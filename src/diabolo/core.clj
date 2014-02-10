@@ -43,25 +43,25 @@
 
 
 (defn encoder
-  [{:keys [input-size hidden-size encoder-activation sparsity-weight sparsity-target dropout] :as config}]
+  [{:keys [input-size hidden-size max-weights encoder-activation sparsity-weight sparsity-target dropout] :as config}]
   (stack
     ;;(offset :length input-size :delta -0.5)
     (neural-network :inputs input-size
                     :outputs hidden-size
                     :layers 1
-                    :max-weight-length 7.0
+                    :max-weight-length max-weights
                     :output-op encoder-activation
                     :dropout dropout)
     (sparsifier :length hidden-size :weight sparsity-weight)))
 
 
 (defn decoder
-  [{:keys [input-size hidden-size decoder-activation] :as config}]
+  [{:keys [input-size hidden-size max-weights decoder-activation] :as config}]
   (stack
     ;(offset :length hidden-size :delta -0.5)
     (neural-network :inputs hidden-size
                     :outputs input-size
-                    ;; :max-weight-length 4.0
+                    :max-weight-length max-weights
                     :output-op decoder-activation
                     :layers 1)))
 
@@ -189,7 +189,7 @@
         mlp    (classifier config ae)
         evaluator (evaluator-task config mlp)]
 
-    (view-samples 25 train-data)
+    (view-samples n-reconstructions train-data)
 
     (println "Training autoencoder...")
     (task/run {:repeat true}
@@ -231,13 +231,14 @@
   {:input-size      784
    :hidden-size     1000
    :classifier-size 200
-   :noise-pct       0.2
-   :dropout         0.3
-   :sparsity-weight 0.2
-   :sparsity-target 0.05
-   :encoder-activation Ops/TANH
-   :decoder-activation Ops/TANH
-   :learning-rate 0.0005
+   :max-weights     2.0
+   :noise-pct       0.5
+   :dropout         0.0
+   :sparsity-weight 0.1
+   :sparsity-target 0.2
+   :encoder-activation Ops/LOGISTIC ;Ops/RECTIFIER
+   :decoder-activation Ops/LOGISTIC ;Ops/RECTIFIER
+   :learning-rate 0.001
 
    :classes       MNIST-CLASSES
    :train-data    MNIST-DATA
