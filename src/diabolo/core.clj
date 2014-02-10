@@ -1,4 +1,5 @@
 (ns diabolo.core
+  (:gen-class)
   (:use [nuroko.lab core charts]
         [nuroko.gui visual]
         [clojure.core.matrix])
@@ -80,12 +81,12 @@
 
 
 (defn classifier
-  [{:keys [classes train-labels train-data classifier-size]} ae]
-  (let [num-coder (class-coder :values classes)
+  [{:keys [classes train-labels train-data classifier-size] :as config} ae]
+  (let [out-coder (class-coder :values classes)
         task (mapping-task
                (apply hash-map
                       (interleave train-data train-labels))
-               :output-coder num-coder)
+               :output-coder out-coder)
         classifier (stack
                      ;(offset :length classifier-size :delta -0.5)
                      (neural-network :inputs classifier-size
@@ -101,7 +102,7 @@
      :classifier classifier
      :model model
      :trainer trainer
-     :output-coder num-coder}))
+     :output-coder out-coder}))
 
 
 (defn classify
@@ -112,7 +113,7 @@
 
 
 (defn evaluator-task
-  [{:keys [test-data test-labels output-coder] :as config} classifier]
+  [{:keys [test-data test-labels] :as config} {:keys [output-coder] :as classifier}]
   (mapping-task (apply hash-map
                        (interleave test-data test-labels))
                 :output-coder output-coder))
@@ -127,7 +128,7 @@
 
 
 (defn view-samples
-  [data n]
+  [n data]
   (show (map img (take n data))
         :title (format "First %d samples" n)))
 
@@ -186,44 +187,56 @@
     :as config}]
   (let [ae     (autoencoder config)
         mlp    (classifier config ae)
-        tester (evaluator-task config mlp)]
+        evaluator (evaluator-task config mlp)]
 
     (view-samples 25 train-data)
 
+    (println "Training autoencoder...")
     (task/run {:repeat true}
       (do ((:trainer ae) (:model ae))
           (show-reconstructions (:model ae) train-data n-reconstructions)))
 
+    (task/run {:repeat true :pause 5000}
+              (show-features (:encoder ae) 3))
+
     (at/after (* 1000 ae-train-secs)
-      (fn []
-        (task/stop-all)
-        (show-features (:encoder ae) 2)
-
-        (track-classification-error (:task classifier) (:model classifier)
-                                    tester)
-
-        (task/run {:repeat true}
-                  ((:trainer mlp) (:model mlp) :learn-rate learning-rate))))
+              (fn []
+                (try
+                  (println "Stopping autoencoder training...")
+                  (task/stop-all)
+                  (track-classification-error (:model mlp)
+                                              (:task mlp)
+                                              evaluator)
+                  (println "Starting classifier training...")
+                  (task/run {:repeat true}
+                            ((:trainer mlp) (:model mlp) :learn-rate learning-rate))
+                  (catch Exception e
+                    (println "Error" e)
+                    (.printStackTrace e))))
+              TIMERZ)
 
     (at/after (+ (* 1000 ae-train-secs)
                  (* 1000 mlp-train-secs))
-              (task/stop-all))
+              (fn []
+                (task/stop-all)
+                (println "All training complete."))
+              TIMERZ)
 
     {:autoencoder ae
      :classifier  mlp
-     :evaluator   tester}))
+     :evaluator   evaluator}))
 
 
 (def config
   {:input-size      784
-   :hidden-size     1200
+   :hidden-size     400
    :classifier-size 400
    :noise-pct       0.3
-   :sparsity-weight 0.2
-   :sparsity-target 0.2
+   :sparsity-weight 0.3
+   :sparsity-target 0.1
    :encoder-activation Ops/LOGISTIC
    :decoder-activation Ops/LOGISTIC
-   :learning-rate 0.0001
+   :learning-rate 0.001
 
    :classes       MNIST-CLASSES
    :train-data    MNIST-DATA
@@ -231,10 +244,14 @@
    :test-data     MNIST-TEST-DATA
    :test-labels   MNIST-TEST-LABELS
 
-   :ae-train-secs (* 5 60)
-   :mlp-train-secs (* 5 60)
+   :ae-train-secs (* 60 5)
+   :mlp-train-secs (* 60 5)
    :n-reconstructions 25
    })
 
-(run-experiment config)
+(def ex (atom nil))
+
+(defn -main [& args]
+  (reset! ex (run-experiment config)))
+
 
