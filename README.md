@@ -2,7 +2,7 @@
 
 Autoencoder experiments with Clojure and Nuroko.  You should be able to run with just:
 
-  $ lein run
+    $ lein run
 
 Tweak the configuration in diabolo.core/config.
 
