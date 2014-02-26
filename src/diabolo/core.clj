@@ -1,12 +1,14 @@
 (ns diabolo.core
   (:gen-class)
-  (:use [nuroko.lab core charts]
-        [nuroko.gui visual]
-        [clojure.core.matrix])
-  (:require [task.core :as task]
-            [mikera.vectorz.core :as vectorz]
-            [diabolo mnist]
-            [overtone.at-at :as at])
+  (:use
+    [nuroko.lab core charts]
+    [clojure.core.matrix])
+  (:require
+    [nuroko.gui.visual :as viz]
+    [task.core :as task]
+    [mikera.vectorz.core :as vectorz]
+    [diabolo.mnist :as mnist]
+    [overtone.at-at :as at])
   (:import [mikera.vectorz Op Ops])
   (:import [mikera.vectorz.ops ScaledLogistic Logistic Tanh])
   (:import [nuroko.coders CharCoder])
@@ -14,13 +16,6 @@
 
 
 (def TIMERZ (at/mk-pool))
-
-;; 60,000 training samples, 10,000 test
-(def MNIST-CLASSES     (range 10))
-(def MNIST-DATA        @diabolo.mnist/data-store)
-(def MNIST-LABELS      @diabolo.mnist/label-store)
-(def MNIST-TEST-DATA   @diabolo.mnist/test-data-store)
-(def MNIST-TEST-LABELS @diabolo.mnist/test-label-store)
 
 (defn denoising-task
   [data noise-ratio]
@@ -119,24 +114,16 @@
                 :output-coder output-coder))
 
 
-(defn feature-img
-  [vector]
-  ((image-generator :width 28
-                    :height 28
-                    :colour-function weight-colour-mono)
-   vector))
-
-
 (defn view-samples
   [n data]
-  (show (map img (take n data))
+  (viz/show (map viz/img (take n data))
         :title (format "First %d samples" n)))
 
 
 (defn track-classification-error
   "Show chart of training error (blue) and test error (red)"
   [model classify-task test-task]
-  (show (time-chart [#(evaluate-classifier classify-task model)
+  (viz/show (viz/time-chart [#(evaluate-classifier classify-task model)
                      #(evaluate-classifier test-task model)]
                     :y-max 1.0)
         :title "Error rate"))
@@ -145,41 +132,40 @@
 #_(defn show-results
   "Show classification results, errors are starred"
   []
-  (show (map (fn [l r] (if (= l r) l (str r "*")))
+  (viz/show (map (fn [l r] (if (= l r) l (str r "*")))
              (take 100 labels)
              (map recognise (take 100 data)))
         :title "Classification results"))
 
 
-;(let [rnet (.clone recognition-network)]
-;  (reduce
-;    (fn [acc i] (if (= (test-labels i) (->> (test-data i) (think rnet) (decode num-coder)))
-;                  (inc acc) acc))
-;    0 (range (count test-data))))
-
 (defn show-class-separation
   [{:keys [test-data test-labels] :as config} classifier n]
-  (show (class-separation-chart classifier
+  (viz/show (viz/class-separation-chart classifier
                                 (take n test-data)
                                 (take n test-labels))))
 
 
-;(show (map feature-img (feature-maps recognition-network :scale 10)) :title "Recognition maps")
-;(show (map feature-img (feature-maps reconstructor :scale 10)) :title "Round trip maps")
+(defn feature-img
+  [vector]
+  ((viz/image-generator :width 28
+                        :height 28
+                        :colour-function viz/weight-colour-mono)
+   vector))
+
 
 (defn show-reconstructions
   [model data n]
-  (show
+  (viz/show
     (->> (take n data)
          (map (partial think model))
-         (map img))
+         (map #(viz/img % :colour-function viz/weight-colour-mono)))
     :title (format "%d samples reconstructed" n)))
 
 
 (defn show-features
   [layer scale]
-  (show (map feature-img (feature-maps layer :scale scale))
-        :title "Features"))
+  (viz/show (map feature-img (viz/feature-maps layer :scale scale))
+            :title "Features"))
 
 
 (defn run-experiment
@@ -227,17 +213,25 @@
      :evaluator   evaluator}))
 
 
+;; 60,000 training samples, 10,000 test
+(def MNIST-CLASSES     (range 10))
+(def MNIST-DATA        @mnist/data-store)
+(def MNIST-LABELS      @mnist/label-store)
+(def MNIST-TEST-DATA   @mnist/test-data-store)
+(def MNIST-TEST-LABELS @mnist/test-label-store)
+
+
 (def config
   {:input-size      784
    :hidden-size     1000
    :classifier-size 200
    :max-weights     2.0
-   :noise-pct       0.5
-   :dropout         0.0
+   :noise-pct       0.4
+   :dropout         0.2
    :sparsity-weight 0.1
    :sparsity-target 0.2
-   :encoder-activation Ops/LOGISTIC ;Ops/RECTIFIER
-   :decoder-activation Ops/LOGISTIC ;Ops/RECTIFIER
+   :encoder-activation Ops/RECTIFIER ; Ops/LOGISTIC
+   :decoder-activation Ops/RECTIFIER ; Ops/LOGISTIC
    :learning-rate 0.001
 
    :classes       MNIST-CLASSES
@@ -255,5 +249,4 @@
 
 (defn -main [& args]
   (reset! ex (run-experiment config)))
-
 
