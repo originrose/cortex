@@ -7,15 +7,12 @@
     [nuroko.gui.visual :as viz]
     [task.core :as task]
     [mikera.vectorz.core :as vectorz]
-    [diabolo.mnist :as mnist]
-    [overtone.at-at :as at])
+    [diabolo.mnist :as mnist])
   (:import [mikera.vectorz Op Ops])
   (:import [mikera.vectorz.ops ScaledLogistic Logistic Tanh])
   (:import [nuroko.coders CharCoder])
   (:import [mikera.vectorz AVector Vectorz]))
 
-
-(def TIMERZ (at/mk-pool))
 
 (defn denoising-task
   [data noise-ratio]
@@ -28,35 +25,39 @@
             (vectorz/set out-vec i 0.0)))))))
 
 
-; Pure autoencoding task
-;(def autoencode-task (identity-task data))
 
-; Autoencode with corrupted input, forcing the network to filter out the noise
 (defn autoencode-task
-  [data noise]
-  (denoising-task data noise))
+  [data & [{:keys [noise-pct]}]]
+  (if (pos? noise-pct)
+    ; Autoencode with corrupted input, forcing the network to filter out the noise
+    (denoising-task data noise-pct)
+    ; Pure autoencoding task
+    (identity-task data)))
 
 
 (defn encoder
-  [{:keys [input-size hidden-size max-weights encoder-activation sparsity-weight sparsity-target dropout] :as config}]
+  [{:keys [input-size hidden-size max-weights encoder-activation
+           sparsity-weight sparsity-target dropout] :as config}]
   (stack
-    ;;(offset :length input-size :delta -0.5)
+    ;(offset :length input-size :delta -0.5)
     (neural-network :inputs input-size
                     :outputs hidden-size
                     :layers 1
                     :max-weight-length max-weights
                     :output-op encoder-activation
-                    :dropout dropout)
-    (sparsifier :length hidden-size :weight sparsity-weight)))
+                    :dropout dropout
+                    )
+    (sparsifier :length hidden-size :weight sparsity-weight :target-mean sparsity-target)
+    ))
 
 
 (defn decoder
   [{:keys [input-size hidden-size max-weights decoder-activation] :as config}]
   (stack
-    ;(offset :length hidden-size :delta -0.5)
+    (offset :length hidden-size :delta -0.5)
     (neural-network :inputs hidden-size
                     :outputs input-size
-                    :max-weight-length max-weights
+    ;                :max-weight-length max-weights
                     :output-op decoder-activation
                     :layers 1)))
 
@@ -66,7 +67,7 @@
   (let [enco    (encoder config)
         deco    (decoder config)
         model   (connect enco deco)
-        task    (autoencode-task train-data noise-pct)
+        task    (autoencode-task train-data config)
         trainer (supervised-trainer model task)]
     {:task task
      :encoder enco
@@ -149,7 +150,7 @@
   [vector]
   ((viz/image-generator :width 28
                         :height 28
-                        :colour-function viz/weight-colour-mono)
+                        :colour-function viz/weight-colour-rgb)
    vector))
 
 
@@ -158,7 +159,7 @@
   (viz/show
     (->> (take n data)
          (map (partial think model))
-         (map #(viz/img % :colour-function viz/weight-colour-mono)))
+         (map #(viz/img % :colour-function viz/weight-colour-rgb)))
     :title (format "%d samples reconstructed" n)))
 
 
@@ -168,45 +169,38 @@
             :title "Features"))
 
 
+(defn chain-task [task1 task2]
+  (future
+    (task/await-task task1)
+    (task/run-task task2)))
+
 (defn run-experiment
-  [{:keys [n-reconstructions train-data ae-train-secs mlp-train-secs learning-rate]
+  [{:keys [n-reconstructions train-data ae-train-epochs mlp-train-epochs learning-rate]
     :as config}]
   (let [ae     (autoencoder config)
         mlp    (classifier config ae)
-        evaluator (evaluator-task config mlp)]
+        evaluator (evaluator-task config mlp)
+        ae-task (task/task {:repeat ae-train-epochs}
+                  (do
+                    ((:trainer ae) (:model ae))
+                    (show-reconstructions (:model ae) train-data n-reconstructions)))
+        mlp-task (task/task
+                   (try
+                     (track-classification-error (:model mlp) (:task mlp) evaluator)
+                     (task/run {:repeat mlp-train-epochs}
+                               ((:trainer mlp) (:model mlp) :learn-rate learning-rate))
 
+                     (catch Exception e
+                       (println "Error: " e)
+                       (.printStackTrace e))))]
+
+    (viz/show (viz/network-graph (:model ae) :line-width 2) :title "Autoencoder : MNIST")
     (view-samples n-reconstructions train-data)
 
-    (println "Training autoencoder...")
-    (task/run {:repeat true}
-      (do ((:trainer ae) (:model ae))
-          (show-reconstructions (:model ae) train-data n-reconstructions)))
-
     (task/run {:repeat true :pause 5000}
-              (show-features (:encoder ae) 3))
-
-    (at/after (* 1000 ae-train-secs)
-              (fn []
-                (try
-                  (println "Stopping autoencoder training...")
-                  (task/stop-all)
-                  (track-classification-error (:model mlp)
-                                              (:task mlp)
-                                              evaluator)
-                  (println "Starting classifier training...")
-                  (task/run {:repeat true}
-                            ((:trainer mlp) (:model mlp) :learn-rate learning-rate))
-                  (catch Exception e
-                    (println "Error" e)
-                    (.printStackTrace e))))
-              TIMERZ)
-
-    (at/after (+ (* 1000 ae-train-secs)
-                 (* 1000 mlp-train-secs))
-              (fn []
-                (task/stop-all)
-                (println "All training complete."))
-              TIMERZ)
+              (show-features (:encoder ae) 5))
+    (chain-task ae-task mlp-task)
+    (task/run-task ae-task)
 
     {:autoencoder ae
      :classifier  mlp
@@ -223,16 +217,16 @@
 
 (def config
   {:input-size      784
-   :hidden-size     1000
-   :classifier-size 200
-   :max-weights     2.0
-   :noise-pct       0.4
-   :dropout         0.2
-   :sparsity-weight 0.1
+   :hidden-size     300
+   :classifier-size 100
+   :max-weights     0.10
+   :noise-pct       0.0
+   :dropout         0.0
+   :sparsity-weight 0.05
    :sparsity-target 0.2
-   :encoder-activation Ops/RECTIFIER ; Ops/LOGISTIC
-   :decoder-activation Ops/RECTIFIER ; Ops/LOGISTIC
-   :learning-rate 0.001
+   :encoder-activation Ops/LOGISTIC ; Ops/TANH ; Ops/RECTIFIER
+   :decoder-activation Ops/LINEAR ; Ops/RECTIFIER
+   :learning-rate 0.00001
 
    :classes       MNIST-CLASSES
    :train-data    MNIST-DATA
@@ -240,13 +234,23 @@
    :test-data     MNIST-TEST-DATA
    :test-labels   MNIST-TEST-LABELS
 
-   :ae-train-secs (* 60 10)
-   :mlp-train-secs (* 60 10)
-   :n-reconstructions 100
+   :ae-train-epochs     2
+   :mlp-train-epochs    1
+   :n-reconstructions 36
    })
 
 (def ex (atom nil))
 
+(defn stop
+  []
+  (overtone.at-at/stop-and-reset-pool! TIMERZ)
+  (task/stop-all))
+
+(defn start
+  []
+  (reset! ex (run-experiment config))
+  :running)
+
 (defn -main [& args]
-  (reset! ex (run-experiment config)))
+  (start))
 
