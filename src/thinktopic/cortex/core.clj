@@ -1,19 +1,20 @@
-(ns diabolo.core
+(ns thinktopic.cortex.core
   (:gen-class)
   (:use
-    [nuroko.lab core charts]
+    [thinktopic.cortex.lab core charts]
     [clojure.core.matrix])
   (:require
-    [nuroko.gui.visual :as viz]
+    [thinktopic.cortex.gui :as viz]
     [task.core :as task]
     [mikera.vectorz.core :as vectorz]
-    [diabolo.mnist :as mnist])
+    [thinktopic.datasets.mnist :as mnist])
   (:import [mikera.vectorz Op Ops])
   (:import [mikera.vectorz.ops ScaledLogistic Logistic Tanh])
   (:import [nuroko.coders CharCoder])
   (:import [mikera.vectorz AVector Vectorz]))
 
 
+; TODO: probably a faster way to do this by generating a random sparse vector
 (defn denoising-task
   [data noise-ratio]
   (let [ins (vec data)]
@@ -23,7 +24,6 @@
         (dotimes [i (ecount out-vec)]
           (when (> (rand) noise-ratio)
             (vectorz/set out-vec i 0.0)))))))
-
 
 
 (defn autoencode-task
@@ -39,7 +39,7 @@
   [{:keys [input-size hidden-size max-weights encoder-activation
            sparsity-weight sparsity-target dropout] :as config}]
   (stack
-    ;(offset :length input-size :delta -0.5)
+    (offset :length input-size :delta -0.5)
     (neural-network :inputs input-size
                     :outputs hidden-size
                     :layers 1
@@ -47,8 +47,7 @@
                     :output-op encoder-activation
                     :dropout dropout
                     )
-    (sparsifier :length hidden-size :weight sparsity-weight :target-mean sparsity-target)
-    ))
+    (sparsifier :length hidden-size :weight sparsity-weight :target-mean sparsity-target)))
 
 
 (defn decoder
@@ -175,36 +174,49 @@
     (task/run-task task2)))
 
 (defn run-experiment
-  [{:keys [n-reconstructions train-data ae-train-epochs mlp-train-epochs learning-rate]
+  [{:keys [n-reconstructions train-data ae-train-epochs mlp-train-epochs learn-rate]
     :as config}]
   (let [ae     (autoencoder config)
-        mlp    (classifier config ae)
-        evaluator (evaluator-task config mlp)
+        ;mlp    (classifier config ae)
+        ;evaluator (evaluator-task config mlp)
         ae-task (task/task {:repeat ae-train-epochs}
                   (do
-                    ((:trainer ae) (:model ae))
+                    ((:trainer ae) (:model ae) :learn-rate learn-rate)
                     (show-reconstructions (:model ae) train-data n-reconstructions)))
-        mlp-task (task/task
-                   (try
-                     (track-classification-error (:model mlp) (:task mlp) evaluator)
-                     (task/run {:repeat mlp-train-epochs}
-                               ((:trainer mlp) (:model mlp) :learn-rate learning-rate))
 
-                     (catch Exception e
-                       (println "Error: " e)
-                       (.printStackTrace e))))]
+        ;mlp-task (task/task
+        ;           (try
+        ;             (track-classification-error (:model mlp) (:task mlp) evaluator)
+        ;             (task/run {:repeat mlp-train-epochs}
+        ;                       ((:trainer mlp) (:model mlp) :learn-rate learn-rate))
 
-    (viz/show (viz/network-graph (:model ae) :line-width 2) :title "Autoencoder : MNIST")
+        ;             (catch Exception e
+        ;               (println "Error: " e)
+        ;               (.printStackTrace e))))
+        viz-task (task/task {:repeat true :pause 5000}
+                            (show-features (:encoder ae) 5))
+        ]
+
+    ;(viz/show (viz/network-graph (:model ae) :line-width 2) :title "Autoencoder : MNIST")
     (view-samples n-reconstructions train-data)
 
-    (task/run {:repeat true :pause 5000}
-              (show-features (:encoder ae) 5))
-    (chain-task ae-task mlp-task)
+    ;(chain-task ae-task mlp-task)
+    (task/run-task viz-task)
     (task/run-task ae-task)
 
     {:autoencoder ae
-     :classifier  mlp
-     :evaluator   evaluator}))
+     :ae-task ae-task
+     ;:classifier  mlp
+     ;:evaluator   evaluator
+     :viz-task viz-task}))
+
+(defn train-more
+  [{:keys [n-reconstructions train-data learn-rate]
+    :as config}]
+  (let [(task/task {:repeat ae-train-epochs}
+                  (do
+                    ((:trainer ae) (:model ae) :learn-rate learn-rate)
+                    (show-reconstructions (:model ae) train-data n-reconstructions)))]))
 
 
 ;; 60,000 training samples, 10,000 test
@@ -217,16 +229,16 @@
 
 (def config
   {:input-size      784
-   :hidden-size     300
-   :classifier-size 100
-   :max-weights     0.10
+   :hidden-size     100
+   :classifier-size 30
+   :max-weights     0.50
    :noise-pct       0.0
    :dropout         0.0
-   :sparsity-weight 0.05
+   :sparsity-weight 0.0
    :sparsity-target 0.2
    :encoder-activation Ops/LOGISTIC ; Ops/TANH ; Ops/RECTIFIER
-   :decoder-activation Ops/LINEAR ; Ops/RECTIFIER
-   :learning-rate 0.00001
+   :decoder-activation Ops/LOGISTIC ;Ops/LOGISTIC ; Ops/LINEAR ; Ops/RECTIFIER
+   :learn-rate 0.1
 
    :classes       MNIST-CLASSES
    :train-data    MNIST-DATA
@@ -243,7 +255,7 @@
 
 (defn stop
   []
-  (overtone.at-at/stop-and-reset-pool! TIMERZ)
+  ;(overtone.at-at/stop-and-reset-pool! TIMERZ)
   (task/stop-all))
 
 (defn start

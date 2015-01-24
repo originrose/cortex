@@ -1,8 +1,8 @@
 (ns diabolo.mnist
-  (:require [clojure.java.io :as io])
-  (:require [nuroko.lab.core :as c])
-  (:import [java.io DataInputStream File FileInputStream BufferedInputStream])
-  (:import [mikera.vectorz Vector AVector Vectorz BitVector]))
+  (:require [clojure.java.io :as io]
+            [thinktopic.cortex.lab.core :as c])
+  (:import [java.io DataInputStream File FileInputStream BufferedInputStream]
+           [mikera.vectorz Vector AVector Vectorz BitVector]))
 
 (set! *unchecked-math* true)
 (set! *warn-on-reflection* true)
