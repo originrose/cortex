@@ -4,7 +4,7 @@
     [thinktopic.cortex.lab core charts]
     [clojure.core.matrix])
   (:require
-    [thinktopic.cortex.gui :as viz]
+    [thinktopic.cortex.gui :as gui]
     [task.core :as task]
     [mikera.vectorz.core :as vectorz]
     [thinktopic.datasets.mnist :as mnist])
@@ -116,14 +116,14 @@
 
 (defn view-samples
   [n data]
-  (viz/show (map viz/img (take n data))
+  (gui/show (map gui/img (take n data))
         :title (format "First %d samples" n)))
 
 
 (defn track-classification-error
   "Show chart of training error (blue) and test error (red)"
   [model classify-task test-task]
-  (viz/show (viz/time-chart [#(evaluate-classifier classify-task model)
+  (gui/show (gui/time-chart [#(evaluate-classifier classify-task model)
                      #(evaluate-classifier test-task model)]
                     :y-max 1.0)
         :title "Error rate"))
@@ -132,7 +132,7 @@
 #_(defn show-results
   "Show classification results, errors are starred"
   []
-  (viz/show (map (fn [l r] (if (= l r) l (str r "*")))
+  (gui/show (map (fn [l r] (if (= l r) l (str r "*")))
              (take 100 labels)
              (map recognise (take 100 data)))
         :title "Classification results"))
@@ -140,31 +140,31 @@
 
 (defn show-class-separation
   [{:keys [test-data test-labels] :as config} classifier n]
-  (viz/show (viz/class-separation-chart classifier
+  (gui/show (gui/class-separation-chart classifier
                                 (take n test-data)
                                 (take n test-labels))))
 
 
 (defn feature-img
   [vector]
-  ((viz/image-generator :width 28
+  ((gui/image-generator :width 28
                         :height 28
-                        :colour-function viz/weight-colour-rgb)
+                        :colour-function gui/weight-colour-rgb)
    vector))
 
 
 (defn show-reconstructions
   [model data n]
-  (viz/show
+  (gui/show
     (->> (take n data)
          (map (partial think model))
-         (map #(viz/img % :colour-function viz/weight-colour-rgb)))
+         (map #(gui/img % :colour-function gui/weight-colour-rgb)))
     :title (format "%d samples reconstructed" n)))
 
 
 (defn show-features
   [layer scale]
-  (viz/show (map feature-img (viz/feature-maps layer :scale scale))
+  (gui/show (map feature-img (gui/feature-maps layer :scale scale))
             :title "Features"))
 
 
@@ -193,22 +193,22 @@
         ;             (catch Exception e
         ;               (println "Error: " e)
         ;               (.printStackTrace e))))
-        viz-task (task/task {:repeat true :pause 5000}
+        gui-task (task/task {:repeat true :pause 5000}
                             (show-features (:encoder ae) 5))
         ]
 
-    ;(viz/show (viz/network-graph (:model ae) :line-width 2) :title "Autoencoder : MNIST")
+    ;(gui/show (gui/network-graph (:model ae) :line-width 2) :title "Autoencoder : MNIST")
     (view-samples n-reconstructions train-data)
 
     ;(chain-task ae-task mlp-task)
-    (task/run-task viz-task)
+    (task/run-task gui-task)
     (task/run-task ae-task)
 
     {:autoencoder ae
      :ae-task ae-task
      ;:classifier  mlp
      ;:evaluator   evaluator
-     :viz-task viz-task}))
+     :gui-task gui-task}))
 
 (defn train-more
   [{:keys [n-reconstructions train-data learn-rate]

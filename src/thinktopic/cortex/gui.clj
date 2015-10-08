@@ -4,6 +4,7 @@
         ;[incanter core stats charts]
         )
   (:require [incanter core charts]
+            [mikera.image.core :as image]
             [mc ui image]
             [clojure.core.matrix :as mat])
   (:import [javax.swing JFrame JComponent JLabel JPanel]
@@ -118,12 +119,15 @@
 
 (defn img
   "Function to create an image from a vector. Defaults to fitting to a square"
-  ([^AVector vector & {:keys [width colour-function] }]
+  ([^AVector vector & {:keys [width colour-function zoom]}]
     (let [vlen (.length vector)
           width (long (or width (Math/sqrt vlen)))
           height (quot vlen width)
-          colour-function (or colour-function weight-colour-rgb)]
-      ((image-generator :width width :height height :colour-function colour-function) vector))))
+          colour-function (or colour-function weight-colour-rgb)
+          im ((image-generator :width width :height height :colour-function colour-function) vector)]
+      (if zoom
+        (image/resize im (* width zoom))
+        im))))
 
 (defn spatio [vs & {:keys [colour-function] }]
   (let [vs (mapv (fn [v] (if (instance? AVector v) v (thinktopic.cortex.lab.core/avector v))) vs)
