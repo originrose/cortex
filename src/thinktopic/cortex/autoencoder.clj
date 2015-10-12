@@ -10,6 +10,10 @@
   [z]
   (/ 1.0  (+ 1.0 (Math/exp (- z)))))
 
+(defn sigmoid-prime
+  [z]
+  (* (sigmoid z) (- 1 (sigmoid z))))
+
 ;; K-sparse autoencoder
 ;0) setup
 ;       initialize weights with gaussian and standard deviation of 0.01
@@ -64,8 +68,22 @@
 ;; Gradient descent
 
 (defn backprop
-  [{:keys [biases weights] :as net} input label]
-  )
+  [{:keys [biases weights layer-sizes] :as net} input label]
+  (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
+        weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
+        [activations zs] (reduce
+                           (fn [[activations zs] [layer-biases layer-weights]]
+                             (let [z (mat/add (mat/mmul (last activations) layer-weights) layer-biases)
+                                   activation (sigmoid z)]
+                               [(conj activations activation) (conj zs z)]))
+                           [[input] []]
+                           (map vector biases weights))
+        cost-derivs (mat/sub (last activations) label)
+        output-deltas (mat/emul cost-derivs (mat/emap sigmoid-prime (last zs)))
+        output-bias-gradients output-deltas
+        output-weight-gradients (mat/mmul output-deltas (mat/transpose (last (drop-last activations))))
+        ]
+    ))
 
 
 (defn update-mini-batch
