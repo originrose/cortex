@@ -62,11 +62,29 @@
       activation)))
 
 ;; Gradient descent
+
+(defn backprop
+  [{:keys [biases weights] :as net} input label]
+  )
+
+
 (defn update-mini-batch
   [{:keys [biases weights] :as net} learning-rate data labels batch]
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
-        weight-gradients (map #(mat/zero-array (mat/shape %)) weights)]
-    ))
+        weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
+        batch-size (count batch)
+        batch-rate (/ learning-rate batch-size)
+        [bias-gradients weight-gradients] (reduce
+                                            (fn [[bias-gradients weight-gradients] sample-index]
+                                              (let [[bias-deltas weight-deltas] (backprop net (mat/get-row data) (mat/get-row labels))
+                                                    bias-gradients (map mat/add! bias-gradients bias-deltas)
+                                                    weight-gradients (map mat/add! weight-gradients weight-deltas)]
+                                                [bias-gradients weight-gradients]))
+                                            [bias-gradients weight-gradients]
+                                            batch)
+        biases (map (fn [b nb] (mat/sub! b (mat/mul batch-rate nb))) biases bias-gradients)
+        weights (map (fn [w nw] (mat/sub! w (mat/mul batch-rate nw))) weights weight-gradients)]
+    (assoc net :biases biases :weights weights)))
 
 (defn sgd
   [net {:keys [learning-rate learning-rate-decay momentum n-epochs batch-size] :as config} training-data training-labels]
