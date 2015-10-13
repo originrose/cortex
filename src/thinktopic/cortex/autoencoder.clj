@@ -10,9 +10,17 @@
   [z]
   (/ 1.0  (+ 1.0 (Math/exp (- z)))))
 
+(defn mat-sigmoid
+  [z]
+  (mat/emap sigmoid z))
+
 (defn sigmoid-prime
   [z]
   (* (sigmoid z) (- 1 (sigmoid z))))
+
+(defn mat-sigmoid-prime
+  [z]
+  (mat/emap sigmoid-prime z))
 
 ;; K-sparse autoencoder
 ;0) setup
@@ -78,12 +86,37 @@
                                [(conj activations activation) (conj zs z)]))
                            [[input] []]
                            (map vector biases weights))
+
+        ; # backward pass
+        ;delta = self.cost_derivative(activations[-1], y) * \
+        ;    sigmoid_prime(zs[-1])
+        ;nabla_b[-1] = delta
+        ;nabla_w[-1] = np.dot(delta, activations[-2].transpose())
+        ;# Note that the variable l in the loop below is used a little
+        ;# differently to the notation in Chapter 2 of the book.  Here,
+        ;# l = 1 means the last layer of neurons, l = 2 is the
+        ;# second-last layer, and so on.  It's a renumbering of the
+        ;# scheme in the book, used here to take advantage of the fact
+        ;# that Python can use negative indices in lists.
+        ;for l in xrange(2, self.num_layers):
+        ;    z = zs[-l]
+        ;    sp = sigmoid_prime(z)
+        ;    delta = np.dot(self.weights[-l+1].transpose(), delta) * sp
+        ;    nabla_b[-l] = delta
+        ;    nabla_w[-l] = np.dot(delta, activations[-l-1].transpose())
+        ;return (nabla_b, nabla_w)
+
+
         cost-derivs (mat/sub (last activations) label)
-        output-deltas (mat/emul cost-derivs (mat/emap sigmoid-prime (last zs)))
+        output-deltas (mat/emul cost-derivs (mat-sigmoid-prime (last zs)))
         output-bias-gradients output-deltas
         output-weight-gradients (mat/mmul output-deltas (mat/transpose (last (drop-last activations))))
-        ]
-    ))
+        [bias-deltas weight-deltas]
+        (reduce
+          (fn []
+            )
+          [(next (reverse weights)) (next (reverse activations))] 
+          )]))
 
 
 (defn update-mini-batch
@@ -92,14 +125,15 @@
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         batch-size (count batch)
         batch-rate (/ learning-rate batch-size)
-        [bias-gradients weight-gradients] (reduce
-                                            (fn [[bias-gradients weight-gradients] sample-index]
-                                              (let [[bias-deltas weight-deltas] (backprop net (mat/get-row data) (mat/get-row labels))
-                                                    bias-gradients (map mat/add! bias-gradients bias-deltas)
-                                                    weight-gradients (map mat/add! weight-gradients weight-deltas)]
-                                                [bias-gradients weight-gradients]))
-                                            [bias-gradients weight-gradients]
-                                            batch)
+        [bias-gradients weight-gradients] 
+        (reduce
+          (fn [[bias-gradients weight-gradients] sample-index]
+            (let [[bias-deltas weight-deltas] (backprop net (mat/get-row data) (mat/get-row labels))
+                  bias-gradients (map mat/add! bias-gradients bias-deltas)
+                  weight-gradients (map mat/add! weight-gradients weight-deltas)]
+              [bias-gradients weight-gradients]))
+          [bias-gradients weight-gradients]
+          batch)
         biases (map (fn [b nb] (mat/sub! b (mat/mul batch-rate nb))) biases bias-gradients)
         weights (map (fn [w nw] (mat/sub! w (mat/mul batch-rate nw))) weights weight-gradients)]
     (assoc net :biases biases :weights weights)))
