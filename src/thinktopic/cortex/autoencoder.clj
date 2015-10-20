@@ -10,9 +10,13 @@
   [z]
   (/ 1.0  (+ 1.0 (Math/exp (- z)))))
 
+(defn exp
+  [a]
+  (mat/emap #(Math/exp %) a))
+
 (defn mat-sigmoid
   [z]
-  (mat/emap sigmoid z))
+  (mat/div 1.0 (mat/add 1.0 (exp (mat/negate z)))))
 
 (defn sigmoid-prime
   [z]
@@ -49,7 +53,7 @@
   "Produce a vector with guassian random elements having mean of 0.0 and std of 1.0."
   [n]
   (let [rgen (Random.)]
-    (mat/array [(repeatedly n #(.nextGaussian rgen))])))
+    (mat/array (repeatedly n #(.nextGaussian rgen)))))
 
 (defn rand-matrix
   [m n]
@@ -70,62 +74,40 @@
          weights weights
          activation input]
     (if biases
-      (recur (next biases) (next weights) (mat-sigmoid (mat/add (mat/dot (first weights) input) (first biases))))
+      (let [z (mat/add (mat/mmul (first weights) activation)
+                                             (first biases))
+            activation (mat-sigmoid z)]
+        (recur (next biases) (next weights) activation))
       activation)))
 
 ;; Gradient descent
 
 (defn backprop
-  [{:keys [biases weights layer-sizes] :as net} input label]
+  [{:keys [biases weights layer-sizes] :as net} input expected-output]
   (println "backprop")
-  (println "input: " input)
-  (println "label: " label)
+  (println "input: " input " => " expected-output)
+  (println "\nforward -----------------------------")
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         [activations zs] (reduce
                            (fn [[activations zs] [layer-biases layer-weights]]
-                             (println "weights: " layer-weights
-                                      "\nbiases: " layer-biases
-                                      "\nactivations: " (last activations))
-                             (let [z (mat/mmul layer-weights (last activations))
-                                   _ (println "1-z: " z)
-                                   z (mat/add z (mat/transpose layer-biases))
-                                   _ (println "z: " z)
-                                   activation (mat-sigmoid z)
-                                   _ (println "activation: " activation)]
+                             (let [z (mat/add (mat/mmul layer-weights (last activations)) layer-biases)
+                                   activation (mat-sigmoid z)]
                                [(conj activations activation) (conj zs z)]))
                            [[input] []]
                            (map vector biases weights))
-        _ (println "activations:" (map mat/shape activations))
-
-        ; # backward pass
-        ;delta = self.cost_derivative(activations[-1], y) * \
-        ;    sigmoid_prime(zs[-1])
-        ;nabla_b[-1] = delta
-        ;nabla_w[-1] = np.dot(delta, activations[-2].transpose())
-        ;# Note that the variable l in the loop below is used a little
-        ;# differently to the notation in Chapter 2 of the book.  Here,
-        ;# l = 1 means the last layer of neurons, l = 2 is the
-        ;# second-last layer, and so on.  It's a renumbering of the
-        ;# scheme in the book, used here to take advantage of the fact
-        ;# that Python can use negative indices in lists.
-        ;for l in xrange(2, self.num_layers):
-        ;    z = zs[-l]
-        ;    sp = sigmoid_prime(z)
-        ;    delta = np.dot(self.weights[-l+1].transpose(), delta) * sp
-        ;    nabla_b[-l] = delta
-        ;    nabla_w[-l] = np.dot(delta, activations[-l-1].transpose())
-        ;return (nabla_b, nabla_w)
-
-        cost-derivs (mat/sub (last activations) label)
-        output-deltas (mat/emul cost-derivs (mat-sigmoid-prime (last zs)))
-        output-deltas (mat/reshape output-deltas [1 (first (mat/shape output-deltas))])
+        _ (println "\nbackward -----------------------------")
+        output (last activations)
+        output-error (mat/sub output expected-output)
+        output-deltas (mat/emul output-error (mat-sigmoid-prime (last zs)))
+        ; TODO: I don't like that we have to reshape here...
+        ;output-deltas (mat/reshape output-deltas [1 (first (mat/shape output-deltas))])
         bias-gradients [output-deltas]
+        layer-activations (mat/transpose [(last (drop-last activations))])
+        ;layer-activations (mat/reshape layer-activations [1 (first (mat/shape layer-activations))])
         _ (println "output-deltas: " (mat/shape output-deltas))
-        a-mat (mat/transpose (last (drop-last activations)))
-        a-mat (mat/reshape a-mat [1 (first (mat/shape a-mat))])
-        _ (println "activations: " (mat/shape a-mat))
-        output-weight-gradients (mat/mmul output-deltas a-mat)
+        ;_ (println "activations: " (mat/shape layer-activations))
+        output-weight-gradients (mat/mmul output-deltas layer-activations)
         weight-gradients [output-weight-gradients]
         layer-indices (reverse (range (- (count layer-sizes) 2)))
         [_ bias-gradients weight-gradients]
@@ -140,6 +122,7 @@
                   _ (println "deltas: " (mat/shape delta))
                   _ (println "sp: " (mat/shape sp) sp)
                   weight-delta (mat/mmul (mat/transpose (nth weights (inc i))) delta)
+                  _ (println "deltas: " (mat/shape weight-delta))
                   delta (mat/mmul weight-delta sp)
                   weight-grad (mat/mmul delta (mat/transpose (nth activations (dec i))))
                   d-biases (cons delta d-biases)
@@ -162,8 +145,8 @@
         [bias-gradients weight-gradients]
         (reduce
           (fn [[bias-gradients weight-gradients] sample-index]
-            (let [input (mat/submatrix data [[sample-index 1] [0 data-cols]]) ;(mat/get-row data sample-index)
-                  label (mat/submatrix labels [[sample-index 1] [0 label-cols]]) ;(mat/get-row labels sample-index)
+            (let [input (mat/get-row data sample-index)
+                  label (mat/get-row labels sample-index)
                   [bias-deltas weight-deltas] (backprop net input label)
                   bias-gradients (map mat/add! bias-gradients bias-deltas)
                   weight-gradients (map mat/add! weight-gradients weight-deltas)]
@@ -197,7 +180,7 @@
                     [v i]
                     [min-val min-index]))
                 [(first as) 0]
-                (map vec (next as) (range 1 (first (mat/shape a)))))]
+                (map vector (next as) (range 1 (first (mat/shape a)))))]
     min-index))
 
 (defn evaluate
@@ -206,7 +189,7 @@
                        (let [res (feed-forward net data)]
                          (argmax res)))
                      (mat/rows test-data) (mat/rows test-labels))
-        score (count (filter #(= (first %) (second %)) (map vec results test-labels)))]
+        score (count (filter #(= (first %) (second %)) (map vector results test-labels)))]
     score))
 
 
@@ -229,14 +212,13 @@
     (reset! trained* trained)
     (println (format "MNIST Score: %f [%d of %d]" score-percent score label-count))))
 
-
 ; a	b	| a XOR b
 ; 1	1	     0
 ; 0	1	     1
 ; 1	0	     1
 ; 0	0	     0
-(def XOR-DATA (mat/array [[[1] [1]] [[0] [1]] [[0] [1]] [[0] [0]]]))
-(def XOR-LABELS (mat/array [[0] [1] [1] [0]]))
+(def XOR-DATA [[1 1] [0 1] [1 0] [0 0]])
+(def XOR-LABELS [[0] [1] [1] [0]])
 
 (defn xor-test
   []
@@ -245,9 +227,21 @@
                        :batch-size 1
                        :learning-rate 0.1}
         trained (sgd net optim-options XOR-DATA XOR-LABELS)
-        score (evaluate net XOR-DATA XOR-LABELS)
+        score (evaluate trained XOR-DATA XOR-LABELS)
         label-count (count XOR-LABELS)
         score-percent (float (/ score label-count))]
     (reset! trained* trained)
     (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))))
 
+(defn hand-test
+  []
+  (let [net (network [2 3 1])
+        net (assoc net
+                   :biases [[0 0 0] [0]]
+                   :weights [[[1 1] [1 1] [1 1]]
+                             [[1 -2 1]]])
+        _ (println "weight shapes: " (map mat/shape (:weights net)))
+        score (evaluate net XOR-DATA XOR-LABELS)
+        label-count (count XOR-LABELS)
+        score-percent (float (/ score label-count))]
+    (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))))
