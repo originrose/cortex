@@ -70,15 +70,23 @@
 
 (defn feed-forward
   [{:keys [biases weights] :as net} input]
+  (println "feed-forward")
   (loop [biases biases
          weights weights
          activation input]
+    (println "top of loop")
     (if biases
-      (let [z (mat/add (mat/mmul (first weights) activation)
+      (let [_ (println "asdf")
+            z (mat/add (mat/mmul (first weights) activation)
                                              (first biases))
             activation (mat-sigmoid z)]
+        (println "activation: " activation)
         (recur (next biases) (next weights) activation))
       activation)))
+
+(defn row-seq
+  [data]
+  (map #(mat/get-row data %) (range (mat/row-count data))))
 
 ;; Gradient descent
 ;; 1) forward propagate
@@ -112,13 +120,16 @@
         ;; Compute the output error and gradients for the output weights
         output-error (mat/sub output expected-output)
         ;_ (println "input: " input " => " output " target: " expected-output "error: " output-error)
-        output-deltas (mat/emul output-error (mat-sigmoid-prime (last zs)))
+        output-delta (mat/emul output-error (mat-sigmoid-prime (last zs)))
         ;_ (println "output-error: " output-error)
-        ;_ (println "output-delta: " output-deltas)
-        bias-gradients [output-deltas]
+        bias-gradients [output-delta]
         ; TODO: not nice to have to wrap this into another layer...
-        layer-activations (mat/array [(last (drop-last activations))])
-        weight-gradients [(mat/mmul output-deltas [layer-activations])]
+        ;layer-activations (mat/transpose (mat/array [(last (drop-last activations))]))
+        layer-activations (mat/transpose (last (drop-last activations)))
+        ;_ (println "output-delta: " (mat/shape output-delta))
+        ;_ (println "layer-activations: " (mat/shape layer-activations))
+        ;_ (println "pre-activations: " (mat/shape (last (drop-last activations))))
+        weight-gradients [(mat/outer-product output-delta layer-activations)]
         ;_ (println "output weight gradients: " (mat/shape (first weight-gradients)))
 
         ;; Now compute deltas and gradients for the hidden layers
@@ -147,7 +158,7 @@
                   bias-grads (cons delta bias-grads)
                   weight-grads (cons weight-grad weight-grads)]
               [delta bias-grads weight-grads]))
-          [output-deltas bias-gradients weight-gradients]
+          [output-delta bias-gradients weight-gradients]
           layer-indices)]
     ;(println "weight-gradients: " (map mat/shape weight-gradients))
     ;(println "\n--------------- end backprop ---------------------")
@@ -184,43 +195,65 @@
     ;(println "weights:\n" weights)
     (assoc net :biases biases :weights weights)))
 
-(defn sgd
-  [net {:keys [learning-rate learning-rate-decay momentum n-epochs batch-size] :as config} training-data training-labels]
-  (loop [net net
-         epoch 0]
-    (if (= epoch n-epochs)
-      net
-      (let [mini-batches (partition batch-size (shuffle (range (first (mat/shape training-labels)))))
-            new-net (reduce (fn [network batch]
-                              (update-mini-batch network learning-rate training-data training-labels batch))
-                            net mini-batches)]
-        (recur new-net (inc epoch))))))
-
 (defn argmax
   [a]
   (let [as (mat/eseq a)
-        [min-val min-index]
-        (reduce (fn [[min-val min-index] [v i]]
-                  (if (< v min-val)
+        [max-val max-index]
+        (reduce (fn [[max-val max-index] [v i]]
+                  (if (> v max-val)
                     [v i]
-                    [min-val min-index]))
+                    [max-val max-index]))
                 [(first as) 0]
-                (map vector (next as) (range 1 (first (mat/shape a)))))]
-    min-index))
+                (map vector (next as) (range 1 (mat/ecount a))))]
+    max-index))
 
 (defn evaluate
   [net test-data test-labels]
-  (let [results (map (fn [data label]
-                       (let [res (feed-forward net data)]
-                         ;(argmax res)
-                         [(Math/round (first res))]
-                         ))
-                     (mat/rows test-data) (mat/rows test-labels))
-        _ (println "RESULTS: " results)
-        _ (println "LABELS: " test-labels)
-        score (count (filter #(= (first %) (second %)) (map vector results test-labels)))]
-    score))
+  (println "evaluate")
+  (let [results (doall
+                  (map (fn [data label]
+                         (println "feeding forward data: " (mat/shape data))
+                         (let [res (feed-forward net data)]
+                           (println "res: " res)
+                           (argmax res)
+                           ;[(Math/round (first res))]
+                           ))
+                     (row-seq test-data) (row-seq test-labels)))
+        _ (println "making score")
+        score (count (filter #(= (first %) (second %)) (map vector results (row-seq test-labels))))]
+    (println "done")
+    [results score]))
 
+(defn classify
+  [net data]
+  (argmax (feed-forward net data)))
+
+(defn sgd
+  [net {:keys [learning-rate learning-rate-decay momentum n-epochs batch-size] :as config} training-data training-labels]
+  (let [[n-inputs input-width] (mat/shape training-data)
+        [n-labels label-width] (mat/shape training-labels)
+        n-batches (long (/ n-inputs batch-size))]
+    (loop [net net
+           epoch 0]
+      (println "epoch" epoch)
+      (if (= epoch n-epochs)
+        net
+        (let [
+              mini-batches (partition batch-size (shuffle (range n-inputs)))
+              new-net (reduce (fn [[i network] batch]
+                                (println "batch" i "of" n-batches)
+                                [(inc i) (update-mini-batch network learning-rate training-data training-labels batch)])
+                              [0 net] mini-batches)
+              sample-size 10
+              sample-start (rand-int (- n-inputs sample-size))
+              sample-end (+ sample-start sample-size)
+              sample-data (mat/submatrix training-data sample-start sample-end 0 input-width)
+              sample-labels (mat/submatrix training-labels sample-start sample-end 0 label-width)
+              [sample-results sample-score] (evaluate new-net sample-data sample-labels)]
+          (println (format "sample score: %5.2f" sample-score))
+          (doseq [[res label] (map vector sample-results (row-seq sample-labels))]
+            (println res ":" label))
+          (recur new-net (inc epoch)))))))
 
 (def trained* (atom nil))
 
@@ -231,10 +264,11 @@
         test-data @mnist/test-data-store
         test-labels @mnist/test-label-store
         net (network [784 30 10])
-        optim-options {:n-epochs 30
+        optim-options {:n-epochs 10
                        :batch-size 10
                        :learning-rate 3.0}
         trained (sgd net optim-options training-data training-labels)
+        _ (println "evaluating...")
         score (evaluate net test-data test-labels)
         label-count (count test-labels)
         score-percent (float (/ score label-count))]
