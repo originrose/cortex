@@ -66,7 +66,7 @@
   {:n-layers (count layer-sizes)
    :layer-sizes layer-sizes
    :biases (map rand-vector (next layer-sizes))
-   :weights (map rand-matrix (rest layer-sizes) (drop-last layer-sizes) )})
+   :weights (map rand-matrix (rest layer-sizes) (drop-last layer-sizes))})
 
 (defn feed-forward
   [{:keys [biases weights] :as net} input]
@@ -81,12 +81,23 @@
       activation)))
 
 ;; Gradient descent
-
+;; 1) forward propagate
+;;  * sum((weights * inputs) + biases) for each neuron, layer by layer
+;; 2) back propagate deltas
+;;  * After propagating forward, we need to figure out the error (often called the
+;;    delta) for each neuron.  For the outputs this is just the
+;;    (output - expected_output) * activation-fn-prime, but for the hidden units the output error has to
+;;    be propagated back across the weights to distributed the error according to
+;;    which hidden units were responsible for it.
+;; 3) compute gradients
+;;  * Then for each weight you multiply its output delta by its input activation to get
+;;    its gradient.  This will correspond to the direction and magnitude of the
+;;    error for that weight, so any update should happen in the opposite direction.
+;; 4) update weights
+;;  * multiply gradient by the learning-rate to smooth out jitter in updates.
 (defn backprop
   [{:keys [biases weights layer-sizes] :as net} input expected-output]
-  (println "backprop")
-  (println "input: " input " => " expected-output)
-  (println "\nforward -----------------------------")
+  ;(println "\n--------------- backprop ---------------------")
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         [activations zs] (reduce
@@ -94,48 +105,58 @@
                              (let [z (mat/add (mat/mmul layer-weights (last activations)) layer-biases)
                                    activation (mat-sigmoid z)]
                                [(conj activations activation) (conj zs z)]))
-                           [[input] []]
+                           [[input] []] ; initialize zs to nil so it's the same shape as activations
                            (map vector biases weights))
-        _ (println "\nbackward -----------------------------")
         output (last activations)
+
+        ;; Compute the output error and gradients for the output weights
         output-error (mat/sub output expected-output)
+        ;_ (println "input: " input " => " output " target: " expected-output "error: " output-error)
         output-deltas (mat/emul output-error (mat-sigmoid-prime (last zs)))
-        ; TODO: I don't like that we have to reshape here...
-        ;output-deltas (mat/reshape output-deltas [1 (first (mat/shape output-deltas))])
+        ;_ (println "output-error: " output-error)
+        ;_ (println "output-delta: " output-deltas)
         bias-gradients [output-deltas]
-        layer-activations (mat/transpose [(last (drop-last activations))])
-        ;layer-activations (mat/reshape layer-activations [1 (first (mat/shape layer-activations))])
-        _ (println "output-deltas: " (mat/shape output-deltas))
-        ;_ (println "activations: " (mat/shape layer-activations))
-        output-weight-gradients (mat/mmul output-deltas layer-activations)
-        weight-gradients [output-weight-gradients]
-        layer-indices (reverse (range (- (count layer-sizes) 2)))
+        ; TODO: not nice to have to wrap this into another layer...
+        layer-activations (mat/array [(last (drop-last activations))])
+        weight-gradients [(mat/mmul output-deltas [layer-activations])]
+        ;_ (println "output weight gradients: " (mat/shape (first weight-gradients)))
+
+        ;; Now compute deltas and gradients for the hidden layers
+        layer-indices (reverse (range 1 (dec (count layer-sizes))))
+        ;_ (println "zs: " (map mat/shape zs))
+        ;_ (println "weights: " (map mat/shape weights))
+        ;_ (println "layer-indices: " layer-indices)
         [_ bias-gradients weight-gradients]
         (reduce
-          (fn [[delta d-biases d-weights] i] ; layer weights, zs and activations, in top down order
-            (let [lws (nth weights i)
-                  lzs (nth zs i)
-                  las (nth activations i)
-                  sp (mat-sigmoid-prime lzs)
-                  _ (println "ws: " (count weights) " i: " (inc i))
-                  _ (println "weights: " (mat/shape (mat/transpose (nth weights (inc i)))))
-                  _ (println "deltas: " (mat/shape delta))
-                  _ (println "sp: " (mat/shape sp) sp)
-                  weight-delta (mat/mmul (mat/transpose (nth weights (inc i))) delta)
-                  _ (println "deltas: " (mat/shape weight-delta))
-                  delta (mat/mmul weight-delta sp)
-                  weight-grad (mat/mmul delta (mat/transpose (nth activations (dec i))))
-                  d-biases (cons delta d-biases)
-                  d-weights (cons weight-grad d-weights)]
-              [delta d-biases d-weights]))
+          (fn [[delta bias-grads weight-grads] i]
+            ;(print "i: " i " -> " )
+            ;(println (nth layer-sizes i) "neurons and" (mat/shape (nth zs (dec i))) "activations")
+            ;(println (nth layer-sizes i) "weights")
+            (let [sp (mat-sigmoid-prime (nth zs (dec i)))
+                  outgoing-weights (mat/transpose (nth weights i))
+                  ;_ (println "delta: " (mat/shape delta))
+                  ;_ (println "outgoing-weights: " (mat/shape outgoing-weights))
+                  errors (mat/mmul outgoing-weights delta)
+                  ;_ (println "deltas: " (mat/shape errors-deltas))
+                  ;_ (println "sp: " (mat/shape sp))
+                  delta (mat/emul errors sp)
+                  ;_ (println "new-delta: " (mat/shape delta))
+                  ;_ (println "activations: " (mat/shape (mat/transpose (nth activations (dec i)))))
+                  weight-grad (mat/outer-product delta (mat/transpose (nth activations (dec i))))
+                  ;_ (println "weight-grad: " (mat/shape weight-grad))
+                  bias-grads (cons delta bias-grads)
+                  weight-grads (cons weight-grad weight-grads)]
+              [delta bias-grads weight-grads]))
           [output-deltas bias-gradients weight-gradients]
           layer-indices)]
+    ;(println "weight-gradients: " (map mat/shape weight-gradients))
+    ;(println "\n--------------- end backprop ---------------------")
     [bias-gradients weight-gradients]))
 
 
 (defn update-mini-batch
   [{:keys [biases weights] :as net} learning-rate data labels batch]
-  (println "update-mini-batch")
+  ;(println "update-mini-batch")
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         batch-size (count batch)
@@ -147,16 +168,20 @@
           (fn [[bias-gradients weight-gradients] sample-index]
             (let [input (mat/get-row data sample-index)
                   label (mat/get-row labels sample-index)
-                  [bias-deltas weight-deltas] (backprop net input label)
-                  bias-gradients (map mat/add! bias-gradients bias-deltas)
-                  weight-gradients (map mat/add! weight-gradients weight-deltas)]
+                  [bias-grad weight-grad] (backprop net input label)
+                  ;_ (println "bias-grad:" bias-grad)
+                  ;_ (println "weight-grad:" weight-grad)
+                  bias-gradients (doall (map mat/add! bias-gradients bias-grad))
+                  weight-gradients (doall (map mat/add! weight-gradients weight-grad))]
+              ;(println "bottom")
               [bias-gradients weight-gradients]))
           [bias-gradients weight-gradients]
           batch)
+        ;_ (println "accumulated gradients...")
         biases (map (fn [b nb] (mat/sub! b (mat/mul batch-rate nb))) biases bias-gradients)
         weights (map (fn [w nw] (mat/sub! w (mat/mul batch-rate nw))) weights weight-gradients)]
-    (println "biases:\n" biases)
-    (println "weights:\n" weights)
+    ;(println "biases:\n" biases)
+    ;(println "weights:\n" weights)
     (assoc net :biases biases :weights weights)))
 
 (defn sgd
@@ -187,8 +212,12 @@
   [net test-data test-labels]
   (let [results (map (fn [data label]
                        (let [res (feed-forward net data)]
-                         (argmax res)))
+                         ;(argmax res)
+                         [(Math/round (first res))]
+                         ))
                      (mat/rows test-data) (mat/rows test-labels))
+        _ (println "RESULTS: " results)
+        _ (println "LABELS: " test-labels)
         score (count (filter #(= (first %) (second %)) (map vector results test-labels)))]
     score))
 
@@ -223,10 +252,12 @@
 (defn xor-test
   []
   (let [net (network [2 3 1])
-        optim-options {:n-epochs 500
-                       :batch-size 1
+        optim-options {:n-epochs 10000
+                       :batch-size 2
                        :learning-rate 0.1}
+        _ (println "initial: " (:weights net))
         trained (sgd net optim-options XOR-DATA XOR-LABELS)
+        _ (println "trained: " (:weights net))
         score (evaluate trained XOR-DATA XOR-LABELS)
         label-count (count XOR-LABELS)
         score-percent (float (/ score label-count))]
