@@ -60,7 +60,11 @@
 (deftype QuadraticCost []
   CostFn
   (cost [this activation target]
-    (mat/mul 0.5 (mat/pow (linear/norm (mat/sub activation target)) 2)))
+    ; NOTE: linear/norm is different for matrices and vectors so this row-matrix
+    ; conversion is important for correctness.
+    (let [diff (mat/sub activation target)
+          diff (if (mat/vec? diff) (mat/row-matrix diff) diff)]
+      (mat/mul 0.5 (mat/pow (linear/norm diff) 2))))
 
   (delta [this activation z target]
     (mat/emul (mat/sub activation target) (sigmoid-prime z))))
@@ -69,8 +73,11 @@
   CostFn
   (cost [this activation target]
     (let [a (mat/mul (mat/negate target) (log activation))
-          b (mat/mul (mat/sub 1.0 target) (log (mat/sub 1.0 a)))]
-      (mat/esum (mat/sub a b))))
+          b (mat/mul (mat/sub 1.0 target) (log (mat/sub 1.0 a)))
+          c (mat/esum (mat/sub a b))]
+      (println a)
+      (println b)
+      c))
 
   (delta [this activation z target]
     (mat/sub activation target)))
@@ -98,11 +105,12 @@
 
 ; TODO: switch to passing layer-specs that have size and activation fn
 (defn network
-  [layer-sizes]
+  [layer-sizes & opts]
   {:n-layers (count layer-sizes)
    :layer-sizes layer-sizes
    :biases (map rand-vector (next layer-sizes))
-   :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))})
+   :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))
+   :cost-fn })
 
 (defn feed-forward
   [{:keys [biases weights] :as net} input]
@@ -137,7 +145,7 @@
 ;; 4) update weights
 ;;  * multiply gradient by the learning-rate to smooth out jitter in updates.
 (defn backprop
-  [{:keys [biases weights layer-sizes] :as net} input expected-output]
+  [{:keys [biases weights cost-fn layer-sizes] :as net} input expected-output]
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         [activations zs] (reduce
