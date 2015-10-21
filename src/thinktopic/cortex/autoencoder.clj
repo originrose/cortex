@@ -1,30 +1,79 @@
 (ns thinktopic.cortex.autoencoder
   (:require [clojure.core.matrix :as mat]
+            [clojure.core.matrix.linear :as linear]
             [mikera.vectorz.core :as vectorz]
             [thinktopic.datasets.mnist :as mnist])
   (:import [java.util Random]))
 
 (mat/set-current-implementation :vectorz)
 
-(defn sigmoid
-  [z]
-  (/ 1.0  (+ 1.0 (Math/exp (- z)))))
-
+;; Helpers
 (defn exp
   [a]
   (mat/emap #(Math/exp %) a))
 
-(defn mat-sigmoid
+(defn log
+  [a]
+  (mat/emap #(Math/log %) a))
+
+(defn rand-vector
+  "Produce a vector with guassian random elements having mean of 0.0 and std of 1.0."
+  [n]
+  (let [rgen (Random.)]
+    (mat/array (repeatedly n #(.nextGaussian rgen)))))
+
+(defn rand-matrix
+  [m n]
+  (let [rgen (Random.)]
+    (mat/array (repeatedly m (fn [] (repeatedly n #(.nextGaussian rgen)))))))
+
+(defn weight-matrix
+  [m n]
+  (let [stdev (/ 1.0 n)]
+    (mat/emap #(* stdev %) (rand-matrix m n))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Activation Functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn sigmoid
   [z]
   (mat/div 1.0 (mat/add 1.0 (exp (mat/negate z)))))
 
 (defn sigmoid-prime
   [z]
-  (* (sigmoid z) (- 1 (sigmoid z))))
+  (mat/emul (sigmoid z) (mat/sub 1.0 (sigmoid z))))
 
-(defn mat-sigmoid-prime
-  [z]
-  (mat/emap sigmoid-prime z))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Cost Functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;(defprotocol NeuralLayer
+;  (feed-forward [input] "Pass data into the layer and return its output.")
+;  (back-propagate [input output-gradient] "Back propagate error gradients through the layer."))
+
+(defprotocol CostFn
+  (cost [this activation target])
+  (delta [this activation z target]))
+
+(deftype QuadraticCost []
+  CostFn
+  (cost [this activation target]
+    (mat/mul 0.5 (mat/pow (linear/norm (mat/sub activation target)) 2)))
+
+  (delta [this activation z target]
+    (mat/emul (mat/sub activation target) (sigmoid-prime z))))
+
+(deftype CrossEntropyCost []
+  CostFn
+  (cost [this activation target]
+    (let [a (mat/mul (mat/negate target) (log activation))
+          b (mat/mul (mat/sub 1.0 target) (log (mat/sub 1.0 a)))]
+      (mat/esum (mat/sub a b))))
+
+  (delta [this activation z target]
+    (mat/sub activation target)))
 
 ;; K-sparse autoencoder
 ;0) setup
@@ -47,42 +96,26 @@
 
 ;       (v = velocity, m = momentum, n=learning rate)
 
-; TODO: this should be scaled lower... research in papers how the initialize
-;  - I think we divide by the sqrt(n)
-(defn rand-vector
-  "Produce a vector with guassian random elements having mean of 0.0 and std of 1.0."
-  [n]
-  (let [rgen (Random.)]
-    (mat/array (repeatedly n #(.nextGaussian rgen)))))
-
-(defn rand-matrix
-  [m n]
-  (let [rgen (Random.)]
-    (mat/array (repeatedly m (fn [] (repeatedly n #(.nextGaussian rgen)))))))
-
 ; TODO: switch to passing layer-specs that have size and activation fn
 (defn network
   [layer-sizes]
   {:n-layers (count layer-sizes)
    :layer-sizes layer-sizes
    :biases (map rand-vector (next layer-sizes))
-   :weights (map rand-matrix (rest layer-sizes) (drop-last layer-sizes))})
+   :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))})
 
 (defn feed-forward
   [{:keys [biases weights] :as net} input]
-  (println "feed-forward")
-  (loop [biases biases
-         weights weights
-         activation input]
-    (println "top of loop")
-    (if biases
-      (let [_ (println "asdf")
-            z (mat/add (mat/mmul (first weights) activation)
-                                             (first biases))
-            activation (mat-sigmoid z)]
-        (println "activation: " activation)
-        (recur (next biases) (next weights) activation))
-      activation)))
+  (when (and biases weights)
+    (loop [biases biases
+           weights weights
+           activation input]
+      (if biases
+        (let [z (mat/add (mat/mmul (first weights) activation)
+                         (first biases))
+              activation (sigmoid z)]
+          (recur (next biases) (next weights) activation))
+        activation))))
 
 (defn row-seq
   [data]
@@ -105,13 +138,12 @@
 ;;  * multiply gradient by the learning-rate to smooth out jitter in updates.
 (defn backprop
   [{:keys [biases weights layer-sizes] :as net} input expected-output]
-  ;(println "\n--------------- backprop ---------------------")
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         [activations zs] (reduce
                            (fn [[activations zs] [layer-biases layer-weights]]
                              (let [z (mat/add (mat/mmul layer-weights (last activations)) layer-biases)
-                                   activation (mat-sigmoid z)]
+                                   activation (sigmoid z)]
                                [(conj activations activation) (conj zs z)]))
                            [[input] []] ; initialize zs to nil so it's the same shape as activations
                            (map vector biases weights))
@@ -119,55 +151,33 @@
 
         ;; Compute the output error and gradients for the output weights
         output-error (mat/sub output expected-output)
-        ;_ (println "input: " input " => " output " target: " expected-output "error: " output-error)
-        output-delta (mat/emul output-error (mat-sigmoid-prime (last zs)))
-        ;_ (println "output-error: " output-error)
+        output-delta (mat/emul output-error (sigmoid-prime (last zs)))
         bias-gradients [output-delta]
         ; TODO: not nice to have to wrap this into another layer...
         ;layer-activations (mat/transpose (mat/array [(last (drop-last activations))]))
         layer-activations (mat/transpose (last (drop-last activations)))
-        ;_ (println "output-delta: " (mat/shape output-delta))
-        ;_ (println "layer-activations: " (mat/shape layer-activations))
-        ;_ (println "pre-activations: " (mat/shape (last (drop-last activations))))
         weight-gradients [(mat/outer-product output-delta layer-activations)]
-        ;_ (println "output weight gradients: " (mat/shape (first weight-gradients)))
 
         ;; Now compute deltas and gradients for the hidden layers
         layer-indices (reverse (range 1 (dec (count layer-sizes))))
-        ;_ (println "zs: " (map mat/shape zs))
-        ;_ (println "weights: " (map mat/shape weights))
-        ;_ (println "layer-indices: " layer-indices)
         [_ bias-gradients weight-gradients]
         (reduce
           (fn [[delta bias-grads weight-grads] i]
-            ;(print "i: " i " -> " )
-            ;(println (nth layer-sizes i) "neurons and" (mat/shape (nth zs (dec i))) "activations")
-            ;(println (nth layer-sizes i) "weights")
-            (let [sp (mat-sigmoid-prime (nth zs (dec i)))
+            (let [sp (sigmoid-prime (nth zs (dec i)))
                   outgoing-weights (mat/transpose (nth weights i))
-                  ;_ (println "delta: " (mat/shape delta))
-                  ;_ (println "outgoing-weights: " (mat/shape outgoing-weights))
                   errors (mat/mmul outgoing-weights delta)
-                  ;_ (println "deltas: " (mat/shape errors-deltas))
-                  ;_ (println "sp: " (mat/shape sp))
                   delta (mat/emul errors sp)
-                  ;_ (println "new-delta: " (mat/shape delta))
-                  ;_ (println "activations: " (mat/shape (mat/transpose (nth activations (dec i)))))
                   weight-grad (mat/outer-product delta (mat/transpose (nth activations (dec i))))
-                  ;_ (println "weight-grad: " (mat/shape weight-grad))
                   bias-grads (cons delta bias-grads)
                   weight-grads (cons weight-grad weight-grads)]
               [delta bias-grads weight-grads]))
           [output-delta bias-gradients weight-gradients]
           layer-indices)]
-    ;(println "weight-gradients: " (map mat/shape weight-gradients))
-    ;(println "\n--------------- end backprop ---------------------")
     [bias-gradients weight-gradients]))
 
 
 (defn update-mini-batch
   [{:keys [biases weights] :as net} learning-rate data labels batch]
-  ;(println "update-mini-batch")
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         batch-size (count batch)
@@ -180,19 +190,13 @@
             (let [input (mat/get-row data sample-index)
                   label (mat/get-row labels sample-index)
                   [bias-grad weight-grad] (backprop net input label)
-                  ;_ (println "bias-grad:" bias-grad)
-                  ;_ (println "weight-grad:" weight-grad)
-                  bias-gradients (doall (map mat/add! bias-gradients bias-grad))
-                  weight-gradients (doall (map mat/add! weight-gradients weight-grad))]
-              ;(println "bottom")
+                  bias-gradients (map mat/add! bias-gradients bias-grad)
+                  weight-gradients (map mat/add! weight-gradients weight-grad)]
               [bias-gradients weight-gradients]))
           [bias-gradients weight-gradients]
           batch)
-        ;_ (println "accumulated gradients...")
-        biases (map (fn [b nb] (mat/sub! b (mat/mul batch-rate nb))) biases bias-gradients)
-        weights (map (fn [w nw] (mat/sub! w (mat/mul batch-rate nw))) weights weight-gradients)]
-    ;(println "biases:\n" biases)
-    ;(println "weights:\n" weights)
+        biases (map (fn [b b-grad] (mat/sub! b (mat/mul batch-rate b-grad))) biases bias-gradients)
+        weights (map (fn [w w-grad] (mat/sub! w (mat/mul batch-rate w-grad))) weights weight-gradients)]
     (assoc net :biases biases :weights weights)))
 
 (defn argmax
@@ -209,19 +213,12 @@
 
 (defn evaluate
   [net test-data test-labels]
-  (println "evaluate")
   (let [results (doall
                   (map (fn [data label]
-                         (println "feeding forward data: " (mat/shape data))
                          (let [res (feed-forward net data)]
-                           (println "res: " res)
-                           (argmax res)
-                           ;[(Math/round (first res))]
-                           ))
+                           (mat/emap #(Math/round %) res)))
                      (row-seq test-data) (row-seq test-labels)))
-        _ (println "making score")
-        score (count (filter #(= (first %) (second %)) (map vector results (row-seq test-labels))))]
-    (println "done")
+        score (count (filter #(mat/equals (first %) (second %)) (map vector results (row-seq test-labels))))]
     [results score]))
 
 (defn classify
@@ -240,37 +237,44 @@
         net
         (let [
               mini-batches (partition batch-size (shuffle (range n-inputs)))
-              new-net (reduce (fn [[i network] batch]
-                                (println "batch" i "of" n-batches)
+              [_ new-net] (reduce (fn [[i network] batch]
                                 [(inc i) (update-mini-batch network learning-rate training-data training-labels batch)])
                               [0 net] mini-batches)
-              sample-size 10
-              sample-start (rand-int (- n-inputs sample-size))
-              sample-end (+ sample-start sample-size)
-              sample-data (mat/submatrix training-data sample-start sample-end 0 input-width)
-              sample-labels (mat/submatrix training-labels sample-start sample-end 0 label-width)
-              [sample-results sample-score] (evaluate new-net sample-data sample-labels)]
-          (println (format "sample score: %5.2f" sample-score))
-          (doseq [[res label] (map vector sample-results (row-seq sample-labels))]
-            (println res ":" label))
+              ;sample-size 10
+              ;sample-start (rand-int (- n-inputs sample-size))
+              ;sample-data (mat/submatrix training-data sample-start sample-size 0 input-width)
+              ;sample-labels (mat/submatrix training-labels sample-start sample-size 0 label-width)
+              ;[sample-results sample-score] (evaluate new-net sample-data sample-labels)
+              ]
+          ;(println "sample score: " sample-score)
+          ;(println (format "sample score: %5.2f" (float (/ sample-score sample-size))))
           (recur new-net (inc epoch)))))))
 
 (def trained* (atom nil))
 
+(defn mnist-labels
+  [class-labels]
+  (let [n-labels (count class-labels)
+        labels (mat/zero-array [n-labels 10])]
+    (doseq [i (range n-labels)]
+      (mat/mset! labels i (nth class-labels i) 1.0))
+    labels))
+
 (defn mnist-test
-  []
+  [& [net]]
   (let [training-data @mnist/data-store
-        training-labels @mnist/label-store
+        [n-inputs input-width] (mat/shape training-data)
+        ;training-data (mat/submatrix training-data 0 3000 0 input-width)
+        training-labels (mnist-labels @mnist/label-store)
         test-data @mnist/test-data-store
-        test-labels @mnist/test-label-store
-        net (network [784 30 10])
-        optim-options {:n-epochs 10
+        test-labels (mnist-labels @mnist/test-label-store)
+        net (or net (network [784 30 10]))
+        optim-options {:n-epochs 1
                        :batch-size 10
                        :learning-rate 3.0}
         trained (sgd net optim-options training-data training-labels)
-        _ (println "evaluating...")
-        score (evaluate net test-data test-labels)
-        label-count (count test-labels)
+        [results score] (evaluate net test-data test-labels)
+        label-count (first (mat/shape test-labels))
         score-percent (float (/ score label-count))]
     (reset! trained* trained)
     (println (format "MNIST Score: %f [%d of %d]" score-percent score label-count))))
@@ -286,16 +290,13 @@
 (defn xor-test
   []
   (let [net (network [2 3 1])
-        optim-options {:n-epochs 10000
-                       :batch-size 2
-                       :learning-rate 0.1}
-        _ (println "initial: " (:weights net))
+        optim-options {:n-epochs 2000
+                       :batch-size 1
+                       :learning-rate 0.2}
         trained (sgd net optim-options XOR-DATA XOR-LABELS)
-        _ (println "trained: " (:weights net))
-        score (evaluate trained XOR-DATA XOR-LABELS)
+        [results score] (evaluate trained XOR-DATA XOR-LABELS)
         label-count (count XOR-LABELS)
         score-percent (float (/ score label-count))]
-    (reset! trained* trained)
     (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))))
 
 (defn hand-test
@@ -305,8 +306,7 @@
                    :biases [[0 0 0] [0]]
                    :weights [[[1 1] [1 1] [1 1]]
                              [[1 -2 1]]])
-        _ (println "weight shapes: " (map mat/shape (:weights net)))
-        score (evaluate net XOR-DATA XOR-LABELS)
+        [results score] (evaluate net XOR-DATA XOR-LABELS)
         label-count (count XOR-LABELS)
         score-percent (float (/ score label-count))]
     (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))))

@@ -12,4 +12,5 @@
                  ]
 
   :jvm-opts  ["-Xmx8g"
-              "-XX:+UseConcMarkSweepGC"])
+              "-XX:+UseConcMarkSweepGC"
+              "-XX:-OmitStackTraceInFastThrow"])
