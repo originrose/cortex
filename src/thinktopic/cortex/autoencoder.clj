@@ -7,6 +7,15 @@
 
 (mat/set-current-implementation :vectorz)
 
+;; Primary Protocols
+(defprotocol NeuralLayer
+  (forward [this input] "Pass data into the layer and return its output.")
+  (backward [this input output-gradient] "Back propagate error gradients through the layer."))
+
+(defprotocol CostFn
+  (cost [this activation target])
+  (delta [this activation z target]))
+
 ;; Helpers
 (defn exp
   [a]
@@ -40,22 +49,32 @@
   [z]
   (mat/div 1.0 (mat/add 1.0 (exp (mat/negate z)))))
 
-(defn sigmoid-prime
+(defn sigmoid'
   [z]
   (mat/emul (sigmoid z) (mat/sub 1.0 (sigmoid z))))
+
+(deftype SigmoidActivation []
+  NeuralLayer
+  (forward [this input]
+    (sigmoid input))
+
+  (backward [this input output-gradient]
+    nil))
+
+(defn softmax
+  "Used for multinomial classification (choose 1 of n classes), where the output
+  layer can be interpreted as class probabilities."
+  [z]
+  (mat/div z (mat/esum z)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Cost Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;(defprotocol NeuralLayer
-;  (feed-forward [input] "Pass data into the layer and return its output.")
-;  (back-propagate [input output-gradient] "Back propagate error gradients through the layer."))
-
-(defprotocol CostFn
-  (cost [this activation target])
-  (delta [this activation z target]))
+(defn mean-squared-error
+  [activation target]
+  (mat/div (mat/esum (mat/pow (mat/sub activation target) 2))
+           (mat/ecount activation)))
 
 (deftype QuadraticCost []
   CostFn
@@ -67,20 +86,29 @@
       (mat/mul 0.5 (mat/pow (linear/norm diff) 2))))
 
   (delta [this activation z target]
-    (mat/emul (mat/sub activation target) (sigmoid-prime z))))
+    (mat/emul (mat/sub activation target) (sigmoid' z))))
+
+(def SMALL-NUM 1e-30)
 
 (deftype CrossEntropyCost []
   CostFn
   (cost [this activation target]
-    (let [a (mat/mul (mat/negate target) (log activation))
-          b (mat/mul (mat/sub 1.0 target) (log (mat/sub 1.0 a)))
+    (let [a (mat/mul (mat/negate target) (log (mat/add SMALL-NUM activation)))
+          b (mat/mul (mat/sub 1.0 target) (log (mat/sub (+ 1.0 SMALL-NUM) a)))
           c (mat/esum (mat/sub a b))]
-      (println a)
-      (println b)
       c))
 
   (delta [this activation z target]
     (mat/sub activation target)))
+
+(defn costs
+  []
+  (let [a [0.2, 0.3, 0.1, 0.9]
+        b [0.0, 0.0, 0.0, 1.0]
+        qc (QuadraticCost.)
+        ce (CrossEntropyCost.)]
+    (println "QuadraticCost: " (cost qc a b))
+    (println "CrossEntropyCost: " (cost ce a b))))
 
 ;; K-sparse autoencoder
 ;0) setup
@@ -110,7 +138,7 @@
    :layer-sizes layer-sizes
    :biases (map rand-vector (next layer-sizes))
    :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))
-   :cost-fn })
+   :cost-fn (get opts :cost-fn (QuadraticCost.))})
 
 (defn feed-forward
   [{:keys [biases weights] :as net} input]
@@ -159,7 +187,7 @@
 
         ;; Compute the output error and gradients for the output weights
         output-error (mat/sub output expected-output)
-        output-delta (mat/emul output-error (sigmoid-prime (last zs)))
+        output-delta (mat/emul output-error (sigmoid' (last zs)))
         bias-gradients [output-delta]
         ; TODO: not nice to have to wrap this into another layer...
         ;layer-activations (mat/transpose (mat/array [(last (drop-last activations))]))
@@ -171,7 +199,7 @@
         [_ bias-gradients weight-gradients]
         (reduce
           (fn [[delta bias-grads weight-grads] i]
-            (let [sp (sigmoid-prime (nth zs (dec i)))
+            (let [sp (sigmoid' (nth zs (dec i)))
                   outgoing-weights (mat/transpose (nth weights i))
                   errors (mat/mmul outgoing-weights delta)
                   delta (mat/emul errors sp)
