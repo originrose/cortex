@@ -16,6 +16,49 @@
   (cost [this activation target])
   (delta [this activation z target]))
 
+(defrecord SequentialNetwork [layers config]
+  NeuralLayer
+  (forward [this input]
+    (reduce (fn [activation layer]
+              (forward layer activation))
+            input layers))
+
+  (backward [this input output-gradient]
+    ))
+
+(defn network
+  [layers & opts]
+  {:n-layers (count layers)
+   :biases (map rand-vector (next layer-sizes))
+   :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))
+   :cost-fn (get opts :cost-fn (QuadraticCost.))})
+
+(defrecord LinearLayer [weights biases]
+  NeuralLayer
+  (forward [this input]
+    (assoc this :output (mat/add (mat/mmul weights input) biases)))
+
+  (backward [this input output-gradient]
+    ))
+
+(reduce
+  (fn [[activations zs] [layer-biases layer-weights]]
+    )
+  [[input] []] ; initialize zs to nil so it's the same shape as activations
+  (map vector biases weights))
+
+(defn feed-forward
+  [{:keys [biases weights] :as net} input]
+  (when (and biases weights)
+    (loop [biases biases
+           weights weights
+           activation input]
+      (if biases
+        (let [z (mat/add (mat/mmul (first weights) activation)
+                         (first biases))
+              activation (sigmoid z)]
+          (recur (next biases) (next weights) activation))
+        activation))))
 ;; Helpers
 (defn exp
   [a]
@@ -132,13 +175,6 @@
 ;       (v = velocity, m = momentum, n=learning rate)
 
 ; TODO: switch to passing layer-specs that have size and activation fn
-(defn network
-  [layer-sizes & opts]
-  {:n-layers (count layer-sizes)
-   :layer-sizes layer-sizes
-   :biases (map rand-vector (next layer-sizes))
-   :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))
-   :cost-fn (get opts :cost-fn (QuadraticCost.))})
 
 (defn feed-forward
   [{:keys [biases weights] :as net} input]
@@ -173,7 +209,7 @@
 ;; 4) update weights
 ;;  * multiply gradient by the learning-rate to smooth out jitter in updates.
 (defn backprop
-  [{:keys [biases weights cost-fn layer-sizes] :as net} input expected-output]
+  [{:keys [biases weights cost-fn n-layers] :as net} input expected-output]
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         [activations zs] (reduce
@@ -195,7 +231,7 @@
         weight-gradients [(mat/outer-product output-delta layer-activations)]
 
         ;; Now compute deltas and gradients for the hidden layers
-        layer-indices (reverse (range 1 (dec (count layer-sizes))))
+        layer-indices (reverse (range 1 (dec n-layers)))
         [_ bias-gradients weight-gradients]
         (reduce
           (fn [[delta bias-grads weight-grads] i]
