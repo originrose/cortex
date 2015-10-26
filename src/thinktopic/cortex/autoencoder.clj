@@ -7,66 +7,32 @@
 
 (mat/set-current-implementation :vectorz)
 
-;; Primary Protocols
+;; Neural Protocols
+
 (defprotocol NeuralLayer
   (forward [this input] "Pass data into the layer and return its output.")
   (backward [this input output-gradient] "Back propagate error gradients through the layer."))
 
-(defprotocol CostFn
-  (cost [this activation target])
-  (delta [this activation z target]))
+(defprotocol LossFn
+  (loss [this v target])
+  (delta [this v target]))
 
-(defrecord SequentialNetwork [layers config]
-  NeuralLayer
-  (forward [this input]
-    (reduce (fn [activation layer]
-              (forward layer activation))
-            input layers))
-
-  (backward [this input output-gradient]
-    ))
-
-(defn network
-  [layers & opts]
-  {:n-layers (count layers)
-   :biases (map rand-vector (next layer-sizes))
-   :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))
-   :cost-fn (get opts :cost-fn (QuadraticCost.))})
-
-(defrecord LinearLayer [weights biases]
-  NeuralLayer
-  (forward [this input]
-    (assoc this :output (mat/add (mat/mmul weights input) biases)))
-
-  (backward [this input output-gradient]
-    ))
-
-(reduce
-  (fn [[activations zs] [layer-biases layer-weights]]
-    )
-  [[input] []] ; initialize zs to nil so it's the same shape as activations
-  (map vector biases weights))
-
-(defn feed-forward
-  [{:keys [biases weights] :as net} input]
-  (when (and biases weights)
-    (loop [biases biases
-           weights weights
-           activation input]
-      (if biases
-        (let [z (mat/add (mat/mmul (first weights) activation)
-                         (first biases))
-              activation (sigmoid z)]
-          (recur (next biases) (next weights) activation))
-        activation))))
 ;; Helpers
 (defn exp
   [a]
   (mat/emap #(Math/exp %) a))
 
+(defn exp!
+  [a]
+  (mat/emap! #(Math/exp %) a))
+
 (defn log
   [a]
   (mat/emap #(Math/log %) a))
+
+(defn log!
+  [a]
+  (mat/emap! #(Math/log %) a))
 
 (defn rand-vector
   "Produce a vector with guassian random elements having mean of 0.0 and std of 1.0."
@@ -88,21 +54,40 @@
 ;; Activation Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; NOTE: This form of computing a sigmoid over a matrix is faster than mapping
+; over each individual element.  Using the mutable versions of most functions
+; saves .
 (defn sigmoid
+  "y =  1 / (1 + e^(-z))
+  Produces an output between 0 and 1."
   [z]
-  (mat/div 1.0 (mat/add 1.0 (exp (mat/negate z)))))
+  (mat/div! (mat/add! (exp! (mat/negate z)) 1.0)))
+
+(defn sigmoid!
+  "y =  1 / (1 + e^(-z))
+  Produces an output between 0 and 1."
+  [z]
+  (mat/div! (mat/add! (exp! (mat/negate! z)) 1.0)))
 
 (defn sigmoid'
   [z]
-  (mat/emul (sigmoid z) (mat/sub 1.0 (sigmoid z))))
+  (let [sz (sigmoid z)]
+    (mat/emul sz (mat/sub 1.0 sz))))
 
-(deftype SigmoidActivation []
+(defrecord SigmoidActivation [output]
   NeuralLayer
   (forward [this input]
-    (sigmoid input))
+    (mat/assign! output input)
+    (sigmoid! output))
 
+  ; z = dot(weights, input) + b
+  ; activation = sigmoid(z)
   (backward [this input output-gradient]
-    nil))
+    (mat/emul output-gradient (sigmoid' input))))
+
+(defn sigmoid-activation
+  [shape]
+  (map->SigmoidActivation {:output (mat/zero-array shape)}))
 
 (defn softmax
   "Used for multinomial classification (choose 1 of n classes), where the output
@@ -110,32 +95,81 @@
   [z]
   (mat/div z (mat/esum z)))
 
+(defrecord LinearLayer [weights biases weight-gradients bias-gradients outputs]
+  NeuralLayer
+  (forward [this input]
+    (mat/assign! outputs biases)
+    (mat/add! outputs (mat/mmul weights input)))
+
+  (backward [this input output-gradient]
+    (mat/fill! weight-gradients 0.0)
+    (mat/assign! bias-gradients output-gradient)
+
+    ; Compute the error gradients with respect to the input data by multiplying the
+    ; output errors backwards through the weights, and then compute the error
+    ; with respect to the weights by multiplying the input error times the
+    ; output error.
+    (let [input-grad (mat/mmul (mat/transpose weights) output-gradient)]
+      (mat/assign! weight-gradients (mat/outer-product output-gradient input-grad)))))
+
+(defn linear-layer
+  [n-inputs n-outputs]
+  (let [weights (weight-matrix n-outputs n-inputs)
+        biases (rand-matrix 1 n-outputs)]
+    (map->LinearLayer
+      {:weights weights
+       :biases biases
+       :weight-gradients (mat/zero-array (mat/shape weights))
+       :bias-gradients (mat/zero-array (mat/shape biases))
+       :outputs (mat/zero-array (mat/shape biases))})))
+
+(defrecord SequentialNetwork [layers config]
+  NeuralLayer
+  (forward [this input]
+    (reduce (fn [activation layer]
+              (forward layer activation))
+            input layers))
+
+  (backward [this input output-gradient]
+    (reduce (fn [out-grad [prev-layer layer]]
+              (backward layer (:output prev-layer) out-grad))
+            output-gradient
+            (map vector (reverse layers)
+                 (concat (next (reverse layers)) [{:output input}])))))
+
+(defn sgd-optimizer
+  [net loss-fn {:keys [learning-rate batch-size] :as opts}]
+  (fn [input label]
+    (let [output (forward net input)
+          loss (loss loss-fn output label)
+          error (delta loss-fn output label)])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Cost Functions
+;; Loss Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn mean-squared-error
   [activation target]
   (mat/div (mat/esum (mat/pow (mat/sub activation target) 2))
            (mat/ecount activation)))
 
-(deftype QuadraticCost []
-  CostFn
-  (cost [this activation target]
+(deftype QuadraticLoss []
+  LossFn
+  ; L = sum(0.5 * (output - label)^2)
+  (loss [this v target]
     ; NOTE: linear/norm is different for matrices and vectors so this row-matrix
     ; conversion is important for correctness.
-    (let [diff (mat/sub activation target)
+    (let [diff (mat/sub v target)
           diff (if (mat/vec? diff) (mat/row-matrix diff) diff)]
       (mat/mul 0.5 (mat/pow (linear/norm diff) 2))))
 
-  (delta [this activation z target]
-    (mat/emul (mat/sub activation target) (sigmoid' z))))
+  (delta [this v z target]
+    (mat/emul (mat/sub v target) (sigmoid' z))))
 
 (def SMALL-NUM 1e-30)
 
-(deftype CrossEntropyCost []
-  CostFn
-  (cost [this activation target]
+(deftype CrossEntropyLoss []
+  LossFn
+  (loss [this activation target]
     (let [a (mat/mul (mat/negate target) (log (mat/add SMALL-NUM activation)))
           b (mat/mul (mat/sub 1.0 target) (log (mat/sub (+ 1.0 SMALL-NUM) a)))
           c (mat/esum (mat/sub a b))]
@@ -144,14 +178,14 @@
   (delta [this activation z target]
     (mat/sub activation target)))
 
-(defn costs
+(defn losses
   []
   (let [a [0.2, 0.3, 0.1, 0.9]
         b [0.0, 0.0, 0.0, 1.0]
-        qc (QuadraticCost.)
-        ce (CrossEntropyCost.)]
-    (println "QuadraticCost: " (cost qc a b))
-    (println "CrossEntropyCost: " (cost ce a b))))
+        qc (QuadraticLoss.)
+        ce (CrossEntropyLoss.)]
+    (println "QuadraticLoss: " (loss qc a b))
+    (println "CrossEntropyLoss: " (loss ce a b))))
 
 ;; K-sparse autoencoder
 ;0) setup
@@ -209,7 +243,7 @@
 ;; 4) update weights
 ;;  * multiply gradient by the learning-rate to smooth out jitter in updates.
 (defn backprop
-  [{:keys [biases weights cost-fn n-layers] :as net} input expected-output]
+  [{:keys [biases weights loss-fn n-layers] :as net} input expected-output]
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)
         weight-gradients (map #(mat/zero-array (mat/shape %)) weights)
         [activations zs] (reduce
@@ -321,6 +355,13 @@
           ;(println "sample score: " sample-score)
           ;(println (format "sample score: %5.2f" (float (/ sample-score sample-size))))
           (recur new-net (inc epoch)))))))
+
+(defn network
+  [layer-sizes & opts]
+  {:n-layers (count layer-sizes)
+   :biases (map rand-vector (next layer-sizes))
+   :weights (map weight-matrix (rest layer-sizes) (drop-last layer-sizes))
+   :loss-fn (get opts :loss-fn (QuadraticLoss.))})
 
 (def trained* (atom nil))
 
