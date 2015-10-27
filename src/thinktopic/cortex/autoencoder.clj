@@ -9,9 +9,44 @@
 
 ;; Neural Protocols
 
+;; Gradient descent
+;; 1) forward propagate
+;;  * sum((weights * inputs) + biases) for each neuron, layer by layer
+;; 2) back propagate deltas
+;;  * After propagating forward, we need to figure out the error (often called the
+;;    delta) for each neuron.  For the outputs this is just the
+;;    ((output - expected_output) * activation-fn-prime), but for the hidden units the output
+;;    error has to be propagated back across the weights to distribute the error according to
+;;    which hidden units were responsible for it.
+;; 3) compute gradients
+;;  * Then for each weight you multiply its output delta by its input activation to get
+;;    its gradient.  This will correspond to the direction and magnitude of the
+;;    error for that weight, so any update should happen in the opposite direction.
+;; 4) update weights
+;;  * multiply gradient by the learning-rate to smooth out jitter in updates,
+;;    and subtract from the weights
+
 (defprotocol NeuralLayer
-  (forward [this input] "Pass data into the layer and return its output.")
-  (backward [this input output-gradient] "Back propagate error gradients through the layer."))
+  "A basic neural network layer abstraction supporting forward and backward propagation of
+  input activations and error gradients."
+  (forward [this input]
+           "Pass data into the layer and return its output.  Also set the :output
+           key with the output values for later retrieval.")
+
+  (backward [this input output-gradient]
+            "Back propagate errors through the layer with respect to the input.  Returns the
+            input deltas (gradient at the inputs).
+            NOTE: the input passed in must be the same input that was used in the forward pass."))
+
+;; possibly two steps to backpropagation per layer:
+;; * compute gradient with respect to the inputs
+;;  - multiply by weights transpose, or by derivative of activation function
+;; * compute gradient with respect to the parameters of a module (weights & biases)
+;;  1) start with zeroed out gradients
+;;  2) accumulate the gradients over a mini-batch
+;;  3) update parameters using average of accumulated gradients (* grads (/ 1 batch-size)
+;;      -> params = params - (learning-rate * param-gradients)
+;;  4) zero out parameter gradients
 
 (defprotocol LossFn
   (loss [this v target])
@@ -74,20 +109,28 @@
   (let [sz (sigmoid z)]
     (mat/emul sz (mat/sub 1.0 sz))))
 
-(defrecord SigmoidActivation [output]
+(defrecord SigmoidActivation [output input-gradient]
   NeuralLayer
   (forward [this input]
     (mat/assign! output input)
     (sigmoid! output))
 
-  ; z = dot(weights, input) + b
-  ; activation = sigmoid(z)
   (backward [this input output-gradient]
-    (mat/emul output-gradient (sigmoid' input))))
+    (mat/assign! input-gradient (mat/emul output-gradient (sigmoid' input)))))
 
 (defn sigmoid-activation
   [shape]
   (map->SigmoidActivation {:output (mat/zero-array shape)}))
+
+(defrecord RectifiedLinearActivation [output input-gradient]
+  NeuralLayer
+  (forward [this input]
+    (mat/assign! output input)
+    (mat/emap! #(if (neg? %) 0 %) output))
+
+  (backward [this input output-gradient]
+    (mat/assign! input-gradient output-gradient)
+    (mat/emap! #(if (neg? %) 0 %) input-gradient)))
 
 (defn softmax
   "Used for multinomial classification (choose 1 of n classes), where the output
@@ -227,21 +270,6 @@
   [data]
   (map #(mat/get-row data %) (range (mat/row-count data))))
 
-;; Gradient descent
-;; 1) forward propagate
-;;  * sum((weights * inputs) + biases) for each neuron, layer by layer
-;; 2) back propagate deltas
-;;  * After propagating forward, we need to figure out the error (often called the
-;;    delta) for each neuron.  For the outputs this is just the
-;;    (output - expected_output) * activation-fn-prime, but for the hidden units the output error has to
-;;    be propagated back across the weights to distributed the error according to
-;;    which hidden units were responsible for it.
-;; 3) compute gradients
-;;  * Then for each weight you multiply its output delta by its input activation to get
-;;    its gradient.  This will correspond to the direction and magnitude of the
-;;    error for that weight, so any update should happen in the opposite direction.
-;; 4) update weights
-;;  * multiply gradient by the learning-rate to smooth out jitter in updates.
 (defn backprop
   [{:keys [biases weights loss-fn n-layers] :as net} input expected-output]
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)

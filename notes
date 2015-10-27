@@ -1,0 +1,141 @@
+### Design of a Neural Network Library
+
+* networks are described as a directed graph of modules
+
+We are focused on online learning of neural network based models.  This means we
+process individual samples at a time (or small batches), rather than looking at
+the whole dataset at once.
+
+#### Modules
+
+(defprotocol NeuralModule
+  (activate [this inputs] "compute forward activations")
+  (back-propagate [this X dE-dY] "back-propagate the deltas down")
+  (update-gradients [this X dE-dY] "compute gradients with respect to the weights")
+
+connecting layers:
+* fully connected (linear)
+* locally connected
+* convolutional
+* pooling
+
+activation functions:
+* rectified-linear
+* sigmoid
+* tanh
+* soft-max
+
+optimization:
+* SGD with momentum
+* adadelta (no learning rate!)
+* feedback alignment
+
+* optimize(func, x, state) -> x', f-res
+ - func: user defined function where f, df/dx = func(x)
+ - x: current set of trainable parameters
+ - state: a map of algorithm specific params (e.g. learning rate, decay, etc...)
+ - x': new parameters that minimize f, x' = argmin(f, x)
+ - f-res: the result of f(x)
+
+### Backprop and Feedback Alignment
+
+How to assign error to specific neurons in the network so that weights
+can be updated correctly? Input is fed into the network,
+and the error vector is the difference between the generated output and
+the expected output. This information needs to be communicated to the network so
+that it can learn from its mistake.  The question is how to propagate this error back
+through the network to improve it for the next time this input or one
+like it occurs.
+
+Feedback alignment produces the weight update matrix by multiplying the error
+vector and a random feedback vector.  (elements chosen uniformly random between [-0.5, 0.5])
+
+Backprop
+
+Backprop updates:
+
+gradient = w1_t ((w2_t * e) • h')
+
+where w1_t means first weights transposed, and • is element-wise multiplication.
+So in english this is the output error times the output weights transposed, element-wise
+times the derivative of the activation function, times the first weights transposed.
+
+Using random feedback weights:
+
+
+
+gradient = w1_t (B * e) • h'
+
+where B is a static, random matrix with elements uniformly chosen from [-0.5, 0.5]
+
+### Test Networks
+
+* mnist classifier MLP with 784 - 1000 - 10 units
+
+#### Dataset abstraction
+
+* make it as plug and play as possible to plug various datasets into our models
+* look at the core.matrix and incanter dataset abstractions
+
+### Linear Regression
+
+If we have k dimensional training data $X = {x_o^k .. x_n^k}$ with corresponding
+output values $Y = y^k$, then we try to find a linear function that can predict
+Y from input data X:
+
+$Y = f(X) = w \cdot X + b$
+
+where $w \cdot X$ is the dot product of a weight vector (w) and the inputs, plus
+a bias value (b).  Training learns the weight parameters $w = [w_0 .. w_n]$ that
+minimize the error between the predicted value $t$ and the output value $y$:
+
+$L(y,t) = (y - t)^2$
+
+As there will often be many possible solutions (or local minima in the parameter
+space), the form of this loss function will influence weights we end up with.
+For example, we can add a term to encourage small weight values:
+
+$L(y,t) = (y - t)^2 + \lambda ||w||^2$
+
+where $||w||^2 = \sum_{j=1}^{d}w_j^2$ is called $L^2$ regularization.
+
+We can encourage a sparse activation with an $L^1$ regularizer:
+
+$L(y,t) = (y - t)^2 + \lambda ||w||$
+
+where $||w|| is just the absolute value of w.  You can see that L2 penalizes
+larger values more than it punishes small values, while L1 penalizes any value.
+
+
+
+### Distributed Gradient Descent
+
+In order to speedup the training of neural network models we will
+develop a distributed gradient descent optimization platform.
+
+#### Strategies
+
+* super simple data parallel map-reduce
+  - each machine trains using SGD over a random subset of the data, and
+    then in a single reduce step all the weights are averaged at the end
+  - From a Yahoo research paper: Parallelized Stochastic Gradient Descent
+  - http://martin.zinkevich.org/publications/nips2010.pdf
+
+* Hogwild: lockless multi-processor updates on shared memory
+  - as long as the weight updates are sparse then you can compute gradients in parallel on multiple CPUs and have them all update the shared weights without locking
+  - occasionally a weight will be updated based on out of date data, overwriting the last update, but with sparse updates it happens rarely enough that you get just about linear speedup
+  - http://papers.nips.cc/paper/4390-hogwild-a-lock-free-approach-to-parallelizing-stochastic-gradient-descent.pdf
+
+* DistBelief
+ - single large models with many parameters are partitioned across CPUs and machines, and then activation values and gradients that cross partition boundaries are transmitted between machines
+ - models with local connectivity rather than fully connected layers get bigger speedups due lower network overhead
+ - example from paper: a single model instance can run on 32 machines with 16 cores each = 512 CPUs
+
+* Downpour SGD
+ - run multiple instances of a model in parallel on subsets of the data
+ - use sharded parameter servers to gather updates and maintain current params
+ - before each mini-batch models request updated parameters from parameter shards, or they can be continuously and asynchronously updated by a background thread
+ - three threads run in parallel without locks: fetch params, push gradients, process training data
+ - parameter server uses Adagrad where each parameter has its own, adaptive learning rate, which they say really helped with stability and speed when training
+
+
