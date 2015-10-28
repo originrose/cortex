@@ -2,8 +2,8 @@
   (:require [clojure.core.matrix :as mat]
             [clojure.core.matrix.linear :as linear]
             [mikera.vectorz.core :as vectorz]
-            [thinktopic.datasets.mnist :as mnist])
-  (:import [java.util Random]))
+            [thinktopic.datasets.mnist :as mnist]
+            [thinktopic.cortex.util :as util]))
 
 (mat/set-current-implementation :vectorz)
 
@@ -62,13 +62,13 @@
   "y =  1 / (1 + e^(-z))
   Produces an output between 0 and 1."
   [z]
-  (mat/div! (mat/add! (exp! (mat/negate z)) 1.0)))
+  (mat/div! (mat/add! (util/exp! (mat/negate z)) 1.0)))
 
 (defn sigmoid!
   "y =  1 / (1 + e^(-z))
   Produces an output between 0 and 1."
   [z]
-  (mat/div! (mat/add! (exp! (mat/negate! z)) 1.0)))
+  (mat/div! (mat/add! (util/exp! (mat/negate! z)) 1.0)))
 
 (defn sigmoid'
   [z]
@@ -87,7 +87,8 @@
 
 (defn sigmoid-activation
   [shape]
-  (map->SigmoidActivation {:output (mat/zero-array shape)}))
+  (let [shape (if (number? shape) [1 shape] shape)]
+    (map->SigmoidActivation {:output (mat/zero-array shape)})))
 
 (defrecord RectifiedLinearActivation [output input-gradient]
   NeuralLayer
@@ -105,63 +106,10 @@
   [z]
   (mat/div z (mat/esum z)))
 
-(defrecord LinearLayer [weights biases output
-                        weight-gradient bias-gradient input-gradient]
-  NeuralLayer
-  (forward [this input]
-    (mat/assign! output biases)
-    (mat/add! output (mat/mmul weights input)))
-
-  ; Compute the error gradients with respect to the input data by multiplying the
-  ; output errors backwards through the weights, and then compute the error
-  ; with respect to the weights by multiplying the input error times the
-  ; output error.
-
-  ; NOTE: this accumulates the bias and weight gradients, but the optimizer is
-  ; expected to apply the gradients to the parameters and then zero them out
-  ; after each mini batch.
-  (backward [this input output-gradient]
-    (let [input-grad (mat/mmul (mat/transpose weights) output-gradient)]
-      (mat/add! bias-gradient output-gradient)
-      (mat/add! weight-gradient (mat/outer-product output-gradient input-grad))
-      (mat/assign! input-gradient input-grad))))
-
-(defn linear-layer
-  [n-inputs n-outputs]
-  (let [weights (weight-matrix n-outputs n-inputs)
-        biases (rand-matrix 1 n-outputs)]
-    (map->LinearLayer
-      {:weights weights
-       :biases biases
-       :output (mat/zero-array (mat/shape biases))
-       :weight-gradient (mat/zero-array (mat/shape weights))
-       :bias-gradient (mat/zero-array (mat/shape biases))
-       :input-gradient (mat/zero-array [1 n-inputs])})))
-
-(defrecord SequentialNetwork [layers]
-  NeuralLayer
-  (forward [this input]
-    (reduce (fn [activation layer]
-              (forward layer activation))
-            input layers))
-
-  (backward [this input output-gradient]
-    (reduce (fn [out-grad [prev-layer layer]]
-              (backward layer (:output prev-layer) out-grad))
-            output-gradient
-            (map vector (reverse layers)
-                 (concat (next (reverse layers)) [{:output input}])))))
-
-(defn sgd-optimizer
-  [net loss-fn {:keys [learning-rate batch-size] :as opts}]
-  (fn [input label]
-    (let [output (forward net input)
-          loss (loss loss-fn output label)
-          error (delta loss-fn output label)])))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Loss Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn mean-squared-error
   [activation target]
   (mat/div (mat/esum (mat/pow (mat/sub activation target) 2))
@@ -190,13 +138,17 @@
   (delta [this v target]
     (mat/sub v target)))
 
+(defn quadratic-loss
+  []
+  (QuadraticLoss.))
+
 (def SMALL-NUM 1e-30)
 
 (deftype CrossEntropyLoss []
   LossFn
   (loss [this activation target]
-    (let [a (mat/mul (mat/negate target) (log (mat/add SMALL-NUM activation)))
-          b (mat/mul (mat/sub 1.0 target) (log (mat/sub (+ 1.0 SMALL-NUM) a)))
+    (let [a (mat/mul (mat/negate target) (util/log (mat/add SMALL-NUM activation)))
+          b (mat/mul (mat/sub 1.0 target) (util/log (mat/sub (+ 1.0 SMALL-NUM) a)))
           c (mat/esum (mat/sub a b))]
       c))
 
@@ -211,4 +163,92 @@
 ;        ce (CrossEntropyLoss.)]
 ;    (println "QuadraticLoss: " (loss qc a b))
 ;    (println "CrossEntropyLoss: " (loss ce a b))))
-;
+
+(defrecord LinearLayer [weights biases output
+                        weight-gradient bias-gradient input-gradient]
+  NeuralLayer
+  (forward [this input]
+    (mat/assign! output biases)
+    (mat/add! output (mat/mmul weights input)))
+
+  ; Compute the error gradients with respect to the input data by multiplying the
+  ; output errors backwards through the weights, and then compute the error
+  ; with respect to the weights by multiplying the input error times the
+  ; output error.
+
+  ; NOTE: this accumulates the bias and weight gradients, but the optimizer is
+  ; expected to apply the gradients to the parameters and then zero them out
+  ; after each mini batch.
+  (backward [this input output-gradient]
+    (let [input-grad (mat/mmul (mat/transpose weights) output-gradient)]
+      (mat/add! bias-gradient output-gradient)
+      (mat/add! weight-gradient (mat/outer-product output-gradient input-grad))
+      (mat/assign! input-gradient input-grad))))
+
+(defn linear-layer
+  [& {:keys [n-inputs n-outputs]}]
+  (let [weights (util/weight-matrix n-outputs n-inputs)
+        biases (util/rand-matrix 1 n-outputs)]
+    (map->LinearLayer
+      {:weights weights
+       :biases biases
+       :output (mat/zero-array (mat/shape biases))
+       :weight-gradient (mat/zero-array (mat/shape weights))
+       :bias-gradient (mat/zero-array (mat/shape biases))
+       :input-gradient (mat/zero-array [1 n-inputs])})))
+
+(defrecord SequentialNetwork [layers]
+  NeuralLayer
+  (forward [this input]
+    (reduce (fn [activation layer]
+              (forward layer activation))
+            input layers))
+
+  (backward [this input output-gradient]
+    (reduce (fn [out-grad [prev-layer layer]]
+              (backward layer (:output prev-layer) out-grad))
+            output-gradient
+            (map vector (reverse layers)
+                 (concat (next (reverse layers)) [{:output input}])))))
+
+(defn sequential-network
+  [layers]
+  (SequentialNetwork. layers))
+
+(defn sgd-optimizer
+  [net loss-fn {:keys [learning-rate batch-size] :as opts}]
+  (fn [input label]
+    (let [output (forward net input)
+          loss (loss loss-fn output label)
+          error (delta loss-fn output label)])))
+
+(defn confusion-matrix
+  "A confusion matrix shows the predicted classes for each of the actual
+  classes in order to understand performance and commonly confused classes.
+
+                         Predicted
+                       Cat Dog Rabbit
+               | Cat	   5  3  0
+        Actual | Dog	   2  3  1
+               | Rabbit  0  2  11
+
+  Initialize with a set of string labels, and then call add-prediction for
+  each prediction to accumulate into the matrix."
+  [labels]
+  (let [prediction-map (zipmap labels (repeat 0))]
+    (into {} (for [label labels]
+               [label prediction-map]))))
+
+(defn add-prediction
+  [conf-mat prediction label]
+  (update-in conf-mat [label prediction] inc))
+
+(defn print-confusion-matrix
+  [conf-mat]
+  (let [ks (sort (keys conf-mat))
+        label-len (inc (apply max (map count ks)))
+        prefix (apply str (repeat label-len " "))
+        s-fmt (str "%" label-len "s")]
+    (apply println prefix ks)
+    (doseq [k ks]
+      (apply println (format s-fmt k) (map #(get-in conf-mat [k %]) ks)))))

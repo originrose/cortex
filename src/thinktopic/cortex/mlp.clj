@@ -200,35 +200,3 @@
         score-percent (float (/ score label-count))]
     (reset! trained* trained)
     (println (format "MNIST Score: %f [%d of %d]" score-percent score label-count))))
-
-; a	b	| a XOR b
-; 1	1	     0
-; 0	1	     1
-; 1	0	     1
-; 0	0	     0
-(def XOR-DATA [[1 1] [0 1] [1 0] [0 0]])
-(def XOR-LABELS [[0] [1] [1] [0]])
-
-(defn xor-test
-  []
-  (let [net (network [2 3 1])
-        optim-options {:n-epochs 4000
-                       :batch-size 1
-                       :learning-rate 0.3}
-        trained (sgd net optim-options XOR-DATA XOR-LABELS)
-        [results score] (evaluate trained XOR-DATA XOR-LABELS)
-        label-count (count XOR-LABELS)
-        score-percent (float (/ score label-count))]
-    (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))))
-
-(defn hand-test
-  []
-  (let [net (network [2 3 1])
-        net (assoc net
-                   :biases [[0 0 0] [0]]
-                   :weights [[[1 1] [1 1] [1 1]]
-                             [[1 -2 1]]])
-        [results score] (evaluate net XOR-DATA XOR-LABELS)
-        label-count (count XOR-LABELS)
-        score-percent (float (/ score label-count))]
-    (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))))
