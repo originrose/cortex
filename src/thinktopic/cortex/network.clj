@@ -197,6 +197,15 @@
        :bias-gradient (mat/zero-array (mat/shape biases))
        :input-gradient (mat/zero-array [1 n-inputs])})))
 
+(defrecord IdentityLayer []
+  NeuralLayer
+  (forward [this input] input)
+  (backward [this input output-gradient] output-gradient))
+
+(defn identity-layer
+  []
+  (IdentityLayer.))
+
 (defrecord SequentialNetwork [layers]
   NeuralLayer
   (forward [this input]
