@@ -1,6 +1,8 @@
 (ns thinktopic.cortex.network-test
   (:require
     [clojure.test :refer [deftest is are]]
+    [clojure.core.matrix :as mat]
+    [thinktopic.cortex.util :as util]
     [thinktopic.cortex.network :as net]))
 
 
@@ -18,15 +20,18 @@
               [(net/linear-layer :n-inputs 2 :n-outputs 3)
                (net/sigmoid-activation 3)
                (net/linear-layer :n-inputs 3 :n-outputs 2)])
-        optim-options {:loss (net/quadratic-loss)
-                       :n-epochs 4000
+        optim-options {:loss-fn (net/quadratic-loss)
                        :batch-size 1
                        :learning-rate 0.3}
+        n-epochs 2000
+        [optimizer optim-state] (sgd-optimizer net optim-options)
         ;trained (sgd net optim-options XOR-DATA XOR-LABELS)
         ;[results score] (evaluate trained XOR-DATA XOR-LABELS)
         ;label-count (count XOR-LABELS)
         ;score-percent (float (/ score label-count))
         ]
+    (println "NET: " net)
+    (println "forward: "  (net/forward net [1 0]))
     ;(println (format "XOR Score: %f [%d of %d]" score-percent score label-count))
     nil
     ))
@@ -60,3 +65,13 @@
             )]
     (net/print-confusion-matrix cf)
     (is (= 2 (get-in cf ["cat" "dog"])))))
+
+
+;(defn losses
+;  []
+;  (let [a [0.2, 0.3, 0.1, 0.9]
+;        b [0.0, 0.0, 0.0, 1.0]
+;        qc (QuadraticLoss.)
+;        ce (CrossEntropyLoss.)]
+;    (println "QuadraticLoss: " (loss qc a b))
+;    (println "CrossEntropyLoss: " (loss ce a b))))

@@ -3,6 +3,12 @@
     [clojure.core.matrix :as mat])
   (:import [java.util Random]))
 
+(defn timestamp [] (System/nanoTime))
+
+(defn ms-elapsed
+  [start end]
+  (/ (double (- end start)) 1000000.0))
+
 (defn exp
   [a]
   (mat/emap #(Math/exp %) a))
