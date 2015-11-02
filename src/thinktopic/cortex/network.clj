@@ -42,7 +42,14 @@
   "For layers that have trainable parameters extend this protocol in order to expose the parameters
   and accumulated gradients to optimization algorithms."
   (parameters-gradients [this]
-    "Returns a vector of [[params gradients] ...] pairs."))
+                        "Returns a vector of [[params gradients] ...] pairs."))
+
+(defprotocol NeuralOptimizer
+  (train [this input label]
+    "Do one forward-backward step through the network.")
+
+  (update-parameters [this & {:keys [scale]}]
+    "Apply the accumulated parameter updates to the parameters."))
 
 ;; possibly two steps to backpropagation per layer:
 ;; * compute gradient with respect to the inputs
@@ -88,6 +95,7 @@
     (sigmoid! output))
 
   (backward [this input output-gradient]
+    ;(println "backward " (mat/shape input-gradient) (mat/shape output-gradient))
     (mat/assign! input-gradient output-gradient)
     (mat/emul! input-gradient output (mat/sub 1.0 output))))
 
@@ -97,7 +105,8 @@
 (defn sigmoid-activation
   [shape]
   (let [shape (if (number? shape) [1 shape] shape)]
-    (map->SigmoidActivation {:output (mat/zero-array shape)})))
+    (map->SigmoidActivation {:output (mat/zero-array shape)
+                             :input-gradient (mat/zero-array shape)})))
 
 (defrecord RectifiedLinearActivation [output input-gradient]
   NeuralLayer
@@ -140,6 +149,7 @@
   (loss [this v target]
     ; NOTE: linear/norm is different for matrices and vectors so this row-matrix
     ; conversion is important for correctness.
+    ;(println "loss: " v "-" target)
     (let [diff (mat/sub v target)
           diff (if (mat/vec? diff) (mat/row-matrix diff) diff)]
       (mat/mul 0.5 (mat/pow (linear/norm diff) 2))))
@@ -187,10 +197,10 @@
   ; expected to apply the gradients to the parameters and then zero them out
   ; after each mini batch.
   (backward [this input output-gradient]
-    (let [input-grad (mat/mmul (mat/transpose weights) output-gradient)]
-      (mat/add! bias-gradient output-gradient)
-      (mat/add! weight-gradient (mat/outer-product output-gradient input-grad))
-      (mat/assign! input-gradient input-grad)))
+    (mat/add! bias-gradient output-gradient)
+    (mat/add! weight-gradient (mat/mmul (mat/transpose output-gradient) input))
+    (mat/assign! input-gradient (mat/mmul output-gradient weights))
+    input-gradient)
 
   ParameterLayer
   (parameters-gradients [this]
@@ -207,6 +217,7 @@
 (defn linear-layer
   [& {:keys [n-inputs n-outputs]}]
   (let [weights (util/weight-matrix n-outputs n-inputs)
+        ; TODO: the biases should also be scaled to the stdev
         biases (util/rand-matrix 1 n-outputs)]
     (map->LinearLayer
       {:n-inputs n-inputs
@@ -230,23 +241,24 @@
 (defrecord SequentialNetwork [layers]
   NeuralLayer
   (forward [this input]
-    (println "forward:")
+    ;(println "forward:")
     (reduce (fn [activation layer]
-              (println "\t" layer)
+              ;(println "\t" layer)
               (forward layer activation))
             input layers))
 
   (backward [this input output-gradient]
+    ;(println "backward:")
     (reduce (fn [out-grad [prev-layer layer]]
+              ;(println "\t" layer)
               (backward layer (:output prev-layer) out-grad))
             output-gradient
-            (map vector (reverse layers)
-                 (concat (next (reverse layers)) [{:output input}]))))
+            (map vector (concat (next (reverse layers)) [{:output input}]) (reverse layers))))
 
- ParameterLayer
- (parameters-gradients [this]
+  ParameterLayer
+  (parameters-gradients [this]
     (mapcat #(if (extends? ParameterLayer (type %))
-               (params-gradients %)
+               (parameters-gradients %)
                [])
             layers)))
 
@@ -261,8 +273,6 @@
 ;; Training and Optimization
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defprotocol )
-
 ; An optimizer takes:
 ; - network
 ; - loss function
@@ -272,58 +282,82 @@
 ; returns a function that takes an input and a label, returns runtime stats and
 ; a new network.
 ; -
+(defrecord SGDOptimizer [net loss-fn learning-rate]
+  NeuralOptimizer
+  (train [this input label]
+    (let [start-time (util/timestamp)
+          output (forward net input)
+          forward-time (util/ms-elapsed start-time)
+          loss (loss loss-fn output label)
+          loss-delta (delta loss-fn output label)
+          start-time (util/timestamp)
+          gradient (backward net input loss-delta)
+          backward-time (util/ms-elapsed start-time)
+          stats {:forward-time forward-time
+                 :backward-time backward-time
+                 :loss loss}]
+      stats))
+
+  (update-parameters [this & {:keys [scale]}]
+    (let [params-grads (parameters-gradients net)
+          ; gradient = accumulated-gradient / batch-size
+
+          ; Vanilla SGD
+          ; param += - learning-rate * gradient
+
+          ; SGD + Momentum
+          ; dx = (prev-dx * momentum) + learning-rate * gradient
+          ; prev-dx = dx
+          ; param += dx
+          ]
+      (doseq [[params grads] params-grads]
+        (mat/sub! params (mat/mul learning-rate (or scale 1) grads))
+        (mat/fill! grads 0)))))
+
 (defn sgd-optimizer
-  [net loss-fn {:keys [learning-rate batch-size loss-fn] :as opts}]
-  (let [trainer (fn [state input label]
-                  (let [start-time (util/timestamp)
-                        output (forward net input)
-                        forward-time (util/ms-elapsed start-time (util/timestamp))
-
-                        loss (loss loss-fn output label)
-                        loss-delta (delta loss-fn output label)
-
-                        start-time (util/timestamp)
-                        gradient (backward net input loss-delta)
-                        backward-time (util/ms-elapsed start-time (util/timestamp))
-
-                        iteration (inc (:iteration state))
-                        state (assoc state :iteration iteration
-                                     :forward-time forward-time
-                                     :backward-time backward-time
-                                     :loss loss)]
-                    (if (zero? (mod iteration batch-size))
-                      (let [params-grads (parameters-gradients net)
-                            ; gradient = accumulated-gradient / batch-size
-
-                            ; Vanilla SGD
-                            ; param += - learning-rate * gradient
-
-                            ; SGD + Momentum
-                            ; dx = (prev-dx * momentum) + learning-rate * gradient
-                            ; prev-dx = dx
-                            ; param += dx
-                            ]
-                        (doseq [[params grads] params-grads]
-                          (mat/sub! params (mat/mul learning-rate (mat/div! grads batch-size))))
-                        state)
-                      state)))]
-    [trainer {:iteration 0}]))
+  [net loss-fn learning-rate]
+  (SGDOptimizer. net loss-fn learning-rate))
 
 (defn train-network
-  [optimizer n-epochs batch-size data labels]
-  (loop [i 0]
-    (if (= i n-epochs)
-      state)))
+  [optimizer n-epochs batch-size training-data training-labels]
+  (let [[n-inputs input-width] (mat/shape training-data)
+        [n-labels label-width] (mat/shape training-labels)
+        n-batches (long (/ n-inputs batch-size))
+        batch-scale (/ 1.0 batch-size)]
+    (dotimes [i n-epochs]
+      (println "epoch" i)
+      (doseq [batch (partition batch-size (shuffle (range n-inputs)))]
+        (let [start-time (util/timestamp)]
+          (doseq [idx batch]
+            (train optimizer (mat/get-row training-data idx) (mat/get-row training-labels idx)))
+          (println "batch time: " (util/ms-elapsed start-time) "ms"))
+        (update-parameters optimizer :scale batch-scale)))))
+
+(defn row-seq
+  [data]
+  (map #(mat/get-row data %) (range (mat/row-count data))))
+
+(defn evaluate
+  [net test-data test-labels]
+  (let [results (doall
+                  (map (fn [data label]
+                         (let [res (forward net data)]
+                           (mat/emap #(Math/round %) res)))
+                       (row-seq test-data) (row-seq test-labels)))
+        res-labels (map vector results (row-seq test-labels))
+        score (count (filter #(mat/equals (first %) (second %)) res-labels))]
+    (println "evaluated: " (take 10 res-labels))
+    [results score]))
 
 (defn confusion-matrix
   "A confusion matrix shows the predicted classes for each of the actual
   classes in order to understand performance and commonly confused classes.
 
-                         Predicted
-                       Cat Dog Rabbit
-               | Cat	   5  3  0
-        Actual | Dog	   2  3  1
-               | Rabbit  0  2  11
+  Predicted
+  Cat Dog Rabbit
+  | Cat	   5  3  0
+  Actual | Dog	   2  3  1
+  | Rabbit  0  2  11
 
   Initialize with a set of string labels, and then call add-prediction for
   each prediction to accumulate into the matrix."
@@ -345,3 +379,4 @@
     (apply println prefix ks)
     (doseq [k ks]
       (apply println (format s-fmt k) (map #(get-in conf-mat [k %]) ks)))))
+

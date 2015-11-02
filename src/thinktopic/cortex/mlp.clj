@@ -89,7 +89,6 @@
           layer-indices)]
     [bias-gradients weight-gradients]))
 
-
 (defn update-mini-batch
   [{:keys [biases weights] :as net} learning-rate data labels batch]
   (let [bias-gradients (map #(mat/zero-array (mat/shape %)) biases)

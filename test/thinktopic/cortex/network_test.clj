@@ -2,53 +2,39 @@
   (:require
     [clojure.test :refer [deftest is are]]
     [clojure.core.matrix :as mat]
+    [thinktopic.datasets.mnist :as mnist]
     [thinktopic.cortex.util :as util]
     [thinktopic.cortex.network :as net]))
-
 
 ; a	b	| a XOR b
 ; 1	1	     0
 ; 0	1	     1
 ; 1	0	     1
 ; 0	0	     0
-(def XOR-DATA [[1 1] [0 1] [1 0] [0 0]])
-(def XOR-LABELS [[0] [1] [1] [0]])
+(def XOR-DATA [[[1 1]] [[0 1]] [[1 0]] [[0 0]]])
+(def XOR-LABELS [[[0]] [[1]] [[1]] [[0]]])
 
 (defn xor-test
   []
   (let [net (net/sequential-network
               [(net/linear-layer :n-inputs 2 :n-outputs 3)
                (net/sigmoid-activation 3)
-               (net/linear-layer :n-inputs 3 :n-outputs 2)])
-        optim-options {:loss-fn (net/quadratic-loss)
-                       :batch-size 1
-                       :learning-rate 0.3}
+               (net/linear-layer :n-inputs 3 :n-outputs 1)])
+        training-data XOR-DATA
+        training-labels XOR-LABELS
         n-epochs 2000
-        [optimizer optim-state] (sgd-optimizer net optim-options)
-        ;trained (sgd net optim-options XOR-DATA XOR-LABELS)
-        ;[results score] (evaluate trained XOR-DATA XOR-LABELS)
-        ;label-count (count XOR-LABELS)
-        ;score-percent (float (/ score label-count))
-        ]
+        loss-fn (net/quadratic-loss)
+        learning-rate 0.3
+        batch-size 1
+        optimizer (net/sgd-optimizer net loss-fn learning-rate)
+        _ (net/train-network optimizer n-epochs batch-size training-data training-labels)
+        [results score] (net/evaluate net XOR-DATA XOR-LABELS)
+        label-count (count XOR-LABELS)
+        score-percent (float(/ score label-count))]
     (println "NET: " net)
     (println "forward: "  (net/forward net [1 0]))
-    ;(println (format "XOR Score: %f [%d of %d]" score-percent score label-count))
-    nil
-    ))
-
-
-;(defn hand-test
-;  []
-;  (let [net (network [2 3 1])
-;        net (assoc net
-;                   :biases [[0 0 0] [0]]
-;                   :weights [[[1 1] [1 1] [1 1]]
-;                             [[1 -2 1]]])
-;        [results score] (evaluate net XOR-DATA XOR-LABELS)
-;        label-count (count XOR-LABELS)
-;        score-percent (float (/ score label-count))]
-;    (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))))
-
+    (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))
+    nil))
 
 (deftest confusion-test
   (let [cf (net/confusion-matrix ["cat" "dog" "rabbit"])
@@ -67,11 +53,44 @@
     (is (= 2 (get-in cf ["cat" "dog"])))))
 
 
-;(defn losses
-;  []
-;  (let [a [0.2, 0.3, 0.1, 0.9]
-;        b [0.0, 0.0, 0.0, 1.0]
-;        qc (QuadraticLoss.)
-;        ce (CrossEntropyLoss.)]
-;    (println "QuadraticLoss: " (loss qc a b))
-;    (println "CrossEntropyLoss: " (loss ce a b))))
+(def trained* (atom nil))
+
+(defn mnist-labels
+  [class-labels]
+  (let [n-labels (count class-labels)
+        labels (mat/zero-array [n-labels 10])]
+    (doseq [i (range n-labels)]
+      (mat/mset! labels i (nth class-labels i) 1.0))
+    labels))
+
+(def MNIST-LABELS (mnist-labels @mnist/label-store))
+
+(defn mnist-test
+  [& [net]]
+  (let [start-time (util/timestamp)
+        training-data @mnist/data-store
+        [n-inputs input-width] (mat/shape training-data)
+        training-data (mat/submatrix training-data 0 100 0 input-width)
+        training-data (map #(mat/broadcast % [1 input-width]) training-data)
+        training-labels (mnist-labels @mnist/label-store)
+        test-data @mnist/test-data-store
+        test-labels (mnist-labels @mnist/test-label-store)
+        net (or net (net/sequential-network
+                      [(net/linear-layer :n-inputs 784 :n-outputs 30)
+                       (net/sigmoid-activation 30)
+                       (net/linear-layer :n-inputs 30 :n-outputs 10)
+                       (net/sigmoid-activation 10)]))
+        n-epochs 1
+        learning-rate 3.0
+        batch-size 10
+        loss-fn (net/quadratic-loss)
+        optimizer (net/sgd-optimizer net loss-fn learning-rate)
+        setup-time (util/ms-elapsed start-time (util/timestamp))
+        _ (println "setup time: " setup-time "ms")
+        _ (net/train-network optimizer n-epochs batch-size training-data training-labels)
+        _ (println "evaluating network...")
+        [results score] (net/evaluate net test-data test-labels)
+        label-count (first (mat/shape test-labels))
+        score-percent (float (/ score label-count))]
+    (reset! trained* net)
+    (println (format "MNIST Score: %f [%d of %d]" score-percent score label-count))))

@@ -139,3 +139,8 @@ develop a distributed gradient descent optimization platform.
  - parameter server uses Adagrad where each parameter has its own, adaptive learning rate, which they say really helped with stability and speed when training
 
 
+### Recurrent Net
+
+In a recurrent network you have hidden layers feedback to themselves.  Each
+timestep you input the next input sample in the sequence, and you add that to
+the recurrent inputs coming in from one or more layers.

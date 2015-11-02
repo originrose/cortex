@@ -6,8 +6,10 @@
 (defn timestamp [] (System/nanoTime))
 
 (defn ms-elapsed
-  [start end]
-  (/ (double (- end start)) 1000000.0))
+  ([start]
+   (ms-elapsed start (timestamp)))
+  ([start end]
+   (/ (double (- end start)) 1000000.0)))
 
 (defn exp
   [a]
