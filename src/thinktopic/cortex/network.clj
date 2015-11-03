@@ -142,6 +142,9 @@
   (delta [this v target]
     (mat/sub v target)))
 
+(defn mse-loss []
+  (MSELoss.))
+
 ; NOTE: not really sure how this is supposed to differ and why from a simple MSE
 ; loss.  Must investigate.
 (deftype QuadraticLoss []
@@ -198,6 +201,8 @@
   ; after each mini batch.
   (backward [this input output-gradient]
     (mat/add! bias-gradient output-gradient)
+    ;(println "output-gradient: " (mat/shape output-gradient))
+    ;(println "input: " (mat/shape input))
     (mat/add! weight-gradient (mat/mmul (mat/transpose output-gradient) input))
     (mat/assign! input-gradient (mat/mmul output-gradient weights))
     input-gradient)
@@ -281,8 +286,7 @@
 ;
 ; returns a function that takes an input and a label, returns runtime stats and
 ; a new network.
-; -
-(defrecord SGDOptimizer [net loss-fn learning-rate]
+(defrecord SGDOptimizer [net loss-fn learning-rate momentum momentum-arrays]
   NeuralOptimizer
   (train [this input label]
     (let [start-time (util/timestamp)
@@ -310,13 +314,18 @@
           ; prev-dx = dx
           ; param += dx
           ]
-      (doseq [[params grads] params-grads]
-        (mat/sub! params (mat/mul learning-rate (or scale 1) grads))
-        (mat/fill! grads 0)))))
+      (doseq [[params grads momentum-array] (map conj params-grads momentum-arrays)]
+        (let [grad-update (mat/mul! grads learning-rate (or scale 1))
+              momentum-update (mat/mul! momentum-array momentum)
+              dx (mat/sub! momentum-update grad-update)]
+          (mat/add! params dx)
+          (mat/fill! grads 0))))))
 
 (defn sgd-optimizer
-  [net loss-fn learning-rate]
-  (SGDOptimizer. net loss-fn learning-rate))
+  [net loss-fn learning-rate momentum]
+  (let [momentum-shapes (map (comp mat/shape second) (parameters-gradients net))
+        momentum-arrays (map mat/zero-array momentum-shapes)]
+    (SGDOptimizer. net loss-fn learning-rate momentum momentum-arrays)))
 
 (defn train-network
   [optimizer n-epochs batch-size training-data training-labels]
@@ -325,12 +334,13 @@
         n-batches (long (/ n-inputs batch-size))
         batch-scale (/ 1.0 batch-size)]
     (dotimes [i n-epochs]
-      (println "epoch" i)
+      ;(println "epoch" i)
       (doseq [batch (partition batch-size (shuffle (range n-inputs)))]
         (let [start-time (util/timestamp)]
           (doseq [idx batch]
             (train optimizer (mat/get-row training-data idx) (mat/get-row training-labels idx)))
-          (println "batch time: " (util/ms-elapsed start-time) "ms"))
+          ;(println "batch time: " (util/ms-elapsed start-time) "ms")
+          )
         (update-parameters optimizer :scale batch-scale)))))
 
 (defn row-seq

@@ -6,7 +6,7 @@
 
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [http-kit "2.1.18"]
-                 [jarohen/chord "0.6.0"]
+                 [jarohen/chord "0.7.0-SNAPSHOT"]
                  [reagent "0.5.1"]
                  [reagent-forms "0.5.13"]
                  [reagent-utils "0.1.5"]

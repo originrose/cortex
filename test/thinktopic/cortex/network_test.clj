@@ -25,8 +25,9 @@
         n-epochs 2000
         loss-fn (net/quadratic-loss)
         learning-rate 0.3
+        momentum 0.9
         batch-size 1
-        optimizer (net/sgd-optimizer net loss-fn learning-rate)
+        optimizer (net/sgd-optimizer net loss-fn learning-rate momentum)
         _ (net/train-network optimizer n-epochs batch-size training-data training-labels)
         [results score] (net/evaluate net XOR-DATA XOR-LABELS)
         label-count (count XOR-LABELS)
@@ -82,9 +83,10 @@
                        (net/sigmoid-activation 10)]))
         n-epochs 1
         learning-rate 3.0
+        momentum 0.9
         batch-size 10
         loss-fn (net/quadratic-loss)
-        optimizer (net/sgd-optimizer net loss-fn learning-rate)
+        optimizer (net/sgd-optimizer net loss-fn learning-rate momentum)
         setup-time (util/ms-elapsed start-time (util/timestamp))
         _ (println "setup time: " setup-time "ms")
         _ (net/train-network optimizer n-epochs batch-size training-data training-labels)
@@ -94,3 +96,54 @@
         score-percent (float (/ score label-count))]
     (reset! trained* net)
     (println (format "MNIST Score: %f [%d of %d]" score-percent score label-count))))
+
+; Data from: Dominick Salvator and Derrick Reagle
+; Shaum's Outline of Theory and Problems of Statistics and Economics
+; 2nd edition,  McGraw-Hill, 2002, pg 157
+
+; Predict corn yield from fertilizer and insecticide inputs
+; [corn, fertilizer, insecticide]
+(def CORN-DATA
+  [[6  4]
+   [10  4]
+   [12  5]
+   [14  7]
+   [16  9]
+   [18 12]
+   [22 14]
+   [24 20]
+   [26 21]
+   [32 24]])
+
+(def CORN-LABELS
+  [40 44 46 48 52 58 60 68 74 80])
+
+(def CORN-RESULTS
+  [40.32, 42.92, 45.33, 48.85, 52.37, 57.0, 61.82, 69.78, 72.19, 79.42])
+
+(def model* (atom nil))
+
+(defn regression-test
+  [& [net]]
+  (let [net (or net (net/sequential-network [(net/linear-layer :n-inputs 2 :n-outputs 1)]))
+        loss (net/mse-loss)
+        learning-rate 0.0001
+        momentum 0.9
+        optimizer (net/sgd-optimizer net loss learning-rate momentum)
+        n-epochs 1000 batch-size 1
+        data (map mat/row-matrix CORN-DATA)
+        labels (map vector CORN-LABELS)
+        results (map vector CORN-RESULTS)]
+    (net/train-network optimizer n-epochs batch-size data labels)
+    (reset! model* net)
+    (println "After training the ideal values solving analytically are:
+     corn = 31.98 + 0.65 * fertilizer + 1.11 * insecticides\n")
+    (println "The networked learned:")
+    (println "    corn = " (mat/mget (get-in net [:layers 0 :biases]) 0 0) "+ "
+             (mat/mget (get-in net [:layers 0 :weights]) 0 0) "* x +"
+             (mat/mget (get-in net [:layers 0 :weights]) 0 1) "* y")
+
+    (println "text  :  prediction")
+    (doseq [[label fertilizer insecticide] (map concat results CORN-DATA)]
+      (println label " : " (mat/mget (net/forward net (mat/row-matrix [fertilizer insecticide])) 0 0)))
+    ))
