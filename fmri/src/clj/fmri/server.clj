@@ -1,9 +1,16 @@
 (ns fmri.server
   (:require [fmri.handler :refer [app]]
             [environ.core :refer [env]]
-            [ring.adapter.jetty :refer [run-jetty]])
+            [org.httpkit.server :as http-kit])
   (:gen-class))
+
+(def server* (atom nil))
 
  (defn -main [& args]
    (let [port (Integer/parseInt (or (env :port) "3000"))]
-     (run-jetty app {:port port :join? false})))
+     (http-kit/run-server app {:port port})))
+
+(defn stop-server []
+  (when @server*
+    (@server*)))
+

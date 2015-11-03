@@ -5,7 +5,8 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
 
   :dependencies [[org.clojure/clojure "1.7.0"]
-                 [ring-server "0.4.0"]
+                 [http-kit "2.1.18"]
+                 [jarohen/chord "0.6.0"]
                  [reagent "0.5.1"]
                  [reagent-forms "0.5.13"]
                  [reagent-utils "0.1.5"]
@@ -15,10 +16,11 @@
                  [compojure "1.4.0"]
                  [hiccup "1.0.5"]
                  [environ "1.0.1"]
+
                  [org.clojure/clojurescript "1.7.145" :scope "provided"]
                  [secretary "1.2.3"]
-
-                 [jarohen/chord "0.6.0"]]
+                 ;[thi.ng/ndarray "0.3.0"]
+                 ]
 
   :plugins [[lein-environ "1.0.1"]
             [lein-asset-minifier "0.2.2"]]
