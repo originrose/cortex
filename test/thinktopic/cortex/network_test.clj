@@ -126,11 +126,12 @@
 (defn regression-test
   [& [net]]
   (let [net (or net (net/sequential-network [(net/linear-layer :n-inputs 2 :n-outputs 1)]))
-        loss (net/mse-loss)
-        learning-rate 0.0001
+        learning-rate 0.00001 
         momentum 0.9
+        n-epochs 10000 
+        batch-size 1
+        loss (net/mse-loss)
         optimizer (net/sgd-optimizer net loss learning-rate momentum)
-        n-epochs 1000 batch-size 1
         data (map mat/row-matrix CORN-DATA)
         labels (map vector CORN-LABELS)
         results (map vector CORN-RESULTS)]
