@@ -23,25 +23,23 @@
 (defmethod cf/formatter* :fressian [_]
   (reify cf/ChordFormatter
     (freeze [_ obj] (fressian/write obj))
-    (thaw [_ s] 
+    (thaw [_ s]
       (println "incoming fressian object:")
       (js/console.log s)
-      (fressian/read s :handlers 
+      (fressian/read s :handlers
                      (assoc fressian/cljs-read-handler "array"
                             (fn [reader tag component-count]
                               (println "component-count: " component-count)
                               (let [shape (freader/read-object reader)
-                                    size (apply + shape)]
+                                    size (apply + shape)
+                                    ary (make-array size)]
                                 (println "shape: " shape)
-                                shape)))))))
+                                (doseq [i (range size)]
+                                  (aset ary i (freader/read-double reader)))
+                                {:type :matrix
+                                 :shape shape
+                                 :data ary})))))))
 
-
-(defn read-array
-  [obj]
-  (println "read-array")
-  (let [shape (freader/read-object obj)]
-    (println "SHAPE: " shape)
-    shape))
 
 (defn home-page []
   (let [msg (atom "")]
@@ -56,9 +54,8 @@
             (js/console.log error))
           (do
             (println "MSG:")
-            (js/console.log message)
-            (js/console.log (type message))
-            (reset! msg (read-array message))))
+            (println message)
+            (reset! msg message)))
         (reset! conn* conn)))
     (fn []
       [:div [:h2 "Welcome to fmri"]
