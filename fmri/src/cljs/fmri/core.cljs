@@ -44,7 +44,7 @@
   (.createElement js/Document "canvas"))
 
 (defn matrix->image
-  [m & {:keys [canvas scale]}]
+  [m & {:keys [canvas scale min-val max-val]}]
   (let [scale (or scale 1)
         depth 4 ; rgba
         [height width] (mat/shape m)
@@ -58,8 +58,8 @@
         ctx (.getContext canvas "2d")
         img-data (.getImageData ctx 0 0 img-width img-height)
         pixels (.-data img-data)
-        min-v (apply min m)
-        max-v (apply max m)
+        min-v (or min-val (apply min m))
+        max-v (or max-val (apply max m))
         dv (- max-v min-v)
         c-range (/ 255.0 dv)]
     (println "rendering with scale: " scale)
@@ -89,12 +89,13 @@
                                        (callback node)))}))
 
 (defn matrix-renderer
-  [m]
+  [m & {:keys [scale]}]
   (reagent/create-class
     {:component-did-mount
      (fn [this]
-       (let [canvas (reagent/dom-node this)]
-         (matrix->image m :scale 20 :canvas canvas)))
+       (let [canvas (reagent/dom-node this)
+             scale (or scale 1)]
+         (matrix->image m :scale scale :canvas canvas)))
      :display-name "Matrix Renderer"
      :reagent-render (fn [] [:canvas])
      }))
@@ -119,22 +120,22 @@
 (defn cross-matrix
   "Generates a matrix with a cross in it as a test for painting
   matrices."
-  [size])
+  [size]
+  (let [ary (double-array (* size size))
+        m (mat/ndarray :float64 ary [size size])]
+    (doseq [i (range (* size size))] (aset m i 0))
+    (doseq [i (range size)]
+      (mat/set-at m 5 i 1)
+      (mat/set-at m i 5 1))
+    m))
 
 (defn home-page []
   (let [msg (atom "")
-        ary (double-array 144)
-        m (mat/ndarray :float64 ary [11 11])]
-    (doseq [i (range (* 11 11))]
-      (aset m i 0))
-    (doseq [i (range 11)]
-      (mat/set-at m 5 i 1)
-      (mat/set-at m i 5 1))
-    (js/console.log ary)
+        m (cross-matrix 11)]
     (fn []
       [:div [:h2 "Welcome to fmri"]
        [:p "MESSAGE: " @msg]
-       [matrix-renderer m]
+       [matrix-renderer m :scale 30]
        [:div [:a {:href "#/about"} "go to about page"]]])))
 
 (defn about-page []

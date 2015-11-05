@@ -28,7 +28,6 @@
     (thaw [_ s]
       (fressian/read s))))
 
-
 (defn jack-in
   [req]
   (println "\njack-in request:")

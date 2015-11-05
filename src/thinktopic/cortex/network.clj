@@ -363,11 +363,11 @@
   "A confusion matrix shows the predicted classes for each of the actual
   classes in order to understand performance and commonly confused classes.
 
-  Predicted
-  Cat Dog Rabbit
-  | Cat	   5  3  0
+                   Predicted
+                 Cat Dog Rabbit
+         | Cat	   5  3  0
   Actual | Dog	   2  3  1
-  | Rabbit  0  2  11
+         | Rabbit  0  2  11
 
   Initialize with a set of string labels, and then call add-prediction for
   each prediction to accumulate into the matrix."
