@@ -390,3 +390,43 @@
     (doseq [k ks]
       (apply println (format s-fmt k) (map #(get-in conf-mat [k %]) ks)))))
 
+
+(def DIFFERENCE-DELTA 1e-5)
+
+; TODO: This will return the relative differences between the components of the
+; analytic gradient computed by the network and the numerical gradient, but it
+; would be nice if it just said, yes!  Need to figure out how close they should
+; be.  Maybe just check that each difference is < 0.01 ???
+(defn gradient-check
+  "Use a finite difference approximation of the derivative to verify
+  that backpropagation and the derivatives of layers and activation functions are correct.
+
+    f'(x) =  f(x + h) - (f(x - h)
+             --------------------
+                    (2 * h)
+
+  Where h is our perterbation of the input, or delta.  This requires evaluating the
+  loss function twice for every dimension of the gradient.
+  "
+  [net loss optimizer input label & {:keys [delta]}]
+  (let [delta (or delta DIFFERENCE-DELTA)
+        output (forward net input)
+        loss (loss loss-fn output label)
+        loss-delta (delta loss-fn output label)
+        gradient (backward net input loss-delta)]
+    (map
+      (fn [i]
+        (let [xi (mat/mget input 0 i)
+              x1 (mat/mset input 0 i (+ xi delta))
+              y1 (forward net input)
+              c1 (loss loss-fn y1 label)
+
+              x2 (mat/mset input 0 i (- xi delta))
+              y2 (forward net input)
+              c2 (loss loss-fn y2 label)
+              numeric-gradient (/ (- c0 c1) (* 2 delta))
+              relative-error (/ (Math/abs (- gradient numeric-gradient))
+                                (Math/abs (+ gradient numeric-gradient)))]
+          relative-error))
+      (range input-size))))
+
