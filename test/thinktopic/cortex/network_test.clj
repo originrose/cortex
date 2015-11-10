@@ -2,9 +2,10 @@
   (:require
     [clojure.test :refer [deftest is are]]
     [clojure.core.matrix :as mat]
-    [thinktopic.datasets.mnist :as mnist]
     [thinktopic.cortex.util :as util]
     [thinktopic.cortex.network :as net]))
+
+(mat/set-current-implementation :vectorz)
 
 ; a	b	| a XOR b
 ; 1	1	     0
@@ -37,6 +38,28 @@
     (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))
     nil))
 
+
+(defn rand-matrix
+  [rows cols]
+  (mat/array (for [i (range rows)] 
+               [(for [i (range cols)]
+                  (rand))])))
+
+(defn linear-model-test
+  "Define a random dataset and create the labels from some fixed parameters so we know exactly
+  what the linear model should learn."
+  []
+  (let [x-data (rand-matrix 100 2)
+        y-data (mat/array (mat/transpose (mat/add (mat/mmul [0.1 0.2] (mat/transpose x-data)) 0.3)))
+        model (net/linear-layer :n-inputs 2 :n-outputs 1)
+        loss (net/mse-loss)
+        optimizer (net/sgd-optimizer model loss 0.1 0.9)]
+    (net/train-network optimizer 200 1 x-data y-data)
+    (println "After training the model learned:")
+    (println "weights: " (:weights model))
+    (println "biases: " (:biases model))))
+ 
+
 (deftest confusion-test
   (let [cf (net/confusion-matrix ["cat" "dog" "rabbit"])
         cf (-> cf
@@ -52,50 +75,6 @@
             )]
     (net/print-confusion-matrix cf)
     (is (= 2 (get-in cf ["cat" "dog"])))))
-
-
-(def trained* (atom nil))
-
-(defn mnist-labels
-  [class-labels]
-  (let [n-labels (count class-labels)
-        labels (mat/zero-array [n-labels 10])]
-    (doseq [i (range n-labels)]
-      (mat/mset! labels i (nth class-labels i) 1.0))
-    labels))
-
-(def MNIST-LABELS (mnist-labels @mnist/label-store))
-
-(defn mnist-test
-  [& [net]]
-  (let [start-time (util/timestamp)
-        training-data @mnist/data-store
-        [n-inputs input-width] (mat/shape training-data)
-        training-data (mat/submatrix training-data 0 100 0 input-width)
-        training-data (map #(mat/broadcast % [1 input-width]) training-data)
-        training-labels (mnist-labels @mnist/label-store)
-        test-data @mnist/test-data-store
-        test-labels (mnist-labels @mnist/test-label-store)
-        net (or net (net/sequential-network
-                      [(net/linear-layer :n-inputs 784 :n-outputs 30)
-                       (net/sigmoid-activation 30)
-                       (net/linear-layer :n-inputs 30 :n-outputs 10)
-                       (net/sigmoid-activation 10)]))
-        n-epochs 1
-        learning-rate 3.0
-        momentum 0.9
-        batch-size 10
-        loss-fn (net/quadratic-loss)
-        optimizer (net/sgd-optimizer net loss-fn learning-rate momentum)
-        setup-time (util/ms-elapsed start-time (util/timestamp))
-        _ (println "setup time: " setup-time "ms")
-        _ (net/train-network optimizer n-epochs batch-size training-data training-labels)
-        _ (println "evaluating network...")
-        [results score] (net/evaluate net test-data test-labels)
-        label-count (first (mat/shape test-labels))
-        score-percent (float (/ score label-count))]
-    (reset! trained* net)
-    (println (format "MNIST Score: %f [%d of %d]" score-percent score label-count))))
 
 ; Data from: Dominick Salvator and Derrick Reagle
 ; Shaum's Outline of Theory and Problems of Statistics and Economics
@@ -126,9 +105,9 @@
 (defn regression-test
   [& [net]]
   (let [net (or net (net/sequential-network [(net/linear-layer :n-inputs 2 :n-outputs 1)]))
-        learning-rate 0.00001 
+        learning-rate 0.00001
         momentum 0.9
-        n-epochs 10000 
+        n-epochs 10000
         batch-size 1
         loss (net/mse-loss)
         optimizer (net/sgd-optimizer net loss learning-rate momentum)
@@ -146,5 +125,6 @@
 
     (println "text  :  prediction")
     (doseq [[label fertilizer insecticide] (map concat results CORN-DATA)]
-      (println label " : " (mat/mget (net/forward net (mat/row-matrix [fertilizer insecticide])) 0 0)))
-    ))
+      (println label " : " (mat/mget (net/forward net (mat/row-matrix [fertilizer insecticide])) 0 0)))))
+
+

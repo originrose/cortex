@@ -118,11 +118,27 @@
     (mat/assign! input-gradient output-gradient)
     (mat/emap! #(if (neg? %) 0 %) input-gradient)))
 
-(defn softmax
-  "Used for multinomial classification (choose 1 of n classes), where the output
-  layer can be interpreted as class probabilities."
-  [z]
-  (mat/div z (mat/esum z)))
+(defn relu-activation
+  [shape]
+  (let [shape (if (number? shape) [1 shape] shape)]
+    (map->RectifiedLinearActivation {:output (mat/zero-array shape)
+                                     :input-gradient (mat/zero-array shape)})))
+
+(defrecord TanhActivation [output input-gradient]
+  NeuralLayer
+  (forward [this input]
+    (mat/assign! output input)
+    (mat/emap! #(Math/tanh %) output))
+
+  (backward [this input output-gradient]
+    (mat/assign! input-gradient output-gradient)
+    (mat/emul! input-gradient (mat/emap #(- 1 (* % %)) output))))
+
+(defn tanh-activation
+  [shape]
+  (let [shape (if (number? shape) [1 shape] shape)]
+    (map->TanhActivation {:output (mat/zero-array shape)
+                          :input-gradient (mat/zero-array shape)})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Loss Functions
@@ -177,11 +193,89 @@
   (delta [this v target]
     (mat/sub v target)))
 
+(defrecord SoftmaxLoss[]
+  "Used for multinomial classification (choose 1 of n classes), where the output
+  layer can be interpreted as class probabilities.  Softmax is a generalization of the 
+  logistic function for K-dimensional vectors that scales values between (0-1) that
+  add up to 1.
+  
+            e^x_j
+   h_j = -----------
+           𝚺 e^x_i
+  "
+  NeuralLayer
+  (forward [this input] 
+    (mat/assign! output input)
+    (mat/exp! output)
+    (mat/div! output (mat/esum exponentials)))
+
+  (backward [this input output-gradient] output-gradient))
+
+(defn identity-layer
+  []
+  (IdentityLayer.))
+
+(defrecord SVMLayer [output input-gradient]
+  "The support vector machine (SVM) loss guides the output representation such
+  that the correct class is separated from incorrect classes by at least a 
+  specified margin."
+  NeuralLayer
+  (forward [this input]
+    (mat/assign! output input))
+
+  (backward [this input output-gradient]
+    ))
+
+(defn identity-layer
+  []
+  (IdentityLayer.))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Layer Types
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+
+(defrecord IdentityLayer []
+  NeuralLayer
+  (forward [this input] input)
+  (backward [this input output-gradient] output-gradient))
+
+(defn identity-layer
+  []
+  (IdentityLayer.))
+
+(defrecord SequentialNetwork [layers]
+  NeuralLayer
+  (forward [this input]
+    ;(println "forward:")
+    (reduce (fn [activation layer]
+              ;(println "\t" layer)
+              (forward layer activation))
+            input layers))
+
+  (backward [this input output-gradient]
+    ;(println "backward:")
+    (reduce (fn [out-grad [prev-layer layer]]
+              ;(println "\t" layer)
+              (backward layer (:output prev-layer) out-grad))
+            output-gradient
+            (map vector (concat (next (reverse layers)) [{:output input}]) (reverse layers))))
+
+  ParameterLayer
+  (parameters-gradients [this]
+    (mapcat #(if (extends? ParameterLayer (type %))
+               (parameters-gradients %)
+               [])
+            layers)))
+
+(defmethod print-method SequentialNetwork [x ^java.io.Writer writer]
+  (print-method (format "Sequential Network [%d layers]" (count (:layers x))) writer))
+
+(defn sequential-network
+  [layers]
+  (SequentialNetwork. layers))
 
 (defrecord LinearLayer [n-inputs n-outputs
                         weights biases output
@@ -189,6 +283,9 @@
   NeuralLayer
   (forward [this input]
     (mat/assign! output biases)
+    ;(println "input: " (type input))
+    ;(println "weights: " (type weights))
+    ;(println "output: " (type output))
     (mat/add! output (mat/mmul input (mat/transpose weights))))
 
   ; Compute the error gradients with respect to the input data by multiplying the
@@ -233,46 +330,6 @@
        :weight-gradient (mat/zero-array (mat/shape weights))
        :bias-gradient (mat/zero-array (mat/shape biases))
        :input-gradient (mat/zero-array [1 n-inputs])})))
-
-(defrecord IdentityLayer []
-  NeuralLayer
-  (forward [this input] input)
-  (backward [this input output-gradient] output-gradient))
-
-(defn identity-layer
-  []
-  (IdentityLayer.))
-
-(defrecord SequentialNetwork [layers]
-  NeuralLayer
-  (forward [this input]
-    ;(println "forward:")
-    (reduce (fn [activation layer]
-              ;(println "\t" layer)
-              (forward layer activation))
-            input layers))
-
-  (backward [this input output-gradient]
-    ;(println "backward:")
-    (reduce (fn [out-grad [prev-layer layer]]
-              ;(println "\t" layer)
-              (backward layer (:output prev-layer) out-grad))
-            output-gradient
-            (map vector (concat (next (reverse layers)) [{:output input}]) (reverse layers))))
-
-  ParameterLayer
-  (parameters-gradients [this]
-    (mapcat #(if (extends? ParameterLayer (type %))
-               (parameters-gradients %)
-               [])
-            layers)))
-
-(defmethod print-method SequentialNetwork [x ^java.io.Writer writer]
-  (print-method (format "Sequential Network [%d layers]" (count (:layers x))) writer))
-
-(defn sequential-network
-  [layers]
-  (SequentialNetwork. layers))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Training and Optimization
@@ -332,15 +389,17 @@
   (let [[n-inputs input-width] (mat/shape training-data)
         [n-labels label-width] (mat/shape training-labels)
         n-batches (long (/ n-inputs batch-size))
-        batch-scale (/ 1.0 batch-size)]
+        batch-scale (/ 1.0 batch-size)
+        data-shape (mat/shape training-data)
+        label-shape (mat/shape training-labels)
+        data-item (fn [idx] (apply mat/select training-data (cons idx (repeat (dec (count data-shape)) :all))))
+        label-item (fn [idx] (apply mat/select training-labels (cons idx (repeat (dec (count label-shape)) :all))))]
     (dotimes [i n-epochs]
       ;(println "epoch" i)
       (doseq [batch (partition batch-size (shuffle (range n-inputs)))]
         (let [start-time (util/timestamp)]
           (doseq [idx batch]
-            (train optimizer (mat/get-row training-data idx) (mat/get-row training-labels idx)))
-          ;(println "batch time: " (util/ms-elapsed start-time) "ms")
-          )
+            (train optimizer (data-item idx) (label-item idx))))
         (update-parameters optimizer :scale batch-scale)))))
 
 (defn row-seq
@@ -408,7 +467,7 @@
   Where h is our perterbation of the input, or delta.  This requires evaluating the
   loss function twice for every dimension of the gradient.
   "
-  [net loss optimizer input label & {:keys [delta]}]
+  [net loss-fn optimizer input label & {:keys [delta]}]
   (let [delta (or delta DIFFERENCE-DELTA)
         output (forward net input)
         loss (loss loss-fn output label)
@@ -424,9 +483,9 @@
               x2 (mat/mset input 0 i (- xi delta))
               y2 (forward net input)
               c2 (loss loss-fn y2 label)
-              numeric-gradient (/ (- c0 c1) (* 2 delta))
+              numeric-gradient (/ (- c1 c2) (* 2 delta))
               relative-error (/ (Math/abs (- gradient numeric-gradient))
                                 (Math/abs (+ gradient numeric-gradient)))]
           relative-error))
-      (range input-size))))
+      (range (mat/column-count input)))))
 
