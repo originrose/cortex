@@ -1,7 +1,6 @@
 (ns cortex.mlp
   (:require [clojure.core.matrix :as mat]
             [clojure.core.matrix.linear :as linear]
-            [mikera.vectorz.core :as vectorz]
             ;;[thinktopic.datasets.mnist :as mnist]
             [cortex.util :as util]))
 
