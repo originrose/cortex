@@ -2,7 +2,7 @@
   (:require [clojure.core.matrix :as mat]
             [clojure.core.matrix.linear :as linear]
             [mikera.vectorz.core :as vectorz]
-            [thinktopic.datasets.mnist :as mnist]
+;            [thinktopic.datasets.mnist :as mnist]
             [thinktopic.cortex.util :as util]))
 
 (mat/set-current-implementation :vectorz)
@@ -193,8 +193,8 @@
   (delta [this v target]
     (mat/sub v target)))
 
-(defrecord SoftmaxLoss[]
-  "Used for multinomial classification (choose 1 of n classes), where the output
+(defrecord 
+  ^{:doc "Used for multinomial classification (choose 1 of n classes), where the output
   layer can be interpreted as class probabilities.  Softmax is a generalization of the 
   logistic function for K-dimensional vectors that scales values between (0-1) that
   add up to 1.
@@ -202,40 +202,33 @@
             e^x_j
    h_j = -----------
            𝚺 e^x_i
-  "
+  "} 
+  SoftmaxLoss [output] 
+  
   NeuralLayer
   (forward [this input] 
     (mat/assign! output input)
     (mat/exp! output)
-    (mat/div! output (mat/esum exponentials)))
+    ;; FIXME: (mat/div! output (mat/esum exponentials))
+    )
 
   (backward [this input output-gradient] output-gradient))
 
-(defn identity-layer
-  []
-  (IdentityLayer.))
-
-(defrecord SVMLayer [output input-gradient]
-  "The support vector machine (SVM) loss guides the output representation such
+(defrecord ^{:doc "The support vector machine (SVM) loss guides the output representation such
   that the correct class is separated from incorrect classes by at least a 
-  specified margin."
+  specified margin."} 
+  SVMLayer [output input-gradient]
+  
   NeuralLayer
-  (forward [this input]
-    (mat/assign! output input))
+    (forward [this input]
+      (mat/assign! output input))
 
-  (backward [this input output-gradient]
-    ))
-
-(defn identity-layer
-  []
-  (IdentityLayer.))
-
-
+    (backward [this input output-gradient]
+      ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Layer Types
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 (defrecord IdentityLayer []
   NeuralLayer
