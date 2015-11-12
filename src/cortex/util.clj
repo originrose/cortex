@@ -1,4 +1,4 @@
-(ns thinktopic.cortex.util
+(ns cortex.util
   (:require
     [clojure.core.matrix :as mat])
   (:import [java.util Random]))

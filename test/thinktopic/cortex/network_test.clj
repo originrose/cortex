@@ -2,8 +2,8 @@
   (:require
     [clojure.test :refer [deftest is are]]
     [clojure.core.matrix :as mat]
-    [thinktopic.cortex.util :as util]
-    [thinktopic.cortex.network :as net]))
+    [cortex.util :as util]
+    [cortex.network :as net]))
 
 (mat/set-current-implementation :vectorz)
 

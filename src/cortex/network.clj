@@ -1,9 +1,9 @@
-(ns thinktopic.cortex.network
+(ns cortex.network
   (:require [clojure.core.matrix :as mat]
             [clojure.core.matrix.linear :as linear]
             [mikera.vectorz.core :as vectorz]
 ;            [thinktopic.datasets.mnist :as mnist]
-            [thinktopic.cortex.util :as util]))
+            [cortex.util :as util]))
 
 (mat/set-current-implementation :vectorz)
 
