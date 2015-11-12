@@ -8,3 +8,6 @@ pom.xml.asc
 /.lein-*
 /.nrepl-port
 *.sw[op]
+/bin/
+/.project
+/.classpath
