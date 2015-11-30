@@ -38,25 +38,25 @@
 
 (defn tanh'
   " tanh'(x) = 1 - tanh(x)^2 "
-  [a]
-  (math/emap (- 1 (* a a))))
+  [th]
+  (mat/emap (- 1 (* th th))))
 
 (defn sigmoid
   "y =  1 / (1 + e^(-z))
   Produces an output between 0 and 1."
   [z]
-  (mat/div! (mat/add! (util/exp! (mat/negate z)) 1.0)))
+  (mat/div! (mat/add! (exp! (mat/negate z)) 1.0)))
 
 (defn sigmoid!
   "y =  1 / (1 + e^(-z))
   It is a smooth threshold function with output between 0 and 1."
   [z]
-  (mat/div! (mat/add! (util/exp! (mat/negate! z)) 1.0)))
+  (mat/div! (mat/add! (exp! (mat/negate! z)) 1.0)))
 
 (defn sigmoid'
   "sigma'(x) = sigma(x) * (1-sigma(x)) "
-  [z]
-  (let [sz (sigmoid z)]
+  [s]
+  (let [sz (sigmoid s)]
     (mat/emul sz (mat/sub 1.0 sz))))
 
 (defn rand-vector
