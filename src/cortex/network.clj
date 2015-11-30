@@ -70,28 +70,12 @@
 
 ; NOTE: This form of computing a sigmoid over a matrix is faster than mapping
 ; over each individual element.
-(defn sigmoid
-  "y =  1 / (1 + e^(-z))
-  Produces an output between 0 and 1."
-  [z]
-  (mat/div! (mat/add! (util/exp! (mat/negate z)) 1.0)))
-
-(defn sigmoid!
-  "y =  1 / (1 + e^(-z))
-  Produces an output between 0 and 1."
-  [z]
-  (mat/div! (mat/add! (util/exp! (mat/negate! z)) 1.0)))
-
-(defn sigmoid'
-  [z]
-  (let [sz (sigmoid z)]
-    (mat/emul sz (mat/sub 1.0 sz))))
 
 (defrecord SigmoidActivation [output input-gradient]
   NeuralLayer
   (forward [this input]
     (mat/assign! output input)
-    (sigmoid! output))
+    (util/sigmoid! output))
 
   (backward [this input output-gradient]
     ;(println "backward " (mat/shape input-gradient) (mat/shape output-gradient))

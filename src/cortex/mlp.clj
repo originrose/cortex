@@ -8,22 +8,6 @@
 ;; A standalone multi-layer perception implementation.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn sigmoid
-  "y =  1 / (1 + e^(-z))
-  Produces an output between 0 and 1."
-  [z]
-  (mat/div! (mat/add! (util/exp! (mat/negate z)) 1.0)))
-
-(defn sigmoid!
-  "y =  1 / (1 + e^(-z))
-  Produces an output between 0 and 1."
-  [z]
-  (mat/div! (mat/add! (util/exp! (mat/negate! z)) 1.0)))
-
-(defn sigmoid'
-  [z]
-  (let [sz (sigmoid z)]
-    (mat/emul sz (mat/sub 1.0 sz))))
 
 ;(defn mean-squared-error
 ;  [activation target]
@@ -41,7 +25,7 @@
       (if biases
         (let [z (mat/add (mat/mmul (first weights) activation)
                          (first biases))
-              activation (sigmoid z)]
+              activation (util/sigmoid z)]
           (recur (next biases) (next weights) activation))
         activation))))
 
@@ -56,7 +40,7 @@
         [activations zs] (reduce
                            (fn [[activations zs] [layer-biases layer-weights]]
                              (let [z (mat/add (mat/mmul layer-weights (last activations)) layer-biases)
-                                   activation (sigmoid z)]
+                                   activation (util/sigmoid z)]
                                [(conj activations activation) (conj zs z)]))
                            [[input] []] ; initialize zs to nil so it's the same shape as activations
                            (map vector biases weights))
@@ -64,7 +48,7 @@
 
         ;; Compute the output error and gradients for the output weights
         output-error (mat/sub output expected-output)
-        output-delta (mat/emul output-error (sigmoid' (last zs)))
+        output-delta (mat/emul output-error (util/sigmoid' (last zs)))
         bias-gradients [output-delta]
         ; TODO: not nice to have to wrap this into another layer...
         ;layer-activations (mat/transpose (mat/array [(last (drop-last activations))]))
@@ -76,7 +60,7 @@
         [_ bias-gradients weight-gradients]
         (reduce
           (fn [[delta bias-grads weight-grads] i]
-            (let [sp (sigmoid' (nth zs (dec i)))
+            (let [sp (util/sigmoid' (nth zs (dec i)))
                   outgoing-weights (mat/transpose (nth weights i))
                   errors (mat/mmul outgoing-weights delta)
                   delta (mat/emul errors sp)
