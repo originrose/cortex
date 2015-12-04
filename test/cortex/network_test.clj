@@ -1,4 +1,4 @@
-(ns thinktopic.cortex.network-test
+(ns cortex.network-test
   (:require
     [clojure.test :refer [deftest is are]]
     [clojure.core.matrix :as mat]
