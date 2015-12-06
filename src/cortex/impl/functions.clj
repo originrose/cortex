@@ -76,6 +76,8 @@
   cp/PParameters
     (parameters [this]
       (m/join (m/as-vector (:weights this)) (m/as-vector (:bias this))))
+    
+  cp/PGradient
     (gradient [this]
       (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
 

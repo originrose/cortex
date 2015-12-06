@@ -10,10 +10,12 @@
     "Returns the calculated output of a module"))
 
 (defprotocol PParameters
-  "Protocol for a module that supports parameters and accumulated parameter gradients for 
-   optimisation"
+  "Protocol for a module that supports parameters"
   (parameters [m]
-    "Gets the parameters for this module, as a vector.")
+    "Gets the parameters for this module, as a vector."))
+
+(defprotocol PGradient
+  "Protocol for a module that supports accumulated gradients for optimisation"
   (gradient [m]
     "Gets the accumulated gradient for this module, as a vector."))
 
@@ -30,3 +32,11 @@
   
   (input-gradient [this]
     "Gets the computed input gradients for a module. Assumes the backward pass has been run."))
+
+(defprotocol PGradientOptimiser
+  "A gradient optimiser is an abstraction for objects that update parameters based on gradient observations.
+   Gradient optimisers typically contain relating to previous observations, momentum etc."
+  (compute-parameters
+    [optimiser gradient parameters] 
+     "Computes updated parameters using the given average gradient. Returns the updated gradient optimiser.
+      Users can then call `parameters` on this object to get the updated parameters"))
