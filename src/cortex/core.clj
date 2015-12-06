@@ -4,6 +4,9 @@
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error]]))
 
+;; ===========================================================================
+;; Main module API functions
+
 (defn calc
   "Runs the calculation for a module"
   ([m input]
@@ -14,8 +17,16 @@
   ([m]
     (or (cp/output m) (error "No output available for module: " (class m)))))
 
+;; ===========================================================================
+;; Module construction and combinator functions
+
 (defn function-module
   "Wraps a Clojure function in a cortex module"
   ([f]
     (cortex.impl.wiring.FunctionModule. f nil)))
+
+(defn stack-module
+  "Creates a linear stack of modules"
+  ([modules]
+    (cortex.impl.wiring.StackModule. modules)))
 
