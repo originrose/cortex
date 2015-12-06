@@ -26,18 +26,6 @@
 ;;  * multiply gradient by the learning-rate to smooth out jitter in updates,
 ;;    and subtract from the weights
 
-(defprotocol NeuralLayer
-  "A basic neural network layer abstraction supporting forward and backward propagation of
-  input activations and error gradients."
-  (forward [this input]
-           "Pass data into the layer and return its output.  Also set the :output
-           key with the output values for later retrieval.")
-
-  (backward [this input output-gradient]
-            "Back propagate errors through the layer with respect to the input.  Returns the
-            input deltas (gradient at the inputs).
-            NOTE: the input passed in must be the same input that was used in the forward pass."))
-
 (defprotocol ParameterLayer
   "For layers that have trainable parameters extend this protocol in order to expose the parameters
   and accumulated gradients to optimization algorithms."
@@ -69,7 +57,7 @@
 ; over each individual element.
 
 (defrecord SigmoidActivation [output input-gradient]
-  NeuralLayer
+  cp/PNeuralTraining
   (forward [this input]
     (mat/assign! output input)
     (util/sigmoid! output))
@@ -89,7 +77,7 @@
                              :input-gradient (mat/zero-array shape)})))
 
 (defrecord RectifiedLinearActivation [output input-gradient]
-  NeuralLayer
+  cp/PNeuralTraining
   (forward [this input]
     (mat/assign! output input)
     (mat/emap! #(if (neg? %) 0 %) output))
@@ -105,7 +93,7 @@
                                      :input-gradient (mat/zero-array shape)})))
 
 (defrecord TanhActivation [output input-gradient]
-  NeuralLayer
+  cp/PNeuralTraining
   (forward [this input]
     (mat/assign! output input)
     (mat/tanh! output))
@@ -132,7 +120,7 @@
   "} 
   SoftmaxLoss [output] 
   
-  NeuralLayer
+  cp/PNeuralTraining
   (forward [this input] 
     (mat/assign! output input)
     (mat/exp! output)
@@ -146,7 +134,7 @@
   specified margin."} 
   SVMLayer [output input-gradient]
   
-  NeuralLayer
+  cp/PNeuralTraining
     (forward [this input]
       (mat/assign! output input))
 
@@ -158,7 +146,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord IdentityLayer []
-  NeuralLayer
+  cp/PNeuralTraining
   (forward [this input] input)
   (backward [this input output-gradient] output-gradient))
 
@@ -167,19 +155,19 @@
   (IdentityLayer.))
 
 (defrecord SequentialNetwork [layers]
-  NeuralLayer
+  cp/PNeuralTraining
   (forward [this input]
     ;(println "forward:")
     (reduce (fn [activation layer]
               ;(println "\t" layer)
-              (forward layer activation))
+              (cp/forward layer activation))
             input layers))
 
   (backward [this input output-gradient]
     ;(println "backward:")
     (reduce (fn [out-grad [prev-layer layer]]
               ;(println "\t" layer)
-              (backward layer (:output prev-layer) out-grad))
+              (cp/backward layer (:output prev-layer) out-grad))
             output-gradient
             (map vector (concat (next (reverse layers)) [{:output input}]) (reverse layers))))
 
@@ -200,7 +188,7 @@
 (defrecord LinearLayer [n-inputs n-outputs
                         weights biases output
                         weight-gradient bias-gradient input-gradient]
-  NeuralLayer
+  cp/PNeuralTraining
   (forward [this input]
     (mat/assign! output biases)
     ;(println "input: " (type input))
@@ -267,12 +255,12 @@
   NeuralOptimizer
   (train [this input label]
     (let [start-time (util/timestamp)
-          output (forward net input)
+          output (cp/forward net input)
           forward-time (util/ms-elapsed start-time)
           loss (cp/loss loss-fn output label)
           loss-delta (cp/loss-gradient loss-fn output label)
           start-time (util/timestamp)
-          gradient (backward net input loss-delta)
+          gradient (cp/backward net input loss-delta)
           backward-time (util/ms-elapsed start-time)
           stats {:forward-time forward-time
                  :backward-time backward-time
@@ -330,7 +318,7 @@
   [net test-data test-labels]
   (let [results (doall
                   (map (fn [data label]
-                         (let [res (forward net data)]
+                         (let [res (cp/forward net data)]
                            (mat/emap #(Math/round %) res)))
                        (row-seq test-data) (row-seq test-labels)))
         res-labels (map vector results (row-seq test-labels))
@@ -389,19 +377,19 @@
   "
   [net loss-fn optimizer input label & {:keys [delta]}]
   (let [delta (or delta DIFFERENCE-DELTA)
-        output (forward net input)
+        output (cp/forward net input)
         loss (cp/loss loss-fn output label)
         loss-gradient (cp/loss-gradient loss-fn output label)
-        gradient (backward net input loss-gradient)]
+        gradient (cp/backward net input loss-gradient)]
     (map
       (fn [i]
         (let [xi (mat/mget input 0 i)
               x1 (mat/mset input 0 i (+ xi delta))
-              y1 (forward net input)
+              y1 (cp/forward net input)
               c1 (cp/loss loss-fn y1 label)
 
               x2 (mat/mset input 0 i (- xi delta))
-              y2 (forward net input)
+              y2 (cp/forward net input)
               c2 (cp/loss loss-fn y2 label)
               numeric-gradient (/ (- c1 c2) (* 2 delta))
               relative-error (/ (Math/abs (- gradient numeric-gradient))

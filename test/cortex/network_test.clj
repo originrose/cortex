@@ -1,4 +1,5 @@
 (ns cortex.network-test
+  (:use cortex.core)
   (:require
     [clojure.test :refer [deftest is are]]
     [cortex.optimise :as opt]
@@ -36,7 +37,7 @@
         label-count (count XOR-LABELS)
         score-percent (float(/ score label-count))]
     (println "NET: " net)
-    (println "forward: "  (net/forward net [1 0]))
+    (println "forward: "  (forward net [1 0]))
     (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))
     nil))
 
@@ -120,6 +121,6 @@
 
     (println "text  :  prediction")
     (doseq [[label fertilizer insecticide] (map concat results CORN-DATA)]
-      (println label " : " (mat/mget (net/forward net (mat/row-matrix [fertilizer insecticide])) 0 0)))))
+      (println label " : " (mat/mget (forward net (mat/row-matrix [fertilizer insecticide])) 0 0)))))
 
 
