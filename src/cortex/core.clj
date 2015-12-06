@@ -68,3 +68,15 @@
   ([output]
     (cortex.impl.functions.Logistic. nil (if output {:output output})))) 
 
+(defn linear-module
+  "Constructs a weighted linear transformation module using a dense matrix and bias vector."
+  ([weights bias]
+    (let [weights (m/array :vectorz weights)
+          bias (m/array :vector bias)
+          wm (cortex.impl.functions.Linear. weights bias)
+          wec (m/ecount weights)
+          bec (m/ecount bias)]
+      (-> wm
+        (assoc :weight-gradient (m/new-vector :vectorz wec))
+        (assoc :bias-gradient (m/new-vector :vectorz bec)))))) 
+

@@ -43,4 +43,40 @@
     (input-gradient [this]
       (:input-gradient this)))
 
+;; a function that implements a linear transformation (weights + bias)
+(defrecord Linear [weights bias]
+  cp/PModule
+    (calc [this input]
+      (let [output (m/inner-product weights input)]
+        (m/add! output bias)
+        (assoc this :ouput output)))
+
+    (output [this]
+      (:output this))
+    
+  cp/PNeuralTraining
+    (forward [this input]
+      (-> this
+        (cp/calc input)
+        (assoc :input input)))
+    
+    (backward [this output-gradient]
+      (let [input (or (:input this) (error "No input available - maybe run forward pass first?"))
+            bg output-gradient
+            wg (m/outer-product output-gradient input)
+            ig (m/inner-product (m/transpose weights) output-gradient)]
+        
+        (m/add! (:weight-gradient this) wg)
+        (m/add! (:bias-gradient this) bg)
+        (assoc this :input-gradient ig)))
+    
+    (input-gradient [this]
+      (:input-gradient this))
+    
+  cp/PParameters
+    (parameters [this]
+      (m/join (m/as-vector (:weights this)) (m/as-vector (:bias this))))
+    (gradient [this]
+      (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
+
 
