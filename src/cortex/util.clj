@@ -75,3 +75,18 @@
   (let [stdev (/ 1.0 n)]
     (mat/emap #(* stdev %) (rand-matrix m n))))
 
+(defmacro error
+  "Throws an error with the provided message(s). This is a macro in order to try and ensure the 
+   stack trace reports the error at the correct source line number."
+  ([& messages]
+    `(throw (mikera.cljutils.Error. (str ~@messages)))))
+
+(defmacro error?
+  "Returns true if executing body throws an error, false otherwise."
+  ([& body]
+    `(try 
+       ~@body
+       false
+       (catch Throwable t# 
+         true)))) 
+
