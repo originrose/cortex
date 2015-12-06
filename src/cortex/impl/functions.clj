@@ -34,8 +34,7 @@
         ;; input gradient = output * (1 - output) * output-gradient
         (m/assign! ig 1.0)
         (m/sub! ig output)
-        (m/mul! ig output)
-        (m/mul! ig output-gradient)
+        (m/mul! ig output output-gradient)
         
         ;; finally return this, input-gradient has been updated in-place
         this))
