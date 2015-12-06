@@ -7,6 +7,9 @@
   (:require [cortex.util :as util :refer [error]])
   (:require [clojure.core.matrix :as m]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 ;; ===========================================================================
 ;; Main module API functions
 
@@ -82,14 +85,17 @@
       (m/ensure-mutable (m/new-array :vectorz shape))))) 
 
 (defn linear-module
-  "Constructs a weighted linear transformation module using a dense matrix and bias vector."
+  "Constructs a weighted linear transformation module using a dense matrix and bias vector.
+   Shape of input and output are determined by the weight matrix."
   ([weights bias]
     (let [weights (m/array :vectorz weights)
           bias (m/array :vector bias)
           wm (cortex.impl.functions.Linear. weights bias)
-          wec (m/ecount weights)
-          bec (m/ecount bias)]
+          [n-outputs n-inputs] (m/shape weights)
+          n-outputs (long n-outputs)
+          n-inputs (long n-inputs)]
+      (when-not (== n-outputs (m/dimension-count bias 0)) (error "Mismatched weight and bias shapes"))
       (-> wm
-        (assoc :weight-gradient (m/new-vector :vectorz wec))
-        (assoc :bias-gradient (m/new-vector :vectorz bec)))))) 
+        (assoc :weight-gradient (m/new-vector :vectorz (* n-outputs n-inputs)))
+        (assoc :bias-gradient (m/new-vector :vectorz n-outputs)))))) 
 
