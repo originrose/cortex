@@ -49,7 +49,7 @@
     (calc [this input]
       (let [output (m/inner-product weights input)]
         (m/add! output bias)
-        (assoc this :ouput output)))
+        (assoc this :output output)))
 
     (output [this]
       (:output this))

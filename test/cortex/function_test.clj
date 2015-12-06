@@ -34,6 +34,11 @@
           grad (gradient wm)]
       (is (m/equals [1 2 3 4 0 10] parm))
       (is (= (m/shape parm) (m/shape grad)))
-      (is (m/zero-matrix? grad)))))
+      (is (m/zero-matrix? grad))))
+  
+  (testing "Calculation"
+    (let [wm (linear-module [[1 2] [3 4]] [0 10])
+          wm (calc wm [1 2])]
+      (is (m/equals [5 21] (output wm))))))
 
 
