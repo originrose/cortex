@@ -2,6 +2,7 @@
   "Namespace for optimisation algorithms, loss functions and optimiser objects"
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error]])
+  (:require [clojure.core.matrix.linear :as linear]) 
   (:require [clojure.core.matrix :as m]))
 
 (set! *warn-on-reflection* true)
@@ -96,3 +97,58 @@
   SGDOptimiser
     (parameters [this]
       (:parameters this)))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Loss Functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn mean-squared-error
+  [activation target]
+  (m/div (m/esum (m/pow (m/sub activation target) 2))
+           (m/ecount activation)))
+
+(deftype MSELoss []
+  cp/PLossFunction
+  (loss [this v target]
+    (let [z (m/sub v target)]
+      (m/esum (m/pow z 2))))
+
+  (loss-gradient [this v target]
+    (m/sub v target)))
+
+(defn mse-loss []
+  (MSELoss.))
+
+; NOTE: not really sure how this is supposed to differ and why from a simple MSE
+; loss.  Must investigate.
+(deftype QuadraticLoss []
+  cp/PLossFunction
+  (loss [this v target]
+    ; NOTE: linear/norm is different for matrices and vectors so this row-matrix
+    ; conversion is important for correctness.
+    ;(println "loss: " v "-" target)
+    (let [diff (m/sub v target)
+          diff (if (m/vec? diff) (m/row-matrix diff) diff)]
+      (m/mul 0.5 (m/pow (linear/norm diff) 2))))
+
+  (loss-gradient [this v target]
+    (m/sub v target)))
+
+(defn quadratic-loss
+  []
+  (QuadraticLoss.))
+
+(def SMALL-NUM 1e-30)
+
+(deftype CrossEntropyLoss []
+  cp/PLossFunction
+  (loss [this activation target]
+    (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM activation)))
+          b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 SMALL-NUM) a)))
+          c (m/esum (m/sub a b))]
+      c))
+
+  (loss-gradient [this v target]
+    (m/sub v target)))
