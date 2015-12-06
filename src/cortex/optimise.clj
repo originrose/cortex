@@ -144,9 +144,9 @@
 
 (deftype CrossEntropyLoss []
   cp/PLossFunction
-  (loss [this activation target]
-    (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM activation)))
-          b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 SMALL-NUM) a)))
+  (loss [this v target]
+    (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM v)))
+          b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 (double SMALL-NUM)) a)))
           c (m/esum (m/sub a b))]
       c))
 

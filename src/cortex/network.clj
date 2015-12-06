@@ -108,7 +108,7 @@
   NeuralLayer
   (forward [this input]
     (mat/assign! output input)
-    (mat/emap! #(Math/tanh %) output))
+    (mat/tanh! output))
 
   (backward [this input output-gradient]
     (mat/assign! input-gradient output-gradient)
