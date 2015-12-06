@@ -60,3 +60,39 @@
   AdaDelta
     (parameters [this]
       (:parameters this)))
+
+;; ==============================================
+;; SGD optimiser with momentum
+
+(defrecord SGDOptimiser [dx         ;; latest delta update
+                         ])
+
+(defn sgd-optimiser 
+  "Constructs a new AdaDelta optimiser of the given size (parameter length)"
+  ([size]
+    (sgd-optimiser size nil))
+  ([size options]
+    (let [dx (m/mutable (m/new-vector size))]
+      (m/assign! dx 0.0)
+      (SGDOptimiser. dx nil options))))
+
+(extend-protocol cp/PGradientOptimiser
+  SGDOptimiser
+    (compute-parameters [this gradient parameters]
+      (let [learn-rate (double (or (:learn-rate this) 0.05))
+            momentum (double (or (:momentum this) 0.000001))
+            dx (:dx this)]
+      
+        ;; apply momentum factor to previous delta
+        (m/scale! dx learn-rate)
+        
+        ;; accumulate the latest gradient
+        (m/add-scaled! dx gradient (* -1.0 learn-rate))
+      
+        ;; return the updated adadelta record. Mutable gradients have been updated
+        (assoc this :parameters (m/add parameters dx)))))
+
+(extend-protocol cp/PParameters
+  SGDOptimiser
+    (parameters [this]
+      (:parameters this)))
