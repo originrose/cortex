@@ -7,10 +7,7 @@
 (defrecord Logistic [output input-gradient]
   cp/PModule
     (calc [this input]
-      (let [output (:output this)
-            output-exists? (boolean output)
-            output (if output-exists? output (m/mutable input))
-            this (if output-exists? this (assoc this :output output))]
+      (let []
         (m/assign! output input)
         (m/logistic! output)
         this))
@@ -20,9 +17,7 @@
     
   cp/PNeuralTraining
     (forward [this input]
-      (-> this
-        (cp/calc input)
-        (assoc :input input)))
+      (cp/calc this input))
     
     (backward [this input output-gradient]
       (let []
@@ -35,7 +30,7 @@
         this))
     
     (input-gradient [this]
-      (:input-gradient this)))
+      input-gradient))
 
 ;; a function that implements a linear transformation (weights + bias)
 ;; has mutable parameters and accumlators for gradient
