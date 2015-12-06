@@ -13,7 +13,7 @@
            m m
            o o]
       (let [m (forward m input)
-            m (backward m (m/mul (m/sub (output m) target) 2.0))
+            m (backward m input (m/mul (m/sub (output m) target) 2.0))
             [o m] (optimise o m)
             dist (m/length (m/sub (output m) target))]
         ;; (println (output m))

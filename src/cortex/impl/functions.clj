@@ -4,7 +4,7 @@
   (:require [clojure.core.matrix :as m]))
 
 ;; Module implementing a Logistic activation function over a numerical array
-(defrecord Logistic []
+(defrecord Logistic [output input-gradient]
   cp/PModule
     (calc [this input]
       (let [output (:output this)
@@ -24,17 +24,12 @@
         (cp/calc input)
         (assoc :input input)))
     
-    (backward [this output-gradient]
-      (let [input (or (:input this) (error "No input available - maybe run forward pass first?"))
-            output (or (:output this) (error "No output available - maybe run forward pass first?"))
-            ig (:input-gradient this)
-            exists-ig? (boolean ig)
-            ig (if exists-ig? ig (m/new-array (m/shape input)))
-            this (if exists-ig? this (assoc this :input-gradient ig))]
+    (backward [this input output-gradient]
+      (let []
         ;; input gradient = output * (1 - output) * output-gradient
-        (m/assign! ig 1.0)
-        (m/sub! ig output)
-        (m/mul! ig output output-gradient)
+        (m/assign! input-gradient 1.0)
+        (m/sub! input-gradient output)
+        (m/mul! input-gradient output output-gradient)
         
         ;; finally return this, input-gradient has been updated in-place
         this))
@@ -60,9 +55,8 @@
         (cp/calc input)
         (assoc :input input)))
     
-    (backward [this output-gradient]
-      (let [input (or (:input this) (error "No input available - maybe run forward pass first?"))
-            bg output-gradient
+    (backward [this input output-gradient]
+      (let [bg output-gradient
             wg (m/outer-product output-gradient input)
             ig (m/inner-product (m/transpose weights) output-gradient)]
         

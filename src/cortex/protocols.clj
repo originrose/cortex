@@ -29,9 +29,10 @@
     available for later retrieval. Input and intermediate states will be stored for
     futuere backward pass usage.")
 
-  (backward [this output-gradient]
+  (backward [this input output-gradient]
     "Back propagate errors through the module with respect to the input.  Returns the
-    module with input-gradient (gradient at the inputs).")
+    module with input-gradient set (gradient at the inputs). Input must be the same
+    as used in the forward pass.")
   
   (input-gradient [this]
     "Gets the computed input gradients for a module. Assumes the backward pass has been run."))

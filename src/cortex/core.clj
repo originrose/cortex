@@ -41,9 +41,10 @@
     (cp/forward m input)))
 
 (defn backward
-  "Runs the backward training pass on a neural network module."
-  ([m output-gradient]
-    (cp/backward m output-gradient)))
+  "Runs the backward training pass on a neural network module. Input must be the same as used
+   in the previous forward pass."
+  ([m input output-gradient]
+    (cp/backward m input output-gradient)))
 
 (defn input-gradient
   "Gets the input gradient for a module. Throws an exception if not available."
@@ -75,10 +76,10 @@
 ;; Mathematical / activation functions
 
 (defn logistic-module
-  ([]
-    (logistic-module nil))
-  ([output]
-    (cortex.impl.functions.Logistic. nil (if output {:output output})))) 
+  ([shape]
+    (cortex.impl.functions.Logistic. 
+      (m/ensure-mutable (m/new-array :vectorz shape)) 
+      (m/ensure-mutable (m/new-array :vectorz shape))))) 
 
 (defn linear-module
   "Constructs a weighted linear transformation module using a dense matrix and bias vector."
