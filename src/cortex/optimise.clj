@@ -14,7 +14,7 @@
                      parameters ;; updated parameters
                      ])
 
-(defn adadelta 
+(defn adadelta-optimiser 
   "Constructs a new AdaDelta optimiser of the given size (parameter length)"
   ([size]
     (let [msgrad (m/mutable (m/new-vector size))
