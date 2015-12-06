@@ -44,6 +44,7 @@
       (:input-gradient this)))
 
 ;; a function that implements a linear transformation (weights + bias)
+;; has mutable parameters and accumlators for gradient
 (defrecord Linear [weights bias]
   cp/PModule
     (calc [this input]
@@ -76,6 +77,13 @@
   cp/PParameters
     (parameters [this]
       (m/join (m/as-vector (:weights this)) (m/as-vector (:bias this))))
+    
+    (update-parameters [this parameters]
+      (let [param-view (cp/parameters this)]
+        (m/assign! param-view parameters))
+      (let [gradient-view (cp/gradient this)]
+        (m/assign! gradient-view 0.0))
+      this)
     
   cp/PGradient
     (gradient [this]
