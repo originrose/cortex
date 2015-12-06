@@ -14,5 +14,31 @@
         this))
 
     (output [this]
-      (:output this)))
+      (:output this))
+    
+  cp/PNeuralTraining
+    (forward [this input]
+      (-> this
+        (cp/calc input)
+        (assoc :input input)))
+    
+    (backward [this output-gradient]
+      (let [input (or (:input this) (error "No input available - maybe run forward pass first?"))
+            output (or (:output this) (error "No output available - maybe run forward pass first?"))
+            ig (:input-gradient this)
+            exists-ig? (boolean ig)
+            ig (if exists-ig? ig (m/new-array (m/shape input)))
+            this (if exists-ig? this (assoc this :input-gradient ig))]
+        ;; input gradient = output * (1 - output) * output-gradient
+        (m/assign! ig 1.0)
+        (m/sub! ig output)
+        (m/mul! ig output)
+        (m/mul! ig output-gradient)
+        
+        ;; finally return this, input-gradient has been updated in-place
+        this))
+    
+    (input-gradient [this]
+      (:input-gradient this)))
+
 
