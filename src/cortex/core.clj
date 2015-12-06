@@ -4,7 +4,8 @@
   (:require [cortex.impl.functions :as functions])
   (:require [cortex.impl default])
   (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error]]))
+  (:require [cortex.util :as util :refer [error]])
+  (:require [clojure.core.matrix :as m]))
 
 ;; ===========================================================================
 ;; Main module API functions
@@ -15,7 +16,7 @@
     (cp/calc m input)))
 
 (defn output
-  "Gets the ouput for a module. Throws an exception if not available"
+  "Gets the ouput for a module. Throws an exception if not available."
   ([m]
     (or (cp/output m) (error "No output available for module: " (class m)))))
 
@@ -28,6 +29,21 @@
   "Gets the accumulated gradient vector for a module (possibly empty)"
   ([m]
     (cp/gradient m)))
+
+(defn forward
+  "Runs the forward training pass on a neural network module."
+  ([m input]
+    (cp/forward m input)))
+
+(defn backward
+  "Runs the backward training pass on a neural network module."
+  ([m output-gradient]
+    (cp/backward m output-gradient)))
+
+(defn input-gradient
+  "Gets the input gradient for a module. Throws an exception if not available."
+  ([m]
+    (or (cp/input-gradient m) (error "No input gradient available - maybe run backward pass first?"))))
 
 ;; ===========================================================================
 ;; Module construction and combinator functions

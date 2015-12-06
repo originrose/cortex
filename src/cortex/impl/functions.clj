@@ -7,8 +7,10 @@
 (defrecord Logistic []
   cp/PModule
     (calc [this input]
-      (let [this (if (:output this) this (assoc this :output (m/new-array (m/shape input))))
-            output (:output this)]
+      (let [output (:output this)
+            output-exists? (boolean output)
+            output (if output-exists? output (m/mutable input))
+            this (if output-exists? this (assoc this :output output))]
         (m/assign! output input)
         (m/logistic! output)
         this))
