@@ -45,6 +45,13 @@
   ([m]
     (or (cp/input-gradient m) (error "No input gradient available - maybe run backward pass first?"))))
 
+(defn optimise
+  "Optimises a module using the given optimiser. Returns an [optimiser module] pair"
+  ([optimiser module]
+    (let [optimiser (cp/compute-parameters optimiser (gradient module) (parameters module))
+          module (cp/update-parameters module (parameters optimiser))]
+      [optimiser module])))
+
 ;; ===========================================================================
 ;; Module construction and combinator functions
 

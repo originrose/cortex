@@ -12,7 +12,10 @@
 (defprotocol PParameters
   "Protocol for a module that supports parameters"
   (parameters [m]
-    "Gets the parameters for this module, as a vector."))
+    "Gets the parameters for this module, as a vector.")
+  
+  (update-parameters [m parameters]
+    "Updates the parameters for this module to the given parameter values. Returns the updated module"))
 
 (defprotocol PGradient
   "Protocol for a module that supports accumulated gradients for optimisation"
