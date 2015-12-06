@@ -43,3 +43,10 @@
     [optimiser gradient parameters] 
      "Computes updated parameters using the given average gradient. Returns the updated gradient optimiser.
       Users can then call `parameters` on this object to get the updated parameters"))
+
+(defprotocol PLossFunction
+  "A function that calculates loss of a vector output vs. a target value" 
+  (loss [this v target]
+    "Computes the loss for a value v against a target")
+  (loss-gradient [this v target]
+    "Computes the gradient of the loss with respect to v"))
