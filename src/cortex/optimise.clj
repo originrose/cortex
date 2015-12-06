@@ -4,6 +4,8 @@
   (:require [cortex.util :as util :refer [error]])
   (:require [clojure.core.matrix :as m]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
 
 ;; ==============================================
 ;; ADADELTA optimiser
@@ -43,7 +45,7 @@
         (m/assign! dx msdx)
         (m/div! dx msgrad)
         (m/sqrt! dx)
-        (m/mul! dx gradient)
+        (m/mul! dx gradient -0.5) ;; follow negative gradient. 0.5 factor seems necessary?
       
         ;; apply decay rate to the previous mean squared update
         (m/mul! msdx (- 1.0 decay-rate))

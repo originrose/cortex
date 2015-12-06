@@ -3,6 +3,8 @@
   (:use [cortex core optimise])
   (:require [clojure.core.matrix :as m]))
 
+(m/set-current-implementation :vectorz)
+
 (deftest test-optimise
   (let [target [1 1]
         input [1 1]
@@ -12,9 +14,11 @@
            m m
            o o]
       (let [m (forward m input)
-            m (backward m (m/mul (m/sub target (output m)) 2.0))
-            [o m] (optimise o m)]
+            m (backward m (m/mul (m/sub (output m) target) 20.0))
+            [o m] (optimise o m)
+            dist (m/length (m/sub (output m) target))]
+        (println (output m))
         (if (< i 100) 
           (recur (inc i) m o)
-          (is (< 0.001 (m/length (m/sub (output m) target)))))))))
+          (is (< dist 0.001)))))))
 
