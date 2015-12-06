@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is are]]
     [clojure.core.matrix :as mat]
+    [clojure.core.matrix.random :as randm]
     [cortex.util :as util]
     [cortex.network :as net]))
 
@@ -38,18 +39,11 @@
     (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))
     nil))
 
-
-(defn rand-matrix
-  [rows cols]
-  (mat/array (for [i (range rows)] 
-               [(for [i (range cols)]
-                  (rand))])))
-
 (defn linear-model-test
   "Define a random dataset and create the labels from some fixed parameters so we know exactly
   what the linear model should learn."
   []
-  (let [x-data (rand-matrix 100 2)
+  (let [x-data (randm/sample-uniform [100 2])
         y-data (mat/array (mat/transpose (mat/add (mat/mmul [0.1 0.2] (mat/transpose x-data)) 0.3)))
         model (net/linear-layer :n-inputs 2 :n-outputs 1)
         loss (net/mse-loss)
