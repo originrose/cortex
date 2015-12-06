@@ -25,6 +25,11 @@
   ([m]
     (cp/parameters m)))
 
+(defn parameter-count
+  "Gets the number of parameters for a given module."
+  ([m]
+    (m/ecount (cp/parameters m))))
+
 (defn gradient
   "Gets the accumulated gradient vector for a module (possibly empty)"
   ([m]

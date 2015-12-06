@@ -32,6 +32,7 @@
     (let [wm (linear-module [[1 2] [3 4]] [0 10])
           parm (parameters wm)
           grad (gradient wm)]
+      (is (== 6 (parameter-count wm)))
       (is (m/equals [1 2 3 4 0 10] parm))
       (is (= (m/shape parm) (m/shape grad)))
       (is (m/zero-matrix? grad))))

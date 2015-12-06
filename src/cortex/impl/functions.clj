@@ -67,7 +67,7 @@
             wg (m/outer-product output-gradient input)
             ig (m/inner-product (m/transpose weights) output-gradient)]
         
-        (m/add! (:weight-gradient this) wg)
+        (m/add! (:weight-gradient this) (m/as-vector wg))
         (m/add! (:bias-gradient this) bg)
         (assoc this :input-gradient ig)))
     
