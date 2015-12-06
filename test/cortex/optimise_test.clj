@@ -1,7 +1,8 @@
 (ns cortex.optimise-test
   (:use [clojure.test])
   (:use [cortex core optimise])
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m]
+            [cortex.layers :as layers]))
 
 (m/set-current-implementation :vectorz)
 
@@ -22,12 +23,12 @@
           (is (< dist 0.001)))))))
 
 (deftest test-adadelta
-  (let [m (linear-module [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
+  (let [m (layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
         o (adadelta-optimiser (parameter-count m))] 
     (optimiser-test m o)))
 
 (deftest test-sgd
-  (let [m (linear-module [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
+  (let [m (layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
         o (sgd-optimiser (parameter-count m))] 
     (optimiser-test m o)))
 

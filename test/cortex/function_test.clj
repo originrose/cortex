@@ -1,22 +1,23 @@
 (ns cortex.function-test
   (:use [clojure.test])
   (:use [cortex.core])
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m]
+            [cortex.layers :as layers]))
 
 (deftest test-logistic-module
   (testing "basic logistic functionality"
-    (let [m (logistic-module [3])]
+    (let [m (layers/logistic [3])]
       (is (m/equals [0 0 0] (output m)))
       (let [cm (calc m [-1000 0 1000])]
         (is (m/equals [0 0.5 1] (output cm))))))
   
   (testing "logistic applied to scalars"
-    (let [m (logistic-module [])]
+    (let [m (layers/logistic [])]
       (let [cm (calc m 0)]
         (is (m/equals 0.5 (output cm))))))
   
   (testing "forward and backward pass"
-    (let [m (logistic-module [3])]
+    (let [m (layers/logistic [3])]
       
       (let [input [-1000 0 1000]
             fm (forward m input)]
@@ -28,7 +29,7 @@
 
 (deftest test-linear-module
   (testing "Parameters"
-    (let [wm (linear-module [[1 2] [3 4]] [0 10])
+    (let [wm (layers/linear [[1 2] [3 4]] [0 10])
           parm (parameters wm)
           grad (gradient wm)]
       (is (== 6 (parameter-count wm)))
@@ -37,7 +38,7 @@
       (is (m/zero-matrix? grad))))
   
   (testing "Calculation"
-    (let [wm (linear-module [[1 2] [3 4]] [0 10])
+    (let [wm (layers/linear [[1 2] [3 4]] [0 10])
           wm (calc wm [1 2])]
       (is (m/equals [5 21] (output wm))))))
 

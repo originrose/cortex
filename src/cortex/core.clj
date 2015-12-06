@@ -1,10 +1,10 @@
 (ns cortex.core
   "Main cortex API function namespace"
   (:require [cortex.impl.wiring :as wiring])
-  (:require [cortex.impl.functions :as functions])
   (:require [cortex.impl default])
   (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error]])
+  (:require [cortex.layers :as layers]
+            [cortex.util :as util :refer [error]])
   (:require [clojure.core.matrix :as m]))
 
 (set! *warn-on-reflection* true)
@@ -75,27 +75,4 @@
     (cortex.impl.wiring.StackModule. modules)))
 
 
-;; ===========================================================================
-;; Mathematical / activation functions
-
-(defn logistic-module
-  ([shape]
-    (cortex.impl.functions.Logistic. 
-      (m/ensure-mutable (m/new-array :vectorz shape)) 
-      (m/ensure-mutable (m/new-array :vectorz shape))))) 
-
-(defn linear-module
-  "Constructs a weighted linear transformation module using a dense matrix and bias vector.
-   Shape of input and output are determined by the weight matrix."
-  ([weights bias]
-    (let [weights (m/array :vectorz weights)
-          bias (m/array :vector bias)
-          wm (cortex.impl.functions.Linear. weights bias)
-          [n-outputs n-inputs] (m/shape weights)
-          n-outputs (long n-outputs)
-          n-inputs (long n-inputs)]
-      (when-not (== n-outputs (m/dimension-count bias 0)) (error "Mismatched weight and bias shapes"))
-      (-> wm
-        (assoc :weight-gradient (m/new-vector :vectorz (* n-outputs n-inputs)))
-        (assoc :bias-gradient (m/new-vector :vectorz n-outputs)))))) 
 

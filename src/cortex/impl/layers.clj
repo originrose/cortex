@@ -1,4 +1,4 @@
-(ns cortex.impl.functions
+(ns cortex.impl.layers
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error]])
   (:require [clojure.core.matrix :as m]))
