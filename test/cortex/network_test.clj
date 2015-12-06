@@ -1,6 +1,7 @@
 (ns cortex.network-test
   (:require
     [clojure.test :refer [deftest is are]]
+    [cortex.optimise :as opt]
     [clojure.core.matrix :as mat]
     [clojure.core.matrix.random :as randm]
     [cortex.util :as util]
@@ -25,7 +26,7 @@
         training-data XOR-DATA
         training-labels XOR-LABELS
         n-epochs 2000
-        loss-fn (net/quadratic-loss)
+        loss-fn (opt/quadratic-loss)
         learning-rate 0.3
         momentum 0.9
         batch-size 1
@@ -46,7 +47,7 @@
   (let [x-data (randm/sample-uniform [100 2])
         y-data (mat/array (mat/transpose (mat/add (mat/mmul [0.1 0.2] (mat/transpose x-data)) 0.3)))
         model (net/linear-layer :n-inputs 2 :n-outputs 1)
-        loss (net/mse-loss)
+        loss (opt/mse-loss)
         optimizer (net/sgd-optimizer model loss 0.1 0.9)]
     (net/train-network optimizer 200 1 x-data y-data)
     (println "After training the model learned:")
@@ -103,7 +104,7 @@
         momentum 0.9
         n-epochs 10000
         batch-size 1
-        loss (net/mse-loss)
+        loss (opt/mse-loss)
         optimizer (net/sgd-optimizer net loss learning-rate momentum)
         data (map mat/row-matrix CORN-DATA)
         labels (map vector CORN-LABELS)

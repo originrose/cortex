@@ -1,5 +1,6 @@
 (ns cortex.network
   (:require [clojure.core.matrix :as mat]
+            [cortex.protocols :as cp]
             [clojure.core.matrix.linear :as linear]
 ;            [thinktopic.datasets.mnist :as mnist]
             [cortex.util :as util]))
@@ -60,10 +61,6 @@
 ;;      -> params = params - (learning-rate * param-gradients)
 ;;  4) zero out parameter gradients
 
-(defprotocol LossFn
-  (loss [this v target])
-  (delta [this v target]))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Activation Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -122,59 +119,6 @@
   (let [shape (if (number? shape) [1 shape] shape)]
     (map->TanhActivation {:output (mat/zero-array shape)
                           :input-gradient (mat/zero-array shape)})))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Loss Functions
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn mean-squared-error
-  [activation target]
-  (mat/div (mat/esum (mat/pow (mat/sub activation target) 2))
-           (mat/ecount activation)))
-
-(deftype MSELoss []
-  LossFn
-  (loss [this v target]
-    (let [z (mat/sub v target)]
-      (mat/esum (mat/pow z 2))))
-
-  (delta [this v target]
-    (mat/sub v target)))
-
-(defn mse-loss []
-  (MSELoss.))
-
-; NOTE: not really sure how this is supposed to differ and why from a simple MSE
-; loss.  Must investigate.
-(deftype QuadraticLoss []
-  LossFn
-  (loss [this v target]
-    ; NOTE: linear/norm is different for matrices and vectors so this row-matrix
-    ; conversion is important for correctness.
-    ;(println "loss: " v "-" target)
-    (let [diff (mat/sub v target)
-          diff (if (mat/vec? diff) (mat/row-matrix diff) diff)]
-      (mat/mul 0.5 (mat/pow (linear/norm diff) 2))))
-
-  (delta [this v target]
-    (mat/sub v target)))
-
-(defn quadratic-loss
-  []
-  (QuadraticLoss.))
-
-(def SMALL-NUM 1e-30)
-
-(deftype CrossEntropyLoss []
-  LossFn
-  (loss [this activation target]
-    (let [a (mat/mul (mat/negate target) (util/log (mat/add SMALL-NUM activation)))
-          b (mat/mul (mat/sub 1.0 target) (util/log (mat/sub (+ 1.0 SMALL-NUM) a)))
-          c (mat/esum (mat/sub a b))]
-      c))
-
-  (delta [this v target]
-    (mat/sub v target)))
 
 (defrecord 
   ^{:doc "Used for multinomial classification (choose 1 of n classes), where the output
@@ -325,8 +269,8 @@
     (let [start-time (util/timestamp)
           output (forward net input)
           forward-time (util/ms-elapsed start-time)
-          loss (loss loss-fn output label)
-          loss-delta (delta loss-fn output label)
+          loss (cp/loss loss-fn output label)
+          loss-delta (cp/loss-gradient loss-fn output label)
           start-time (util/timestamp)
           gradient (backward net input loss-delta)
           backward-time (util/ms-elapsed start-time)
@@ -446,19 +390,19 @@
   [net loss-fn optimizer input label & {:keys [delta]}]
   (let [delta (or delta DIFFERENCE-DELTA)
         output (forward net input)
-        loss (loss loss-fn output label)
-        loss-delta (delta loss-fn output label)
-        gradient (backward net input loss-delta)]
+        loss (cp/loss loss-fn output label)
+        loss-gradient (cp/loss-gradient loss-fn output label)
+        gradient (backward net input loss-gradient)]
     (map
       (fn [i]
         (let [xi (mat/mget input 0 i)
               x1 (mat/mset input 0 i (+ xi delta))
               y1 (forward net input)
-              c1 (loss loss-fn y1 label)
+              c1 (cp/loss loss-fn y1 label)
 
               x2 (mat/mset input 0 i (- xi delta))
               y2 (forward net input)
-              c2 (loss loss-fn y2 label)
+              c2 (cp/loss loss-fn y2 label)
               numeric-gradient (/ (- c1 c2) (* 2 delta))
               relative-error (/ (Math/abs (- gradient numeric-gradient))
                                 (Math/abs (+ gradient numeric-gradient)))]
