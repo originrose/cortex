@@ -1,6 +1,7 @@
 (ns cortex.core
   "Main cortex API function namespace"
   (:require [cortex.impl.wiring :as wiring])
+  (:require [cortex.impl default])
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error]]))
 
@@ -16,6 +17,16 @@
   "Gets the ouput for a module. Throws an exception if not available"
   ([m]
     (or (cp/output m) (error "No output available for module: " (class m)))))
+
+(defn parameters
+  "Gets the vector of parameters for a module (possibly empty)"
+  ([m]
+    (cp/parameters m)))
+
+(defn gradient
+  "Gets the accumulated gradient vector for a module (possibly empty)"
+  ([m]
+    (cp/gradient m)))
 
 ;; ===========================================================================
 ;; Module construction and combinator functions
