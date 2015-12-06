@@ -1,6 +1,7 @@
 (ns cortex.core
   "Main cortex API function namespace"
   (:require [cortex.impl.wiring :as wiring])
+  (:require [cortex.impl.functions :as functions])
   (:require [cortex.impl default])
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error]]))
@@ -40,4 +41,14 @@
   "Creates a linear stack of modules"
   ([modules]
     (cortex.impl.wiring.StackModule. modules)))
+
+
+;; ===========================================================================
+;; Mathematical / activation functions
+
+(defn logistic-module
+  ([]
+    (logistic-module nil))
+  ([output]
+    (cortex.impl.functions.Logistic. nil (if output {:output output})))) 
 
