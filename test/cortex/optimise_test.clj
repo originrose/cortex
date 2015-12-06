@@ -17,7 +17,7 @@
             m (backward m (m/mul (m/sub (output m) target) 2.0))
             [o m] (optimise o m)
             dist (m/length (m/sub (output m) target))]
-        (println (output m))
+        ;; (println (output m))
         (if (< i 100) 
           (recur (inc i) m o)
           (is (< dist 0.001)))))))
