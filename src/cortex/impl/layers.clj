@@ -1,7 +1,9 @@
 (ns cortex.impl.layers
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error EMPTY-VECTOR]])
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m])
+  (:import [java.lang Math])
+  (:import [java.util Random]))
 
 ;; LOGISTIC 
 ;; Module implementing a Logistic activation function over a numerical array
@@ -146,5 +148,67 @@
         (m/add-scaled-product! sd mean mean -1.0)
         (m/sqrt! sd)
         this))
+
+
+
+;; DENOISING AUTOENCODER
+(def ^Random NOISE-RANDOM (Random.))
+
+(defn noise-fn ^double [^double x]
+  (let [r NOISE-RANDOM]
+    (if (< 0.2 (.nextDouble r))
+     (.nextGaussian r)
+     x)))
+
+(defrecord DenoisingAutoencoder
+  [up down input-tmp output-tmp ]
+  cp/PModule
+    (cp/calc [m input]
+      (let [up (cp/calc up input)] 
+        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+    
+    (cp/output [m]
+      (cp/output up))
+    
+  cp/PNeuralTraining
+    (forward [this input]
+      (m/assign! input-tmp input)
+      (m/emap! noise-fn input-tmp)
+      (let [noise-up (cp/calc up input-tmp)
+            _ (m/assign! output-tmp (cp/output noise-up))
+            up (cp/forward up input)
+            down (cp/forward down output-tmp)
+            ]
+        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+    
+    (backward [this input output-gradient]
+      (let [up (cp/backward up input output-gradient)
+            down (cp/backward down output-tmp (m/sub input (cp/output down)))]
+        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+    
+    (input-gradient [this]
+      (cp/input-gradient up))
+  
+  cp/PGradient
+    (gradient [this]
+      (m/join (cp/gradient up) (cp/gradient down)))
+  
+  cp/PParameters
+    (parameters [this]
+      (m/join (cp/parameters up) (cp/parameters down)))
+    
+    (update-parameters [this parameters]
+      (let [nup (cp/parameter-count up)
+            ndown (cp/parameter-count down)
+            up (cp/update-parameters up (m/subvector parameters 0 nup))
+            down (cp/update-parameters down (m/subvector parameters nup ndown))]
+        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+    
+    cp/PModuleClone
+      (clone [this]
+        (DenoisingAutoencoder. (cp/clone up) 
+                               (cp/clone down) 
+                               (m/clone input-tmp)
+                               (m/clone output-tmp))))
 
 
