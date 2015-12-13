@@ -9,12 +9,15 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]))
 
+(declare MODULE-GENS)
 
 (def MODULE-GENS [(gen/return (layers/linear [[1 2] [3 4]] [0 10]))
                   (gen/return (layers/logistic [3]))])
 
 
-(defspec test-module-parameters
+(defspec test-module-parameter-lengths
          100 
          (prop/for-all [m (gen/one-of MODULE-GENS)]
-           (= (m/ecount (parameters m)) (m/ecount (gradient m)))))
+           (let [params (parameters m)
+                 grad (gradient m)]
+             (= (m/ecount params) (m/ecount grad) (parameter-count m)))))
