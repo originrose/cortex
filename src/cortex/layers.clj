@@ -9,6 +9,8 @@
 
 (defn logistic
   ([shape]
+    (when-not (coll? shape)
+      (error "logistic layer constructor requires a shape vector")) 
     (cortex.impl.layers.Logistic. 
       (m/ensure-mutable (m/new-array :vectorz shape)) 
       (m/ensure-mutable (m/new-array :vectorz shape))))) 
