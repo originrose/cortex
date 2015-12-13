@@ -20,9 +20,9 @@
 (defn adadelta-optimiser 
   "Constructs a new AdaDelta optimiser of the given size (parameter length)"
   ([size]
-    (let [msgrad (m/mutable (m/new-vector size))
-          msdx (m/mutable (m/new-vector size))
-          dx (m/mutable (m/new-vector size))]
+    (let [msgrad (m/mutable (m/new-vector :vectorz size))
+          msdx (m/mutable (m/new-vector :vectorz size))
+          dx (m/mutable (m/new-vector :vectorz size))]
       (m/assign! msgrad 0.01)
       (m/assign! msdx 0.01)
       (m/assign! dx 0.0)
@@ -76,7 +76,7 @@
   ([size]
     (sgd-optimiser size nil))
   ([size {:keys [learn-rate momentum] :as options}]
-    (let [dx (m/mutable (m/new-vector size))]
+    (let [dx (m/mutable (m/new-vector :vectorz size))]
       (m/assign! dx 0.0)
       (SGDOptimiser. dx nil options))))
 

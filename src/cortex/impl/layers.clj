@@ -1,6 +1,6 @@
 (ns cortex.impl.layers
   (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error]])
+  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]])
   (:require [clojure.core.matrix :as m]))
 
 ;; LOGISTIC 
@@ -78,5 +78,73 @@
   cp/PGradient
     (gradient [this]
       (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
+
+;; NORMALISER 
+;; Module which normalises outputs towards mean 0.0, sd 1.0
+;; accumulates observed mean and variance of data, recalibrates during update-parameters
+(def DEFAULT-NORMALISER-LEARN-RATE 0.001)
+(def DEFAULT-NORMALISER-FACTOR 0.001)
+
+(defrecord Normaliser [output input-gradient sd mean acc-ss acc-mean tmp]
+  cp/PModule
+    (calc [this input]
+      (let []
+        (m/assign! output input)
+        (m/sub! output mean) 
+        (m/div! output sd) 
+        this))
+
+    (output [this]
+      (:output this))
+    
+  cp/PNeuralTraining
+    (forward [this input]
+      (let [lr (double (or (:learn-rate this) DEFAULT-NORMALISER-LEARN-RATE ))]
+        (when (> lr 0)
+          (let [decay (- 1.0 lr)] 
+            (m/scale! acc-mean decay)
+            (m/add-scaled! acc-mean input lr)
+            (m/scale! acc-ss decay)
+            (m/add-scaled-product! acc-ss input input lr)))
+        (cp/calc this input)))
+    
+    (backward [this input output-gradient]
+      (let []
+        ;; input gradient = output / s.d.
+        (m/assign! input-gradient output-gradient)
+        (m/div! input-gradient sd)
+        
+        ;; add gradient for normalisation adjustment
+        (let [nf (double (or (:normaliser-factor this) DEFAULT-NORMALISER-FACTOR))]
+          (when (> nf 0)
+            ;; mean adjustment - gradient towards mean
+            (m/assign! tmp input)
+            (m/sub! tmp mean)
+            (m/add-scaled! input-gradient tmp nf)
+            
+            ;; sd adjustment - gradient scales towards sd 1.0
+            (m/assign! tmp sd)
+            (m/sub! tmp 1.0)
+            (m/add-scaled-product! input-gradient input tmp nf)
+            )) 
+        
+        ;; finally return this, input-gradient has been updated in-place
+        this))
+    
+    (input-gradient [this]
+      input-gradient)
+  
+  cp/PParameters
+	  (parameters 
+      [this]
+        ;; no external parameters to optimise
+        EMPTY-VECTOR)
+    (update-parameters 
+      [this parameters]
+        (m/assign! mean acc-mean)
+        (m/assign! sd acc-ss)
+        (m/add-scaled-product! sd mean mean -1.0)
+        (m/sqrt! sd)
+        this))
 
 

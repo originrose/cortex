@@ -29,3 +29,22 @@
       (-> wm
         (assoc :weight-gradient (m/new-vector :vectorz (* n-outputs n-inputs)))
         (assoc :bias-gradient (m/new-vector :vectorz n-outputs)))))) 
+
+(defn normaliser
+  "Constructs a normaliser of the given shape"
+  ([shape]
+    (normaliser shape nil))
+  ([shape {:keys [learn-rate normaliser-factor] :as options}]
+    (when-not (coll? shape)
+      (error "normaliser layer constructor requires a shape vector")) 
+    (let [output (m/new-array :vectorz shape)
+          input-gradient (m/new-array :vectorz  shape)
+          mean (m/new-array :vectorz shape)
+          sd (m/new-array :vectorz shape)
+          acc-ss (m/new-array :vectorz shape)
+          acc-mean (m/new-array :vectorz shape)
+          tmp (m/new-array :vectorz shape)
+          ]
+      (m/fill! sd 1.0)
+      (m/fill! acc-ss 1.0)
+      (cortex.impl.layers.Normaliser. output input-gradient sd mean acc-ss acc-mean tmp nil options))))

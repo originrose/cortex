@@ -2,10 +2,8 @@
   "Default implementations for coretx protocols."
   (:require [cortex.protocols :as cp])
   (:require [clojure.core.matrix :as m])
-  (:require [cortex.util :as util :refer [error]])
-  (:import [mikera.vectorz Vectorz]))
+  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]]))
 
-(def EMPTY-VECTOR (Vectorz/newVector 0))
 
 (extend-protocol cp/PParameters
   Object

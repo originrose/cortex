@@ -1,9 +1,12 @@
 (ns cortex.util
   (:require
     [clojure.core.matrix :as mat])
-  (:import [java.util Random]))
+  (:import [java.util Random])
+  (:import [mikera.vectorz Vectorz]))
 
 (defn timestamp [] (System/nanoTime))
+
+(def EMPTY-VECTOR (Vectorz/newVector 0))
 
 (defn ms-elapsed
   ([start]
