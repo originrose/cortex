@@ -9,6 +9,11 @@
   (output [m]
     "Returns the calculated output of a module"))
 
+(defprotocol PModuleClone
+  "Protocol for cloning a module, including all mutable state."
+  (clone [m]
+    "Returns a cloned module"))
+
 (defprotocol PParameters
   "Protocol for a module that supports parameters"
   (parameters [m]

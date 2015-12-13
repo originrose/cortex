@@ -76,5 +76,10 @@
     (when (empty? modules) (error "Stack must have at least one sub-module"))
     (cortex.impl.wiring.StackModule. (vec modules))))
 
+(defn clone
+  "clones a module, including all internal state strauctures. New module will be independent of the original."
+  ([m]
+    (cp/clone m)))
+
 
 
