@@ -4,8 +4,6 @@
   (:require [clojure.core.matrix :as m]
             [cortex.layers :as layers]))
 
-(m/set-current-implementation :vectorz)
-
 ;; simple optimiser testing function: try to optimse a linear transform
 (defn optimiser-test [m o]
   (let [target [0.3 0.7]
