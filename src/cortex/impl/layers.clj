@@ -3,6 +3,7 @@
   (:require [cortex.util :as util :refer [error]])
   (:require [clojure.core.matrix :as m]))
 
+;; LOGISTIC 
 ;; Module implementing a Logistic activation function over a numerical array
 (defrecord Logistic [output input-gradient]
   cp/PModule
@@ -32,7 +33,8 @@
     (input-gradient [this]
       input-gradient))
 
-;; a function that implements a linear transformation (weights + bias)
+;; LINEAR 
+;; function that implements a linear transformation (weights + bias)
 ;; has mutable parameters and accumlators for gradient
 (defrecord Linear [weights bias]
   cp/PModule

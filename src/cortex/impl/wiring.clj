@@ -94,6 +94,10 @@
                 (assoc-in this [modules i] module)))
             (do
               ;; TODO check offset is at end of parameters
-              this))))))
+              this)))))
+    
+    cp/PModuleClone
+      (clone [this]
+        (StackModule. (mapv cp/clone modules))))
 
 
