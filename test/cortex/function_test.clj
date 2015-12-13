@@ -1,8 +1,10 @@
-(ns cortex.function-test
+(ns cortex.module-test
+  "Tests for behaviour of mathematical function modules"
   (:use [clojure.test])
   (:use [cortex.core])
   (:require [clojure.core.matrix :as m]
             [cortex.layers :as layers]))
+
 
 (deftest test-logistic-module
   (testing "basic logistic functionality"
@@ -41,5 +43,4 @@
     (let [wm (layers/linear [[1 2] [3 4]] [0 10])
           wm (calc wm [1 2])]
       (is (m/equals [5 21] (output wm))))))
-
 
