@@ -1,4 +1,5 @@
 (ns cortex.network
+  "Namespace for constructing and managing neural networks"
   (:require [clojure.core.matrix :as mat]
             [cortex.protocols :as cp]
             [clojure.core.matrix.linear :as linear]
