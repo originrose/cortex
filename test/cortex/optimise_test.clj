@@ -8,7 +8,7 @@
 
 ;; simple optimiser testing function: try to optimse a linear transform
 (defn optimiser-test [m o]
-  (let [target [1 1]
+  (let [target [0.3 0.7]
         input [1 1]]
     (loop [i 0
            m m
@@ -20,7 +20,7 @@
         ;; (println (output m))
         (if (< i 100) 
           (recur (inc i) m o)
-          (is (< dist 0.001)))))))
+          (is (< dist 0.01)))))))
 
 (deftest test-adadelta
   (let [m (layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
@@ -29,6 +29,13 @@
 
 (deftest test-sgd
   (let [m (layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
+        o (sgd-optimiser (parameter-count m))] 
+    (optimiser-test m o)))
+
+(deftest test-nn
+  (let [m (stack-module
+            [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
+             (layers/logistic [2])])
         o (sgd-optimiser (parameter-count m))] 
     (optimiser-test m o)))
 

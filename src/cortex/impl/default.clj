@@ -25,5 +25,12 @@
       ([m]
         EMPTY-VECTOR)))
 
+(extend-protocol cp/PParameterCount
+  Object
+    (parameter-count 
+      ([m]
+        (m/ecount (cp/parameters m)))))
+
+
 
 

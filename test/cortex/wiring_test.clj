@@ -15,8 +15,10 @@
         st (stack-module [m m])]
     (is (= 3 (output (calc st 1)))))
   
-  ;; empty stack
-  (let [st (stack-module [])]
-    (is (= 1 (output (calc st 1))))
-    (is (= [0] (shape (parameters st))))))
+  ;; empty stack - not valid since stack must have at least one sub-module
+  ;;(let [st (stack-module [])]
+  ;;  (is (= 1 (output (calc st 1))))
+  ;;  (is (= [0] (shape (parameters st)))))
+  
+  )
 

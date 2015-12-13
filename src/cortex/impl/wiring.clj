@@ -1,7 +1,8 @@
 (ns cortex.impl.wiring
   "Namespace for standard 'wiring' modules that can be used to compose and combine modules with
    various other functionality"
-  (:require [cortex.protocols :as cp])
+  (:require [cortex.protocols :as cp]
+            [clojure.core.matrix :as m])
   (:require [cortex.util :as util :refer [error]])
   (:import [clojure.lang IFn]))
 
@@ -31,8 +32,68 @@
             (let [layer (nth modules i)
                   new-layer (cp/calc layer v)]
               (recur (inc i) (cp/output new-layer) (assoc new-modules i new-layer)))
-            (StackModule. new-modules nil {:output v})))))
+            (StackModule. new-modules)))))
+    
     (cp/output [m]
-      (:output m)))
+      (cp/output (last modules)))
+    
+    cp/PNeuralTraining
+    (forward [this input]
+      (let [n (long (count modules))]
+        (loop [i 0
+               v input
+               this this]
+          (if (< i n)
+            (let [module (cp/forward (nth modules i) v)]
+              (recur
+                (inc i)
+                (cp/output module)
+                (assoc-in this [modules i] module)))
+            this))))
+    
+    (backward [this input output-gradient]
+      (let [n (long (count modules))]
+        (loop [i (dec n) 
+               output-gradient output-gradient
+               this this]
+          (if (<= 0 i)
+            (let [module (cp/backward (nth modules i) 
+                                      (if (> i 0) (cp/output (nth modules (dec i))) input) 
+                                      output-gradient)]
+              (recur
+                (dec i)
+                (cp/input-gradient module)
+                (assoc-in this [modules i] module)))
+            this))))
+    
+    (input-gradient [this]
+      (cp/input-gradient (nth modules 0)))
+  
+  cp/PGradient
+    (gradient [this]
+      (apply m/join (map cp/gradient modules)))
+  
+    
+  cp/PParameters
+    (parameters [this]
+      (apply m/join (map cp/parameters modules)))
+    
+    (update-parameters [this parameters]
+      (let [n (long (count modules))]
+        (loop [i 0
+               offset 0
+               this this]
+          (if (< i n)
+            (let [module (nth modules i)
+                  pc (long (cp/parameter-count module))
+                  new-module-params (m/subvector parameters offset pc)
+                  module (cp/update-parameters module new-module-params)]
+              (recur
+                (inc i)
+                (+ offset pc) 
+                (assoc-in this [modules i] module)))
+            (do
+              ;; TODO check offset is at end of parameters
+              this))))))
 
 

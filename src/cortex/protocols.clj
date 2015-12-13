@@ -17,6 +17,11 @@
   (update-parameters [m parameters]
     "Updates the parameters for this module to the given parameter values. Returns the updated module"))
 
+(defprotocol PParameterCount
+  "Protocol for computing the parameter count"
+  (parameter-count [m]
+    "Gets the number of parameters for this module, as a long value."))
+
 (defprotocol PGradient
   "Protocol for a module that supports accumulated gradients for optimisation"
   (gradient [m]

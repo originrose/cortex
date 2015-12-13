@@ -31,7 +31,7 @@
 (defn parameter-count
   "Gets the number of parameters for a given module."
   ([m]
-    (m/ecount (cp/parameters m))))
+    (cp/parameter-count m)))
 
 (defn gradient
   "Gets the accumulated gradient vector for a module (possibly empty)"
@@ -67,12 +67,14 @@
 (defn function-module
   "Wraps a Clojure function in a cortex module"
   ([f]
+    (when-not (fn? f) (error "function-module requires a Clojure function"))
     (cortex.impl.wiring.FunctionModule. f nil)))
 
 (defn stack-module
   "Creates a linear stack of modules"
   ([modules]
-    (cortex.impl.wiring.StackModule. modules)))
+    (when (empty? modules) (error "Stack must have at least one sub-module"))
+    (cortex.impl.wiring.StackModule. (vec modules))))
 
 
 
