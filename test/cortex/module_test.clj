@@ -15,9 +15,10 @@
                   (gen/return (layers/logistic [3]))])
 
 
-(defspec test-module-parameter-lengths
-         100 
-         (prop/for-all [m (gen/one-of MODULE-GENS)]
+(def MODULE-GEN (gen/one-of MODULE-GENS))
+
+(defspec test-module-parameter-lengths 100 
+         (prop/for-all [m MODULE-GEN]
            (let [params (parameters m)
                  grad (gradient m)]
              (= (m/ecount params) (m/ecount grad) (parameter-count m)))))
