@@ -9,6 +9,7 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
+;; FUNCTION
 ;; Wrapper class for a standard Clojure function
 ;; supports an option inverse function
 (defrecord FunctionModule
@@ -19,6 +20,7 @@
     (cp/output [m]
       (:output m)))
 
+;; STACK
 ;; Wrapper for a linear stack of modules
 (defrecord StackModule
   [modules]
