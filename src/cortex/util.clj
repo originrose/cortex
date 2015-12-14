@@ -14,52 +14,15 @@
   ([start end]
    (/ (double (- end start)) 1000000.0)))
 
-; Functions and Hyperbolic functions 
-(defn exp
-  [a]
-  (mat/emap #(Math/exp %) a))
-
-(defn exp!
-  [a]
-  (mat/emap! #(Math/exp %) a))
-
-(defn log
-  [a]
-  (mat/emap #(Math/log %) a))
-
-(defn log!
-  [a]
-  (mat/emap! #(Math/log %) a))
-
-(defn tanh
-  [a]
-  (mat/emap #(Math/tanh %) a))
-
-(defn tanh!
-  [a]
-  (mat/emap! #(Math/tanh %) a))
-
 (defn tanh'
   " tanh'(x) = 1 - tanh(x)^2 "
   [th]
   (mat/emap (- 1 (* th th))))
 
-(defn sigmoid
-  "y =  1 / (1 + e^(-z))
-  Produces an output between 0 and 1."
-  [z]
-  (mat/div! (mat/add! (exp! (mat/negate z)) 1.0)))
-
-(defn sigmoid!
-  "y =  1 / (1 + e^(-z))
-  It is a smooth threshold function with output between 0 and 1."
-  [z]
-  (mat/div! (mat/add! (exp! (mat/negate! z)) 1.0)))
-
 (defn sigmoid'
   "sigma'(x) = sigma(x) * (1-sigma(x)) "
   [s]
-  (let [sz (sigmoid s)]
+  (let [sz (mat/logistic s)]
     (mat/emul sz (mat/sub 1.0 sz))))
 
 (defn rand-vector

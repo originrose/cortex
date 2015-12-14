@@ -1,12 +1,12 @@
 (ns cortex.network
   "Namespace for constructing and managing neural networks"
-  (:require [clojure.core.matrix :as mat]
+  (:require [clojure.core.matrix :as m]
             [cortex.protocols :as cp]
             [clojure.core.matrix.linear :as linear]
 ;            [thinktopic.datasets.mnist :as mnist]
             [cortex.util :as util]))
 
-(mat/set-current-implementation :vectorz)
+(m/set-current-implementation :vectorz)
 
 ;; Neural Protocols
 
@@ -60,54 +60,54 @@
 (defrecord SigmoidActivation [output input-gradient]
   cp/PNeuralTraining
   (forward [this input]
-    (mat/assign! output input)
-    (util/sigmoid! output))
+    (m/assign! output input)
+    (m/logistic! output))
 
   (backward [this input output-gradient]
-    ;(println "backward " (mat/shape input-gradient) (mat/shape output-gradient))
-    (mat/assign! input-gradient output-gradient)
-    (mat/emul! input-gradient output (mat/sub 1.0 output))))
+    ;(println "backward " (m/shape input-gradient) (m/shape output-gradient))
+    (m/assign! input-gradient output-gradient)
+    (m/emul! input-gradient output (m/sub 1.0 output))))
 
 (defmethod print-method SigmoidActivation [x ^java.io.Writer writer]
-  (print-method (format "Sigmoid %s" (mat/shape (:output x))) writer))
+  (print-method (format "Sigmoid %s" (m/shape (:output x))) writer))
 
 (defn sigmoid-activation
   [shape]
   (let [shape (if (number? shape) [1 shape] shape)]
-    (map->SigmoidActivation {:output (mat/zero-array shape)
-                             :input-gradient (mat/zero-array shape)})))
+    (map->SigmoidActivation {:output (m/zero-array shape)
+                             :input-gradient (m/zero-array shape)})))
 
 (defrecord RectifiedLinearActivation [output input-gradient]
   cp/PNeuralTraining
   (forward [this input]
-    (mat/assign! output input)
-    (mat/emap! #(if (neg? %) 0 %) output))
+    (m/assign! output input)
+    (m/emap! #(if (neg? %) 0 %) output))
 
   (backward [this input output-gradient]
-    (mat/assign! input-gradient output-gradient)
-    (mat/emap! #(if (neg? %) 0 %) input-gradient)))
+    (m/assign! input-gradient output-gradient)
+    (m/emap! #(if (neg? %) 0 %) input-gradient)))
 
 (defn relu-activation
   [shape]
   (let [shape (if (number? shape) [1 shape] shape)]
-    (map->RectifiedLinearActivation {:output (mat/zero-array shape)
-                                     :input-gradient (mat/zero-array shape)})))
+    (map->RectifiedLinearActivation {:output (m/zero-array shape)
+                                     :input-gradient (m/zero-array shape)})))
 
 (defrecord TanhActivation [output input-gradient]
   cp/PNeuralTraining
   (forward [this input]
-    (mat/assign! output input)
-    (mat/tanh! output))
+    (m/assign! output input)
+    (m/tanh! output))
 
   (backward [this input output-gradient]
-    (mat/assign! input-gradient output-gradient)
-    (mat/emul! input-gradient (mat/emap #(- 1 (* % %)) output))))
+    (m/assign! input-gradient output-gradient)
+    (m/emul! input-gradient (m/emap #(- 1 (* % %)) output))))
 
 (defn tanh-activation
   [shape]
   (let [shape (if (number? shape) [1 shape] shape)]
-    (map->TanhActivation {:output (mat/zero-array shape)
-                          :input-gradient (mat/zero-array shape)})))
+    (map->TanhActivation {:output (m/zero-array shape)
+                          :input-gradient (m/zero-array shape)})))
 
 (defrecord 
   ^{:doc "Used for multinomial classification (choose 1 of n classes), where the output
@@ -123,9 +123,9 @@
   
   cp/PNeuralTraining
   (forward [this input] 
-    (mat/assign! output input)
-    (mat/exp! output)
-    ;; FIXME: (mat/div! output (mat/esum exponentials))
+    (m/assign! output input)
+    (m/exp! output)
+    ;; FIXME: (m/div! output (m/esum exponentials))
     )
 
   (backward [this input output-gradient] output-gradient))
@@ -137,7 +137,7 @@
   
   cp/PNeuralTraining
     (forward [this input]
-      (mat/assign! output input))
+      (m/assign! output input))
 
     (backward [this input output-gradient]
       ))
@@ -191,11 +191,11 @@
                         weight-gradient bias-gradient input-gradient]
   cp/PNeuralTraining
   (forward [this input]
-    (mat/assign! output biases)
+    (m/assign! output biases)
     ;(println "input: " (type input))
     ;(println "weights: " (type weights))
     ;(println "output: " (type output))
-    (mat/add! output (mat/mmul input (mat/transpose weights))))
+    (m/add! output (m/mmul input (m/transpose weights))))
 
   ; Compute the error gradients with respect to the input data by multiplying the
   ; output errors backwards through the weights, and then compute the error
@@ -206,11 +206,11 @@
   ; expected to apply the gradients to the parameters and then zero them out
   ; after each mini batch.
   (backward [this input output-gradient]
-    (mat/add! bias-gradient output-gradient)
-    ;(println "output-gradient: " (mat/shape output-gradient))
-    ;(println "input: " (mat/shape input))
-    (mat/add! weight-gradient (mat/mmul (mat/transpose output-gradient) input))
-    (mat/assign! input-gradient (mat/mmul output-gradient weights))
+    (m/add! bias-gradient output-gradient)
+    ;(println "output-gradient: " (m/shape output-gradient))
+    ;(println "input: " (m/shape input))
+    (m/add! weight-gradient (m/mmul (m/transpose output-gradient) input))
+    (m/assign! input-gradient (m/mmul output-gradient weights))
     input-gradient)
 
   ParameterLayer
@@ -235,10 +235,10 @@
        :n-outputs n-outputs
        :weights weights
        :biases biases
-       :output (mat/zero-array (mat/shape biases))
-       :weight-gradient (mat/zero-array (mat/shape weights))
-       :bias-gradient (mat/zero-array (mat/shape biases))
-       :input-gradient (mat/zero-array [1 n-inputs])})))
+       :output (m/zero-array (m/shape biases))
+       :weight-gradient (m/zero-array (m/shape weights))
+       :bias-gradient (m/zero-array (m/shape biases))
+       :input-gradient (m/zero-array [1 n-inputs])})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Training and Optimization
@@ -281,28 +281,28 @@
           ; param += dx
           ]
       (doseq [[params grads momentum-array] (map conj params-grads momentum-arrays)]
-        (let [grad-update (mat/mul! grads learning-rate (or scale 1))
-              momentum-update (mat/mul! momentum-array momentum)
-              dx (mat/sub! momentum-update grad-update)]
-          (mat/add! params dx)
-          (mat/fill! grads 0))))))
+        (let [grad-update (m/mul! grads learning-rate (or scale 1))
+              momentum-update (m/mul! momentum-array momentum)
+              dx (m/sub! momentum-update grad-update)]
+          (m/add! params dx)
+          (m/fill! grads 0))))))
 
 (defn sgd-optimizer
   [net loss-fn learning-rate momentum]
-  (let [momentum-shapes (map (comp mat/shape second) (parameters-gradients net))
-        momentum-arrays (map mat/zero-array momentum-shapes)]
+  (let [momentum-shapes (map (comp m/shape second) (parameters-gradients net))
+        momentum-arrays (map m/zero-array momentum-shapes)]
     (SGDOptimizer. net loss-fn learning-rate momentum momentum-arrays)))
 
 (defn train-network
   [optimizer n-epochs batch-size training-data training-labels]
-  (let [[n-inputs input-width] (mat/shape training-data)
-        [n-labels label-width] (mat/shape training-labels)
+  (let [[n-inputs input-width] (m/shape training-data)
+        [n-labels label-width] (m/shape training-labels)
         n-batches (long (/ n-inputs batch-size))
         batch-scale (/ 1.0 batch-size)
-        data-shape (mat/shape training-data)
-        label-shape (mat/shape training-labels)
-        data-item (fn [idx] (apply mat/select training-data (cons idx (repeat (dec (count data-shape)) :all))))
-        label-item (fn [idx] (apply mat/select training-labels (cons idx (repeat (dec (count label-shape)) :all))))]
+        data-shape (m/shape training-data)
+        label-shape (m/shape training-labels)
+        data-item (fn [idx] (apply m/select training-data (cons idx (repeat (dec (count data-shape)) :all))))
+        label-item (fn [idx] (apply m/select training-labels (cons idx (repeat (dec (count label-shape)) :all))))]
     (dotimes [i n-epochs]
       ;(println "epoch" i)
       (doseq [batch (partition batch-size (shuffle (range n-inputs)))]
@@ -313,7 +313,7 @@
 
 (defn row-seq
   [data]
-  (map #(mat/get-row data %) (range (mat/row-count data))))
+  (map #(m/get-row data %) (range (m/row-count data))))
 
 (defn evaluate
   "Evaluates a model with a given set of test data.
@@ -322,10 +322,10 @@
     (let [results (doall
                     (map (fn [data label]
                            (let [res (cp/forward net data)]
-                             (mat/emap #(Math/round %) res)))
+                             (m/emap #(Math/round %) res)))
                          (row-seq test-data) (row-seq test-labels)))
           res-labels (map vector results (row-seq test-labels))
-          score (count (filter #(mat/equals (first %) (second %)) res-labels))]
+          score (count (filter #(m/equals (first %) (second %)) res-labels))]
       (println "evaluated: " (take 10 res-labels))
       [results score])))
 
@@ -394,17 +394,17 @@
         gradient (cp/backward net input loss-gradient)]
     (map
       (fn [i]
-        (let [xi (mat/mget input 0 i)
-              x1 (mat/mset input 0 i (+ xi delta))
+        (let [xi (m/mget input 0 i)
+              x1 (m/mset input 0 i (+ xi delta))
               y1 (cp/forward net input)
               c1 (cp/loss loss-fn y1 label)
 
-              x2 (mat/mset input 0 i (- xi delta))
+              x2 (m/mset input 0 i (- xi delta))
               y2 (cp/forward net input)
               c2 (cp/loss loss-fn y2 label)
               numeric-gradient (/ (- c1 c2) (* 2 delta))
               relative-error (/ (Math/abs (- gradient numeric-gradient))
                                 (Math/abs (+ gradient numeric-gradient)))]
           relative-error))
-      (range (mat/column-count input)))))
+      (range (m/column-count input)))))
 
