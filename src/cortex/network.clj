@@ -316,16 +316,26 @@
   (map #(mat/get-row data %) (range (mat/row-count data))))
 
 (defn evaluate
-  [net test-data test-labels]
-  (let [results (doall
-                  (map (fn [data label]
-                         (let [res (cp/forward net data)]
-                           (mat/emap #(Math/round %) res)))
-                       (row-seq test-data) (row-seq test-labels)))
-        res-labels (map vector results (row-seq test-labels))
-        score (count (filter #(mat/equals (first %) (second %)) res-labels))]
-    (println "evaluated: " (take 10 res-labels))
-    [results score]))
+  "Evaluates a model with a given set of test data.
+   Returns a [result score] pair"
+  ([net test-data test-labels]
+    (let [results (doall
+                    (map (fn [data label]
+                           (let [res (cp/forward net data)]
+                             (mat/emap #(Math/round %) res)))
+                         (row-seq test-data) (row-seq test-labels)))
+          res-labels (map vector results (row-seq test-labels))
+          score (count (filter #(mat/equals (first %) (second %)) res-labels))]
+      (println "evaluated: " (take 10 res-labels))
+      [results score])))
+
+(defn evaluator 
+  "Creates an evaluator for a given set of test data, as a function that can be applied to a model.
+   The evalutor function takes a model and returns the error rate."
+  ([test-data test-labels]
+    (fn [net]
+      (let [score (second (evaluate net test-data test-labels))]
+        (- 1.0 (/ score (count test-labels)))))))
 
 (defn confusion-matrix
   "A confusion matrix shows the predicted classes for each of the actual
