@@ -20,7 +20,7 @@
    Shape of input and output are determined by the weight matrix."
   ([weights bias]
     (let [weights (m/array :vectorz weights)
-          bias (m/array :vector bias)
+          bias (m/array :vectorz bias)
           wm (cortex.impl.layers.Linear. weights bias)
           [n-outputs n-inputs] (m/shape weights)
           n-outputs (long n-outputs)
@@ -28,7 +28,8 @@
       (when-not (== n-outputs (m/dimension-count bias 0)) (error "Mismatched weight and bias shapes"))
       (-> wm
         (assoc :weight-gradient (m/new-vector :vectorz (* n-outputs n-inputs)))
-        (assoc :bias-gradient (m/new-vector :vectorz n-outputs)))))) 
+        (assoc :bias-gradient (m/new-vector :vectorz n-outputs))
+        (assoc :input-gradient (m/new-vector :vectorz n-inputs)))))) 
 
 (defn normaliser
   "Constructs a normaliser of the given shape"

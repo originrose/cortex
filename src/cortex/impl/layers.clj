@@ -173,17 +173,20 @@
   cp/PNeuralTraining
     (forward [this input]
       (m/assign! input-tmp input)
-      (m/emap! noise-fn input-tmp)
+      (m/emap! noise-fn input-tmp) ;; input-tmp contains input with noise
       (let [noise-up (cp/calc up input-tmp)
-            _ (m/assign! output-tmp (cp/output noise-up))
+            _ (m/assign! output-tmp (cp/output noise-up)) ;; output-tmp contains noisy output from up
             up (cp/forward up input)
             down (cp/forward down output-tmp)
             ]
         (DenoisingAutoencoder. up down input-tmp output-tmp)))
     
     (backward [this input output-gradient]
-      (let [up (cp/backward up input output-gradient)
-            down (cp/backward down output-tmp (m/sub input (cp/output down)))]
+      (let [down (cp/backward down output-tmp (m/sub input (cp/output down)))
+            _ (m/assign! output-tmp output-gradient)
+            _ (m/add! output-tmp (cp/input-gradient down)) ;; output-tmp contains gradient
+            up (cp/backward up input output-tmp)
+            ]
         (DenoisingAutoencoder. up down input-tmp output-tmp)))
     
     (input-gradient [this]
