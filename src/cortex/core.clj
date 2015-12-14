@@ -14,7 +14,7 @@
 ;; Main module API functions
 
 (defn calc
-  "Runs the calculation for a module"
+  "Runs the calculation for a module. Returns the updated module, with output available."
   ([m input]
     (cp/calc m input)))
 
@@ -22,6 +22,11 @@
   "Gets the ouput for a module. Throws an exception if not available."
   ([m]
     (or (cp/output m) (error "No output available for module: " (class m)))))
+
+(defn calc-output
+  "Runs the calculation for a module. Returns the module output."
+  ([m input]
+    (cp/output (cp/calc m input))))
 
 (defn parameters
   "Gets the vector of parameters for a module (possibly empty)"
