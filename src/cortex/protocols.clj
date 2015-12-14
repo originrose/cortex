@@ -1,6 +1,9 @@
 (ns cortex.protocols
   "Protocols for cortex ML Module implementations")
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 (defprotocol PModule
   "Protocol for a generic module. All cortex modules must implement this."
   (calc [m input]

@@ -6,7 +6,8 @@
 ;            [thinktopic.datasets.mnist :as mnist]
             [cortex.util :as util]))
 
-(m/set-current-implementation :vectorz)
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* true)
 
 ;; Neural Protocols
 
@@ -81,11 +82,11 @@
   cp/PNeuralTraining
   (forward [this input]
     (m/assign! output input)
-    (m/emap! #(if (neg? %) 0 %) output))
+    (m/emap! (fn ^double [^double x] (if (neg? x) 0 x)) output))
 
   (backward [this input output-gradient]
     (m/assign! input-gradient output-gradient)
-    (m/emap! #(if (neg? %) 0 %) input-gradient)))
+    (m/emap! (fn ^double [^double x] (if (neg? x) 0 x)) input-gradient)))
 
 (defn relu-activation
   [shape]
@@ -101,7 +102,7 @@
 
   (backward [this input output-gradient]
     (m/assign! input-gradient output-gradient)
-    (m/emul! input-gradient (m/emap #(- 1 (* % %)) output))))
+    (m/emul! input-gradient (util/tanh' output))))
 
 (defn tanh-activation
   [shape]
@@ -322,7 +323,7 @@
     (let [results (doall
                     (map (fn [data label]
                            (let [res (cp/forward net data)]
-                             (m/emap #(Math/round %) res)))
+                             (m/emap #(Math/round (double %)) res)))
                          (row-seq test-data) (row-seq test-labels)))
           res-labels (map vector results (row-seq test-labels))
           score (count (filter #(m/equals (first %) (second %)) res-labels))]
@@ -387,7 +388,7 @@
   loss function twice for every dimension of the gradient.
   "
   [net loss-fn optimizer input label & {:keys [delta]}]
-  (let [delta (or delta DIFFERENCE-DELTA)
+  (let [delta (double (or delta DIFFERENCE-DELTA))
         output (cp/forward net input)
         loss (cp/loss loss-fn output label)
         loss-gradient (cp/loss-gradient loss-fn output label)
@@ -397,11 +398,11 @@
         (let [xi (m/mget input 0 i)
               x1 (m/mset input 0 i (+ xi delta))
               y1 (cp/forward net input)
-              c1 (cp/loss loss-fn y1 label)
+              c1 (double (cp/loss loss-fn y1 label))
 
               x2 (m/mset input 0 i (- xi delta))
               y2 (cp/forward net input)
-              c2 (cp/loss loss-fn y2 label)
+              c2 (double (cp/loss loss-fn y2 label))
               numeric-gradient (/ (- c1 c2) (* 2 delta))
               relative-error (/ (Math/abs (- gradient numeric-gradient))
                                 (Math/abs (+ gradient numeric-gradient)))]

@@ -5,6 +5,9 @@
   (:import [java.lang Math])
   (:import [java.util Random]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 ;; LOGISTIC 
 ;; Module implementing a Logistic activation function over a numerical array
 (defrecord Logistic [output input-gradient]

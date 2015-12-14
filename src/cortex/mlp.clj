@@ -8,6 +8,8 @@
 ;; A standalone multi-layer perception implementation.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
 
 ;(defn mean-squared-error
 ;  [activation target]

@@ -4,6 +4,9 @@
             [cortex.impl.layers])
   (:require [clojure.core.matrix :as m]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 ;; ===========================================================================
 ;; Layer constructors
 
