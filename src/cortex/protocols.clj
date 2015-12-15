@@ -18,7 +18,7 @@
     "Returns a cloned module"))
 
 (defprotocol PParameters
-  "Protocol for a module that supports parameters"
+  "Protocol for a module that supports parameters. The default implementation returns an empty parameter vector."
   (parameters [m]
     "Gets the parameters for this module, as a vector.")
   
@@ -26,12 +26,14 @@
     "Updates the parameters for this module to the given parameter values. Returns the updated module"))
 
 (defprotocol PParameterCount
-  "Protocol for computing the parameter count"
+  "Protocol for computing the parameter count. The default implementation just calls count on the parameter vector.."
   (parameter-count [m]
     "Gets the number of parameters for this module, as a long value."))
 
 (defprotocol PGradient
-  "Protocol for a module that supports accumulated gradients for optimisation"
+  "Protocol for a module that supports accumulated gradients for optimisation. This vector should be exactly the 
+   same length as the parameter vector.
+   The default implementation returns an empty gradient vector."
   (gradient [m]
     "Gets the accumulated gradient for this module, as a vector."))
 
