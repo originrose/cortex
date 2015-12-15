@@ -1,6 +1,7 @@
 (ns cortex.util
   (:require
-    [clojure.core.matrix :as m])
+    [clojure.core.matrix :as m]
+    [clojure.core.matrix.random :as rand])
   (:import [java.util Random])
   (:import [mikera.vectorz Vectorz]))
 
@@ -35,23 +36,12 @@
   (let [sz (m/logistic s)]
     (m/emul sz (m/sub 1.0 sz))))
 
-(defn rand-vector
-  "Produce a vector with guassian random elements having mean of 0.0 and std of 1.0."
-  [n]
-  (let [rgen (Random.)]
-    (m/array (repeatedly n #(.nextGaussian rgen)))))
-
-(defn rand-matrix
-  [m n]
-  (let [rgen (Random.)]
-    (m/array :vectorz (repeatedly m (fn [] (repeatedly n #(.nextGaussian rgen)))))))
-
 (defn weight-matrix
   [m n]
   (let [n (long n)
         m (long m)
         stdev (/ 1.0 n)]
-    (m/scale! (rand-matrix m n) stdev)))
+    (m/scale! (rand/sample-normal [m n]) stdev)))
 
 (defmacro error
   "Throws an error with the provided message(s). This is a macro in order to try and ensure the 

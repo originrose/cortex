@@ -3,6 +3,7 @@
   (:require [clojure.core.matrix :as m]
             [cortex.protocols :as cp]
             [clojure.core.matrix.linear :as linear]
+            [clojure.core.matrix.random :as rand]
 ;            [thinktopic.datasets.mnist :as mnist]
             [cortex.util :as util]))
 
@@ -230,7 +231,7 @@
   [& {:keys [n-inputs n-outputs]}]
   (let [weights (util/weight-matrix n-outputs n-inputs)
         ; TODO: the biases should also be scaled to the stdev
-        biases (util/rand-matrix 1 n-outputs)]
+        biases (rand/sample-normal [1 n-outputs])]
     (map->LinearLayer
       {:n-inputs n-inputs
        :n-outputs n-outputs
