@@ -29,38 +29,49 @@
       (mapv #(new Double (str %)))))
 
 (defn char->bit-array [character]
-  "Takes a character and bit vector with a 1.0 in the nth position where
-  n is the offset from the character 'a'."
+  "Takes a character, returns and bit vector with a 1.0 in the nth position
+  where n is the offset from the character 'a'."
   (let [offset (- (int character) (int \a))
         begin (take offset (repeatedly #(new Double 0.0)))
         end (take (- 26 offset 1) (repeatedly #(new Double 0.0)))]
   (into [] (concat begin [1.0] end))))
 
-;; training
+;; decoder
+
+(defn bit-array->num [input]
+  "Inverse of encoder, takes a bit array and converts it into an int"
+  (-> (map int input)
+       clojure.string/join
+       (Integer/parseInt 2)))
+
+;; training, evaluation and prediction
 
 (defn train [network training-data training-labels]
-  (let [n-epochs 2000            ;; Number of iterations to train
+  (let [n-epochs 30            ;; Number of iterations to train
         learning-rate 0.3
-        momentum 0.9
+        momentum 0.1
         batch-size 1
         loss-fn (opt/quadratic-loss)
         optimizer (net/sgd-optimizer network loss-fn learning-rate momentum)]
-    (println "Training network...")
     (net/train-network optimizer n-epochs batch-size training-data training-labels)))
 
 (defn evaluate [network test-data test-labels]
-  (let [_ (println "Evaluating network...")
-        [results score] (net/evaluate network test-data test-labels)
+  (let [[results score] (net/evaluate network test-data test-labels)
         label-count (count test-data)
         score-percent (float (/ score label-count))]
     (println (format "Score: %f [%d of %d]" score-percent score label-count))))
 
+(defn predict [network character]
+  (-> (net/predict network [(char->bit-array character)])
+      first
+      bit-array->num))
+
 (defn run-experiment []
   (let [;; convert the values from the scrabble pieces (letters) into floating-point bit-arrays
-        training-data   (mapv #(into [] [(char->bit-array %)]) (keys scrabble-values))
+        training-data (for [k (keys scrabble-values)] [(char->bit-array k)])
 
         ;; convert the "labels" of the scrabble pieces (scores) into floating-point bit-arrays
-        training-labels (mapv #(into [] [(num->bit-array %)]) (vals scrabble-values))
+        training-labels (for [v (vals scrabble-values)] [(num->bit-array v)])
 
         ;; infer the width of the input and output based on the shape of the training data
         ;; - input layer has one input corresponding to each possible letter
@@ -82,5 +93,7 @@
     ;; Once the network has been trained, use the same input data to test to see
     ;; how the neural network has learned the target function. We use the same
     ;; data for testing as training for this degenerate case.
-    (evaluate network training-data training-labels)))
+    (evaluate network training-data training-labels)
 
+    ;; Use the network to perform a prediction
+    (println (format "Piece 'k' is worth %d points." (predict network \k)))))
