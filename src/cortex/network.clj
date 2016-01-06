@@ -111,20 +111,20 @@
     (map->TanhActivation {:output (m/zero-array shape)
                           :input-gradient (m/zero-array shape)})))
 
-(defrecord 
+(defrecord
   ^{:doc "Used for multinomial classification (choose 1 of n classes), where the output
-  layer can be interpreted as class probabilities.  Softmax is a generalization of the 
+  layer can be interpreted as class probabilities.  Softmax is a generalization of the
   logistic function for K-dimensional vectors that scales values between (0-1) that
   add up to 1.
-  
+
             e^x_j
    h_j = -----------
            𝚺 e^x_i
-  "} 
-  SoftmaxLoss [output] 
-  
+  "}
+  SoftmaxLoss [output]
+
   cp/PNeuralTraining
-  (forward [this input] 
+  (forward [this input]
     (m/assign! output input)
     (m/exp! output)
     ;; FIXME: (m/div! output (m/esum exponentials))
@@ -133,10 +133,10 @@
   (backward [this input output-gradient] output-gradient))
 
 (defrecord ^{:doc "The support vector machine (SVM) loss guides the output representation such
-  that the correct class is separated from incorrect classes by at least a 
-  specified margin."} 
+  that the correct class is separated from incorrect classes by at least a
+  specified margin."}
   SVMLayer [output input-gradient]
-  
+
   cp/PNeuralTraining
     (forward [this input]
       (m/assign! output input))
@@ -317,21 +317,22 @@
   [data]
   (map #(m/get-row data %) (range (m/row-count data))))
 
+(defn predict
+  "Uses a trained network to predict a result."
+  [net data]
+  (->> (cp/forward net data)
+       (m/emap #(Math/round (double %)))))
+
 (defn evaluate
   "Evaluates a model with a given set of test data.
    Returns a [result score] pair"
-  ([net test-data test-labels]
-    (let [results (doall
-                    (map (fn [data label]
-                           (let [res (cp/forward net data)]
-                             (m/emap #(Math/round (double %)) res)))
-                         (row-seq test-data) (row-seq test-labels)))
-          res-labels (map vector results (row-seq test-labels))
-          score (count (filter #(m/equals (first %) (second %)) res-labels))]
-      (println "evaluated: " (take 10 res-labels))
-      [results score])))
+  [net test-data test-labels]
+  (let [results (doall (map (partial predict net) (row-seq test-data)))
+        res-labels (map vector results (row-seq test-labels))
+        score (count (filter #(m/equals (first %) (second %)) res-labels))]
+    [results score]))
 
-(defn evaluator 
+(defn evaluator
   "Creates an evaluator for a given set of test data, as a function that can be applied to a model.
    The evalutor function takes a model and returns the error rate."
   ([test-data test-labels]
