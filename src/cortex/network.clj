@@ -36,9 +36,6 @@
                         "Returns a vector of [[params gradients] ...] pairs."))
 
 (defprotocol NeuralOptimizer
-  (train [this input label]
-    "Do one forward-backward step through the network.")
-
   (update-parameters [this & {:keys [scale]}]
     "Apply the accumulated parameter updates to the parameters."))
 
@@ -255,7 +252,7 @@
 ; returns a function that takes an input and a label, returns runtime stats and
 ; a new network.
 (defrecord SGDOptimizer [net loss-fn learning-rate momentum momentum-arrays]
-  NeuralOptimizer
+  cp/PTraining
   (train [this input label]
     (let [start-time (util/timestamp)
           output (cp/forward net input)
@@ -270,6 +267,7 @@
                  :loss loss}]
       stats))
 
+  NeuralOptimizer
   (update-parameters [this & {:keys [scale]}]
     (let [params-grads (parameters-gradients net)
           ; gradient = accumulated-gradient / batch-size
@@ -310,7 +308,7 @@
       (doseq [batch (partition batch-size (shuffle (range n-inputs)))]
         (let [start-time (util/timestamp)]
           (doseq [idx batch]
-            (train optimizer (data-item idx) (label-item idx))))
+            (cp/train optimizer (data-item idx) (label-item idx))))
         (update-parameters optimizer :scale batch-scale)))))
 
 (defn row-seq
