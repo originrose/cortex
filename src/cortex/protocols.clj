@@ -37,6 +37,12 @@
   (gradient [m]
     "Gets the accumulated gradient for this module, as a vector."))
 
+(defprotocol PLossGradientFunction
+  "Protocol to return a function that computes the gradient of the loss function for a module."
+  (loss-gradient-fn [m]
+    "Gets a fn [output traget] that computes the loss gradient for a module. May return nil to
+     indicate that no loss function is specified."))
+
 (defprotocol PNeuralTraining
   "Protocol for modules that can be trained with forward / back propagation."
   (forward [this input]

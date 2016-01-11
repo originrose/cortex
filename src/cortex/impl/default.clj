@@ -33,17 +33,25 @@
       ([m]
         (m/ecount (cp/parameters m)))))
 
+;; Default loss gradient function returns :loss-gradient-fn (may be nil)
+(extend-protocol cp/PLossGradientFunction
+  Object
+    (loss-gradient-fn 
+      ([m]
+        (:loss-gradient-fn m))))
+
 ;; default training implementation is to:
 ;; 1. Run forward pass
-;; 2. Compute gradient of loss function
-;; 3. Run backward pass
+;; 2. Gets the loss gradient function for the module (or defaults to MSE)
+;; 3. Compute outpout gradient
+;; 4. Run backward pass
 (extend-protocol cp/PTraining
   Object
     (train 
       ([m input target]
         (let [m (cp/forward m input)
               output (cp/output m)
-              loss-function util/mse-gradient ;; TODO: alternative loss functions
+              loss-function (or (cp/loss-gradient-fn m) util/mse-gradient-fn) ;; default to MSE
               output-gradient (loss-function output target)
               m (cp/backward m input output-gradient)]
           m))))

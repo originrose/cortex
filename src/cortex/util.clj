@@ -43,7 +43,7 @@
         stdev (/ 1.0 n)]
     (m/scale! (rand/sample-normal [m n]) stdev)))
 
-(defn mse-gradient
+(defn mse-gradient-fn
   "Returns the MSE error gradient for a given output and target value"
   ([output target]
     (let [result (m/mutable output)]
