@@ -39,7 +39,7 @@
     (cp/output [m]
       (cp/output (last modules)))
     
-    cp/PNeuralTraining
+  cp/PNeuralTraining
     (forward [this input]
       (let [n (long (count modules))]
         (loop [i 0
@@ -71,10 +71,15 @@
     (input-gradient [this]
       (cp/input-gradient (nth modules 0)))
   
+  cp/PLossGradientFunction
+    (loss-gradient-fn [m]
+      (or
+        (:loss-gradient-fn m) ;; allow stack to provide an override
+        (cp/loss-gradient-fn (last modules))))    
+
   cp/PGradient
     (gradient [this]
       (apply m/join (map cp/gradient modules)))
-  
     
   cp/PParameters
     (parameters [this]
