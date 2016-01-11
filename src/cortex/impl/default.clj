@@ -7,6 +7,7 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
+;; default to assuming zero parameters
 (extend-protocol cp/PParameters
   Object
 	  (parameters 
@@ -18,13 +19,14 @@
         (when (> 0 (long (m/ecount parameters))) (error "Non-zero length for parameter update"))
         m)))
 
+;; default gradient function assumes zero parameters
 (extend-protocol cp/PGradient
-  ;; default to assuming zero parameters
   Object
     (gradient 
       ([m]
         EMPTY-VECTOR)))
 
+;; default parameter count implementation is to... err... count the parameters. duh!
 (extend-protocol cp/PParameterCount
   Object
     (parameter-count 
@@ -34,7 +36,7 @@
 ;; default training implementation is to:
 ;; 1. Run forward pass
 ;; 2. Compute gradient of loss function
-;; run backward pass
+;; 3. Run backward pass
 (extend-protocol cp/PTraining
   Object
     (train 
