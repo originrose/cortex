@@ -52,6 +52,12 @@
   (input-gradient [this]
     "Gets the computed input gradients for a module. Assumes the backward pass has been run."))
 
+(defprotocol PTraining
+  "Protocol for modules that can be trained input / output pairs."
+  (train [this input output]
+    "Trains the module to produce the given input / output. Accumulates gradients as necessary.
+     Intended for use with update-parameters after completion of a (mini-)batch."))
+
 (defprotocol PGradientOptimiser
   "A gradient optimiser is an abstraction for objects that update parameters based on gradient observations.
    Gradient optimisers typically contain relating to previous observations, momentum etc."
