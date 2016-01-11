@@ -31,6 +31,21 @@
       ([m]
         (m/ecount (cp/parameters m)))))
 
+;; default training implementation is to:
+;; 1. Run forward pass
+;; 2. Compute gradient of loss function
+;; run backward pass
+(extend-protocol cp/PTraining
+  Object
+    (train 
+      ([m input target]
+        (let [m (cp/forward m input)
+              output (cp/output m)
+              loss-function util/mse-gradient ;; TODO: alternative loss functions
+              output-gradient (loss-function output target)
+              m (cp/backward m input output-gradient)]
+          m))))
+
 
 
 

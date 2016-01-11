@@ -1,5 +1,6 @@
 (ns cortex.test-utils
   (:require [clojure.core.matrix :as m])
+  (:require [cortex.util :as util])
   (:use [clojure.test]))
 
 (def DEFAULT-TOLERANCE 0.001)
@@ -33,3 +34,6 @@
   (is (converges? (range 10) 5 {:hits-needed 2 :tolerance 1}))
   (is (not (converges? (range 10) 15)))
   (is (converges? (range 10) 15 {:tolerance 10})))
+
+(deftest test-mse-gardient
+  (is (m/equals [-2 0 2] (util/mse-gradient [10 11 12] [11 11 11]))))

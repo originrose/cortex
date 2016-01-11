@@ -43,6 +43,14 @@
         stdev (/ 1.0 n)]
     (m/scale! (rand/sample-normal [m n]) stdev)))
 
+(defn mse-gradient
+  "Returns the MSE error gradient for a given output and target value"
+  ([output target]
+    (let [result (m/mutable output)]
+      (m/sub! result target)
+      (m/scale! result 2.0)
+      result)))
+
 (defmacro error
   "Throws an error with the provided message(s). This is a macro in order to try and ensure the 
    stack trace reports the error at the correct source line number."
