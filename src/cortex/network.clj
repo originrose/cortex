@@ -63,7 +63,6 @@
     (m/logistic! output))
 
   (backward [this input output-gradient]
-    ;(println "backward " (m/shape input-gradient) (m/shape output-gradient))
     (m/assign! input-gradient output-gradient)
     (m/emul! input-gradient output (m/sub 1.0 output))))
 
@@ -72,7 +71,7 @@
 
 (defn sigmoid-activation
   [shape]
-  (let [shape (if (number? shape) [1 shape] shape)]
+  (let [shape (if (number? shape) [shape] shape)]
     (map->SigmoidActivation {:output (m/zero-array shape)
                              :input-gradient (m/zero-array shape)})))
 
@@ -88,7 +87,7 @@
 
 (defn relu-activation
   [shape]
-  (let [shape (if (number? shape) [1 shape] shape)]
+  (let [shape (if (number? shape) [shape] shape)]
     (map->RectifiedLinearActivation {:output (m/zero-array shape)
                                      :input-gradient (m/zero-array shape)})))
 
@@ -104,7 +103,7 @@
 
 (defn tanh-activation
   [shape]
-  (let [shape (if (number? shape) [1 shape] shape)]
+  (let [shape (if (number? shape) [shape] shape)]
     (map->TanhActivation {:output (m/zero-array shape)
                           :input-gradient (m/zero-array shape)})))
 
@@ -191,10 +190,11 @@
   cp/PNeuralTraining
   (forward [this input]
     (m/assign! output biases)
-    ;(println "input: " (type input))
-    ;(println "weights: " (type weights))
-    ;(println "output: " (type output))
-    (m/add! output (m/mmul input (m/transpose weights))))
+
+    (let [activation (if (m/matrix? input)
+                       (m/mmul input (m/transpose weights))
+                       (m/inner-product input (m/transpose weights)))]
+      (m/add! output activation)))
 
   ; Compute the error gradients with respect to the input data by multiplying the
   ; output errors backwards through the weights, and then compute the error
@@ -205,10 +205,10 @@
   ; expected to apply the gradients to the parameters and then zero them out
   ; after each mini batch.
   (backward [this input output-gradient]
+    (if (m/matrix? input)
+      (m/add! weight-gradient (m/mmul (m/transpose output-gradient) input))
+      (m/add! weight-gradient (m/outer-product (m/transpose output-gradient) input)))
     (m/add! bias-gradient output-gradient)
-    ;(println "output-gradient: " (m/shape output-gradient))
-    ;(println "input: " (m/shape input))
-    (m/add! weight-gradient (m/mmul (m/transpose output-gradient) input))
     (m/assign! input-gradient (m/mmul output-gradient weights))
     input-gradient)
 
@@ -228,7 +228,7 @@
   [& {:keys [n-inputs n-outputs]}]
   (let [weights (util/weight-matrix n-outputs n-inputs)
         ; TODO: the biases should also be scaled to the stdev
-        biases (rand/sample-normal [1 n-outputs])]
+        biases (rand/sample-normal [n-outputs])]
     (map->LinearLayer
       {:n-inputs n-inputs
        :n-outputs n-outputs
@@ -237,7 +237,7 @@
        :output (m/zero-array (m/shape biases))
        :weight-gradient (m/zero-array (m/shape weights))
        :bias-gradient (m/zero-array (m/shape biases))
-       :input-gradient (m/zero-array [1 n-inputs])})))
+       :input-gradient (m/zero-array [n-inputs])})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Training and Optimization
@@ -250,18 +250,31 @@
 ; - optimization params
 ;
 ; returns a function that takes an input and a label, returns runtime stats and
-; a new network.
+                                        ; a new network.
+(defonce failure-data (atom nil))
 (defrecord SGDOptimizer [net loss-fn learning-rate momentum momentum-arrays]
   cp/PTraining
   (train [this input label]
     (let [start-time (util/timestamp)
           output (cp/forward net input)
           forward-time (util/ms-elapsed start-time)
-          loss (cp/loss loss-fn output label)
+          loss (double (cp/loss loss-fn output label))
           loss-delta (cp/loss-gradient loss-fn output label)
           start-time (util/timestamp)
           gradient (cp/backward net input loss-delta)
           backward-time (util/ms-elapsed start-time)
+          _ (reset! failure-data {:this this
+                                  :input input
+                                  :loss-fn loss-fn
+                                  :loss-delta loss-delta
+                                  :output output
+                                  :label label
+                                  :gradient gradient
+                                  :loss loss})
+          ;_ (println "loss:" loss)
+          _ (when (or (Double/isInfinite loss)
+                      (Double/isNaN loss))
+              (throw (Exception. "Numeric failure in SGDOptimizer; check failure-data atom for more info")))
           stats {:forward-time forward-time
                  :backward-time backward-time
                  :loss loss}]
@@ -276,16 +289,15 @@
           ; param += - learning-rate * gradient
 
           ; SGD + Momentum
-          ; dx = (prev-dx * momentum) + learning-rate * gradient
+          ; dx = (prev-dx * momentum) - learning-rate * gradient
           ; prev-dx = dx
           ; param += dx
           ]
-      (doseq [[params grads momentum-array] (map conj params-grads momentum-arrays)]
-        (let [grad-update (m/mul! grads learning-rate (or scale 1))
-              momentum-update (m/mul! momentum-array momentum)
-              dx (m/sub! momentum-update grad-update)]
-          (m/add! params dx)
-          (m/fill! grads 0))))))
+      (doseq [[params grads dx] (map conj params-grads momentum-arrays)]
+        (m/scale! dx momentum)
+        (m/add-scaled! dx grads (* -1.0 learning-rate))
+        (m/add! params dx)
+        (m/fill! grads 0)))))
 
 (defn sgd-optimizer
   [net loss-fn learning-rate momentum]
@@ -293,8 +305,12 @@
         momentum-arrays (map m/zero-array momentum-shapes)]
     (SGDOptimizer. net loss-fn learning-rate momentum momentum-arrays)))
 
-(defn train-network
-  [optimizer n-epochs batch-size training-data training-labels]
+
+(defn setup-train-network
+  "Returns a function you can use to run a complete batch.  This allows iterative
+testing via the repl for no perf cost when running outside the repl.
+The function returned runs a batch which is defined as a sequence of indexes."
+  [optimizer batch-size training-data training-labels]
   (let [[n-inputs input-width] (m/shape training-data)
         [n-labels label-width] (m/shape training-labels)
         n-batches (long (/ n-inputs batch-size))
@@ -303,13 +319,26 @@
         label-shape (m/shape training-labels)
         data-item (fn [idx] (apply m/select training-data (cons idx (repeat (dec (count data-shape)) :all))))
         label-item (fn [idx] (apply m/select training-labels (cons idx (repeat (dec (count label-shape)) :all))))]
+
+    (fn [batch]
+      (doseq [idx batch]
+        (cp/train optimizer (data-item idx) (label-item idx)))
+      (update-parameters optimizer :scale batch-scale))))
+
+
+(def batch-idx (atom 0))
+
+(defn train-network
+  [optimizer n-epochs batch-size training-data training-labels]
+  (let [[n-inputs input-width] (m/shape training-data)
+        batch-fn (setup-train-network optimizer batch-size training-data training-labels)]
+    (reset! batch-idx 0)
     (dotimes [i n-epochs]
-      ;(println "epoch" i)
-      (doseq [batch (partition batch-size (shuffle (range n-inputs)))]
-        (let [start-time (util/timestamp)]
-          (doseq [idx batch]
-            (cp/train optimizer (data-item idx) (label-item idx))))
-        (update-parameters optimizer :scale batch-scale)))))
+      (let [batch-seq (into [] (partition batch-size (shuffle (range n-inputs))))]
+        (doseq [batch batch-seq]
+          (swap! batch-idx inc)
+          (batch-fn batch))))))
+
 
 (defn row-seq
   [data]
@@ -408,4 +437,3 @@
                                 (Math/abs (+ gradient numeric-gradient)))]
           relative-error))
       (range (m/column-count input)))))
-

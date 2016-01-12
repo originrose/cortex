@@ -50,11 +50,11 @@
         model (net/linear-layer :n-inputs 2 :n-outputs 1)
         loss (opt/mse-loss)
         optimizer (net/sgd-optimizer model loss 0.1 0.9)]
-    (net/train-network optimizer 200 1 x-data y-data)
+    (net/train-network optimizer 10 1 x-data y-data)
     (println "After training the model learned:")
     (println "weights: " (:weights model))
     (println "biases: " (:biases model))))
- 
+
 
 (deftest confusion-test
   (let [cf (net/confusion-matrix ["cat" "dog" "rabbit"])
@@ -122,5 +122,3 @@
     (println "text  :  prediction")
     (doseq [[label fertilizer insecticide] (map concat results CORN-DATA)]
       (println label " : " (mat/mget (forward net (mat/row-matrix [fertilizer insecticide])) 0 0)))))
-
-
