@@ -81,7 +81,7 @@
         output-width (last (mat/shape training-labels))
 
         ;; This defines the shape of the network
-        ;; TODO: add some explanation for the intution of the size of the hidden layer
+        ;; TODO: add some explanation for the intuition of the size of the hidden layer
         network (net/sequential-network
                   [(net/linear-layer :n-inputs input-width :n-outputs 6)
                    (net/sigmoid-activation 6)
