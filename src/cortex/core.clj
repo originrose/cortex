@@ -82,9 +82,6 @@
     (cortex.impl.wiring.StackModule. (vec modules))))
 
 (defn clone
-  "clones a module, including all internal state strauctures. New module will be independent of the original."
+  "clones a module, including all internal state structures. New module will be independent of the original."
   ([m]
     (cp/clone m)))
-
-
-
