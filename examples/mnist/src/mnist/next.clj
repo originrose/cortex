@@ -31,10 +31,10 @@
 (def hidden-layer-size 30)
 
 
-(def n-epochs 1)
-(def learning-rate 0.001)
-(def momentum 0.9)
-(def batch-size 100)
+(def n-epochs 10)
+(def learning-rate 0.01)
+(def momentum 0.1)
+(def batch-size 1)
 (def loss-fn (opt/mse-loss))
 
 (defn random-matrix
@@ -56,9 +56,11 @@
     (core/stack-module network-modules)))
 
 
-(defn create-sgd-optimizer
+(defn create-optimizer
   [network]
-  (opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum}))
+  (opt/adadelta-optimiser (core/parameter-count network))
+  ;(opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
+  )
 
 
 (defn train-step
@@ -67,7 +69,7 @@
         temp-answer (core/output network)
         loss (cp/loss loss-fn temp-answer answer)
         loss-gradient (cp/loss-gradient loss-fn temp-answer answer)]
-    (core/backward network input loss-gradient)))
+    (core/backward (assoc network :loss loss) input loss-gradient)))
 
 (defn test-train-step
   []
@@ -79,7 +81,7 @@
                           (train-step input answer network loss-fn))
                         network
                         (map vector input-seq label-seq))
-        batch-scale (/ 1.0 (count input-seq))]
+        batch-scale (/ 10.0 (count input-seq))]
     (m/scale! (core/gradient network) batch-scale)
     (core/optimise optimizer network)))
 
@@ -87,14 +89,18 @@
 (defn train
   []
   (let [network (create-network)
-        optimizer (create-sgd-optimizer network)
+        optimizer (create-optimizer network)
         epoch-batches (repeatedly n-epochs
                        #(into [] (partition batch-size (shuffle (range (count training-data))))))
         [optimizer network] (reduce (fn [opt-network batch-index-seq]
                                       (reduce (fn [[optimizer network] batch-indexes]
                                                 (let [input-seq (mapv training-data batch-indexes)
-                                                      answer-seq (mapv training-labels batch-indexes)]
-                                                  (train-batch input-seq answer-seq network optimizer loss-fn)))
+                                                      answer-seq (mapv training-labels batch-indexes)
+                                                      [optimizer network] (train-batch input-seq
+                                                                                       answer-seq
+                                                                                       network optimizer loss-fn)]
+                                                  ;(println "loss after batch:" (:loss network))
+                                                  [optimizer network]))
                                               opt-network
                                               batch-index-seq))
                                     [optimizer network]
@@ -108,11 +114,11 @@
                               (m/emap #(Math/round (double %)) (core/output network))))
                           test-data)
         correct (count (filter #(m/equals (first %) (second %)) (map vector test-results test-labels)))]
-    (/ correct (count test-data))))
+    (double (/ correct (count test-data)))))
 
 
 (defn train-and-evaluate
   []
   (let [network (train)
         fraction-correct (evaluate network)]
-    (println (format "Network got %d correct" fraction-correct))))
+    (println (format "Network score: %g" fraction-correct))))
