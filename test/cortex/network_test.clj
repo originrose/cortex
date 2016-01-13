@@ -6,7 +6,9 @@
     [clojure.core.matrix :as mat]
     [clojure.core.matrix.random :as randm]
     [cortex.util :as util]
-    [cortex.network :as net]))
+    [cortex.network :as net]
+    [cortex.core :as core]
+    [cortex.layers :as layers]))
 
 (mat/set-current-implementation :vectorz)
 
@@ -15,62 +17,48 @@
 ; 0	1	     1
 ; 1	0	     1
 ; 0	0	     0
-(def XOR-DATA [[[1 1]] [[0 1]] [[1 0]] [[0 0]]])
-(def XOR-LABELS [[[0]] [[1]] [[1]] [[0]]])
+(def XOR-DATA [[1 1] [0 1] [1 0] [0 0]])
+(def XOR-LABELS [[0] [1] [1] [0]])
 
-(defn xor-test
+(defn abs-diff
+  ^Double [^Double x ^Double y]
+  (Math/abs (- x y)))
+
+(deftest xor-test
   []
-  (let [net (net/sequential-network
-              [(net/linear-layer :n-inputs 2 :n-outputs 3)
-               (net/sigmoid-activation 3)
-               (net/linear-layer :n-inputs 3 :n-outputs 1)])
+  (let [net (core/stack-module
+              [(layers/linear-layer 2 3)
+               (layers/logistic [3])
+               (layers/linear-layer 3 1)])
+
         training-data XOR-DATA
         training-labels XOR-LABELS
         n-epochs 2000
-        loss-fn (opt/quadratic-loss)
-        learning-rate 0.3
+        loss-fn (opt/mse-loss)
+        learning-rate 0.01
         momentum 0.9
         batch-size 1
-        optimizer (net/sgd-optimizer net loss-fn learning-rate momentum)
-        _ (net/train-network optimizer n-epochs batch-size training-data training-labels)
-        [results score] (net/evaluate net XOR-DATA XOR-LABELS)
-        label-count (count XOR-LABELS)
-        score-percent (float(/ score label-count))]
-    (println "NET: " net)
-    (println "forward: "  (forward net [1 0]))
-    (println (format "XOR Score: %f [%d of %d]" score-percent score label-count))
-    nil))
+        optimizer (opt/sgd-optimiser (core/parameter-count net) { :learn-rate learning-rate :momentum momentum })
+        network (net/train net optimizer loss-fn training-data training-labels batch-size n-epochs)
+        score-percent (net/evaluate net training-data training-labels)]
+    (is (< (abs-diff score-percent 1.0) 0.001))))
 
-(defn linear-model-test
+
+(deftest linear-model-test
   "Define a random dataset and create the labels from some fixed parameters so we know exactly
   what the linear model should learn."
   []
-  (let [x-data (randm/sample-uniform [100 2])
-        y-data (mat/array (mat/transpose (mat/add (mat/mmul [0.1 0.2] (mat/transpose x-data)) 0.3)))
-        model (net/linear-layer :n-inputs 2 :n-outputs 1)
+  (let [x-data (into [] (mat/rows (randm/sample-uniform [100 2])))
+        y-data (into [] (map vector (mat/array (mat/transpose (mat/add (mat/mmul [0.1 0.2] (mat/transpose x-data)) 0.3)))))
+        model (layers/linear-layer 2 1)
         loss (opt/mse-loss)
-        optimizer (net/sgd-optimizer model loss 0.1 0.9)]
-    (net/train-network optimizer 10 1 x-data y-data)
-    (println "After training the model learned:")
-    (println "weights: " (:weights model))
-    (println "biases: " (:biases model))))
+        optimizer (opt/sgd-optimiser (core/parameter-count model) {:learn-rate 0.01 :momentum 0.9})
+        model (net/train model optimizer loss x-data y-data 10 1)
+        mse (net/evaluate-mse model x-data y-data)]
+    (is (< mse 1))))
 
 
-(deftest confusion-test
-  (let [cf (net/confusion-matrix ["cat" "dog" "rabbit"])
-        cf (-> cf
-            (net/add-prediction "dog" "cat")
-            (net/add-prediction "dog" "cat")
-            (net/add-prediction "cat" "cat")
-            (net/add-prediction "cat" "cat")
-            (net/add-prediction "rabbit" "cat")
-            (net/add-prediction "dog" "dog")
-            (net/add-prediction "cat" "dog")
-            (net/add-prediction "rabbit" "rabbit")
-            (net/add-prediction "cat" "rabbit")
-            )]
-    (net/print-confusion-matrix cf)
-    (is (= 2 (get-in cf ["cat" "dog"])))))
+
 
 ; Data from: Dominick Salvator and Derrick Reagle
 ; Shaum's Outline of Theory and Problems of Statistics and Economics
@@ -96,29 +84,17 @@
 (def CORN-RESULTS
   [40.32, 42.92, 45.33, 48.85, 52.37, 57.0, 61.82, 69.78, 72.19, 79.42])
 
-(def model* (atom nil))
-
-(defn regression-test
-  [& [net]]
-  (let [net (or net (net/sequential-network [(net/linear-layer :n-inputs 2 :n-outputs 1)]))
+(deftest core-test
+  (let [net (layers/linear-layer 2 1)
         learning-rate 0.00001
         momentum 0.9
         n-epochs 10000
         batch-size 1
         loss (opt/mse-loss)
-        optimizer (net/sgd-optimizer net loss learning-rate momentum)
-        data (map mat/row-matrix CORN-DATA)
-        labels (map vector CORN-LABELS)
-        results (map vector CORN-RESULTS)]
-    (net/train-network optimizer n-epochs batch-size data labels)
-    (reset! model* net)
-    (println "After training the ideal values solving analytically are:
-     corn = 31.98 + 0.65 * fertilizer + 1.11 * insecticides\n")
-    (println "The networked learned:")
-    (println "    corn = " (mat/mget (get-in net [:layers 0 :biases]) 0 0) "+ "
-             (mat/mget (get-in net [:layers 0 :weights]) 0 0) "* x +"
-             (mat/mget (get-in net [:layers 0 :weights]) 0 1) "* y")
-
-    (println "text  :  prediction")
-    (doseq [[label fertilizer insecticide] (map concat results CORN-DATA)]
-      (println label " : " (mat/mget (forward net (mat/row-matrix [fertilizer insecticide])) 0 0)))))
+        optimizer (opt/sgd-optimiser (core/parameter-count net) {:learn-rate learning-rate :momentum momentum})
+        data CORN-DATA
+        labels CORN-LABELS
+        results CORN-RESULTS
+        net (net/train net optimizer loss data labels batch-size n-epochs)
+        mse (net/evaluate-mse net data labels)]
+    (is (< mse 25))))

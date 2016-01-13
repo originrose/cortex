@@ -8,6 +8,7 @@
     [clojure.core.matrix.random :as rand]
     [cortex.util :as util]
     [cortex.protocols :as cp]
+    [cortex.network :as net]
     [clojure.pprint])
   (:gen-class))
 
@@ -68,23 +69,12 @@
 (def batch-size 1) ;;For this example a small batch size is ideal
 (def loss-fn (opt/mse-loss))
 
-(defn random-matrix
-  [shape-vector]
-  (if (> (count shape-vector) 1 )
-    (apply util/weight-matrix shape-vector)
-    (rand/sample-normal (first shape-vector))))
-
-(defn linear-layer
-  [n-inputs n-outputs]
-  (layers/linear (random-matrix [n-outputs n-inputs])
-                 (random-matrix [n-outputs])))
-
 ;; training, evaluation and prediction
 (defn create-network
   []
-  (let [network-modules [(linear-layer input-width hidden-layer-size)
+  (let [network-modules [(layers/linear-layer input-width hidden-layer-size)
                          (layers/logistic [hidden-layer-size])
-                         (linear-layer hidden-layer-size output-width)]]
+                         (layers/linear-layer hidden-layer-size output-width)]]
     (core/stack-module network-modules)))
 
 (defn create-optimizer
@@ -93,60 +83,20 @@
   (opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
   )
 
-(defn train-step
-  [input answer network loss-fn]
-  (let [network (core/forward network input)
-        temp-answer (core/output network)
-        loss (cp/loss loss-fn temp-answer answer)
-        loss-gradient (cp/loss-gradient loss-fn temp-answer answer)]
-    (core/backward (assoc network :loss loss) input loss-gradient)))
 
 (defn test-train-step
   []
-  (train-step (first training-data) (first training-labels) (create-network) loss-fn))
-
-(defn train-batch
-  [input-seq label-seq network optimizer loss-fn]
-  (let [network (reduce (fn [network [input answer]]
-                          (train-step input answer network loss-fn))
-                        network
-                        (map vector input-seq label-seq))]
-    (core/optimise optimizer network)))
+  (net/train-step (first training-data) (first training-labels) (create-network) loss-fn))
 
 (defn train
   []
   (let [network (create-network)
-        optimizer (create-optimizer network)
-        epoch-batches (repeatedly n-epochs
-                                  #(into [] (partition batch-size (shuffle (range (count training-data))))))
-        epoch-count (atom 0)
-        [optimizer network] (reduce (fn [opt-network batch-index-seq]
-                                      (swap! epoch-count inc)
-                                      (println "Running epoch:" @epoch-count)
-                                      (reduce (fn [[optimizer network] batch-indexes]
-                                                (let [input-seq (mapv training-data batch-indexes)
-                                                      answer-seq (mapv training-labels batch-indexes)
-                                                      [optimizer network] (train-batch input-seq
-                                                                                       answer-seq
-                                                                                       network optimizer loss-fn)]
-                                                  ;(println "loss after batch:" (:loss network))
-                                                  [optimizer network]))
-                                              opt-network
-                                              batch-index-seq))
-                                    [optimizer network]
-                                    epoch-batches)]
-    network))
-
+        optimizer (create-optimizer network)]
+    (net/train network optimizer loss-fn training-data training-labels batch-size n-epochs)))
 
 (defn evaluate
   [network]
-  (let [test-results (map (fn [input]
-                            (let [network (core/forward network input)]
-                              (m/emap #(Math/round (double %)) (core/output network))))
-                          training-data)
-        correct (count (filter #(m/equals (first %) (second %)) (map vector test-results training-labels)))]
-    (double (/ correct (count training-data)))))
-
+  (net/evaluate network training-data training-labels))
 
 
 (defn train-and-evaluate

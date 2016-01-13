@@ -13,10 +13,10 @@
 (defn logistic
   ([shape]
     (when-not (coll? shape)
-      (error "logistic layer constructor requires a shape vector")) 
-    (cortex.impl.layers.Logistic. 
-      (m/ensure-mutable (m/new-array :vectorz shape)) 
-      (m/ensure-mutable (m/new-array :vectorz shape))))) 
+      (error "logistic layer constructor requires a shape vector"))
+    (cortex.impl.layers.Logistic.
+      (m/ensure-mutable (m/new-array :vectorz shape))
+      (m/ensure-mutable (m/new-array :vectorz shape)))))
 
 (defn linear
   "Constructs a weighted linear transformation module using a dense matrix and bias vector.
@@ -32,7 +32,12 @@
       (-> wm
         (assoc :weight-gradient (m/new-vector :vectorz (* n-outputs n-inputs)))
         (assoc :bias-gradient (m/new-vector :vectorz n-outputs))
-        (assoc :input-gradient (m/new-vector :vectorz n-inputs)))))) 
+        (assoc :input-gradient (m/new-vector :vectorz n-inputs))))))
+
+(defn linear-layer
+  [n-inputs n-outputs]
+  (linear (util/random-matrix [n-outputs n-inputs])
+          (util/random-matrix [n-outputs])))
 
 (defn normaliser
   "Constructs a normaliser of the given shape"
@@ -40,7 +45,7 @@
     (normaliser shape nil))
   ([shape {:keys [learn-rate normaliser-factor] :as options}]
     (when-not (coll? shape)
-      (error "normaliser layer constructor requires a shape vector")) 
+      (error "normaliser layer constructor requires a shape vector"))
     (let [output (m/new-array :vectorz shape)
           input-gradient (m/new-array :vectorz  shape)
           mean (m/new-array :vectorz shape)
@@ -54,7 +59,7 @@
       (cortex.impl.layers.Normaliser. output input-gradient sd mean acc-ss acc-mean tmp nil options))))
 
 (defn denoising-autoencoder
-  "Constructs a denoining auto-encoder, using the specified up and down modules. 
+  "Constructs a denoining auto-encoder, using the specified up and down modules.
 
    Shape of output of up must match input of down, and vice-versa."
   ([up down]
