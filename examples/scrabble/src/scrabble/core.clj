@@ -1,8 +1,15 @@
 (ns scrabble.core
   (:require
-    [clojure.core.matrix :as mat]
+    [clojure.core.matrix :as m]
     [cortex.optimise :as opt]
-    [cortex.network :as net]))
+    [cortex.layers :as layers]
+    [cortex.optimise :as opt]
+    [cortex.core :as core]
+    [clojure.core.matrix.random :as rand]
+    [cortex.util :as util]
+    [cortex.protocols :as cp]
+    [clojure.pprint])
+  (:gen-class))
 
 ;; This is an example of a very simple network that is designed to learn the
 ;; values for given scrabble pieces. Inspired by the following talk:
@@ -12,7 +19,7 @@
 ;; training data, however it shows how a neural network can learn an arbitrary
 ;; function.
 
-(mat/set-current-implementation :vectorz)
+(m/set-current-implementation :vectorz)
 
 ;; scrabble pieces and their values
 (def scrabble-values {\a 1 \b 3 \c 3 \d 2 \e 1 \f 4 \g 2 \h 4 \i 1 \j 8 \k 5
@@ -44,56 +51,110 @@
        clojure.string/join
        (Integer/parseInt 2)))
 
+(def training-data (into [] (for [k (keys scrabble-values)] (char->bit-array k))))
+;; convert the "labels" of the scrabble pieces (scores) into floating-point bit-arrays
+(def training-labels (into [] (for [v (vals scrabble-values)] (num->bit-array v))))
+
+;; infer the width of the input and output based on the shape of the training data
+;; - input layer has one input corresponding to each possible letter
+;; - output layer is of size 4 as we can represent the corresponding scores for
+;;   each letter with 4 bits (max score of 10)
+(def input-width (last (m/shape training-data)))
+(def output-width (last (m/shape training-labels)))
+(def hidden-layer-size 4)
+(def n-epochs 1) ;;epoch is a pass through the dataset
+(def learning-rate 0.1)
+(def momentum 0.1)
+(def batch-size 1) ;;For this example a small batch size is ideal
+(def loss-fn (opt/mse-loss))
+
+(defn random-matrix
+  [shape-vector]
+  (if (> (count shape-vector) 1 )
+    (apply util/weight-matrix shape-vector)
+    (rand/sample-normal (first shape-vector))))
+
+(defn linear-layer
+  [n-inputs n-outputs]
+  (layers/linear (random-matrix [n-outputs n-inputs])
+                 (random-matrix [n-outputs])))
+
 ;; training, evaluation and prediction
+(defn create-network
+  []
+  (let [network-modules [(linear-layer input-width hidden-layer-size)
+                         (layers/logistic [hidden-layer-size])
+                         (linear-layer hidden-layer-size output-width)]]
+    (core/stack-module network-modules)))
 
-(defn train [network training-data training-labels]
-  (let [n-epochs 30            ;; Number of iterations to train
-        learning-rate 0.3
-        momentum 0.1
-        batch-size 1
-        loss-fn (opt/quadratic-loss)
-        optimizer (net/sgd-optimizer network loss-fn learning-rate momentum)]
-    (net/train-network optimizer n-epochs batch-size training-data training-labels)))
+(defn create-optimizer
+  [network]
+  ;(opt/adadelta-optimiser (core/parameter-count network))
+  (opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
+  )
 
-(defn evaluate [network test-data test-labels]
-  (let [[results score] (net/evaluate network test-data test-labels)
-        label-count (count test-data)
-        score-percent (float (/ score label-count))]
-    (println (format "Score: %f [%d of %d]" score-percent score label-count))))
+(defn train-step
+  [input answer network loss-fn]
+  (let [network (core/forward network input)
+        temp-answer (core/output network)
+        loss (cp/loss loss-fn temp-answer answer)
+        loss-gradient (cp/loss-gradient loss-fn temp-answer answer)]
+    (core/backward (assoc network :loss loss) input loss-gradient)))
 
-(defn predict [network character]
-  (-> (net/predict network [(char->bit-array character)])
-      first
-      bit-array->num))
+(defn test-train-step
+  []
+  (train-step (first training-data) (first training-labels) (create-network) loss-fn))
 
-(defn run-experiment []
-  (let [;; convert the values from the scrabble pieces (letters) into floating-point bit-arrays
-        training-data (for [k (keys scrabble-values)] [(char->bit-array k)])
+(defn train-batch
+  [input-seq label-seq network optimizer loss-fn]
+  (let [network (reduce (fn [network [input answer]]
+                          (train-step input answer network loss-fn))
+                        network
+                        (map vector input-seq label-seq))]
+    (core/optimise optimizer network)))
 
-        ;; convert the "labels" of the scrabble pieces (scores) into floating-point bit-arrays
-        training-labels (for [v (vals scrabble-values)] [(num->bit-array v)])
+(defn train
+  []
+  (let [network (create-network)
+        optimizer (create-optimizer network)
+        epoch-batches (repeatedly n-epochs
+                                  #(into [] (partition batch-size (shuffle (range (count training-data))))))
+        epoch-count (atom 0)
+        [optimizer network] (reduce (fn [opt-network batch-index-seq]
+                                      (swap! epoch-count inc)
+                                      (println "Running epoch:" @epoch-count)
+                                      (reduce (fn [[optimizer network] batch-indexes]
+                                                (let [input-seq (mapv training-data batch-indexes)
+                                                      answer-seq (mapv training-labels batch-indexes)
+                                                      [optimizer network] (train-batch input-seq
+                                                                                       answer-seq
+                                                                                       network optimizer loss-fn)]
+                                                  ;(println "loss after batch:" (:loss network))
+                                                  [optimizer network]))
+                                              opt-network
+                                              batch-index-seq))
+                                    [optimizer network]
+                                    epoch-batches)]
+    network))
 
-        ;; infer the width of the input and output based on the shape of the training data
-        ;; - input layer has one input corresponding to each possible letter
-        ;; - output layer is of size 4 as we can represent the corresponding scores for
-        ;;   each letter with 4 bits (max score of 10)
-        input-width (last (mat/shape training-data))
-        output-width (last (mat/shape training-labels))
 
-        ;; This defines the shape of the network
-        ;; TODO: add some explanation for the intuition of the size of the hidden layer
-        network (net/sequential-network
-                  [(net/linear-layer :n-inputs input-width :n-outputs 6)
-                   (net/sigmoid-activation 6)
-                   (net/linear-layer :n-inputs 6 :n-outputs output-width)])]
+(defn evaluate
+  [network]
+  (let [test-results (map (fn [input]
+                            (let [network (core/forward network input)]
+                              (m/emap #(Math/round (double %)) (core/output network))))
+                          training-data)
+        correct (count (filter #(m/equals (first %) (second %)) (map vector test-results training-labels)))]
+    (double (/ correct (count training-data)))))
 
-    ;; Run the training portion of the algorithm using the parameters from above
-    (train network training-data training-labels)
 
-    ;; Once the network has been trained, use the same input data to test to see
-    ;; how the neural network has learned the target function. We use the same
-    ;; data for testing as training for this degenerate case.
-    (evaluate network training-data training-labels)
 
-    ;; Use the network to perform a prediction
-    (println (format "Piece 'k' is worth %d points." (predict network \k)))))
+(defn train-and-evaluate
+  []
+  (let [network (train)
+        fraction-correct (evaluate network)]
+    (println (format "Network score: %g" fraction-correct))))
+
+(defn -main
+  [& args]
+  (train-and-evaluate))
