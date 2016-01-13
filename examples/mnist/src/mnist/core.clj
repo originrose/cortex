@@ -1,4 +1,4 @@
-(ns mnist.next
+(ns mnist.core
   (:require [cortex.protocols :as cp]
             [cortex.util :as util]
             [cortex.layers :as layers]
@@ -6,7 +6,8 @@
             [thinktopic.datasets.mnist :as mnist]
             [cortex.optimise :as opt]
             [cortex.core :as core]
-            [clojure.core.matrix.random :as rand]))
+            [clojure.core.matrix.random :as rand])
+  (:gen-class))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -32,7 +33,7 @@
 
 
 (def n-epochs 4)
-(def learning-rate 0.001)
+(def learning-rate 0.01)
 (def momentum 0.5)
 (def batch-size 10)
 (def loss-fn (opt/mse-loss))
@@ -80,9 +81,7 @@
   (let [network (reduce (fn [network [input answer]]
                           (train-step input answer network loss-fn))
                         network
-                        (map vector input-seq label-seq))
-        batch-scale (/ 10.0 (count input-seq))]
-    ;(m/scale! (core/gradient network) batch-scale)
+                        (map vector input-seq label-seq))]
     (core/optimise optimizer network)))
 
 
@@ -93,7 +92,6 @@
         epoch-batches (repeatedly n-epochs
                                   #(into [] (partition batch-size (shuffle (range (count training-data))))))
         epoch-count (atom 0)
-        _ (println (count epoch-batches))
         [optimizer network] (reduce (fn [opt-network batch-index-seq]
                                       (swap! epoch-count inc)
                                       (println "Running epoch:" @epoch-count)
@@ -127,6 +125,6 @@
         fraction-correct (evaluate network)]
     (println (format "Network score: %g" fraction-correct))))
 
-(defn main
+(defn -main
   [& args]
   (train-and-evaluate))
