@@ -31,10 +31,10 @@
 (def hidden-layer-size 30)
 
 
-(def n-epochs 10)
-(def learning-rate 0.01)
-(def momentum 0.1)
-(def batch-size 1)
+(def n-epochs 4)
+(def learning-rate 0.001)
+(def momentum 0.5)
+(def batch-size 10)
 (def loss-fn (opt/mse-loss))
 
 (defn random-matrix
@@ -58,8 +58,8 @@
 
 (defn create-optimizer
   [network]
-  (opt/adadelta-optimiser (core/parameter-count network))
-  ;(opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
+  ;(opt/adadelta-optimiser (core/parameter-count network))
+  (opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
   )
 
 
@@ -82,7 +82,7 @@
                         network
                         (map vector input-seq label-seq))
         batch-scale (/ 10.0 (count input-seq))]
-    (m/scale! (core/gradient network) batch-scale)
+    ;(m/scale! (core/gradient network) batch-scale)
     (core/optimise optimizer network)))
 
 
@@ -91,8 +91,12 @@
   (let [network (create-network)
         optimizer (create-optimizer network)
         epoch-batches (repeatedly n-epochs
-                       #(into [] (partition batch-size (shuffle (range (count training-data))))))
+                                  #(into [] (partition batch-size (shuffle (range (count training-data))))))
+        epoch-count (atom 0)
+        _ (println (count epoch-batches))
         [optimizer network] (reduce (fn [opt-network batch-index-seq]
+                                      (swap! epoch-count inc)
+                                      (println "Running epoch:" @epoch-count)
                                       (reduce (fn [[optimizer network] batch-indexes]
                                                 (let [input-seq (mapv training-data batch-indexes)
                                                       answer-seq (mapv training-labels batch-indexes)
@@ -122,3 +126,7 @@
   (let [network (train)
         fraction-correct (evaluate network)]
     (println (format "Network score: %g" fraction-correct))))
+
+(defn main
+  [& args]
+  (train-and-evaluate))
