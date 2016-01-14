@@ -15,3 +15,5 @@ pom.xml.asc
 examples/mnist/checkouts
 examples/mnist/target
 examples/scrabble/checkouts
+caffe/checkouts
+caffe/target
