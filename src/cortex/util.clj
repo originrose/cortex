@@ -46,6 +46,11 @@
           factor (Math/sqrt (/ 1.0 n))]
       (m/scale! (rand/sample-normal [m n]) factor))))
 
+(defn random-matrix
+  "Constructs an array of the given shape with random normally distributed element values"
+  ([shape-vector]
+    (rand/sample-normal shape-vector)))
+
 (defn mse-gradient-fn
   "Returns the MSE error gradient for a given output and target value"
   ([output target]
@@ -140,10 +145,3 @@
                                 (Math/abs (+ gradient numeric-gradient)))]
           relative-error))
       (range (m/column-count input)))))
-
-(defn random-matrix
-  "Constructs an array of the given shape with random normally distributed element values"
-  ([shape-vector]
-    (if (> (count shape-vector) 1 )
-      (apply weight-matrix shape-vector)
-      (rand/sample-normal (first shape-vector)))))
