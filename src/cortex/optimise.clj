@@ -127,26 +127,6 @@
   ([]
     (MSELoss.)))
 
-; NOTE: not really sure how this is supposed to differ and why from a simple MSE
-; loss.  Must investigate.
-(deftype QuadraticLoss []
-  cp/PLossFunction
-    (loss [this v target]
-      ; NOTE: linear/norm is different for matrices and vectors so this row-matrix
-      ; conversion is important for correctness.
-      ;(println "loss: " v "-" target)
-      (let [diff (m/sub v target)
-            diff (if (m/vec? diff) (m/row-matrix diff) diff)]
-        (m/mul 0.5 (m/pow (linear/norm diff) 2))))
-
-    (loss-gradient [this v target]
-      (m/sub v target)))
-
-(defn quadratic-loss
-  "Returns a qaudratic loss function"
-  ([]
-    (QuadraticLoss.)))
-
 (def SMALL-NUM 1e-30)
 
 (deftype CrossEntropyLoss []
