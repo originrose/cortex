@@ -38,7 +38,7 @@
   "Constructs a linear transformation layer with a random weight matrix and bias for the
   given numbers of inputs and outputs."
   ([n-inputs n-outputs]
-    (linear (util/random-matrix [n-outputs n-inputs])
+    (linear (util/weight-matrix n-outputs n-inputs)
             (util/random-matrix [n-outputs]))))
 
 (defn normaliser

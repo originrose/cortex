@@ -108,9 +108,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn mean-squared-error
-  [activation target]
-  (m/div (m/esum (m/pow (m/sub activation target) 2))
-           (m/ecount activation)))
+  "Computes the mean squared error of an activation array and a target array"
+  ([activation target]
+    (/ (double (m/esum (m/square (m/sub activation target))))
+       (double (m/ecount activation)))))
 
 (deftype MSELoss []
   cp/PLossFunction
