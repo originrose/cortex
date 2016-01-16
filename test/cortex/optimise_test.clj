@@ -16,7 +16,7 @@
             [o m] (optimise o m)
             dist (m/length (m/sub (output m) target))]
         ;; (println (output m))
-        (if (< i 100) 
+        (if (< i 150) 
           (recur (inc i) m o)
           (is (< dist 0.01)))))))
 
