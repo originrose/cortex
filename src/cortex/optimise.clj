@@ -116,11 +116,12 @@
 (deftype MSELoss []
   cp/PLossFunction
     (loss [this v target]
-      (let [z (m/sub v target)]
-        (m/esum (m/pow z 2))))
+      (mean-squared-error v target))
 
     (loss-gradient [this v target]
-      (m/sub v target)))
+      (let [r (m/mutable v)]
+        (m/sub! r target)
+        (m/scale! r (/ 2.0 (double (m/ecount v)))))))
 
 (defn mse-loss 
   "Returns a Mean Squared Error (MSE) loss function"
