@@ -35,9 +35,11 @@
         (assoc :input-gradient (m/new-vector :vectorz n-inputs))))))
 
 (defn linear-layer
-  [n-inputs n-outputs]
-  (linear (util/random-matrix [n-outputs n-inputs])
-          (util/random-matrix [n-outputs])))
+  "Constructs a linear transformation layer with a random weight matrix and bias for the
+  given numbers of inputs and outputs."
+  ([n-inputs n-outputs]
+    (linear (util/random-matrix [n-outputs n-inputs])
+            (util/random-matrix [n-outputs]))))
 
 (defn normaliser
   "Constructs a normaliser of the given shape"

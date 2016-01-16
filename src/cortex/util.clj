@@ -140,7 +140,8 @@
       (range (m/column-count input)))))
 
 (defn random-matrix
-  [shape-vector]
-  (if (> (count shape-vector) 1 )
-    (apply weight-matrix shape-vector)
-    (rand/sample-normal (first shape-vector))))
+  "Constructs an array of the given shape with random normally distributed element values"
+  ([shape-vector]
+    (if (> (count shape-vector) 1 )
+      (apply weight-matrix shape-vector)
+      (rand/sample-normal (first shape-vector)))))
