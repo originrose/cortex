@@ -38,11 +38,13 @@
     (m/emul sz (m/sub 1.0 sz))))
 
 (defn weight-matrix
-  [m n]
-  (let [n (long n)
-        m (long m)
-        stdev (/ 1.0 n)]
-    (m/scale! (rand/sample-normal [m n]) stdev)))
+  "Constructs a weight matrix with normally distributed random values. Weights are scaled so that 
+   the element sums of each row are normally distributed with mean 0.0 and stdev 1.0"
+  ([m n]
+    (let [n (long n)
+          m (long m)
+          factor (Math/sqrt (/ 1.0 n))]
+      (m/scale! (rand/sample-normal [m n]) factor))))
 
 (defn mse-gradient-fn
   "Returns the MSE error gradient for a given output and target value"
