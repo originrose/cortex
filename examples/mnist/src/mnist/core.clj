@@ -33,10 +33,10 @@
 (def hidden-layer-size 30)
 
 
-(def n-epochs 4)
-(def learning-rate 0.01)
-(def momentum 0.5)
-(def batch-size 10)
+(def n-epochs 2)
+(def learning-rate 0.001)
+(def momentum 0.9)
+(def batch-size 2)
 (def loss-fn (opt/mse-loss))
 
 (defn create-network
@@ -47,6 +47,20 @@
     (core/stack-module network-modules)))
 
 
+(defn create-relu-softmax-network
+  []
+  (core/stack-module
+   [(layers/linear-layer input-width hidden-layer-size)
+    (layers/relu [hidden-layer-size])
+    (layers/linear-layer hidden-layer-size output-width)
+    ;(layers/softmax [output-width])
+    ]))
+
+
+(def network-fn create-relu-softmax-network)
+;(def network-fn create-network)
+
+
 (defn create-optimizer
   [network]
   ;(opt/adadelta-optimiser (core/parameter-count network))
@@ -55,11 +69,11 @@
 
 (defn test-train-step
   []
-  (net/train-step (first training-data) (first training-labels) (create-network) loss-fn))
+  (net/train-step (first training-data) (first training-labels) (network-fn) loss-fn))
 
 (defn train
   []
-  (let [network (create-network)
+  (let [network (network-fn)
         optimizer (create-optimizer network)]
     (net/train network optimizer loss-fn training-data training-labels batch-size n-epochs)))
 
@@ -68,11 +82,16 @@
   [network]
   (net/evaluate network test-data test-labels))
 
+(defn evaluate-mse
+  [network]
+  (net/evaluate-mse network test-data test-labels))
+
 (defn train-and-evaluate
   []
   (let [network (train)
         fraction-correct (evaluate network)]
-    (println (format "Network score: %g" fraction-correct))))
+    (println (format "Network score: %g" fraction-correct))
+    (println (format "Network mse-score %g" (evaluate-mse network)))))
 
 (defn -main
   [& args]

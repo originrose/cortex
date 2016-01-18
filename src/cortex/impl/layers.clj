@@ -38,11 +38,15 @@
       input-gradient))
 
 
-(defrecord RectifiedLinear [output input-gradient]
+;;There is an option that torch uses which is if the input is less than 0
+;;then multiply it by a special value (negval).
+;;https://github.com/torch/nn/blob/master/lib/THNN/generic/LeakyReLU.c
+(defrecord RectifiedLinear [output input-gradient dotvec negval]
   cp/PModule
   (calc [this input]
+    (m/emap! (fn ^double [^double _ ^double in] (if (neg? in) negval 1.0)) dotvec input)
     (m/assign! output input)
-    (m/emap! (fn ^double [^double x] (if (neg? x) 0 x)) output))
+    (m/mul! output dotvec))
 
   (output [this]
     (:output this))
@@ -55,7 +59,7 @@
 
   (backward [this input output-gradient]
     (m/assign! input-gradient output-gradient)
-    (m/emap! (fn ^double [^double x] (if (neg? x) 0 x)) input-gradient)
+    (m/mul! input-gradient dotvec)
     this)
 
   (input-gradient [this]
@@ -85,13 +89,22 @@
     input-gradient))
 
 
-(defrecord SoftmaxLoss [output input-gradient]
+(defn softmax-forward!
+  "Runs softmax on input and places result in output"
+  [input output]
+  (let [max-val (m/emax input)]
+    ;;From caffe, we subtract the max for numerical stability
+    ;;and then run the textbook softmax
+    (m/assign! output input)
+    (m/sub! output max-val)
+    (m/exp! output)
+    (m/div! output (m/esum output))))
+
+
+(defrecord Softmax [output input-gradient]
   cp/PModule
   (calc [this input]
-    (m/assign! output input)
-    (m/exp! output)
-    ;; FIXME: (m/div! output (m/esum exponentials))
-    )
+    (softmax-forward! input output))
 
   (output [this]
     (:output this))

@@ -33,7 +33,7 @@
 
         training-data XOR-DATA
         training-labels XOR-LABELS
-        n-epochs 2000
+        n-epochs 1000
         loss-fn (opt/mse-loss)
         learning-rate 0.01
         momentum 0.9
