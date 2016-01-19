@@ -15,6 +15,8 @@
                      msdx       ;; mean squared delta update
                      dx         ;; latest delta update
                      parameters ;; updated parameters
+                     rms-g      ;; root mean squared gt
+                     rms-dx     ;; root mean squared (delta x)t-1
                      ])
 
 (defn adadelta-optimiser
@@ -22,11 +24,51 @@
   ([size]
     (let [msgrad (m/mutable (m/new-vector :vectorz size))
           msdx (m/mutable (m/new-vector :vectorz size))
-          dx (m/mutable (m/new-vector :vectorz size))]
-      (m/assign! msgrad 0.01)
-      (m/assign! msdx 0.01)
+          dx (m/mutable (m/new-vector :vectorz size))
+          rms-g (m/mutable (m/new-vector :vectorz size))
+          rms-dx (m/mutable (m/new-vector :vectorz size))]
+      (m/assign! msgrad 0.00)
+      (m/assign! msdx 0.00)
       (m/assign! dx 0.0)
-      (AdaDelta. msgrad msdx dx nil))))
+      (AdaDelta. msgrad msdx dx nil rms-g rms-dx))))
+
+
+(defn sqrt-with-epsilon!
+  "res[i] = sqrt(res[i] + epsilon)"
+  [squared-vec epsilon]
+  (m/add! squared-vec epsilon)
+  (m/sqrt! squared-vec))
+
+(defn adadelta-step!
+  [decay-rate epsilon grad-sq-accum dx-sq-accum rms-grad rms-dx dx gradient parameters]
+  (let [decay-rate (double decay-rate)
+        rho (- 1.0 decay-rate)]
+
+    ;;Compute squared gradient running average and mean squared gradient
+    (m/mul! grad-sq-accum rho)
+    (m/add-scaled-product! grad-sq-accum gradient gradient decay-rate)
+    (m/assign! rms-grad grad-sq-accum)
+    (sqrt-with-epsilon! rms-grad epsilon)
+
+    ;;Compute mean squared parameter update from past squared parameter update
+    (m/assign! rms-dx dx-sq-accum)
+    (sqrt-with-epsilon! rms-dx epsilon)
+
+    ;;Compute update
+    ;;x(t) = -1.0 * (rms-gx/rms-grad) * gradient
+    ;;Epsilon is important both as initial condition *and* in ensuring
+    ;;that updates happen as learning rate decreases
+    ;;May be a more clever core.matrix way of doing this
+    (m/assign! dx gradient)
+    (m/mul! dx -1.0)
+    (m/mul! dx rms-dx)
+    (m/div! dx rms-grad)
+
+    ;;Accumulate gradients
+    (m/mul! dx-sq-accum rho)
+    (m/add-scaled-product! dx-sq-accum dx dx decay-rate)
+    (m/add parameters dx)
+    ))
 
 (extend-protocol cp/PGradientOptimiser
   AdaDelta
@@ -42,7 +84,7 @@
         ;; accumulate the latest gradient
         (m/add-scaled-product! msgrad gradient gradient decay-rate)
 
-        ;; compute the parameter update
+         ;; compute the parameter update
         (m/assign! dx msdx)
         (m/div! dx msgrad)
         (m/sqrt! dx)
