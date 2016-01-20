@@ -38,13 +38,16 @@
     (m/emul sz (m/sub 1.0 sz))))
 
 (defn weight-matrix
-  "Constructs a weight matrix with normally distributed random values. Weights are scaled so that 
-   the element sums of each row are normally distributed with mean 0.0 and stdev 1.0"
-  ([m n]
-    (let [n (long n)
-          m (long m)
-          factor (Math/sqrt (/ 1.0 n))]
-      (m/scale! (rand/sample-normal [m n]) factor))))
+  [rows cols]
+  (let [^java.util.Random random-obj (java.util.Random.)
+        weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
+    (m/mutable
+     (m/array
+      (mapv (fn [_]
+              (repeatedly cols
+                          #(* weight-scale
+                              (.nextGaussian random-obj))))
+            (range rows))))))
 
 (defn random-matrix
   "Constructs an array of the given shape with random normally distributed element values"

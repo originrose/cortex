@@ -8,51 +8,37 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-;; ==============================================
-;; ADADELTA optimiser
-
-(defrecord AdaDelta [msgrad     ;; mean squared gradient
-                     msdx       ;; mean squared delta update
-                     dx         ;; latest delta update
-                     parameters ;; updated parameters
-                     rms-g      ;; root mean squared gt
-                     rms-dx     ;; root mean squared (delta x)t-1
-                     ])
-
-(defn adadelta-optimiser
-  "Constructs a new AdaDelta optimiser of the given size (parameter length)"
-  ([size]
-    (let [msgrad (m/mutable (m/new-vector :vectorz size))
-          msdx (m/mutable (m/new-vector :vectorz size))
-          dx (m/mutable (m/new-vector :vectorz size))
-          rms-g (m/mutable (m/new-vector :vectorz size))
-          rms-dx (m/mutable (m/new-vector :vectorz size))]
-      (m/assign! msgrad 0.00)
-      (m/assign! msdx 0.00)
-      (m/assign! dx 0.0)
-      (AdaDelta. msgrad msdx dx nil rms-g rms-dx))))
-
+(defn new-mutable-vector
+  [size]
+  (m/mutable (m/new-vector :vectorz size)))
 
 (defn sqrt-with-epsilon!
-  "res[i] = sqrt(res[i] + epsilon)"
-  [squared-vec epsilon]
-  (m/add! squared-vec epsilon)
-  (m/sqrt! squared-vec))
+  "res[i] = sqrt(vec[i] + epsilon)"
+  [output-vec squared-vec epsilon]
+  (m/assign! output-vec squared-vec)
+  (m/add! output-vec epsilon)
+  (m/sqrt! output-vec))
+
+
+(defn compute-squared-running-average!
+  [accumulator data-vec ^double decay-rate]
+  (m/mul! accumulator (- 1.0 decay-rate))
+  (m/add-scaled-product! accumulator data-vec data-vec decay-rate))
 
 (defn adadelta-step!
+  "http://www.matthewzeiler.com/pubs/googleTR2012/googleTR2012.pdf
+Mutates: grad-sq-accum dx-sq-accum rms-grad rms-dx dx
+Returns new parameters"
   [decay-rate epsilon grad-sq-accum dx-sq-accum rms-grad rms-dx dx gradient parameters]
-  (let [decay-rate (double decay-rate)
-        rho (- 1.0 decay-rate)]
+  (let [decay-rate (double 0.05)
+        epsilon 1e-8]
 
     ;;Compute squared gradient running average and mean squared gradient
-    (m/mul! grad-sq-accum rho)
-    (m/add-scaled-product! grad-sq-accum gradient gradient decay-rate)
-    (m/assign! rms-grad grad-sq-accum)
-    (sqrt-with-epsilon! rms-grad epsilon)
+    (compute-squared-running-average! grad-sq-accum gradient decay-rate)
 
+    (sqrt-with-epsilon! rms-grad grad-sq-accum epsilon)
     ;;Compute mean squared parameter update from past squared parameter update
-    (m/assign! rms-dx dx-sq-accum)
-    (sqrt-with-epsilon! rms-dx epsilon)
+    (sqrt-with-epsilon! rms-dx dx-sq-accum epsilon)
 
     ;;Compute update
     ;;x(t) = -1.0 * (rms-gx/rms-grad) * gradient
@@ -65,44 +51,52 @@
     (m/div! dx rms-grad)
 
     ;;Accumulate gradients
-    (m/mul! dx-sq-accum rho)
-    (m/add-scaled-product! dx-sq-accum dx dx decay-rate)
+    (compute-squared-running-average! dx-sq-accum dx decay-rate)
+
+    ;;Compute new parameters and return them.
     (m/add parameters dx)
     ))
 
-(extend-protocol cp/PGradientOptimiser
-  AdaDelta
-    (compute-parameters [adadelta gradient parameters]
-      (let [decay-rate (double (or (:decay-rate adadelta) 0.05))
-            epsilon (double (or (:epsilon adadelta) 0.000001))
-            msgrad (:msgrad adadelta)
-            msdx (:msdx adadelta)
-            dx (:dx adadelta)]
+;; ==============================================
+;; ADADELTA optimiser
 
-        ;; apply decay rate to the previous mean squared gradient
-        (m/mul! msgrad (- 1.0 decay-rate))
-        ;; accumulate the latest gradient
-        (m/add-scaled-product! msgrad gradient gradient decay-rate)
+(defrecord AdaDelta [msgrad     ;; mean squared gradient
+                     msdx       ;; mean squared delta update
+                     dx         ;; latest delta update
+                     parameters ;; updated parameters
+                     rms-g      ;; root mean squared gt
+                     rms-dx     ;; root mean squared (delta x)t-1
+                     ]
+  cp/PGradientOptimiser
+  (compute-parameters [adadelta gradient parameters]
+    (let [decay-rate (double (or (:decay-rate adadelta) 0.05))
+          epsilon (double (or (:epsilon adadelta) 0.000001))
+          msgrad (:msgrad adadelta)
+          msdx (:msdx adadelta)
+          dx (:dx adadelta)]
+      (assoc adadelta :parameters
+             (adadelta-step! decay-rate epsilon
+                             msgrad msdx
+                             rms-g rms-dx
+                             dx gradient parameters))))
+  cp/PParameters
+  (parameters [this]
+    (:parameters this))
+  )
 
-         ;; compute the parameter update
-        (m/assign! dx msdx)
-        (m/div! dx msgrad)
-        (m/sqrt! dx)
-        (m/mul! dx gradient -0.5) ;; change varies with negative gradient. 0.5 factor seems necessary?
+(defn adadelta-optimiser
+  "Constructs a new AdaDelta optimiser of the given size (parameter length)"
+  ([size]
+    (let [msgrad (new-mutable-vector size)
+          msdx (new-mutable-vector size)
+          dx (new-mutable-vector size)
+          rms-g (new-mutable-vector size)
+          rms-dx (new-mutable-vector size)]
+      (m/assign! msgrad 0.00)
+      (m/assign! msdx 0.00)
+      (m/assign! dx 0.0)
+      (AdaDelta. msgrad msdx dx nil rms-g rms-dx))))
 
-        ;; apply decay rate to the previous mean squared update
-        (m/mul! msdx (- 1.0 decay-rate))
-
-        ;; accumulate the latest update
-        (m/add-scaled-product! msdx dx dx decay-rate)
-
-        ;; return the updated adadelta record. Mutable gradients have been updated
-        (assoc adadelta :parameters (m/add parameters dx)))))
-
-(extend-protocol cp/PParameters
-  AdaDelta
-    (parameters [this]
-      (:parameters this)))
 
 ;; ==============================================
 ;; SGD optimiser with momentum
@@ -118,7 +112,7 @@
   ([size]
     (sgd-optimiser size nil))
   ([size {:keys [learn-rate momentum] :as options}]
-    (let [dx (m/mutable (m/new-vector :vectorz size))]
+   (let [dx (new-mutable-vector size)]
       (m/assign! dx 0.0)
       (SGDOptimiser. dx nil options))))
 

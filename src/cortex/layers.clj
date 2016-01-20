@@ -21,7 +21,7 @@
 (defn softmax
   [shape]
   (when-not (coll? shape)
-    (error "logistic layer constructor requires a shape vector"))
+    (error "softmax layer constructor requires a shape vector"))
   (cortex.impl.layers.Softmax.
       (m/ensure-mutable (m/new-array :vectorz shape))
       (m/ensure-mutable (m/new-array :vectorz shape))))
@@ -30,7 +30,7 @@
   [shape & {:keys [negval]
             :or {negval 0.0 }}]
   (when-not (coll? shape)
-    (error "logistic layer constructor requires a shape vector"))
+    (error "relu layer constructor requires a shape vector"))
   (cortex.impl.layers.RectifiedLinear.
       (m/ensure-mutable (m/new-array :vectorz shape))
       (m/ensure-mutable (m/new-array :vectorz shape))
@@ -54,11 +54,9 @@
         (assoc :input-gradient (m/new-vector :vectorz n-inputs))))))
 
 (defn linear-layer
-  "Constructs a linear transformation layer with a random weight matrix and bias for the
-  given numbers of inputs and outputs."
-  ([n-inputs n-outputs]
-    (linear (util/weight-matrix n-outputs n-inputs)
-            (util/random-matrix [n-outputs]))))
+  [n-inputs n-outputs]
+  (linear (util/weight-matrix n-outputs n-inputs)
+          (m/new-vector :vectorz n-outputs)))
 
 (defn normaliser
   "Constructs a normaliser of the given shape"

@@ -16,7 +16,7 @@
             [o m] (optimise o m)
             dist (m/length (m/sub (output m) target))]
         ;; (println (output m))
-        (if (< i 150) 
+        (if (< i 150)
           (recur (inc i) m o)
           (is (< dist 0.01)))))))
 
@@ -54,3 +54,7 @@
                (layers/logistic [2])]))
         o (adadelta-optimiser (parameter-count m))]
     (optimiser-test m o)))
+
+(defmacro pr-local
+  [varname]
+  `(println (str (name '~varname) ":") ~varname))

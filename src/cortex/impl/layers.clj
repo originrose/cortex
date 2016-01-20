@@ -101,6 +101,29 @@
     (m/div! output (m/esum output))))
 
 
+
+
+;; for (t = 0; t < stride*nframe; t++)
+;; {
+;;         real *gradInput_ptr = gradInput_data + (t/stride)*dim*stride + t % stride;
+;;         real *output_ptr = output_data + (t/stride)*dim*stride + t % stride;
+;;         real *gradOutput_ptr = gradOutput_data + (t/stride)*dim*stride + t % stride;
+
+;;         long d;
+;;         accreal sum = 0;
+;;         for (d = 0; d < dim; d++)
+;;              sum += (accreal)gradOutput_ptr [d*stride] * output_ptr [d*stride];
+
+;;         for (d = 0; d < dim; d++)
+;;              gradInput_ptr [d*stride] = output_ptr [d*stride] * (gradOutput_ptr [d*stride] - sum);
+;; }
+
+(defn softmax-backward!
+  ""
+  [input-gradient output output-gradient input]
+  (m/assign! input-gradient output-gradient))
+
+
 (defrecord Softmax [output input-gradient]
   cp/PModule
   (calc [this input]
@@ -116,11 +139,26 @@
 
 
   (backward [this input output-gradient]
-    (m/assign! input-gradient output-gradient)
+    (softmax-backward! input-gradient (:output this) output-gradient input)
     this)
 
   (input-gradient [this]
     input-gradient))
+
+
+(defn linear-backward!
+  "linear backward pass.  Returns input gradient"
+  [input output-gradient weights bias weight-gradient bias-gradient]
+  (let [bg output-gradient
+        wg (m/outer-product output-gradient input)
+        ig (m/inner-product (m/transpose weights) output-gradient)]
+    ;(println "gradient:" (into [] (seq output-gradient)))
+    ;(println "input:" (into [] (seq input)))
+    ;(println "bias-gradient:" (into [] (seq bg)))
+    ;(println "weight-gradient:" (into [] (seq wg)))
+    (m/add! weight-gradient (m/as-vector wg))
+    (m/add! bias-gradient bg)
+    ig))
 
 ;; LINEAR
 ;; function that implements a linear transformation (weights + bias)
@@ -142,13 +180,10 @@
         (assoc :input input)))
 
     (backward [this input output-gradient]
-      (let [bg output-gradient
-            wg (m/outer-product output-gradient input)
-            ig (m/inner-product (m/transpose weights) output-gradient)]
-
-        (m/add! (:weight-gradient this) (m/as-vector wg))
-        (m/add! (:bias-gradient this) bg)
-        (assoc this :input-gradient ig)))
+      (assoc this :input-gradient
+             (linear-backward! input output-gradient (:weights this) (:bias this)
+                               (:weight-gradient this)
+                               (:bias-gradient this))))
 
     (input-gradient [this]
       (:input-gradient this))
