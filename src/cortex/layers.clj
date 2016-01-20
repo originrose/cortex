@@ -18,6 +18,25 @@
       (m/ensure-mutable (m/new-array :vectorz shape))
       (m/ensure-mutable (m/new-array :vectorz shape)))))
 
+(defn softmax
+  [shape]
+  (when-not (coll? shape)
+    (error "logistic layer constructor requires a shape vector"))
+  (cortex.impl.layers.Softmax.
+      (m/ensure-mutable (m/new-array :vectorz shape))
+      (m/ensure-mutable (m/new-array :vectorz shape))))
+
+(defn relu
+  [shape & {:keys [negval]
+            :or {negval 0.0 }}]
+  (when-not (coll? shape)
+    (error "logistic layer constructor requires a shape vector"))
+  (cortex.impl.layers.RectifiedLinear.
+      (m/ensure-mutable (m/new-array :vectorz shape))
+      (m/ensure-mutable (m/new-array :vectorz shape))
+      (m/ensure-mutable (m/new-array :vectorz shape))
+      negval))
+
 (defn linear
   "Constructs a weighted linear transformation module using a dense matrix and bias vector.
    Shape of input and output are determined by the weight matrix."

@@ -145,3 +145,9 @@
                                 (Math/abs (+ gradient numeric-gradient)))]
           relative-error))
       (range (m/column-count input)))))
+
+
+(defn estimate-gradient 
+  "Computes a numerical approximation of the derivative of the function f at with respectr to input x"
+  ([f x]
+    (let [x+dx (m/add )])))

@@ -22,19 +22,26 @@
 
 (deftest test-adadelta
   (let [m (layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
-        o (adadelta-optimiser (parameter-count m))] 
+        o (adadelta-optimiser (parameter-count m))]
     (optimiser-test m o)))
 
 (deftest test-sgd
   (let [m (layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
-        o (sgd-optimiser (parameter-count m))] 
+        o (sgd-optimiser (parameter-count m))]
     (optimiser-test m o)))
 
 (deftest test-nn
   (let [m (stack-module
             [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
              (layers/logistic [2])])
-        o (sgd-optimiser (parameter-count m))] 
+        o (sgd-optimiser (parameter-count m))]
+    (optimiser-test m o)))
+
+(deftest test-relu-nn
+  (let [m (stack-module
+            [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
+             (layers/relu [2])])
+        o (sgd-optimiser (parameter-count m))]
     (optimiser-test m o)))
 
 (deftest test-denoise
@@ -45,6 +52,5 @@
             (stack-module
               [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
                (layers/logistic [2])]))
-        o (adadelta-optimiser (parameter-count m))] 
+        o (adadelta-optimiser (parameter-count m))]
     (optimiser-test m o)))
-

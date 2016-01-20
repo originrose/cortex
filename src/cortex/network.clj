@@ -27,6 +27,7 @@
                           (train-step input answer network loss-fn))
                         network
                         (map vector input-seq label-seq))]
+    (m/div! (core/gradient network) (double (count input-seq)))
     (core/optimise optimizer network)))
 
 (defn train
@@ -43,7 +44,6 @@
                                                       [optimizer network] (train-batch input-seq
                                                                                        answer-seq
                                                                                        network optimizer loss-fn)]
-                                                  ;(println "loss after batch:" (:loss network))
                                                   [optimizer network]))
                                               opt-network
                                               batch-index-seq))
