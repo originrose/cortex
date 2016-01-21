@@ -286,8 +286,6 @@
                                                        test-layer1-bias-gradients
                                                        test-layer2-weight-gradients
                                                        test-layer2-bias-gradients]))]
-    (println "gradients:" gradients)
-    (println "test-gradients:" test-gradients)
     (is (< (m/distance gradients test-gradients) 0.001))))
 
 
@@ -358,8 +356,9 @@
         parameters (core/parameters network)
         test-params (m/array (apply m/join (map m/as-vector [(:weights test-lin-1) (:bias test-lin-1)
                                                               (:weights test-lin-2) (:bias test-lin-2)])))]
-    (println "distance: "  (m/dot (m/sub parameters test-params)
-                                  (m/sub parameters test-params)))))
+    (is (< (m/dot (m/sub parameters test-params)
+                  (m/sub parameters test-params))
+           0.001))))
 
 (defn create-softmax-network-from-test-data
   [run-data]
@@ -406,8 +405,6 @@
                                         [optimizer network]))
                                     [optimizer network]
                                     (range (count test-input)))]
-    (clojure.pprint/pprint (:modules network))
-    (clojure.pprint/pprint (net/run network test-input))
     nil))
 
 (deftest adadelta-run

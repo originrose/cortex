@@ -3,7 +3,8 @@
    various other functionality"
   (:require [cortex.protocols :as cp]
             [clojure.core.matrix :as m])
-  (:require [cortex.util :as util :refer [error]])
+  (:require [cortex.util :as util :refer [error]]
+            [cortex.serialization :as cs])
   (:import [clojure.lang IFn]))
 
 (set! *warn-on-reflection* true)
@@ -104,5 +105,15 @@
               this)))))
 
     cp/PModuleClone
-      (clone [this]
-        (StackModule. (mapv cp/clone modules))))
+    (clone [this]
+      (StackModule. (mapv cp/clone modules)))
+
+    cp/PSerialize
+    (->map [this]
+      (let [typed-map (dissoc (cs/record->map this) :modules)
+            modules (mapv cs/module->map (:modules this))]
+        (assoc typed-map :modules modules)))
+
+    (map-> [this map-data]
+      (let [modules (mapv cs/map->module (:modules map-data))]
+        (into (assoc this :modules modules) (dissoc map-data :modules)))))

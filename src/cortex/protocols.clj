@@ -21,7 +21,7 @@
   "Protocol for a module that supports parameters. The default implementation returns an empty parameter vector."
   (parameters [m]
     "Gets the parameters for this module, as a vector.")
-  
+
   (update-parameters [m parameters]
     "Updates the parameters for this module to the given parameter values. Returns the updated module"))
 
@@ -31,7 +31,7 @@
     "Gets the number of parameters for this module, as a long value."))
 
 (defprotocol PGradient
-  "Protocol for a module that supports accumulated gradients for optimisation. This vector should be exactly the 
+  "Protocol for a module that supports accumulated gradients for optimisation. This vector should be exactly the
    same length as the parameter vector.
    The default implementation returns an empty gradient vector."
   (gradient [m]
@@ -54,7 +54,7 @@
     "Back propagate errors through the module with respect to the input.  Returns the
     module with input-gradient set (gradient at the inputs). Input must be the same
     as used in the forward pass.")
-  
+
   (input-gradient [this]
     "Gets the computed input gradients for a module. Assumes the backward pass has been run."))
 
@@ -68,13 +68,23 @@
   "A gradient optimiser is an abstraction for objects that update parameters based on gradient observations.
    Gradient optimisers typically contain relating to previous observations, momentum etc."
   (compute-parameters
-    [optimiser gradient parameters] 
+    [optimiser gradient parameters]
      "Computes updated parameters using the given average gradient. Returns the updated gradient optimiser.
       Users can then call `parameters` on this object to get the updated parameters"))
 
 (defprotocol PLossFunction
-  "A function that calculates loss of a vector output vs. a target value" 
+  "A function that calculates loss of a vector output vs. a target value"
   (loss [this v target]
-    "Computes the loss for a value v against a target")
+        "Computes the loss for a value v against a target")
   (loss-gradient [this v target]
-    "Computes the gradient of the loss with respect to v"))
+        "Computes the gradient of the loss with respect to v"))
+
+
+(defprotocol PSerialize
+  "Default implementation simply calls into {} and adds type.  An override
+is necessary if your class has complex object members instead of simple keys.
+The map must have a key named :record-type that is the fully namespaced
+qualified record class name (.getName (type item)).  The system will look
+for a function map->TypeName in order to create an empty object."
+  (->map [this])
+  (map-> [this map-data]))

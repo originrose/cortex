@@ -11,8 +11,8 @@
 
 
 
-(def num-points 100)
-(def num-classes 2)
+(def num-points 200)
+(def num-classes 3)
 (m/set-current-implementation :vectorz)
 
 (defn create-spiral
@@ -38,12 +38,16 @@
 (def all-data (into [] (mapcat create-spiral-from-index (range num-classes))))
 (def all-labels (into [] (mapcat #(repeat num-points (m/array (assoc (into [] (repeat num-classes 0)) % 1))) (range num-classes))))
 (def loss-fn (opt/mse-loss))
-(def hidden-layer-size 5)
+(def hidden-layer-size 10)
 
 
 (defn softmax-network
   []
-  (core/stack-module [(layers/linear-layer 2 num-classes)
+  (core/stack-module [(layers/linear-layer 2 hidden-layer-size)
+                      (layers/relu [hidden-layer-size])
+                      (layers/linear-layer hidden-layer-size hidden-layer-size)
+                      (layers/relu [hidden-layer-size])
+                      (layers/linear-layer hidden-layer-size num-classes)
                       (layers/softmax [num-classes])
                       ]))
 
@@ -56,6 +60,15 @@
   []
   (let [network (softmax-network)
         optimizer (create-optimizer network)
-        network (net/train network optimizer loss-fn all-data all-labels 100 1)]
-    (println (format "Network score: %g" (net/evaluate-softmax network all-data all-labels)))
-    network))
+        network (net/train network optimizer loss-fn all-data all-labels 10 100)
+        score (net/evaluate-softmax network all-data all-labels)]
+    [score network]))
+
+
+(defonce score-network (atom nil))
+
+(defn get-score-network
+  []
+  (when-not @score-network
+    (reset! score-network (train-and-evaluate)))
+  @score-network)

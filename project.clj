@@ -3,7 +3,8 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.taoensso/timbre "4.2.1"]
                  [net.mikera/vectorz-clj "0.41.0"]
-                 [org.clojure/test.check "0.9.0"]]
+                 [org.clojure/test.check "0.9.0"]
+                 [thinktopic/matrix.fressian "0.2.1"]]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]]
                    :java-source-paths ["test"]}}
