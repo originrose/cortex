@@ -363,14 +363,16 @@
 
 (defn create-softmax-network-from-test-data
   [run-data]
-  (let [network (core/stack-module [(layers/linear-layer 2 2)
-                                    (layers/relu [2])
-                                    (layers/linear-layer 2 2)
-                                    (layers/softmax [2])])
-        initial-run (first run-data)
+  (let [initial-run (first run-data)
         initial-setup (first initial-run)
         source-linear-1 (first initial-setup)
         source-linear-2 (second initial-setup)
+        hidden-layer-size (count (:bias source-linear-1))
+        network (core/stack-module [(layers/linear-layer 2 hidden-layer-size)
+                                    (layers/relu [hidden-layer-size])
+                                    (layers/linear-layer hidden-layer-size 2)
+                                    (layers/softmax [2])])
+
         linear-1 (first (:modules network))
         linear-2 (nth (:modules network) 2)
         linear-1 (assoc linear-1 :weights (m/mutable (m/array (:weights source-linear-1)))
@@ -382,9 +384,9 @@
     network))
 
 
-
-(deftest adadelta-run
-  (let [test-data (read-string (slurp (clojure.java.io/resource "adadelta_test.log")))
+(defn run-log-test
+  [resource-name]
+  (let [test-data (read-string (slurp (clojure.java.io/resource resource-name)))
         run-data (into [] (partition 3 (partition 2 (:run test-data))))
         test-input (mapv m/array (partition 2 (:data test-data)))
         test-labels (mapv #(m/array (assoc [0 0] % 1.0)) (:labels test-data))
@@ -405,4 +407,11 @@
                                     [optimizer network]
                                     (range (count test-input)))]
     (clojure.pprint/pprint (:modules network))
+    (clojure.pprint/pprint (net/run network test-input))
     nil))
+
+(deftest adadelta-run
+  (run-log-test "adadelta_test.log"))
+
+(deftest spiral-run
+  (run-log-test "spiral.log"))

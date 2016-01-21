@@ -11,8 +11,8 @@
 
 
 
-(def num-points 25)
-(def num-classes 3)
+(def num-points 100)
+(def num-classes 2)
 (m/set-current-implementation :vectorz)
 
 (defn create-spiral
@@ -36,15 +36,15 @@
 
 
 (def all-data (into [] (mapcat create-spiral-from-index (range num-classes))))
-(def all-labels (into [] (mapcat #(repeat num-points (m/array (assoc [0 0 0] % 1))) (range num-classes))))
+(def all-labels (into [] (mapcat #(repeat num-points (m/array (assoc (into [] (repeat num-classes 0)) % 1))) (range num-classes))))
 (def loss-fn (opt/mse-loss))
 (def hidden-layer-size 5)
 
 
 (defn softmax-network
   []
-  (core/stack-module [(layers/linear-layer 2 3)
-                      (layers/softmax [3])
+  (core/stack-module [(layers/linear-layer 2 num-classes)
+                      (layers/softmax [num-classes])
                       ]))
 
 (defn create-optimizer
@@ -52,13 +52,10 @@
   (opt/adadelta-optimiser (core/parameter-count network)))
 
 
-(def crap-data (into [] (repeat 100 (nth all-data 26))))
-(def crap-labels (into [] (repeat 100 (nth all-labels 26))))
-
 (defn train-and-evaluate
   []
   (let [network (softmax-network)
         optimizer (create-optimizer network)
-        network (net/train network optimizer loss-fn all-data all-labels 10 1000)]
+        network (net/train network optimizer loss-fn all-data all-labels 100 1)]
     (println (format "Network score: %g" (net/evaluate-softmax network all-data all-labels)))
     network))

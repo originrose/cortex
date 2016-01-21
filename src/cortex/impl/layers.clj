@@ -152,10 +152,6 @@
   (let [bg output-gradient
         wg (m/outer-product output-gradient input)
         ig (m/inner-product (m/transpose weights) output-gradient)]
-    ;(println "gradient:" (into [] (seq output-gradient)))
-    ;(println "input:" (into [] (seq input)))
-    ;(println "bias-gradient:" (into [] (seq bg)))
-    ;(println "weight-gradient:" (into [] (seq wg)))
     (m/add! weight-gradient (m/as-vector wg))
     (m/add! bias-gradient bg)
     ig))

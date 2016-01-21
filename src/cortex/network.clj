@@ -14,9 +14,9 @@
 (defn run
   [network test-data]
   (mapv (fn [input]
-         (let [network (core/forward network input)]
-           (core/output network)))
-       test-data))
+          (let [network (core/forward network input)]
+            (m/clone (core/output network))))
+        test-data))
 
 (defn evaluate
   "Evaluate the network assuming we want discreet integers in the result vector"
@@ -65,7 +65,6 @@
   (let [network (core/forward network input)
         temp-answer (core/output network)
         loss (cp/loss loss-fn temp-answer answer)
-        _ (println "network loss:" loss)
         loss-gradient (cp/loss-gradient loss-fn temp-answer answer)]
     (core/backward (assoc network :loss loss) input loss-gradient)))
 
@@ -96,7 +95,7 @@
                                                                                              network optimizer loss-fn)]
                                                         [optimizer network]))
                                                     opt-network
-                                                    (take 10 batch-index-seq))]
+                                                    batch-index-seq)]
                                         (when test-data
                                           (println "epoch mse-loss:" (evaluate-mse network test-data test-labels)))
                                         [optimizer network]))

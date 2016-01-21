@@ -30,14 +30,15 @@
 
 (def input-width (last (m/shape training-data)))
 (def output-width (last (m/shape training-labels)))
-(def hidden-layer-size 100)
 
 
-(def n-epochs 1)
+
+(def n-epochs 500)
 (def learning-rate 0.001)
 (def momentum 0.9)
 (def batch-size 10)
 (def loss-fn (opt/mse-loss))
+(def hidden-layer-size 80)
 
 (defn create-network
   []
@@ -51,6 +52,10 @@
   []
   (core/stack-module
    [(layers/linear-layer input-width hidden-layer-size)
+    (layers/relu [hidden-layer-size])
+    (layers/linear-layer hidden-layer-size hidden-layer-size)
+    (layers/relu [hidden-layer-size])
+    (layers/linear-layer hidden-layer-size hidden-layer-size)
     (layers/relu [hidden-layer-size])
     (layers/linear-layer hidden-layer-size output-width)
     (layers/softmax [output-width])
