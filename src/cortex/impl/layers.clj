@@ -130,7 +130,7 @@
 
 
 (defn linear-backward!
-  "linear backward pass.  Returns input gradient"
+  "linear backward pass.  Returns a new input gradient."
   [input output-gradient weights bias weight-gradient bias-gradient]
   (let [bg output-gradient
         wg (m/outer-product output-gradient input)
@@ -317,40 +317,110 @@
 
 
 (defn get-padded-strided-dimension
-  "http://caffe.berkeleyvision.org/tutorial/layers.html"
+  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
+of the output of a conv-net ignoring channels."
   ^long [^long input-dim ^long pad ^long kernel-size ^long stride]
   (long (+ (long (/ (- (+ input-dim (* 2 pad))  kernel-size)
                     stride))
            1)))
 
+(defn columnar-sum
+  "Sum the columns of the matrix so we produce in essence a new row
+which contains the columnar sums.  Produces a vector and leaves input unchanged"
+  [m]
+  (let [rows (m/rows m)
+        accumulator (m/clone (first rows))]
+    (reduce m/add! accumulator (rest rows))))
 
 
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Convolution layer forward pass utility functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn create-padded-input-matrix
-  [input-vector-matrixes width height padx pady num-channels]
+  [interleaved-input-vector width height padx pady num-channels]
   (let [width (long width)
         height (long height)
         padx (long padx)
         pady (long pady)
         num-channels (long num-channels)
-        padded-input-matrix (m/zero-array :vectorz [(+ height (* 2 pady))
-                                                    (* (+ width (* 2 padx)) num-channels)])
-        input-mat-view (m/submatrix padded-input-matrix
-                                    [[pady height]
-                                     [(* padx num-channels) (* width num-channels)]])
-        input-vec-seq (map m/eseq input-vector-matrixes)
-        interleaved-data (apply interleave input-vec-seq)
-        data-rows (map-indexed vector (partition (* width num-channels) interleaved-data))]
-    (doseq [[idx data-row] data-rows]
-      (m/set-row! input-mat-view idx data-row))
-    padded-input-matrix))
+        has-padding (or (> padx 0) (> pady 0))]
+    (if has-padding
+      (let [padded-input-matrix (m/zero-array :vectorz [(+ height (* 2 pady))
+                                                        (* (+ width (* 2 padx)) num-channels)])
+            input-mat-view (m/submatrix padded-input-matrix
+                                        [[pady height]
+                                         [(* padx num-channels) (* width num-channels)]])
+            data-rows (map-indexed vector (partition (* width num-channels) interleaved-input-vector))]
+        (doseq [[idx data-row] data-rows]
+          (m/set-row! input-mat-view idx data-row))
+        padded-input-matrix)
+      (m/reshape interleaved-input-vector [height (* width num-channels)]))))
+
 
 (defn create-convolution-rows
-  "Given an image flattened into a matrix for each channel
+  "Given an image flattened into an interleaved vector
 create a matrix where each row is the input to the convolution filter row
 meaning the convolution is just a dotproduct across the rows.
-Should be width*height rows.  Padding is applied as zeros across channels"
-  [input-vector-matrixes width height k-width k-height padx pady stride-w stride-h]
+Should be output-width*output-height rows.  Padding is applied as zeros across channels.
+The rational for creating a matrix instead of a sequence of rows is to provide a hint to
+the underlying implementation to store the data contiguously as we will be accessing it
+in order repeatedly"
+  [interleaved-input-vector width height k-width k-height padx pady stride-w stride-h]
+  (let [width (long width)
+        height (long height)
+        num-items (long (first (m/shape interleaved-input-vector)))
+        num-channels (long (/ num-items (* width height)))
+        k-width (long k-width)
+        k-height (long k-height)
+        padx (long padx)
+        pady (long pady)
+        stride-w (long stride-w)
+        stride-h (long stride-h)
+        input-matrix (create-padded-input-matrix interleaved-input-vector
+                                                 width height
+                                                 padx pady
+                                                 num-channels)
+        output-width (get-padded-strided-dimension width padx k-width stride-w)
+        output-height (get-padded-strided-dimension height pady k-height stride-h)
+        input-mat-stride (* (+ width (* 2 padx)) num-channels)
+        kernel-stride (* k-width num-channels)]
+    ;;I go ahead and create a contiguous matrix here because we will iterate over this many times
+    (m/array :vectorz
+             (for [^long output-y (range output-height)
+                   ^long output-x (range output-width)]
+               (m/as-vector (m/submatrix input-matrix [[(* output-y stride-h) k-height]
+                                                       [(* output-x stride-w num-channels) kernel-stride]]))))))
+
+(defn convolution-forward
+  [weights bias input-convolved-rows]
+  (let [weights-t (m/transpose! weights)
+        result (m/inner-product input-convolved-rows weights-t)
+        _ (m/transpose! weights)]
+    (doseq [row (m/rows result)]
+      (m/add! row bias))
+    (m/as-vector result)))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Convolution backward pass utility functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn gradient-vector-to-output-gradient
+  "Given the gradient vector coming from downstream reshape it
+such that we can use the linear layer's backprop step to produce
+the weight and bias gradient update and the upstream gradient
+information."
+  [gradient-vector ^long num-kernels]
+  (let [num-gradient-rows (/ (long (first (m/shape gradient-vector))) num-kernels)
+        gradient-matrix (m/reshape gradient-vector [num-gradient-rows num-kernels])]
+    (columnar-sum gradient-matrix)))
+
+
+(defn linear-input-gradient-to-input-image
+  "Given the results of the linear backward pass we have an input gradient that is
+a vector of k-width * k-height * num-channels.  We need to de-convolve this using opposite
+  operation as we did when we convolved the input."
+  [input-gradient width height k-width k-height padx pady stride-w stride-h]
   (let [width (long width)
         height (long height)
         k-width (long k-width)
@@ -359,37 +429,74 @@ Should be width*height rows.  Padding is applied as zeros across channels"
         pady (long pady)
         stride-w (long stride-w)
         stride-h (long stride-h)
-        num-channels (long (count input-vector-matrixes))
-        input-matrix (create-padded-input-matrix input-vector-matrixes
-                                                 width height
-                                                 padx pady
-                                                 num-channels)
+        num-channels (long (/ (long (first (m/shape input-gradient)))
+                              (* k-width k-height)))
+        input-matrix (m/zero-array :vectorz [(+ height (* 2 pady))
+                                             (* (+ width (* 2 padx)) num-channels)])
+        input-mat-view (m/submatrix input-matrix
+                                    [[pady height]
+                                     [(* padx num-channels) (* width num-channels)]])
         output-width (get-padded-strided-dimension width padx k-width stride-w)
         output-height (get-padded-strided-dimension height pady k-height stride-h)
-        input-mat-stride (* (+ width (* 2 padx)) num-channels)
-        kernel-stride (* k-width num-channels)]
-    (for [^long output-y (range output-height)
-          ^long output-x (range output-width)]
-      (m/array :vectorz (m/eseq (m/submatrix input-matrix [[(* output-y stride-h) k-height]
-                                                           [(* output-x stride-w num-channels) kernel-stride]]))))))
-(defn calc-conv
-  "input: channels*w.h
-   weights: channels*kw*ky.n-kernels
-   bias: w.h.n-kernels
-  weight-gradient: (m/shape weights)
-  bias-gradient: (m/shape bias)
-  output: (m/shape bias)
-  returns output."
-  [input weights bias padx pady output]
-  (m/assign! output bias))
+        kernel-stride (* k-width num-channels)
+        input-gradient-mat (m/reshape input-gradient [k-height kernel-stride])]
+    (doseq [^long output-y (range output-height)
+            ^long output-x (range output-width)]
+      (m/add! (m/submatrix input-matrix [[(* output-y stride-h) k-height]
+                                          [(* output-x stride-w num-channels) kernel-stride]])
+              input-gradient-mat))
+    (m/array :vectorz (m/as-vector input-mat-view))))
 
 
-;; (defrecord Convolutional [weights bias padx pady output weight-gradient bias-gradient]
-;;     cp/PModule
-;;     (cp/calc [m input]
-;;       (let [up (cp/calc up input)]
-;;         (DenoisingAutoencoder. up down input-tmp output-tmp)))
+(defn convolution-backward!
+  [output-gradient backpass-input weights bias weight-gradient bias-gradient
+   width height k-width k-height padx pady stride-w stride-h]
+  (let [linear-output-gradient (gradient-vector-to-output-gradient output-gradient (m/row-count weights))
+        linear-input backpass-input
+        linear-input-gradient (linear-backward! linear-input linear-output-gradient weights
+                                                bias weight-gradient bias-gradient)]
+    (linear-input-gradient-to-input-image linear-input-gradient
+                                          width height k-width k-height padx pady stride-w stride-h)))
 
-;;     (cp/output [m]
-;;       (cp/output up))
-;;)
+
+
+(defrecord Convolutional [weights bias width height padx pady k-width k-height
+                          stride-w stride-h output weight-gradient bias-gradient]
+    cp/PModule
+    (cp/calc [this input]
+      (let [input-convolved-rows (create-convolution-rows input width height k-width k-height
+                                                          padx pady stride-w stride-h)
+            backpass-input (columnar-sum input-convolved-rows)
+            output (convolution-forward weights bias input-convolved-rows)]
+        [output backpass-input]))
+
+    (cp/output [m]
+      (:output m))
+
+    cp/PNeuralTraining
+    (forward [this input]
+      (let [[output backpass-input] (cp/calc this input)]
+        (assoc this :output output :backpass-input backpass-input)))
+
+    (backward [this input output-gradient]
+      (assoc this :input-gradient (convolution-backward! output-gradient (:backpass-gradient this)
+                                                         weights bias weight-gradient bias-gradient
+                                                         width height k-width k-height stride-w stride-h)))
+
+    (input-gradient [this]
+      (:input-gradient this))
+
+    cp/PParameters
+    (parameters [this]
+      (m/join (m/as-vector (:weights this)) (m/as-vector (:bias this))))
+
+    (update-parameters [this parameters]
+      (let [param-view (cp/parameters this)]
+        (m/assign! param-view parameters))
+      (let [gradient-view (cp/gradient this)]
+        (m/assign! gradient-view 0.0))
+      this)
+
+    cp/PGradient
+    (gradient [this]
+      (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
