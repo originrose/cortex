@@ -357,6 +357,21 @@ which contains the columnar sums.  Produces a vector and leaves input unchanged"
       (m/reshape interleaved-input-vector [height (* width num-channels)]))))
 
 
+(defn convolution-sequence
+  "Produce a sequence of views that allows performs a convolution over an input matrix"
+  [input-matrix output-width output-height k-width k-height stride-w stride-h num-channels]
+  (let [stride-h (long stride-h)
+        stride-w (long stride-w)
+        num-channels (long num-channels)
+        k-width (long k-width)
+        k-height (long k-height)
+        kernel-stride (* k-width num-channels)]
+      (for [^long output-y (range output-height)
+            ^long output-x (range output-width)]
+        (m/as-vector (m/submatrix input-matrix [[(* output-y stride-h) k-height]
+                                                [(* output-x stride-w num-channels) kernel-stride]])))))
+
+
 (defn create-convolution-rows
   "Given an image flattened into an interleaved vector
 create a matrix where each row is the input to the convolution filter row
@@ -385,11 +400,8 @@ in order repeatedly"
         input-mat-stride (* (+ width (* 2 padx)) num-channels)
         kernel-stride (* k-width num-channels)]
     ;;I go ahead and create a contiguous matrix here because we will iterate over this many times
-    (m/array :vectorz
-             (for [^long output-y (range output-height)
-                   ^long output-x (range output-width)]
-               (m/as-vector (m/submatrix input-matrix [[(* output-y stride-h) k-height]
-                                                       [(* output-x stride-w num-channels) kernel-stride]]))))))
+    (m/array :vectorz (convolution-sequence input-matrix output-width output-height k-width k-height
+                                            stride-w stride-h num-channels))))
 
 (defn convolution-forward
   [weights bias input-convolved-rows]
@@ -438,13 +450,12 @@ a vector of k-width * k-height * num-channels.  We need to de-convolve this usin
                                      [(* padx num-channels) (* width num-channels)]])
         output-width (get-padded-strided-dimension width padx k-width stride-w)
         output-height (get-padded-strided-dimension height pady k-height stride-h)
-        kernel-stride (* k-width num-channels)
-        input-gradient-mat (m/reshape input-gradient [k-height kernel-stride])]
-    (doseq [^long output-y (range output-height)
-            ^long output-x (range output-width)]
-      (m/add! (m/submatrix input-matrix [[(* output-y stride-h) k-height]
-                                          [(* output-x stride-w num-channels) kernel-stride]])
-              input-gradient-mat))
+        kernel-stride (* k-width num-channels)]
+    (doall
+     (map #(m/add! % input-gradient)
+          (convolution-sequence input-matrix output-width output-height
+                                k-width k-height stride-w stride-h
+                                num-channels)))
     (m/array :vectorz (m/as-vector input-mat-view))))
 
 
@@ -457,6 +468,89 @@ a vector of k-width * k-height * num-channels.  We need to de-convolve this usin
                                                 bias weight-gradient bias-gradient)]
     (linear-input-gradient-to-input-image linear-input-gradient
                                           width height k-width k-height padx pady stride-w stride-h)))
+
+
+
+
+
+;; Explanation of the the conv-layer algorithm:
+;;
+;; Forward: Take the input which is expected to be a single interleaved vector of data
+;; and create a matrix that contains a row for each convolution.  So for example if you have
+;; 2x2 kernels and you have a 3x3 matrix of monotonically incrementing indexes we produce
+;; a new matrix
+;; input: [[1 2 3]
+;;         [4 5 6]
+;;         [7 8 9]]
+;;
+;;
+;; convolved rows:
+;;
+;; [[1.0,2.0,4.0,5.0],
+;;  [2.0,3.0,5.0,6.0],
+;;  [4.0,5.0,7.0,8.0],
+;;  [5.0,6.0,8.0,9.0]].
+;;
+;; You can see how each convolution is represented by a row in the matrix.
+;;
+;; Now we expect our weights and bias in the same format as what the linear layer
+;; uses so each convolution kernel has a row of weights and a bias entry in the bias
+;; vector.
+;;
+;; This means the convolution step is:
+;; (m/matrix-multiply convolved-rows (m/transpose weights))
+;; The result is an interleaved matrix that looks like:
+;; [[cr1k1 cr1k2 cr1k3 cr1k4] (repeats for num convolved rows...)].
+;; Note that simply calling as-vector means our output is in the exact same format
+;; as our input where each convolution kernel output plane is interleaved.  It also means
+;; we can use our linear layer with no changes directly after a convolution layer.
+;;
+;; Next up we need to talk about the inverse operation.  Note that the derivatives come
+;; in in the same format as the output:
+;; [[dk1 dk2 dk3 dk4] (repeats for num convolved rows)].
+;; Thus the total derivative input for k1 is the columnar sum of the derivative matrix.
+;; Now in order to use the linear-layer's backward pass we need the inputs w/r/t to the
+;; kernel weights.
+;;
+;; The convolved rows could be interpreted as such:
+;; [[kw1 kw2 kw3 kw4] ...] where you can see that the first kernel weight is going to be
+;; multiplied by kw1.  Thus the columnar sum of the convolved rows *is* the total input
+;; by weight to any of the kernels.
+;;
+;; So the inputs to the linear-layer's backward pass is something like:
+;; input: (columnar-sum convolved-rows)
+;; gradient: (column-sum (reshape output-gradient [output-height num-kernels]))
+;; weights, bias weight-gradient bias-gradient are all the same.
+;;
+;; Now we are left with the problem of deconvolving the input-gradients to produce
+;; upstream gradients.  Note that gradients are associative, commutative w/r/t addition
+;; (we can sum them to produce total gradients).
+;;
+;; We initialize a gradient total matrix with zero that looks exactly like input including
+;; rows added for padding.
+;; We then run a modified form of the convolve-rows algorithm that instead of producing
+;; an output of the rows from the matrix views for each convolution it uses the view as an
+;; accumulator with the gradient vector under addition.  This aggregates the gradient vector
+;; backwards down the convolution step to produce an input gradient image of precisely
+;; the same format.
+;;
+;; (defn linear-input-gradient-to-input-image
+;;   [input-gradient width height k-width k-height padx pady stride-w stride-h]
+;;  ...)
+;;
+;; (linear-input-gradient-to-input-image (m/array [1 1 1 1]) 3 3 2 2 0 0 1 1)
+;;
+;; => [1.0,2.0,1.0,2.0,4.0,2.0,1.0,2.0,1.0]
+;;
+;; or:
+;;
+;; [[1 2 1]
+;;  [2 4 2]
+;;  [1 2 1]]
+;;
+;; This output makes sense because given an input gradient for a 2x2 kernel of [1 1 1 1]
+;; we spread it out such that we effectively count the number of convolutions each input
+;; pixel would be involved in.
 
 
 
