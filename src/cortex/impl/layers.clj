@@ -101,23 +101,6 @@
     (m/div! output (m/esum output))))
 
 
-
-
-;; for (t = 0; t < stride*nframe; t++)
-;; {
-;;         real *gradInput_ptr = gradInput_data + (t/stride)*dim*stride + t % stride;
-;;         real *output_ptr = output_data + (t/stride)*dim*stride + t % stride;
-;;         real *gradOutput_ptr = gradOutput_data + (t/stride)*dim*stride + t % stride;
-
-;;         long d;
-;;         accreal sum = 0;
-;;         for (d = 0; d < dim; d++)
-;;              sum += (accreal)gradOutput_ptr [d*stride] * output_ptr [d*stride];
-
-;;         for (d = 0; d < dim; d++)
-;;              gradInput_ptr [d*stride] = output_ptr [d*stride] * (gradOutput_ptr [d*stride] - sum);
-;; }
-
 (defn softmax-backward!
   ""
   [input-gradient output output-gradient input]
@@ -331,3 +314,82 @@
                                (cp/clone down)
                                (m/clone input-tmp)
                                (m/clone output-tmp))))
+
+
+(defn get-padded-strided-dimension
+  "http://caffe.berkeleyvision.org/tutorial/layers.html"
+  ^long [^long input-dim ^long pad ^long kernel-size ^long stride]
+  (long (+ (long (/ (- (+ input-dim (* 2 pad))  kernel-size)
+                    stride))
+           1)))
+
+
+
+
+(defn create-padded-input-matrix
+  [input-vector-matrixes width height padx pady num-channels]
+  (let [width (long width)
+        height (long height)
+        padx (long padx)
+        pady (long pady)
+        num-channels (long num-channels)
+        padded-input-matrix (m/zero-array :vectorz [(+ height (* 2 pady))
+                                                    (* (+ width (* 2 padx)) num-channels)])
+        input-mat-view (m/submatrix padded-input-matrix
+                                    [[pady height]
+                                     [(* padx num-channels) (* width num-channels)]])
+        input-vec-seq (map m/eseq input-vector-matrixes)
+        interleaved-data (apply interleave input-vec-seq)
+        data-rows (map-indexed vector (partition (* width num-channels) interleaved-data))]
+    (doseq [[idx data-row] data-rows]
+      (m/set-row! input-mat-view idx data-row))
+    padded-input-matrix))
+
+(defn create-convolution-rows
+  "Given an image flattened into a matrix for each channel
+create a matrix where each row is the input to the convolution filter row
+meaning the convolution is just a dotproduct across the rows.
+Should be width*height rows.  Padding is applied as zeros across channels"
+  [input-vector-matrixes width height k-width k-height padx pady stride-w stride-h]
+  (let [width (long width)
+        height (long height)
+        k-width (long k-width)
+        k-height (long k-height)
+        padx (long padx)
+        pady (long pady)
+        stride-w (long stride-w)
+        stride-h (long stride-h)
+        num-channels (long (count input-vector-matrixes))
+        input-matrix (create-padded-input-matrix input-vector-matrixes
+                                                 width height
+                                                 padx pady
+                                                 num-channels)
+        output-width (get-padded-strided-dimension width padx k-width stride-w)
+        output-height (get-padded-strided-dimension height pady k-height stride-h)
+        input-mat-stride (* (+ width (* 2 padx)) num-channels)
+        kernel-stride (* k-width num-channels)]
+    (for [^long output-y (range output-height)
+          ^long output-x (range output-width)]
+      (m/array :vectorz (m/eseq (m/submatrix input-matrix [[(* output-y stride-h) k-height]
+                                                           [(* output-x stride-w num-channels) kernel-stride]]))))))
+(defn calc-conv
+  "input: channels*w.h
+   weights: channels*kw*ky.n-kernels
+   bias: w.h.n-kernels
+  weight-gradient: (m/shape weights)
+  bias-gradient: (m/shape bias)
+  output: (m/shape bias)
+  returns output."
+  [input weights bias padx pady output]
+  (m/assign! output bias))
+
+
+;; (defrecord Convolutional [weights bias padx pady output weight-gradient bias-gradient]
+;;     cp/PModule
+;;     (cp/calc [m input]
+;;       (let [up (cp/calc up input)]
+;;         (DenoisingAutoencoder. up down input-tmp output-tmp)))
+
+;;     (cp/output [m]
+;;       (cp/output up))
+;;)
