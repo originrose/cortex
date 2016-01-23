@@ -28,6 +28,10 @@
         (let [bm (backward fm input [10 10 -10])]
           (is (m/equals [0 2.5 0] (input-gradient bm))))))))
 
+(deftest test-split
+  (testing "Split with different functions"
+     (let [m (layers/split [(layers/function inc) (layers/function dec)])]
+       (is (= [11 9] (calc-output m 10)))))) 
 
 (deftest test-linear-module
   (testing "Parameters"

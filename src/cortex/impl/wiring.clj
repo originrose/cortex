@@ -5,7 +5,7 @@
             [clojure.core.matrix :as m])
   (:require [cortex.util :as util :refer [error]]
             [cortex.serialization :as cs])
-  (:import [clojure.lang IFn]))
+  (:import [clojure.lang IFn IPersistentVector]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -20,6 +20,18 @@
       (assoc m :output (fn input)))
     (cp/output [m]
       (:output m)))
+
+;; SPLIT
+;; Runs a collection of modules on the same input, returning a vector of outputs
+(defrecord Split
+  [^IPersistentVector modules]
+   cp/PModule
+     (cp/calc [m input]
+       (let [new-modules (mapv #(cp/calc % input) modules)]
+         (assoc m :modules new-modules
+                  :output (mapv cp/output new-modules))))
+     (cp/output [m]
+       (:output m)))
 
 ;; STACK
 ;; Wrapper for a linear stack of modules

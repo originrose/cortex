@@ -58,6 +58,13 @@
   (linear (util/weight-matrix n-outputs n-inputs)
           (m/new-vector :vectorz n-outputs)))
 
+(defn split
+  "Creates a split later using a collection of modules. The split layer returns the outputs of each
+   sub-module concatenated into a vector, i.e. it behaves as a fn: input -> [output0 output1 ....]"
+  ([modules]
+    (let [modules (vec modules)]
+      (cortex.impl.wiring.Split. modules))))
+
 (defn normaliser
   "Constructs a normaliser of the given shape"
   ([shape]

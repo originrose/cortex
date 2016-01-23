@@ -70,7 +70,7 @@
 ;; Module construction and combinator functions
 
 (defn function-module
-  "Wraps a Clojure function in a cortex module"
+  "Wraps a Clojure function in a cortex module. The function f will be applied to the input to produce the output."
   ([f]
     (when-not (fn? f) (error "function-module requires a Clojure function"))
     (cortex.impl.wiring.FunctionModule. f nil)))
