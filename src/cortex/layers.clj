@@ -54,6 +54,7 @@
         (assoc :input-gradient (m/new-vector :vectorz n-inputs))))))
 
 (defn linear-layer
+  "Creates a linear layer with a new randomised weight matrix for the given number of inputs and outputs"
   ([n-inputs n-outputs]
     (linear (util/weight-matrix n-outputs n-inputs)
             (m/new-vector :vectorz n-outputs))))
