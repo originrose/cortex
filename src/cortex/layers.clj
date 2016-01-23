@@ -23,6 +23,7 @@
     (cortex.impl.wiring.FunctionModule. f nil {:gradient-fn gradient-fn})))
 
 (defn logistic
+  "Creates a logistic module of the given shape."
   ([shape]
     (when-not (coll? shape)
       (error "logistic layer constructor requires a shape vector"))
@@ -31,23 +32,27 @@
       (m/ensure-mutable (m/new-array :vectorz shape)))))
 
 (defn softmax
-  [shape]
-  (when-not (coll? shape)
-    (error "softmax layer constructor requires a shape vector"))
-  (cortex.impl.layers.Softmax.
-      (m/ensure-mutable (m/new-array :vectorz shape))
-      (m/ensure-mutable (m/new-array :vectorz shape))))
+  "Creates a softmax module of the given shape."
+  ([shape]
+    (when-not (coll? shape)
+      (error "softmax layer constructor requires a shape vector"))
+    (cortex.impl.layers.Softmax.
+        (m/ensure-mutable (m/new-array :vectorz shape))
+        (m/ensure-mutable (m/new-array :vectorz shape)))))
 
 (defn relu
-  [shape & {:keys [negval]
+  "Creates a rectified linear (ReLU) module of the given shape.
+
+   An optional lower bound may be provided, which otherwise defaults to 0.0"
+  ([shape & {:keys [negval]
             :or {negval 0.0 }}]
-  (when-not (coll? shape)
-    (error "relu layer constructor requires a shape vector"))
-  (cortex.impl.layers.RectifiedLinear.
-      (m/ensure-mutable (m/new-array :vectorz shape))
-      (m/ensure-mutable (m/new-array :vectorz shape))
-      (m/ensure-mutable (m/new-array :vectorz shape))
-      negval))
+    (when-not (coll? shape)
+      (error "relu layer constructor requires a shape vector"))
+    (cortex.impl.layers.RectifiedLinear.
+        (m/ensure-mutable (m/new-array :vectorz shape))
+        (m/ensure-mutable (m/new-array :vectorz shape))
+        (m/ensure-mutable (m/new-array :vectorz shape))
+        negval)))
 
 (defn linear
   "Constructs a weighted linear transformation module using a dense matrix and bias vector.
