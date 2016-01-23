@@ -3,7 +3,7 @@
    various other functionality"
   (:require [cortex.protocols :as cp]
             [clojure.core.matrix :as m])
-  (:require [cortex.util :as util :refer [error]]
+  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]]
             [cortex.serialization :as cs])
   (:import [clojure.lang IFn IPersistentVector]))
 
@@ -105,33 +105,17 @@
       ;; we are stateless, so nothing to do!
       this) 
     
-;  cp/PNeuralTraining
-;    (forward [this input]
-;      (let [n (long (count modules))]
-;        (loop [i 0
-;               this this]
-;          (if (< i n)
-;            (let [module (cp/forward (nth modules i) input)]
-;              (recur
-;                (inc i)
-;                (assoc-in this [:modules i] module)))
-;            (assoc this :output (mapv cp/output (:modules this)))))))
-;
-;    (backward [this input output-gradient]
-;      (let [n (long (count modules))]
-;        (loop [i 0
-;               this this]
-;          (if (< i n)
-;            (let [module (cp/backward (nth modules i) input output-gradient)]
-;              (m/add! input-gradient (cp/input-gradient module))
-;              (recur
-;                (inc i)
-;                (assoc-in this [:modules i] module)))
-;            this))))
-;
-;    (input-gradient [this]
-;      input-gradient)
-)
+  cp/PNeuralTraining
+    (forward [this input]
+      (assoc this :output (apply combine-fn input)))
+
+    (backward [this input output-gradient]
+      (if-let [gfn (:gradient-fn this)]
+        (assoc this :input-gradient (gfn input output-gradient))
+        (assoc this :input-gradient (mapv #(m/assign % 0.0) input))))
+
+    (input-gradient [this]
+      (:input-gradient this)))
 
 ;; STACK
 ;; Wrapper for a linear stack of modules

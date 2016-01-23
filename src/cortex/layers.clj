@@ -54,9 +54,9 @@
         (assoc :input-gradient (m/new-vector :vectorz n-inputs))))))
 
 (defn linear-layer
-  [n-inputs n-outputs]
-  (linear (util/weight-matrix n-outputs n-inputs)
-          (m/new-vector :vectorz n-outputs)))
+  ([n-inputs n-outputs]
+    (linear (util/weight-matrix n-outputs n-inputs)
+            (m/new-vector :vectorz n-outputs))))
 
 (defn split
   "Creates a split later using a collection of modules. The split layer returns the outputs of each
@@ -69,9 +69,15 @@
 
 (defn combine
   "Creates a combine layer that applies a specified combination function to create the output. 
-   i.e. it behaves as a fn: [input0 input1 ....] -> output"
+   i.e. it behaves as a fn: [input0 input1 ....] -> output
+
+   An optional gradient-fn may be provided, in which case the backward pass will compute a vector of input
+   gradients according to (gradient-fn input output-gradient). In the absence of a gradient-fn, input 
+   gradients will be zero."
   ([combine-fn]
-    (cortex.impl.wiring.Combine. combine-fn)))
+    (cortex.impl.wiring.Combine. combine-fn))
+  ([combine-fn gradient-fn]
+    (cortex.impl.wiring.Combine. combine-fn nil {:gradient-fn gradient-fn})))
 
 (defn normaliser
   "Constructs a normaliser of the given shape"
