@@ -11,10 +11,16 @@
 ;; Layer constructors
 
 (defn function
-  "Wraps a Clojure function in a cortex module. The function f will be applied to the input to produce the output."
+  "Wraps a Clojure function in a cortex module. The function f will be applied to the input to produce the output.
+
+   An optional gradient-fn may be provided, in which case the input gradient will be calculated by:
+   (gradient-fn input output-gradient)"
   ([f]
     (when-not (fn? f) (error "function-module requires a Clojure function"))
-    (cortex.impl.wiring.FunctionModule. f nil)))
+    (cortex.impl.wiring.FunctionModule. f))
+  ([f gradient-fn]
+    (when-not (fn? f) (error "function-module requires a Clojure function"))
+    (cortex.impl.wiring.FunctionModule. f nil {:gradient-fn gradient-fn})))
 
 (defn logistic
   ([shape]
@@ -69,10 +75,8 @@
   "Creates a split later using a collection of modules. The split layer returns the outputs of each
    sub-module concatenated into a vector, i.e. it behaves as a fn: input -> [output0 output1 ....]"
   ([modules]
-    (let [modules (vec modules)
-          input-gradient (m/clone (cp/input-gradient (first modules)))]
-      (m/assign! input-gradient 0.0) ;; clear the input gradient
-      (cortex.impl.wiring.Split. modules input-gradient))))
+    (let [modules (vec modules)]
+      (cortex.impl.wiring.Split. modules))))
 
 (defn combine
   "Creates a combine layer that applies a specified combination function to create the output. 

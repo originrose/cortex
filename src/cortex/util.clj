@@ -54,6 +54,11 @@
   ([shape-vector]
     (rand/sample-normal shape-vector)))
 
+(defn empty-array
+  "Constructs a new empty (zero-filled) array of the given shape"
+  ([shape]
+    (m/new-array :vectorz shape)))
+
 (defn mse-gradient-fn
   "Returns the MSE error gradient for a given output and target value"
   ([output target]

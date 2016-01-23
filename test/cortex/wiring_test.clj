@@ -29,8 +29,7 @@
        (is (= [11 9] (calc-output m 10))))
      (let [m (layers/split [(layers/function inc) (layers/function dec)])
            m (forward m 10)]
-       (is (= [11 9] (output m)))
-       (is (m/equals [] (input-gradient m)))))) 
+       (is (= [11 9] (output m)))))) 
 
 (deftest test-split-combine
   (testing "Split and combine in sequence"
@@ -42,8 +41,7 @@
                [(layers/split [(layers/function inc) (layers/function dec)])
                 (layers/combine +)])
            m (forward m 10)]
-       (is (= 20 (output m)))
-       (is (m/equals [] (input-gradient m)))))) 
+       (is (= 20 (output m)))))) 
 
 (deftest test-split-combine-network
   (testing "Testing backprop with split and combine using addition"

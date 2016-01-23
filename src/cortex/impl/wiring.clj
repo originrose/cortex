@@ -12,19 +12,31 @@
 
 ;; FUNCTION
 ;; Wrapper class for a standard Clojure function
-;; supports an option inverse function
+;; supports an option :gradient-fn
 (defrecord FunctionModule
-  [^IFn fn ^IFn inverse]
+  [^IFn function]
   cp/PModule
     (cp/calc [m input]
-      (assoc m :output (fn input)))
+      (assoc m :output (function input)))
     (cp/output [m]
-      (:output m)))
+      (:output m))
+    
+  cp/PNeuralTraining
+    (forward [this input]
+      (assoc this :output (function input)))
+
+    (backward [this input output-gradient]
+      (if-let [gfn (:gradient-fn this)]
+        (assoc this :input-gradient (gfn input output-gradient))
+        (assoc this :input-gradient (m/assign input 0.0))))
+
+    (input-gradient [this]
+      (:input-gradient this)))
 
 ;; SPLIT
 ;; Runs a collection of modules on the same input, returning a vector of outputs
 (defrecord Split
-  [^IPersistentVector modules input-gradient]
+  [^IPersistentVector modules]
    cp/PModule
      (cp/calc [m input]
        (let [new-modules (mapv #(cp/calc % input) modules)]
@@ -39,7 +51,11 @@
     
   cp/PModuleClone
     (clone [this]
-      (Split. (mapv cp/clone modules) (m/clone input-gradient)))
+      (let [mod (Split. (mapv cp/clone modules))
+            mod (if-let [ig (:input-gradient mod)]
+                  (update mod :input/gradient m/clone)
+                  mod)]
+        mod))
     
   cp/PNeuralTraining
     (forward [this input]
@@ -54,7 +70,9 @@
             (assoc this :output (mapv cp/output (:modules this)))))))
 
     (backward [this input output-gradient]
-      (let [n (long (count modules))]
+      (let [n (long (count modules))
+            input-gradient (or (:input-gradient this) (util/empty-array (m/shape input)))]
+        (m/assign! input-gradient 0.0)
         (loop [i 0
                this this]
           (if (< i n)
@@ -63,10 +81,10 @@
               (recur
                 (inc i)
                 (assoc-in this [:modules i] module)))
-            this))))
+            (assoc this :input-gradient input-gradient)))))
 
     (input-gradient [this]
-      input-gradient)
+      (:input-gradient this))
 
   cp/PParameters
     (parameters [this]
