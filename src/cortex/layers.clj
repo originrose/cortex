@@ -67,6 +67,12 @@
       (m/assign! input-gradient 0.0) ;; clear the input gradient
       (cortex.impl.wiring.Split. modules input-gradient))))
 
+(defn combine
+  "Creates a combine layer that applies a specified combination function to create the output. 
+   i.e. it behaves as a fn: [input0 input1 ....] -> output"
+  ([combine-fn]
+    (cortex.impl.wiring.Combine. combine-fn)))
+
 (defn normaliser
   "Constructs a normaliser of the given shape"
   ([shape]

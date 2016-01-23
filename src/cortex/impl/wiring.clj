@@ -90,6 +90,49 @@
               ;; TODO check offset is at end of parameters
               this))))))
 
+;; COMBINE
+;; Combines a vector of input elements, returning a combined result
+(defrecord Combine
+  [^IFn combine-fn]
+   cp/PModule
+     (cp/calc [m input]
+       (assoc m :output (apply combine-fn input)))
+     (cp/output [m]
+       (:output m))
+         
+  cp/PModuleClone
+    (clone [this]
+      ;; we are stateless, so nothing to do!
+      this) 
+    
+;  cp/PNeuralTraining
+;    (forward [this input]
+;      (let [n (long (count modules))]
+;        (loop [i 0
+;               this this]
+;          (if (< i n)
+;            (let [module (cp/forward (nth modules i) input)]
+;              (recur
+;                (inc i)
+;                (assoc-in this [:modules i] module)))
+;            (assoc this :output (mapv cp/output (:modules this)))))))
+;
+;    (backward [this input output-gradient]
+;      (let [n (long (count modules))]
+;        (loop [i 0
+;               this this]
+;          (if (< i n)
+;            (let [module (cp/backward (nth modules i) input output-gradient)]
+;              (m/add! input-gradient (cp/input-gradient module))
+;              (recur
+;                (inc i)
+;                (assoc-in this [:modules i] module)))
+;            this))))
+;
+;    (input-gradient [this]
+;      input-gradient)
+)
+
 ;; STACK
 ;; Wrapper for a linear stack of modules
 (defrecord StackModule
