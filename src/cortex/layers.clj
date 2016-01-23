@@ -43,7 +43,7 @@
 (defn relu
   "Creates a rectified linear (ReLU) module of the given shape.
 
-   An optional lower bound may be provided, which otherwise defaults to 0.0"
+   An optional factor may be provided to scale negative values, which otherwise defaults to 0.0"
   ([shape & {:keys [negval]
             :or {negval 0.0 }}]
     (when-not (coll? shape)
