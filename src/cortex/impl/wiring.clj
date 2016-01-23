@@ -24,14 +24,71 @@
 ;; SPLIT
 ;; Runs a collection of modules on the same input, returning a vector of outputs
 (defrecord Split
-  [^IPersistentVector modules]
+  [^IPersistentVector modules input-gradient]
    cp/PModule
      (cp/calc [m input]
        (let [new-modules (mapv #(cp/calc % input) modules)]
          (assoc m :modules new-modules
                   :output (mapv cp/output new-modules))))
      (cp/output [m]
-       (:output m)))
+       (:output m))
+     
+       cp/PGradient
+    (gradient [this]
+      (apply m/join (map cp/gradient modules)))
+    
+  cp/PModuleClone
+    (clone [this]
+      (Split. (mapv cp/clone modules) (m/clone input-gradient)))
+    
+  cp/PNeuralTraining
+    (forward [this input]
+      (let [n (long (count modules))]
+        (loop [i 0
+               this this]
+          (if (< i n)
+            (let [module (cp/forward (nth modules i) input)]
+              (recur
+                (inc i)
+                (assoc-in this [:modules i] module)))
+            (assoc this :output (mapv cp/output (:modules this)))))))
+
+    (backward [this input output-gradient]
+      (let [n (long (count modules))]
+        (loop [i 0
+               this this]
+          (if (< i n)
+            (let [module (cp/backward (nth modules i) input output-gradient)]
+              (m/add! input-gradient (cp/input-gradient module))
+              (recur
+                (inc i)
+                (assoc-in this [:modules i] module)))
+            this))))
+
+    (input-gradient [this]
+      input-gradient)
+
+  cp/PParameters
+    (parameters [this]
+      (apply m/join (map cp/parameters modules)))
+
+    (update-parameters [this parameters]
+      (let [n (long (count modules))]
+        (loop [i 0
+               offset 0
+               this this]
+          (if (< i n)
+            (let [module (nth modules i)
+                  pc (long (cp/parameter-count module))
+                  new-module-params (m/subvector parameters offset pc)
+                  module (cp/update-parameters module new-module-params)]
+              (recur
+                (inc i)
+                (+ offset pc)
+                (assoc-in this [:modules i] module)))
+            (do
+              ;; TODO check offset is at end of parameters
+              this))))))
 
 ;; STACK
 ;; Wrapper for a linear stack of modules

@@ -62,8 +62,10 @@
   "Creates a split later using a collection of modules. The split layer returns the outputs of each
    sub-module concatenated into a vector, i.e. it behaves as a fn: input -> [output0 output1 ....]"
   ([modules]
-    (let [modules (vec modules)]
-      (cortex.impl.wiring.Split. modules))))
+    (let [modules (vec modules)
+          input-gradient (m/clone (cp/input-gradient (first modules)))]
+      (m/assign! input-gradient 0.0) ;; clear the input gradient
+      (cortex.impl.wiring.Split. modules input-gradient))))
 
 (defn normaliser
   "Constructs a normaliser of the given shape"
