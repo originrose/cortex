@@ -1,7 +1,8 @@
 (ns cortex.wiring-test
   (:use [clojure.test])
   (:use [cortex.core])
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m]
+            [cortex.layers :as layers]))
 
 (deftest test-function-module
   ;; simple module implementing inc function
@@ -21,4 +22,13 @@
   ;;  (is (= [0] (shape (parameters st)))))
   
   )
+
+(deftest test-split
+  (testing "Split with different functions"
+     (let [m (layers/split [(function-module inc) (function-module dec)])]
+       (is (= [11 9] (calc-output m 10))))
+     (let [m (layers/split [(function-module inc) (function-module dec)])
+           m (forward m 10)]
+       (is (= [11 9] (output m)))
+       (is (m/equals [] (input-gradient m)))))) 
 
