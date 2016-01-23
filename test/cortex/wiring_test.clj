@@ -6,13 +6,13 @@
 
 (deftest test-function-module
   ;; simple module implementing inc function
-  (let [m (function-module inc)]
+  (let [m (layers/function inc)]
     (is (= 2 (output (calc m 1))))
     (is (= [0] (m/shape (parameters m))))))
 
 (deftest test-stack-module
   ;; simple 2-layer stack
-  (let [m (function-module inc)
+  (let [m (layers/function inc)
         st (stack-module [m m])]
     (is (= 3 (output (calc st 1)))))
   
@@ -25,9 +25,9 @@
 
 (deftest test-split
   (testing "Split with different basic functions"
-     (let [m (layers/split [(function-module inc) (function-module dec)])]
+     (let [m (layers/split [(layers/function inc) (layers/function dec)])]
        (is (= [11 9] (calc-output m 10))))
-     (let [m (layers/split [(function-module inc) (function-module dec)])
+     (let [m (layers/split [(layers/function inc) (layers/function dec)])
            m (forward m 10)]
        (is (= [11 9] (output m)))
        (is (m/equals [] (input-gradient m)))))) 
@@ -35,11 +35,11 @@
 (deftest test-split-combine
   (testing "Split and combine in sequence"
      (let [m (stack-module 
-               [(layers/split [(function-module inc) (function-module dec)])
+               [(layers/split [(layers/function inc) (layers/function dec)])
                 (layers/combine +)])]
        (is (= 20 (calc-output m 10))))
      (let [m (stack-module 
-               [(layers/split [(function-module inc) (function-module dec)])
+               [(layers/split [(layers/function inc) (layers/function dec)])
                 (layers/combine +)])
            m (forward m 10)]
        (is (= 20 (output m)))
