@@ -15,7 +15,7 @@
 ;; Wrapper class for a standard Clojure function
 ;; supports an option inverse function
 (defrecord FunctionModule
-  #?(:clj [^IFn fn ^IFn inverse])
+  [#?(:clj ^IFn fn :cljs fn) #?(:clj ^IFn inverse :cljs inverse)]
   cp/PModule
     (cp/calc [m input]
       (assoc m :output (fn input)))
