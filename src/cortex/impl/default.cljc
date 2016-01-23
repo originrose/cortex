@@ -1,8 +1,8 @@
 (ns cortex.impl.default
   "Default implementations for coretx protocols."
-  (:require [cortex.protocols :as cp])
-  (:require [clojure.core.matrix :as m])
-  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]]))
+  (:require [cortex.protocols :as cp]
+            [clojure.core.matrix :as m]
+            [cortex.util :as util :refer [error EMPTY-VECTOR]]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -10,7 +10,7 @@
 ;; default to assuming zero parameters
 (extend-protocol cp/PParameters
   Object
-	  (parameters 
+  (parameters 
       ([m]
         ;; default to assuming zero parameters
         EMPTY-VECTOR))

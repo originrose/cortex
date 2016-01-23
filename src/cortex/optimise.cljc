@@ -1,9 +1,9 @@
 (ns cortex.optimise
   "Namespace for optimisation algorithms, loss functions and optimiser objects"
-  (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error]])
-  (:require [clojure.core.matrix.linear :as linear])
-  (:require [clojure.core.matrix :as m]))
+  (:require [cortex.protocols :as cp]
+            [cortex.util :as util :refer [error]]
+            [clojure.core.matrix.linear :as linear]
+            [clojure.core.matrix :as m]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)

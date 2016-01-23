@@ -2,10 +2,11 @@
   "Namespace for standard 'wiring' modules that can be used to compose and combine modules with
    various other functionality"
   (:require [cortex.protocols :as cp]
-            [clojure.core.matrix :as m])
-  (:require [cortex.util :as util :refer [error]]
+            [clojure.core.matrix :as m]
+            [cortex.util :as util :refer [error]]
             [cortex.serialization :as cs])
-  (:import [clojure.lang IFn]))
+
+  #?(:clj (:import [clojure.lang IFn])))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -14,7 +15,7 @@
 ;; Wrapper class for a standard Clojure function
 ;; supports an option inverse function
 (defrecord FunctionModule
-  [^IFn fn ^IFn inverse]
+  #?(:clj [^IFn fn ^IFn inverse])
   cp/PModule
     (cp/calc [m input]
       (assoc m :output (fn input)))

@@ -1,17 +1,50 @@
 (ns cortex.util
   (:require
     [clojure.core.matrix :as m]
-    [clojure.core.matrix.random :as rand]
+    [clojure.core.matrix.random :as rand-matrix]
     [cortex.protocols :as cp])
-  (:import [java.util Random])
-  (:import [mikera.vectorz Vectorz]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+  #?(:clj (do (:import [java.util Random])
+              (:import [mikera.vectorz Vectorz]))))
+
+#?(:clj (do (set! *warn-on-reflection* true)
+            (set! *unchecked-math* :warn-on-boxed)))
 
 (defn timestamp [] (System/nanoTime))
 
 (def EMPTY-VECTOR (Vectorz/newVector 0))
+
+#?(:clj
+    (do
+      (def ^Random RAND-GENERATOR (Random.))
+
+      (defn rand-normal []
+        (.nextDouble RAND-GENERATOR))
+
+      (defn rand-gaussian []
+        (.nextGaussian RAND-GENERATOR)))
+    :cljs
+    (do
+      (defn rand-gaussian* [mu sigma]
+        ; This function implements the Kinderman-Monahan ratio method:
+        ;  A.J. Kinderman & J.F. Monahan
+        ;  Computer Generation of Random Variables Using the Ratio of Uniform Deviates
+        ;  ACM Transactions on Mathematical Software 3(3) 257-260, 1977
+        (let [[u1 ] (rand)
+              [u2*] (rand)
+              u2 (- 1. u2*)
+              s (const (* 4 (/ (. Math exp (- 0.5)) (. Math sqrt 2.))))
+              z (* s (/ (- u1 0.5) u2))
+              zz (+ (* 0.25 z z) (. Math log u2))]
+          (if (> zz 0)
+            (recur)
+            (+ mu (* sigma z)))))
+
+      (defn rand-normal []
+        (rand))
+
+      (defn rand-gaussian []
+        (rand-gaussian* 0 1.0))))
 
 (defn ms-elapsed
   ([start]
@@ -39,20 +72,19 @@
 
 (defn weight-matrix
   [rows cols]
-  (let [^java.util.Random random-obj (java.util.Random.)
-        weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
+  (let [weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
     (m/mutable
      (m/array
       (mapv (fn [_]
               (repeatedly cols
                           #(* weight-scale
-                              (.nextGaussian random-obj))))
+                              (rand-gaussian))))
             (range rows))))))
 
 (defn random-matrix
   "Constructs an array of the given shape with random normally distributed element values"
   ([shape-vector]
-    (rand/sample-normal shape-vector)))
+    (rand-matrix/sample-normal shape-vector)))
 
 (defn mse-gradient-fn
   "Returns the MSE error gradient for a given output and target value"

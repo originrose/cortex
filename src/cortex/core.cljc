@@ -1,11 +1,11 @@
 (ns cortex.core
   "Main cortex API function namespace"
-  (:require [cortex.impl.wiring :as wiring])
-  (:require [cortex.impl default])
-  (:require [cortex.protocols :as cp])
-  (:require [cortex.layers :as layers]
-            [cortex.util :as util :refer [error]])
-  (:require [clojure.core.matrix :as m]))
+  (:require [cortex.impl.wiring :as wiring]
+            [cortex.impl.default]
+            [cortex.protocols :as cp]
+            [cortex.layers :as layers]
+            [cortex.util :as util :refer [error]]
+            [clojure.core.matrix :as m]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)

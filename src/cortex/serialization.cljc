@@ -1,21 +1,22 @@
 (ns cortex.serialization
   (:require [clojure.core.matrix :as m]
             [cortex.protocols :as cp]
-            [thinktopic.matrix.fressian :as mf]
-            [clojure.data.fressian :as fress]))
-
+            ;; FIXME: remove when fressian is cross platform
+            #?(:clj
+            [thinktopic.matrix.fressian :as mf])))
 
 (defn record->map
   [rec]
   (assoc (into {} rec) :record-type (.getName (type rec))))
 
+(declare map->module)
 
 (defn record-type-name->map-constructor
   [record-name]
   (let [last-dot (.lastIndexOf record-name ".")
         ns-name (.substring record-name 0 last-dot)
         item-name (.substring record-name (+ 1 last-dot))
-        cons-fn (resolve (symbol ns-name (str "map->" item-name)))]
+        cons-fn #?(:clj (resolve (symbol ns-name (str "map->" item-name))) :cljs map->module)]
     cons-fn))
 
 (defn typed-map->empty-record
@@ -25,12 +26,13 @@
 
 
 ;;default implementation for generic modules
+#?(:clj
 (extend-protocol cp/PSerialize
   Object
   (->map [this]
     (record->map this))
   (map-> [this map-data]
-    (into this map-data)))
+    (into this map-data))))
 
 
 
@@ -51,10 +53,13 @@
 (defn write-network!
   [network os]
   (let [map-net (module->map network)]
-    (mf/write-data os map-net *array-type*)))
+    ;; FIXME: remove when fressian is cross platform
+    #?(:clj
+        (mf/write-data os map-net *array-type*))))
 
 
 (defn read-network!
   [os]
-  (let [map-net (mf/read-data os)]
+                 ;; FIXME: remove when fressian is cross platform
+  (let [map-net #?(:clj (mf/read-data os) :cljs {})]
     (map->module map-net)))

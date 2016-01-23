@@ -1,8 +1,8 @@
 (ns cortex.layers
-  (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error]]
-            [cortex.impl.layers])
-  (:require [clojure.core.matrix :as m]))
+  (:require [cortex.protocols :as cp]
+            [cortex.util :as util :refer [error]]
+            [cortex.impl.layers]
+            [clojure.core.matrix :as m]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)

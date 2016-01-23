@@ -1,9 +1,7 @@
 (ns cortex.impl.layers
-  (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]])
-  (:require [clojure.core.matrix :as m])
-  (:import [java.lang Math])
-  (:import [java.util Random]))
+  (:require [cortex.protocols :as cp]
+  [cortex.util :as util :refer [error EMPTY-VECTOR]]
+  [clojure.core.matrix :as m]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -255,7 +253,7 @@
       input-gradient)
 
   cp/PParameters
-	  (parameters
+  (parameters
       [this]
         ;; no external parameters to optimise
         EMPTY-VECTOR)
@@ -267,16 +265,12 @@
         (m/sqrt! sd)
         this))
 
-
-
 ;; DENOISING AUTOENCODER
-(def ^Random NOISE-RANDOM (Random.))
-
 (defn noise-fn ^double [^double x]
-  (let [r NOISE-RANDOM]
-    (if (< 0.2 (.nextDouble r))
-     (.nextGaussian r)
-     x)))
+      (let [r NOISE-RANDOM]
+        (if (< 0.2 (util/rand-normal))
+          (util/rand-gaussian)
+          x)))
 
 (defrecord DenoisingAutoencoder
   [up down input-tmp output-tmp ]
