@@ -79,7 +79,6 @@
     (cp/calc this input)
     this)
 
-
   (backward [this input output-gradient]
     (m/assign! input-gradient output-gradient)
     (m/emul! input-gradient (util/tanh' output))

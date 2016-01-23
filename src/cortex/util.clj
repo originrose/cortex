@@ -22,19 +22,23 @@
       (/ (- end start) 1000000.0))))
 
 (defn tanh'
-  " tanh'(x) = 1 - tanh(x)^2 "
-  [th]
-  (if (number? th)
-    (let [th (double th)] (- 1 (* th th)))
-    (let [r (m/array :vectorz th)]
+  "Compute the derivative of the tanh function for a given output.  Works on any array shape.
+
+     tanh'(y) = 1 - tanh(y)^2 "
+  [y]
+  (if (number? y)
+    (let [y (double y)] (- 1 (* y y)))
+    (let [r (m/array :vectorz y)]
       (m/fill! r 1)
-      (m/add-scaled-product! r th th -1.0)
+      (m/add-scaled-product! r y y -1.0)
       r)))
 
 (defn sigmoid'
-  "sigma'(x) = sigma(x) * (1-sigma(x)) "
-  [s]
-  (let [sz (m/logistic s)]
+  "Compute the derivative of the logistic (sigmoid) function for a given output. Works on any array shape.
+    
+     sigma'(y) = sigma(y) * (1-sigma(y)) "
+  [y]
+  (let [sz (m/logistic y)]
     (m/emul sz (m/sub 1.0 sz))))
 
 (defn weight-matrix
