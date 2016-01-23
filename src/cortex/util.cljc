@@ -37,7 +37,7 @@
               z (* s (/ (- u1 0.5) u2))
               zz (+ (* 0.25 z z) (. Math log u2))]
           (if (> zz 0)
-            (recur)
+            (recur mu sigma)
             (+ mu (* sigma z)))))
 
       (defn rand-normal []
