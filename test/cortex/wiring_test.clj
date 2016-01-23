@@ -45,3 +45,15 @@
        (is (= 20 (output m)))
        (is (m/equals [] (input-gradient m)))))) 
 
+(deftest test-split-combine-network
+  (testing "Testing backprop with split and combine using addition"
+     (let [m (stack-module 
+               [(layers/split [(layers/linear [[2 0 0] [0 2 0] [0 0 -1]] [0 0 0]) 
+                               (layers/linear [[2 0 0] [0 -2 0] [0 0 2]] [0 0 0])])
+                (layers/combine m/add (fn [inputs output] output))])
+           input [10 100 1000]
+           m (forward m input)
+           m (backward m input [1 1 1])]
+       (is (m/equals [40 0 1000] (output m)))
+       (is (m/equals [4 0 1] (input-gradient m)))))) 
+
