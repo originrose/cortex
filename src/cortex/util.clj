@@ -33,7 +33,7 @@
       (m/add-scaled-product! r y y -1.0)
       r)))
 
-(defn sigmoid'
+(defn logistic'
   "Compute the derivative of the logistic (sigmoid) function for a given output. Works on any array shape.
     
      sigma'(y) = sigma(y) * (1-sigma(y)) "

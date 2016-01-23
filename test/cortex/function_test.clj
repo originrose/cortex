@@ -3,7 +3,8 @@
   (:use [clojure.test])
   (:use [cortex.core])
   (:require [clojure.core.matrix :as m]
-            [cortex.layers :as layers]))
+            [cortex.layers :as layers]
+            [cortex.util :as util]))
 
 
 (deftest test-logistic-module
@@ -33,8 +34,7 @@
     (let [m (layers/logistic [3])
           m2 (layers/function m/logistic 
                               (fn [input output-gradient] 
-                                (let [output (m/logistic input)] 
-                                  (m/mul output-gradient (m/mul output (m/sub 1.0 output))))))]
+                                (m/mul output-gradient (util/logistic' (m/logistic input)))))]
       (let [v [-10 1 10]]
         (is (m/equals (calc-output m v) (calc-output m2 v))))
       (let [train (fn [m input target]
