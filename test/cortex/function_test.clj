@@ -1,4 +1,4 @@
-(ns cortex.module-test
+(ns cortex.function-test
   "Tests for behaviour of mathematical function modules"
   (:use [clojure.test])
   (:use [cortex.core])
@@ -31,10 +31,17 @@
 (deftest test-function
   (testing "emulated logistic function"
     (let [m (layers/logistic [3])
-          m2 (layers/function m/logistic (fn [input output] (m/mul output (m/sub 1.0 output))))]
+          m2 (layers/function m/logistic 
+                              (fn [input output-gradient] 
+                                (let [output (m/logistic input)] 
+                                  (m/mul output-gradient (m/mul output (m/sub 1.0 output))))))]
       (let [v [-10 1 10]]
         (is (m/equals (calc-output m v) (calc-output m2 v))))
-      (let [input [-10 1 10]
+      (let [train (fn [m input target]
+                    (let [m (forward m input)
+                          d (m/sub (output m) target)]
+                      (backward m input d)))
+            input [-10 1 10]
             target [0.1 0.5 0.6]
             m (train m input target)
             m2 (train m2 input target)]
