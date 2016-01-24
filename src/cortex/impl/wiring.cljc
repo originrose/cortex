@@ -8,8 +8,9 @@
 
   #?(:clj (:import [clojure.lang IFn])))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; FUNCTION
 ;; Wrapper class for a standard Clojure function

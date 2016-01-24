@@ -3,8 +3,9 @@
   [cortex.util :as util :refer [error EMPTY-VECTOR]]
   [clojure.core.matrix :as m]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; LOGISTIC
 ;; Module implementing a Logistic activation function over a numerical array
@@ -267,10 +268,9 @@
 
 ;; DENOISING AUTOENCODER
 (defn noise-fn ^double [^double x]
-      (let [r NOISE-RANDOM]
-        (if (< 0.2 (util/rand-normal))
-          (util/rand-gaussian)
-          x)))
+  (if (< 0.2 (util/rand-normal))
+    (util/rand-gaussian)
+    x))
 
 (defrecord DenoisingAutoencoder
   [up down input-tmp output-tmp ]

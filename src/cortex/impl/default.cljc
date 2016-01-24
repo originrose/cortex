@@ -4,12 +4,13 @@
             [clojure.core.matrix :as m]
             [cortex.util :as util :refer [error EMPTY-VECTOR]]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; default to assuming zero parameters
 (extend-protocol cp/PParameters
-  Object
+  #?(:clj Object :cljs js/object)
   (parameters 
       ([m]
         ;; default to assuming zero parameters
@@ -21,21 +22,21 @@
 
 ;; default gradient function assumes zero parameters
 (extend-protocol cp/PGradient
-  Object
+  #?(:clj Object :cljs js/object)
     (gradient 
       ([m]
         EMPTY-VECTOR)))
 
 ;; default parameter count implementation is to... err... count the parameters. duh!
 (extend-protocol cp/PParameterCount
-  Object
+  #?(:clj Object :cljs js/object)
     (parameter-count 
       ([m]
         (m/ecount (cp/parameters m)))))
 
 ;; Default loss gradient function returns :loss-gradient-fn (may be nil)
 (extend-protocol cp/PLossGradientFunction
-  Object
+  #?(:clj Object :cljs js/object)
     (loss-gradient-fn 
       ([m]
         (:loss-gradient-fn m))))
@@ -46,7 +47,7 @@
 ;; 3. Compute outpout gradient
 ;; 4. Run backward pass
 (extend-protocol cp/PTraining
-  Object
+  #?(:clj Object :cljs js/object)
     (train 
       ([m input target]
         (let [m (cp/forward m input)

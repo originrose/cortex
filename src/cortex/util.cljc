@@ -2,7 +2,8 @@
   (:require
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
-    [cortex.protocols :as cp])
+    [cortex.protocols :as cp]
+    #?(:cljs [goog.string :refer [format]]))
 
   #?(:clj (do (:import [java.util Random])
               (:import [mikera.vectorz Vectorz]))))
@@ -10,9 +11,11 @@
 #?(:clj (do (set! *warn-on-reflection* true)
             (set! *unchecked-math* :warn-on-boxed)))
 
-(defn timestamp [] (System/nanoTime))
 
-(def EMPTY-VECTOR (Vectorz/newVector 0))
+#?(:clj (defn timestamp [] (System/nanoTime)))
+   :cljs (defn timestamp [] (.getTime (js/Date.)))
+
+(def EMPTY-VECTOR (m/new-array 0))
 
 #?(:clj
     (do
@@ -33,9 +36,9 @@
         (let [[u1 ] (rand)
               [u2*] (rand)
               u2 (- 1. u2*)
-              s (const (* 4 (/ (. Math exp (- 0.5)) (. Math sqrt 2.))))
+              s (* 4 (/ (Math/exp (- 0.5)) (Math/sqrt 2.)))
               z (* s (/ (- u1 0.5) u2))
-              zz (+ (* 0.25 z z) (. Math log u2))]
+              zz (+ (* 0.25 z z) (Math/log u2))]
           (if (> zz 0)
             (recur mu sigma)
             (+ mu (* sigma z)))))
@@ -52,7 +55,8 @@
   ([start end]
     (let [start (double start)
           end (double end)]
-      (/ (- end start) 1000000.0))))
+      #?(:clj  (/ (- end start) 1000000.0))
+         :cljs (- end start))))
 
 (defn tanh'
   " tanh'(x) = 1 - tanh(x)^2 "
@@ -94,11 +98,16 @@
       (m/scale! result 2.0)
       result)))
 
-(defmacro error
-  "Throws an error with the provided message(s). This is a macro in order to try and ensure the
-   stack trace reports the error at the correct source line number."
-  ([& messages]
-    `(throw (mikera.cljutils.Error. (str ~@messages)))))
+
+#?(:clj
+   (defmacro error
+     "Throws an error with the provided message(s). This is a macro in order to try and ensure the
+     stack trace reports the error at the correct source line number."
+     ([& messages]
+      `(throw (mikera.cljutils.Error. (str ~@messages)))))
+   :cljs
+   (defn error [& messages]
+     (throw (mikera.cljutils.Error. (apply str messages)))))
 
 (defmacro error?
   "Returns true if executing body throws an error, false otherwise."

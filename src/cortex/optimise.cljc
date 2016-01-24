@@ -5,8 +5,9 @@
             [clojure.core.matrix.linear :as linear]
             [clojure.core.matrix :as m]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* true)))
 
 (defn new-mutable-vector
   [size]
@@ -114,7 +115,7 @@ Returns new parameters"
   ([size {:keys [learn-rate momentum] :as options}]
    (let [dx (new-mutable-vector size)]
       (m/assign! dx 0.0)
-      (SGDOptimiser. dx nil options))))
+      (SGDOptimiser. dx))))
 
 (extend-protocol cp/PGradientOptimiser
   SGDOptimiser
