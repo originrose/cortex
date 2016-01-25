@@ -1,7 +1,8 @@
 (ns cortex.layers
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error]]
-            [cortex.impl.layers])
+            [cortex.impl.layers]
+            [cortex.impl.wiring])
   (:require [clojure.core.matrix :as m]))
 
 (set! *warn-on-reflection* true)
@@ -84,11 +85,11 @@
       (cortex.impl.wiring.Split. modules))))
 
 (defn combine
-  "Creates a combine layer that applies a specified combination function to create the output. 
+  "Creates a combine layer that applies a specified combination function to create the output.
    i.e. it behaves as a fn: [input0 input1 ....] -> output
 
    An optional gradient-fn may be provided, in which case the backward pass will compute a vector of input
-   gradients according to (gradient-fn input output-gradient). In the absence of a gradient-fn, input 
+   gradients according to (gradient-fn input output-gradient). In the absence of a gradient-fn, input
    gradients will be zero."
   ([combine-fn]
     (cortex.impl.wiring.Combine. combine-fn))
