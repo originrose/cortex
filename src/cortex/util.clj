@@ -36,7 +36,7 @@
 (defn logistic'
   "Compute the derivative of the logistic (sigmoid) function for a given output. Works on any array shape.
     
-     sigma'(y) = sigma(y) * (1-sigma(y)) "
+     sigma'(y) = y * (1 - y) "
   [y]
   (m/emul y (m/sub 1.0 y)))
 
