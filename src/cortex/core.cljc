@@ -2,7 +2,7 @@
   "Main cortex API function namespace"
   (:refer-clojure :exclude [clone])
   (:require [cortex.impl.wiring :as wiring]
-            [cortex.impl.default]
+            [cortex.impl.default- :as cortex.impl.default]
             [cortex.protocols :as cp]
             [cortex.layers :as layers]
             [cortex.util :as util :refer [error]]
@@ -87,3 +87,4 @@
   "clones a module, including all internal state structures. New module will be independent of the original."
   ([m]
     (cp/clone m)))
+
