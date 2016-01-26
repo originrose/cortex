@@ -2,8 +2,9 @@
   (:require [clojure.core.matrix :as m]
             [cortex.protocols :as cp]
             ;; FIXME: remove when fressian is cross platform
-            #?(:clj
-            [thinktopic.matrix.fressian :as mf])))
+            #?(:clj  [thinktopic.matrix.fressian :as mf])
+            #?(:cljs [fressian-cljs.core :as fressian])
+            #?(:cljs [fressian-cljs.reader :as freader])))
 
 (defn record->map
   [rec]
@@ -48,7 +49,9 @@
     (cp/map-> new-obj map-data)))
 
 
-(def ^:dynamic *array-type* mikera.arrayz.impl.AbstractArray)
+;; FIXME: remove when fressian is cross platform
+#?(:clj
+    (def ^:dynamic *array-type* mikera.arrayz.impl.AbstractArray))
 
 (defn write-network!
   [network os]
@@ -57,9 +60,23 @@
     #?(:clj
         (mf/write-data os map-net *array-type*))))
 
+#?(:clj
+    (defn defressian [s]
+      (mf/read-data s))
+   :cljs
+    (defn defressian [s]
+      (fressian/read s
+                     :handlers
+                     (assoc fressian/cljs-read-handler "array"
+                            (fn [reader tag component-count]
+                              (let [dims (freader/read-object reader)
+                                    shape (doall (for [i (range dims)]
+                                                   (freader/read-object reader)))]
+                                (m/compute-matrix shape
+                                                    (fn [& indices]
+                                                      (freader/read-double reader)))))))))
 
 (defn read-network!
   [os]
-                 ;; FIXME: remove when fressian is cross platform
-  (let [map-net #?(:clj (mf/read-data os) :cljs {})]
+  (let [map-net (defressian os)]
     (map->module map-net)))

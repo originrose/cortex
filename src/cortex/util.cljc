@@ -5,15 +5,15 @@
     [cortex.protocols :as cp]
     #?(:cljs [goog.string :refer [format]]))
 
-  #?(:clj (do (:import [java.util Random])
-              (:import [mikera.vectorz Vectorz]))))
+  #?(:clj (:import [mikera.vectorz Vectorz]))
+  #?(:clj (:import [java.util Random])))
 
 #?(:clj (do (set! *warn-on-reflection* true)
             (set! *unchecked-math* :warn-on-boxed)))
 
 
-#?(:clj (defn timestamp [] (System/nanoTime)))
-   :cljs (defn timestamp [] (.getTime (js/Date.)))
+#?(:clj (defn timestamp [] (System/nanoTime))
+   :cljs (defn timestamp [] (.getTime (js/Date.))))
 
 (def EMPTY-VECTOR (m/new-array [0]))
 
