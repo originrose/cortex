@@ -146,13 +146,15 @@
    & {:keys [custom-weights custom-bias]}]
   (let [^long input-width input-width
         ^long num-input-channels num-input-channels
+        ^long kernel-width kernel-width
+        ^long kernel-height kernel-height
         conv-config (impl/create-conv-layer-config input-width input-height
                                                    kernel-width kernel-height
                                                    pad-x pad-y
                                                    stride-x stride-y
                                                    num-input-channels)
         weights (or custom-weights
-                    (util/weight-matrix num-kernels (* input-width num-input-channels)))
+                    (util/weight-matrix num-kernels (* kernel-width kernel-height num-input-channels)))
         bias (or custom-bias
                  (m/zero-array :vectorz [num-kernels]))
         output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)

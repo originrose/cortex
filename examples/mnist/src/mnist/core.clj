@@ -59,11 +59,11 @@
 
 (defn test-train-step
   []
-  (net/train-step (first training-data) (first training-labels) (network-fn) loss-fn))
+  (net/train-step (first training-data) (first training-labels) (create-network) loss-fn))
 
 (defn train
   []
-  (let [network (network-fn)
+  (let [network (create-network)
         optimizer (create-optimizer network)]
     (net/train network optimizer loss-fn training-data training-labels batch-size n-epochs test-data test-labels)))
 
