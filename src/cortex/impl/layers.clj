@@ -388,6 +388,10 @@ which contains the columnar sums.  Produces a vector and leaves input unchanged"
 ;; Convolution layer forward pass utility functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn create-padded-input-matrix
+  "Remove padding from the equation by creating an input vector that includes it
+and then copying the input data (if necessary) into the input vector.  Note this operation
+is done for every input *and* it is done for the max pooling layers.  If you want to avoid
+the perf hit of a copy then don't use padding."
   [interleaved-input-vector {:keys [^long width ^long height ^long padx ^long pady
                                     ^long num-channels] :as conv-layer-config}]
   (let [has-padding (or (> padx 0) (> pady 0))]
@@ -419,12 +423,9 @@ which contains the columnar sums.  Produces a vector and leaves input unchanged"
 
 (defn create-convolution-rows
   "Given an image flattened into an interleaved vector
-create a matrix where each row is the input to the convolution filter row
+create a sequence where each item is the input to the convolution filter row
 meaning the convolution is just a dotproduct across the rows.
-Should be output-width*output-height rows.  Padding is applied as zeros across channels.
-The rational for creating a matrix instead of a sequence of rows is to provide a hint to
-the underlying implementation to store the data contiguously as we will be accessing it
-in order repeatedly"
+Should be output-width*output-height rows.  Padding is applied as zeros across channels."
   [interleaved-input-vector {:keys [^long width ^long height ^long k-width ^long k-height
                                     ^long padx ^long pady ^long stride-w ^long stride-h
                                     ^long num-channels] :as conv-layer-config }]
@@ -435,14 +436,14 @@ in order repeatedly"
         input-mat-stride (* (+ width (* 2 padx)) num-channels)
         kernel-stride (* k-width num-channels)]
     ;;I go ahead and create a contiguous matrix here because we will iterate over this many times
-    (m/array :vectorz (convolution-sequence input-matrix output-width output-height
-                                            conv-layer-config))))
+    (convolution-sequence input-matrix output-width output-height
+                          conv-layer-config)))
+
 
 (defn convolution-forward
   [weights bias input-convolved-rows]
-  (let [weights-t (m/transpose! weights)
-        result (m/inner-product input-convolved-rows weights-t)
-        _ (m/transpose! weights)]
+  (let [weights-t (m/transpose weights)
+        result (m/inner-product input-convolved-rows weights-t)]
     (doseq [row (m/rows result)]
       (m/add! row bias))
     (m/as-vector result)))
@@ -462,14 +463,12 @@ information."
         gradient-matrix (m/reshape gradient-vector [num-gradient-rows num-kernels])]
     (columnar-sum gradient-matrix)))
 
-
-(defn linear-input-gradient-to-input-image
-  "Given the results of the linear backward pass we have an input gradient that is
-a vector of k-width * k-height * num-channels.  We need to de-convolve this using opposite
-  operation as we did when we convolved the input."
-  [input-gradient {:keys [^long width ^long height ^long k-width ^long k-height
-                          ^long padx ^long pady ^long stride-w ^long stride-h
-                          ^long num-channels] :as conv-layer-config}]
+(defn get-gradient-convolution-sequence
+  "returns [conv-sequence input-mat-view] for the backpass steps of nn layers
+using convolutional steps"
+  [{:keys [^long width ^long height ^long k-width ^long k-height
+           ^long padx ^long pady ^long stride-w ^long stride-h
+           ^long num-channels] :as conv-layer-config}]
   (let [input-matrix (m/zero-array :vectorz [(+ height (* 2 pady))
                                              (* (+ width (* 2 padx)) num-channels)])
         input-mat-view (m/submatrix input-matrix
@@ -478,21 +477,51 @@ a vector of k-width * k-height * num-channels.  We need to de-convolve this usin
         output-width (get-padded-strided-dimension width padx k-width stride-w)
         output-height (get-padded-strided-dimension height pady k-height stride-h)
         kernel-stride (* k-width num-channels)]
-    (doall
-     (map #(m/add! % input-gradient)
-          (convolution-sequence input-matrix output-width output-height
-                                conv-layer-config)))
+    [(convolution-sequence input-matrix output-width output-height
+                           conv-layer-config)
+     input-mat-view]))
+
+
+(defn linear-input-gradient-to-input-image
+  "Given the results of the linear backward pass we have an input gradient that is
+  a vector of k-width * k-height * num-channels.  We need to de-convolve this using opposite
+  operation as we did when we convolved the input."
+  [input-gradient {:keys [^long width ^long height ^long k-width ^long k-height
+                          ^long padx ^long pady ^long stride-w ^long stride-h
+                          ^long num-channels] :as conv-layer-config}]
+  (let [[conv-sequence input-mat-view] (get-gradient-convolution-sequence conv-layer-config)]
+    (doall (map #(m/add! % input-gradient) conv-sequence))
     (m/array :vectorz (m/as-vector input-mat-view))))
 
 
+
 (defn convolution-backward!
-  [output-gradient backpass-input weights bias weight-gradient bias-gradient conv-layer-config]
-  (let [linear-output-gradient (gradient-vector-to-output-gradient output-gradient (m/row-count weights))
-        linear-input backpass-input
-        linear-input-gradient (linear-backward! linear-input linear-output-gradient weights
-                                                bias weight-gradient bias-gradient)]
-    (linear-input-gradient-to-input-image linear-input-gradient
-                                          conv-layer-config)))
+  ""
+  [output-gradient input weights weight-gradient bias-gradient
+   {:keys [^long width ^long height
+           ^long k-width ^long k-height
+           ^long padx ^long pady
+           ^long stride-w ^long stride-h
+           ^long num-channels] :as conv-layer-config}]
+  (let [[input-gradient-conv-sequence input-mat-view] (get-gradient-convolution-sequence conv-layer-config)
+        input-conv-sequence (create-convolution-rows input conv-layer-config)
+        ^long kernel-count (first (m/shape weights))
+        output-row-count (/ (long (first (m/shape output-gradient))) kernel-count)
+        output-gradient-rows (m/rows (m/reshape output-gradient [output-row-count kernel-count]))
+        weight-gradient-rows (into [] (m/rows weight-gradient))
+        weight-rows (into [] (m/rows weights))]
+    (doall (map (fn [input-gradient-row input-row output-gradient-row]
+                  (doall (map (fn [weight-row weight-gradient-row gradient]
+                                (m/add-scaled! input-gradient-row weight-row gradient)
+                                (m/add-scaled! weight-gradient-row input-row gradient))
+                              weight-rows
+                              weight-gradient-rows
+                              output-gradient-row))
+                  (m/add! bias-gradient output-gradient-row))
+                input-gradient-conv-sequence
+                input-conv-sequence
+                output-gradient-rows))
+    (m/as-vector input-mat-view)))
 
 
 ;; Explanation of the the conv-layer algorithm:
@@ -527,60 +556,17 @@ a vector of k-width * k-height * num-channels.  We need to de-convolve this usin
 ;; as our input where each convolution kernel output plane is interleaved.  It also means
 ;; we can use our linear layer with no changes directly after a convolution layer.
 ;;
-;; Next up we need to talk about the inverse operation.  Note that the derivatives come
-;; in in the same format as the output:
-;; [[dk1 dk2 dk3 dk4] (repeats for num convolved rows)].
-;; Thus the total derivative input for k1 is the columnar sum of the derivative matrix.
-;; Now in order to use the linear-layer's backward pass we need the inputs w/r/t to the
-;; kernel weights.
-;;
-;; The convolved rows could be interpreted as such:
-;; [[kw1 kw2 kw3 kw4] ...] where you can see that the first kernel weight is going to be
-;; multiplied by kw1.  Thus the columnar sum of the convolved rows *is* the total input
-;; by weight to any of the kernels.
-;;
-;; So the inputs to the linear-layer's backward pass is something like:
-;; input: (columnar-sum convolved-rows)
-;; gradient: (column-sum (reshape output-gradient [output-height num-kernels]))
-;; weights, bias weight-gradient bias-gradient are all the same.
-;;
-;; Now we are left with the problem of deconvolving the input-gradients to produce
-;; upstream gradients.  Note that gradients are associative, commutative w/r/t addition
-;; (we can sum them to produce total gradients).
-;;
-;; We initialize a gradient total matrix with zero that looks exactly like input including
-;; rows added for padding.
-;; We then run a modified form of the convolve-rows algorithm that instead of producing
-;; an output of the rows from the matrix views for each convolution it uses the view as an
-;; accumulator with the gradient vector under addition.  This aggregates the gradient vector
-;; backwards down the convolution step to produce an input gradient image of precisely
-;; the same format.
-;;
-;; (defn linear-input-gradient-to-input-image
-;;   [input-gradient width height k-width k-height padx pady stride-w stride-h]
-;;  ...)
-;;
-;; (linear-input-gradient-to-input-image (m/array [1 1 1 1]) 3 3 2 2 0 0 1 1)
-;;
-;; => [1.0,2.0,1.0,2.0,4.0,2.0,1.0,2.0,1.0]
-;;
-;; or:
-;;
-;; [[1 2 1]
-;;  [2 4 2]
-;;  [1 2 1]]
-;;
-;; This output makes sense because given an input gradient for a 2x2 kernel of [1 1 1 1]
-;; we spread it out such that we effectively count the number of convolutions each input
-;; pixel would be involved in.
-
 
 
 (defrecord Convolutional [weights bias weight-gradient bias-gradient
                           conv-layer-config]
     cp/PModule
     (cp/calc [this input]
-      (let [input-convolved-rows (create-convolution-rows input conv-layer-config)
+      ;;We create a matrix from the convolution rows because we will iterate them
+      ;;twice...Potentially this isn't the fastest possible solution but it can't
+      ;;be far from it.  If we work batching through the entire system at the matrix/input
+      ;;level then we should see some speed benefit.
+      (let [input-convolved-rows (m/array :vectorz (create-convolution-rows input conv-layer-config))
             backpass-input (columnar-sum input-convolved-rows)
             output (convolution-forward weights bias input-convolved-rows)]
         [output backpass-input]))
@@ -594,8 +580,8 @@ a vector of k-width * k-height * num-channels.  We need to de-convolve this usin
         (assoc this :output output :backpass-input backpass-input)))
 
     (backward [this input output-gradient]
-      (assoc this :input-gradient (convolution-backward! output-gradient (:backpass-input this)
-                                                         weights bias weight-gradient bias-gradient
+      (assoc this :input-gradient (convolution-backward! output-gradient input
+                                                         weights weight-gradient bias-gradient
                                                          conv-layer-config)))
 
     (input-gradient [this]
@@ -615,3 +601,80 @@ a vector of k-width * k-height * num-channels.  We need to de-convolve this usin
     cp/PGradient
     (gradient [this]
       (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
+
+
+(defn max-pooling-forward!
+  "The forward pass writes to two things; output and output-indexes.  The indexes
+record which item from the input row we actually looked at.  Returns
+[output output-indexes].  Note that this does not change the number of channels
+so it needs to remember the max per-channel."
+  [input output output-indexes {:keys [^long k-width ^long k-height
+                                       ^long num-channels] :as conv-layer-config}]
+  ;;Each input row has k-width*num-channels*k-height in it.
+  ;;Each output index gets num-channels written to it.
+  (let [input-convolved-rows (create-convolution-rows input conv-layer-config)
+        num-kernel-items (* k-width k-height)]
+    (doall (map-indexed (fn [^long idx input-row]
+                          (loop [kernel-item 0]
+                            (when (< kernel-item num-kernel-items)
+                              (loop [channel 0]
+                                (when (< channel num-channels)
+                                  (let [write-offset (+ (* idx num-channels) channel)
+                                        read-offset (+ (* kernel-item num-channels) channel)
+                                        ^double input-item (m/mget input-row read-offset)]
+                                    (let [^double output-item (m/mget output write-offset)]
+                                      (when (or (= 0 kernel-item)
+                                                (> input-item output-item))
+                                        (m/mset! output write-offset input-item)
+                                        (m/mset! output-indexes write-offset (double kernel-item)))))
+                                  (recur (inc channel))))
+                              (recur (inc kernel-item)))))
+                        input-convolved-rows))
+    [output output-indexes]))
+
+
+(defn max-pooling-backward!
+  "Calculates the input gradient using the inverse of the convolution step
+combined with the output gradient and the output indexes which tell you which kernel
+index the output came from."
+  [output-gradient output-indexes input-gradient
+   {:keys [^long k-width ^long k-height
+           ^long num-channels] :as conv-layer-config}]
+  (let [[conv-sequence input-mat-view] (get-gradient-convolution-sequence conv-layer-config)
+        num-kernel-items (* k-width k-height)]
+    (doall (map-indexed (fn [^long idx input-row]
+                          (loop [channel 0]
+                            (when (< channel num-channels)
+                              (let [write-offset (+ (* idx num-channels) channel)
+                                    ^double output-item (m/mget output-gradient write-offset)
+                                    kernel-item (long (m/mget output-indexes write-offset))
+                                    read-offset (+ (* kernel-item num-channels) channel)
+                                    ^double read-item (m/mget input-row read-offset)]
+                                (m/mset! input-row read-offset (+ read-item output-item)))
+                              (recur (inc channel)))))
+                        conv-sequence))
+    (m/assign! input-gradient (m/as-vector input-mat-view))))
+
+
+;;Max pooling layer.  There are other pooling layer types (average,a sochiastic)
+;;that may be implemented later but for now we only need max pooling.
+(defrecord Pooling [output output-indexes input-gradient conv-layer-config]
+  cp/PModule
+  (cp/calc [this input]
+    (max-pooling-forward! input output output-indexes conv-layer-config))
+
+  (cp/output [m]
+    (:output m))
+
+  cp/PNeuralTraining
+  (forward [this input]
+    (cp/calc this input)
+    this)
+
+  (backward [this input output-gradient]
+    (max-pooling-backward! output-gradient output-indexes
+                           input-gradient conv-layer-config)
+    this)
+
+  (input-gradient [this]
+    (:input-gradient this)))
