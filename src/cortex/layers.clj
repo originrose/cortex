@@ -1,7 +1,7 @@
 (ns cortex.layers
   (:require [cortex.protocols :as cp])
   (:require [cortex.util :as util :refer [error]]
-            [cortex.impl.layers]
+            [cortex.impl.layers :as impl]
             [cortex.impl.wiring])
   (:require [clojure.core.matrix :as m]))
 
@@ -33,7 +33,7 @@
       (m/ensure-mutable (m/new-array :vectorz shape)))))
 
 (defn dropout
-  "Creates a dropout module of the given shape. 
+  "Creates a dropout module of the given shape.
 
    During training, units will be included with the given probability."
   ([shape probability]
@@ -137,3 +137,53 @@
   ([up down options]
     (cortex.impl.layers.DenoisingAutoencoder. up down (m/clone (cp/output down)) (m/clone (cp/output up))
                                               nil options)))
+
+
+(defn convolutional
+  [input-width input-height num-input-channels
+   kernel-width kernel-height pad-x pad-y stride-x stride-y
+   num-kernels
+   & {:keys [custom-weights custom-bias]}]
+  (let [^long input-width input-width
+        ^long num-input-channels num-input-channels
+        conv-config (impl/create-conv-layer-config input-width input-height
+                                                   kernel-width kernel-height
+                                                   pad-x pad-y
+                                                   stride-x stride-y
+                                                   num-input-channels)
+        weights (or custom-weights
+                    (util/weight-matrix num-kernels (* input-width num-input-channels)))
+        bias (or custom-bias
+                 (m/zero-array :vectorz [num-kernels]))
+        output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)
+        output-height (impl/get-padded-strided-dimension input-height pad-y kernel-height stride-y)
+        weight-gradient (m/zero-array :vectorz (m/shape weights))
+        bias-gradient (m/zero-array :vectorz (m/shape bias))]
+    (impl/->Convolutional weights bias
+                          weight-gradient
+                          bias-gradient
+                          conv-config)))
+
+
+(defn max-pooling
+  "Performs per-channel max within a convolution window.  Thus output has same number of channels
+as the input"
+  [input-width input-height num-input-channels
+   kernel-width kernel-height pad-x pad-y stride-x stride-y]
+  (let [^long num-input-channels num-input-channels
+        ^long input-width input-width
+        ^long input-height input-height
+        conv-config (impl/create-conv-layer-config input-width input-height
+                                                   kernel-width kernel-height
+                                                   pad-x pad-y
+                                                   stride-x stride-y
+                                                   num-input-channels)
+        output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)
+        output-height (impl/get-padded-strided-dimension input-height pad-y kernel-height stride-y)
+        output (m/zero-array :vectorz [(* output-width output-height num-input-channels)])
+        output-indexes (m/zero-array :vectorz (m/shape output))
+        input-gradient (m/zero-array :vectorz [(* input-width input-height num-input-channels)])]
+    (impl/->Pooling output
+                    output-indexes
+                    input-gradient
+                    conv-config)))

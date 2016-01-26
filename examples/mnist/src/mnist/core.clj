@@ -7,7 +7,8 @@
             [cortex.optimise :as opt]
             [cortex.core :as core]
             [clojure.core.matrix.random :as rand]
-            [cortex.network :as net])
+            [cortex.network :as net]
+            [cortex.description :as desc])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -32,44 +33,28 @@
 (def output-width (last (m/shape training-labels)))
 
 
-
-(def n-epochs 500)
-(def learning-rate 0.001)
-(def momentum 0.9)
+(def n-epochs 10)
 (def batch-size 10)
 (def loss-fn (opt/mse-loss))
 (def hidden-layer-size 80)
 
+
 (defn create-network
   []
-  (let [network-modules [(layers/linear-layer input-width hidden-layer-size)
-                         (layers/logistic [hidden-layer-size])
-                         (layers/linear-layer hidden-layer-size output-width)]]
-    (core/stack-module network-modules)))
-
-
-(defn create-relu-softmax-network
-  []
-  (core/stack-module
-   [(layers/linear-layer input-width hidden-layer-size)
-    (layers/relu [hidden-layer-size])
-    (layers/linear-layer hidden-layer-size hidden-layer-size)
-    (layers/relu [hidden-layer-size])
-    (layers/linear-layer hidden-layer-size hidden-layer-size)
-    (layers/relu [hidden-layer-size])
-    (layers/linear-layer hidden-layer-size output-width)
-    (layers/softmax [output-width])
-    ]))
-
-
-(def network-fn create-relu-softmax-network)
-;(def network-fn create-network)
+  (let [network-desc [(desc/input 28 28 1)
+                      (desc/convolutional 5 0 1 20)
+                      (desc/max-pooling 2 0 2)
+                      (desc/convolutional 5 0 1 50)
+                      (desc/max-pooling 2 0 2)
+                      (desc/linear->relu 500)
+                      (desc/softmax 10)]
+        built-network (desc/build-full-network-description network-desc)]
+    (desc/create-network built-network)))
 
 
 (defn create-optimizer
   [network]
   (opt/adadelta-optimiser (core/parameter-count network))
-  ;(opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
   )
 
 (defn test-train-step

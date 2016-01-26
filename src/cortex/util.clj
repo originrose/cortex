@@ -35,7 +35,7 @@
 
 (defn logistic'
   "Compute the derivative of the logistic (sigmoid) function for a given output. Works on any array shape.
-    
+
      sigma'(y) = y * (1 - y) "
   [y]
   (m/emul y (m/sub 1.0 y)))
@@ -44,13 +44,12 @@
   [rows cols]
   (let [^java.util.Random random-obj (java.util.Random.)
         weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
-    (m/mutable
-     (m/array
-      (mapv (fn [_]
-              (repeatedly cols
-                          #(* weight-scale
-                              (.nextGaussian random-obj))))
-            (range rows))))))
+    (m/array :vectorz
+             (mapv (fn [_]
+                     (repeatedly cols
+                                 #(* weight-scale
+                                     (.nextGaussian random-obj))))
+                   (range rows)))))
 
 (defn random-matrix
   "Constructs an array of the given shape with random normally distributed element values"
@@ -158,7 +157,7 @@
       (range (m/column-count input)))))
 
 
-(defn estimate-gradient 
+(defn estimate-gradient
   "Computes a numerical approximation of the derivative of the function f at with respectr to input x"
   ([f x]
     (let [x+dx (m/add )])))
