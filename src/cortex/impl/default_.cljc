@@ -1,4 +1,4 @@
-(ns cortex.impl.default
+(ns cortex.impl.default-
   "Default implementations for coretx protocols."
   (:require [cortex.protocols :as cp]
             [clojure.core.matrix :as m]
@@ -10,7 +10,7 @@
 
 ;; default to assuming zero parameters
 (extend-protocol cp/PParameters
-  #?(:clj Object :cljs js/object)
+  #?(:clj Object :cljs object)
   (parameters 
       ([m]
         ;; default to assuming zero parameters
@@ -22,21 +22,21 @@
 
 ;; default gradient function assumes zero parameters
 (extend-protocol cp/PGradient
-  #?(:clj Object :cljs js/object)
+  #?(:clj Object :cljs object)
     (gradient 
       ([m]
         EMPTY-VECTOR)))
 
 ;; default parameter count implementation is to... err... count the parameters. duh!
 (extend-protocol cp/PParameterCount
-  #?(:clj Object :cljs js/object)
+  #?(:clj Object :cljs object)
     (parameter-count 
       ([m]
         (m/ecount (cp/parameters m)))))
 
 ;; Default loss gradient function returns :loss-gradient-fn (may be nil)
 (extend-protocol cp/PLossGradientFunction
-  #?(:clj Object :cljs js/object)
+  #?(:clj Object :cljs object)
     (loss-gradient-fn 
       ([m]
         (:loss-gradient-fn m))))
@@ -47,7 +47,7 @@
 ;; 3. Compute outpout gradient
 ;; 4. Run backward pass
 (extend-protocol cp/PTraining
-  #?(:clj Object :cljs js/object)
+  #?(:clj Object :cljs object)
     (train 
       ([m input target]
         (let [m (cp/forward m input)
@@ -56,7 +56,4 @@
               output-gradient (loss-function output target)
               m (cp/backward m input output-gradient)]
           m))))
-
-
-
 
