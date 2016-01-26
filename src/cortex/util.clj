@@ -38,8 +38,7 @@
     
      sigma'(y) = sigma(y) * (1-sigma(y)) "
   [y]
-  (let [sz (m/logistic y)]
-    (m/emul sz (m/sub 1.0 sz))))
+  (m/emul y (m/sub 1.0 y)))
 
 (defn weight-matrix
   [rows cols]

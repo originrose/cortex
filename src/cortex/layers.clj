@@ -31,6 +31,19 @@
       (m/ensure-mutable (m/new-array :vectorz shape))
       (m/ensure-mutable (m/new-array :vectorz shape)))))
 
+(defn dropout
+  "Creates a dropout module of the given shape. 
+
+   During training, units will be included with the given probability."
+  ([shape probability]
+    (when-not (coll? shape)
+      (error "logistic layer constructor requires a shape vector"))
+    (cortex.impl.layers.Dropout.
+      (m/ensure-mutable (m/new-array :vectorz shape))
+      (m/ensure-mutable (m/new-array :vectorz shape))
+      (double probability)
+      (m/ensure-mutable (m/new-array :vectorz shape)))))
+
 (defn softmax
   "Creates a softmax module of the given shape."
   ([shape]

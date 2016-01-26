@@ -38,6 +38,37 @@
       input-gradient))
 
 
+;; DROPOUT
+;; Module implementing "dropout" functionality when training
+;; Works as a identity function otherwise
+(defrecord Dropout [output input-gradient ^double probability dropout]
+  cp/PModule
+    (calc [this input]
+      (m/assign! output input)
+       this)
+
+    (output [this]
+      (:output this))
+
+  cp/PNeuralTraining
+    (forward [this input]
+      (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) 1.0 0.0)) dropout)
+      (m/assign! output input)
+      (m/mul! output dropout)
+      (m/scale! output (/ 1.0 probability))
+      this)
+
+    (backward [this input output-gradient]
+      (let []
+        (m/assign! input-gradient output-gradient)
+        (m/mul! input-gradient dropout)
+        (m/scale! input-gradient (/ 1.0 probability))
+        this))
+
+    (input-gradient [this]
+      input-gradient))
+
+
 ;;There is an option that torch uses which is if the input is less than 0
 ;;then multiply it by a special value (negval).
 ;;https://github.com/torch/nn/blob/master/lib/THNN/generic/LeakyReLU.c
