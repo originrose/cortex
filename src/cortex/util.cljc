@@ -15,7 +15,7 @@
 #?(:clj (defn timestamp [] (System/nanoTime)))
    :cljs (defn timestamp [] (.getTime (js/Date.)))
 
-(def EMPTY-VECTOR (m/new-array 0))
+(def EMPTY-VECTOR (m/new-array [0]))
 
 #?(:clj
     (do
@@ -33,8 +33,8 @@
         ;  A.J. Kinderman & J.F. Monahan
         ;  Computer Generation of Random Variables Using the Ratio of Uniform Deviates
         ;  ACM Transactions on Mathematical Software 3(3) 257-260, 1977
-        (let [[u1 ] (rand)
-              [u2*] (rand)
+        (let [u1  (rand)
+              u2* (rand)
               u2 (- 1. u2*)
               s (* 4 (/ (Math/exp (- 0.5)) (Math/sqrt 2.)))
               z (* s (/ (- u1 0.5) u2))
