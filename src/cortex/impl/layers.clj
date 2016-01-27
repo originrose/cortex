@@ -408,6 +408,60 @@ the perf hit of a copy then don't use padding."
       (m/reshape interleaved-input-vector [height (* width num-channels)]))))
 
 
+(defn convolution-to-input-matrix!
+  "Given a convolution sequence and the convolutional layer config
+produce an input vector using summation over overlapping entries.
+Mutates input vector"
+  [conv-sequence input-vector
+   {:keys [^long width ^long height
+           ^long k-width ^long k-height
+           ^long padx ^long pady
+           ^long stride-w ^long stride-h
+           ^long num-channels] :as conv-layer-config}]
+  (let [output-width (get-padded-strided-dimension width padx k-width stride-w)
+        output-height (get-padded-strided-dimension height pady k-height stride-w)
+        kernel-stride (* k-width num-channels)
+        input-stride (* width num-channels)
+        num-rows (m/row-count conv-sequence)]
+    (loop [idx 0]
+      (when (< idx num-rows)
+        (let [input-row (m/get-row conv-sequence idx)]
+          (let [output-x (long (rem idx output-width))
+                output-y (long (/ idx output-width))
+                input-left (- (* output-x stride-w) padx)
+                input-top (- (* output-y stride-h) pady)]
+            (loop [conv-y 0]
+              (when (< conv-y k-height)
+                (let [y-write-offset (+ input-top conv-y)]
+                  (when (and (>= y-write-offset 0)
+                             (< y-write-offset height))
+                    (loop [conv-x 0]
+                      (when (< conv-x k-width)
+                        (let [x-write-offset (+ input-left conv-x)]
+                          (when (and (>= x-write-offset 0)
+                                     (< x-write-offset width))
+                            ;;write the pixel.  It would be ideal
+                            ;;if there was an operator to mutableadd
+                            ;;a sub-vector.  In that case we could probably
+                            ;;copy a row here instead of write pixel by pixel
+                            (loop [chan 0]
+                              (when (< chan num-channels)
+                                (let [input-offset (+ (* conv-y kernel-stride)
+                                                      (* conv-x num-channels)
+                                                      chan)
+                                      ^double conv-val (m/mget input-row input-offset)
+                                      write-offset (+ (* y-write-offset input-stride)
+                                                      (* x-write-offset num-channels)
+                                                      chan)
+                                      ^double sum-val (m/mget input-vector write-offset)]
+                                  (m/mset! input-vector write-offset (+ sum-val conv-val)))
+                                (recur (inc chan))))))
+                        (recur (inc conv-x))))))
+                (recur (inc conv-y))))))
+        (recur (inc idx))))
+    input-vector))
+
+
 (defn convolution-sequence
   "Produce a sequence of views that performs a convolution over an input matrix"
   [input-matrix output-width output-height {:keys [^long k-width ^long k-height
@@ -496,32 +550,41 @@ using convolutional steps"
 
 
 (defn convolution-backward!
-  ""
-  [output-gradient input weights weight-gradient bias-gradient
-   {:keys [^long width ^long height
-           ^long k-width ^long k-height
-           ^long padx ^long pady
-           ^long stride-w ^long stride-h
-           ^long num-channels] :as conv-layer-config}]
-  (let [[input-gradient-conv-sequence input-mat-view] (get-gradient-convolution-sequence conv-layer-config)
-        input-conv-sequence (create-convolution-rows input conv-layer-config)
-        ^long kernel-count (first (m/shape weights))
-        output-row-count (/ (long (first (m/shape output-gradient))) kernel-count)
-        output-gradient-rows (m/rows (m/reshape output-gradient [output-row-count kernel-count]))
-        weight-gradient-rows (into [] (m/rows weight-gradient))
-        weight-rows (into [] (m/rows weights))]
-    (doall (map (fn [input-gradient-row input-row output-gradient-row]
-                  (doall (map (fn [weight-row weight-gradient-row gradient]
-                                (m/add-scaled! input-gradient-row weight-row gradient)
-                                (m/add-scaled! weight-gradient-row input-row gradient))
-                              weight-rows
-                              weight-gradient-rows
-                              output-gradient-row))
-                  (m/add! bias-gradient output-gradient-row))
-                input-gradient-conv-sequence
-                input-conv-sequence
-                output-gradient-rows))
-    (m/as-vector input-mat-view)))
+  ([output-gradient input-conv-sequence weights
+    weight-gradient bias-gradient input-gradient-conv-sequence
+    {:keys [^long width ^long height
+            ^long k-width ^long k-height
+            ^long padx ^long pady
+            ^long stride-w ^long stride-h
+            ^long num-channels] :as conv-layer-config}]
+   (let [^long kernel-count (first (m/shape weights))
+         output-row-count (long (/ (long (first (m/shape output-gradient))) kernel-count))]
+     (loop [idx 0]
+       (when (< idx output-row-count)
+         (let [input-gradient-row (m/get-row input-gradient-conv-sequence idx)
+               input-row (m/get-row input-conv-sequence idx)]
+           (loop [kern-idx 0]
+             (when (< kern-idx kernel-count)
+               (let [weight-row (m/get-row weights kern-idx)
+                     weight-gradient-row (m/get-row weight-gradient kern-idx)
+                     output-gradient-offset (+ (* idx kernel-count)
+                                               kern-idx)
+                     ^double gradient (m/mget output-gradient output-gradient-offset)
+                     ^double bias-gradient-val (m/mget bias-gradient kern-idx)]
+                 (m/add-scaled! input-gradient-row weight-row gradient)
+                 (m/add-scaled! weight-gradient-row input-row gradient)
+                 (m/mset! bias-gradient kern-idx (+ gradient bias-gradient-val)))
+               (recur (inc kern-idx)))))
+         (recur (inc idx))))))
+  ;;Easier access for testing
+  ([output-gradient input weights weight-gradient bias-gradient conv-layer-config]
+   (let [input-conv-sequence (create-convolution-rows input conv-layer-config)
+         [gradient-conv-sequence gradient-mat-view] (get-gradient-convolution-sequence conv-layer-config)
+         gradient-conv-sequence (into [] gradient-conv-sequence)]
+     (convolution-backward! output-gradient input-conv-sequence weights weight-gradient
+                            bias-gradient gradient-conv-sequence conv-layer-config)
+     (m/as-vector gradient-mat-view))))
+
 
 
 ;; Explanation of the the conv-layer algorithm:
@@ -567,22 +630,30 @@ using convolutional steps"
       ;;be far from it.  If we work batching through the entire system at the matrix/input
       ;;level then we should see some speed benefit.
       (let [input-convolved-rows (m/array :vectorz (create-convolution-rows input conv-layer-config))
-            backpass-input (columnar-sum input-convolved-rows)
             output (convolution-forward weights bias input-convolved-rows)]
-        [output backpass-input]))
+        [output input-convolved-rows]))
 
     (cp/output [m]
       (:output m))
 
     cp/PNeuralTraining
     (forward [this input]
-      (let [[output backpass-input] (cp/calc this input)]
-        (assoc this :output output :backpass-input backpass-input)))
+      (let [[output input-convolved-rows] (cp/calc this input)]
+        (assoc this :output output :input-convolved-rows input-convolved-rows)))
 
     (backward [this input output-gradient]
-      (assoc this :input-gradient (convolution-backward! output-gradient input
-                                                         weights weight-gradient bias-gradient
-                                                         conv-layer-config)))
+      (let [input-convolved-rows (:input-convolved-rows this)
+            gradient-convolved-rows (or (:gradient-convolved-rows this)
+                                        (m/array :vectorz (first (get-gradient-convolution-sequence conv-layer-config))))
+            gradient-matrix (or (:input-gradient this)
+                                (m/zero-array :vectors (m/shape input)))]
+        (m/mset! gradient-matrix 0.0)
+        (convolution-backward! output-gradient input-convolved-rows weights weight-gradient
+                               bias-gradient gradient-convolved-rows conv-layer-config)
+        (convolution-to-input-matrix! gradient-convolved-rows gradient-matrix conv-layer-config)
+        (assoc this
+               :input-gradient gradient-matrix
+               :gradient-convolved-rows gradient-convolved-rows)))
 
     (input-gradient [this]
       (:input-gradient this))

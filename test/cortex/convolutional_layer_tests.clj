@@ -12,7 +12,7 @@
 
 (deftest conv-rows
   (is (= (map double [1 2 4 5 2 3 5 6 4 5 7 8 5 6 8 9])
-         (m/eseq (impl/create-convolution-rows (range 1 10) conv-layer-config)))))
+         (map double (m/eseq (impl/create-convolution-rows (range 1 10) conv-layer-config))))))
 
 
 (defn create-conv-layer
@@ -130,3 +130,47 @@ for testing against other conv net implementations."
            (map double [4 4 4 4])))
     (is (= (m/eseq input-gradient)
            (map double (repeat (* 9 3) 10))))))
+
+
+(defn run-conv-gradient-copy
+  []
+  (let [conv-config (impl/create-conv-layer-config 3 3 2 2 1 1 1 1 1)
+        input-mat (m/array :vectorz (repeat 9 1))
+        input-conv (impl/create-convolution-rows input-mat conv-config)
+        output-mat (m/array :vectors (repeat 9 0))]
+    (impl/convolution-to-input-matrix! input-conv output-mat conv-config)))
+
+
+;;compare using views to using concrete rep and then copy result
+(deftest perf-test-conv-backward
+  (let [conv-config (impl/create-conv-layer-config 28 28 5 5 0 0 1 1 1)
+        weights (m/array :vectorz (map #(repeat 25 %) (range 1 21)))
+        bias (m/array :vectorz (repeat 20 1))
+        weight-gradient (m/zero-array :vectorz (m/shape weights))
+        bias-gradient (m/zero-array :vectorz (m/shape bias))
+        output-width (impl/get-padded-strided-dimension 28 0 5 1)
+        output-height (impl/get-padded-strided-dimension 28 0 5 1)
+        output-gradients (m/array :vectorz (repeat (* output-width output-height 20) 1))
+        [gradient-seq gradient-view] (impl/get-gradient-convolution-sequence conv-config)
+        gradient-seq (into [] gradient-seq)
+        input (m/array :vectorz (repeat 1 (* 28 28)))
+        input-conv-rows (m/array :vectorz (impl/create-convolution-rows input conv-config))
+        packed-gradient-seq (m/array :vectorz gradient-seq)
+        packed-gradient-output (m/zero-array :vectorz [(* 28 28)])]
+
+    (dotimes [outer 5]
+     (println "backward-view")
+     (time (dotimes [iter 100]
+             (m/mset! gradient-view 0.0)
+             (impl/convolution-backward! output-gradients input-conv-rows
+                                         weights weight-gradient bias-gradient
+                                         gradient-seq conv-config)
+             (m/array :vectorz (m/as-vector gradient-view))))
+
+     (println "backward-packed")
+     (time (dotimes [iter 100]
+             (m/mset! packed-gradient-output 0.0)
+             (impl/convolution-backward! output-gradients input-conv-rows
+                                         weights weight-gradient bias-gradient
+                                         packed-gradient-seq conv-config)
+             (impl/convolution-to-input-matrix! packed-gradient-seq packed-gradient-output conv-config))))))
