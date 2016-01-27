@@ -1,7 +1,10 @@
 (ns cortex.wiring-test
-  (:use [clojure.test])
-  (:use [cortex.core])
-  (:require [clojure.core.matrix :as m]))
+  (:require [cortex.core :refer [calc function-module stack-module parameters output]]
+            #?(:cljs
+                [cljs.test :refer-macros [deftest is]]
+                :clj
+                [clojure.test :refer [deftest is]])
+            [clojure.core.matrix :as m]))
 
 (deftest test-function-module
   ;; simple module implementing inc function
