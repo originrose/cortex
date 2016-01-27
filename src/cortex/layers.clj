@@ -30,8 +30,8 @@
     (when-not (coll? shape)
       (error "logistic layer constructor requires a shape vector"))
     (cortex.impl.layers.Logistic.
-      (m/ensure-mutable (m/new-array :vectorz shape))
-      (m/ensure-mutable (m/new-array :vectorz shape)))))
+      (util/empty-array shape)
+      (util/empty-array shape))))
 
 (defn dropout
   "Creates a dropout module of the given shape.
@@ -41,10 +41,10 @@
     (when-not (coll? shape)
       (error "logistic layer constructor requires a shape vector"))
     (cortex.impl.layers.Dropout.
-      (m/ensure-mutable (m/new-array :vectorz shape))
-      (m/ensure-mutable (m/new-array :vectorz shape))
+      (util/empty-array shape)
+      (util/empty-array shape)
       (double probability)
-      (m/ensure-mutable (m/new-array :vectorz shape)))))
+      (util/empty-array shape))))
 
 (defn scale
   "Creates a scaling layer with the specified shape and multiplication factor"
@@ -62,8 +62,8 @@
     (when-not (coll? shape)
       (error "softmax layer constructor requires a shape vector"))
     (cortex.impl.layers.Softmax.
-        (m/ensure-mutable (m/new-array :vectorz shape))
-        (m/ensure-mutable (m/new-array :vectorz shape)))))
+        (util/empty-array shape)
+        (util/empty-array shape))))
 
 (defn relu
   "Creates a rectified linear (ReLU) module of the given shape.
@@ -74,9 +74,9 @@
     (when-not (coll? shape)
       (error "relu layer constructor requires a shape vector"))
     (cortex.impl.layers.RectifiedLinear.
-        (m/ensure-mutable (m/new-array :vectorz shape))
-        (m/ensure-mutable (m/new-array :vectorz shape))
-        (m/ensure-mutable (m/new-array :vectorz shape))
+        (util/empty-array shape)
+        (util/empty-array shape)
+        (util/empty-array shape)
         negval)))
 
 (defn linear
@@ -91,15 +91,15 @@
           n-inputs (long n-inputs)]
       (when-not (== n-outputs (m/dimension-count bias 0)) (error "Mismatched weight and bias shapes"))
       (-> wm
-        (assoc :weight-gradient (m/new-vector :vectorz (* n-outputs n-inputs)))
-        (assoc :bias-gradient (m/new-vector :vectorz n-outputs))
-        (assoc :input-gradient (m/new-vector :vectorz n-inputs))))))
+        (assoc :weight-gradient (util/empty-array [(* n-outputs n-inputs)]))
+        (assoc :bias-gradient (util/empty-array [n-outputs]))
+        (assoc :input-gradient (util/empty-array [n-inputs]))))))
 
 (defn linear-layer
   "Creates a linear layer with a new randomised weight matrix for the given number of inputs and outputs"
   ([n-inputs n-outputs]
     (linear (util/weight-matrix n-outputs n-inputs)
-            (m/new-vector :vectorz n-outputs))))
+            (util/empty-array [n-outputs]))))
 
 (defn split
   "Creates a split later using a collection of modules. The split layer returns the outputs of each
@@ -127,13 +127,13 @@
   ([shape {:keys [learn-rate normaliser-factor] :as options}]
     (when-not (coll? shape)
       (error "normaliser layer constructor requires a shape vector"))
-    (let [output (m/new-array :vectorz shape)
-          input-gradient (m/new-array :vectorz  shape)
-          mean (m/new-array :vectorz shape)
-          sd (m/new-array :vectorz shape)
-          acc-ss (m/new-array :vectorz shape)
-          acc-mean (m/new-array :vectorz shape)
-          tmp (m/new-array :vectorz shape)
+    (let [output (util/empty-array shape)
+          input-gradient (util/empty-array shape)
+          mean (util/empty-array shape)
+          sd (util/empty-array shape)
+          acc-ss (util/empty-array shape)
+          acc-mean (util/empty-array shape)
+          tmp (util/empty-array shape)
           ]
       (m/fill! sd 1.0)
       (m/fill! acc-ss 1.0)
