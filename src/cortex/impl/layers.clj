@@ -38,6 +38,36 @@
       input-gradient))
 
 
+;; LOGISTIC
+;; Module implementing a Logistic activation function over a numerical array
+(defrecord Logistic [output input-gradient]
+  cp/PModule
+    (calc [this input]
+      (m/assign! output input)
+      (m/logistic! output)
+      this)
+
+    (output [this]
+      (:output this))
+
+  cp/PNeuralTraining
+    (forward [this input]
+      (cp/calc this input))
+
+    (backward [this input output-gradient]
+      (let []
+        ;; input gradient = output * (1 - output) * output-gradient
+        (m/assign! input-gradient 1.0)
+        (m/sub! input-gradient output)
+        (m/mul! input-gradient output output-gradient)
+
+        ;; finally return this, input-gradient has been updated in-place
+        this))
+
+    (input-gradient [this]
+      input-gradient))
+
+
 ;; DROPOUT
 ;; Module implementing "dropout" functionality when training
 ;; Works as a identity function otherwise
@@ -63,6 +93,35 @@
         (m/assign! input-gradient output-gradient)
         (m/mul! input-gradient dropout)
         (m/scale! input-gradient (/ 1.0 probability))
+        this))
+
+    (input-gradient [this]
+      input-gradient))
+
+
+;; SCALE
+;; Module implementing simple scaling functionality 
+;; Scale factor of 1.0 works as identity layer
+(defrecord Scale [output input-gradient ^double factor]
+  cp/PModule
+    (calc [this input]
+      (m/assign! output input)
+      (when (not= factor 1.0) (m/scale! output factor))
+      this)
+
+    (output [this]
+      (:output this))
+
+  cp/PNeuralTraining
+    (forward [this input]
+      (m/assign! output input)
+      (when (not= factor 1.0) (m/scale! output factor))
+      this)
+
+    (backward [this input output-gradient]
+      (let []
+        (m/assign! input-gradient output-gradient)
+        (when (not= factor 1.0) (m/scale! input-gradient factor))
         this))
 
     (input-gradient [this]
