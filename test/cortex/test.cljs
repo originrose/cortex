@@ -1,8 +1,10 @@
 (ns cortex.test
   (:require [doo.runner :refer-macros [doo-tests]]
-            [cortex.wiring-test]))
+            [cortex.wiring-test]
+            [cortex.function-test]))
 
 (enable-console-print!)
 
-(doo-tests 'cortex.wiring-test)
+(doo-tests 'cortex.wiring-test
+           'cortex.function-test)
 
