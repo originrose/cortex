@@ -29,7 +29,7 @@
         output-gradient (m/array :vectorz (repeat (* output-dim output-dim n-kernels) 1))
         weight-gradient (m/zero-array :vectorz (m/shape weights))
         bias-gradient (m/zero-array :vectorz [n-kernels])]
-    (impl/map->Convolutional { :weights weights :bias bias
+    (impl/map->Convolutional {:weights weights :bias bias
                               :weight-gradient weight-gradient
                               :bias-gradient bias-gradient
                               :conv-layer-config conv-config})))
@@ -133,12 +133,21 @@ for testing against other conv net implementations."
 
 
 (defn run-conv-gradient-copy
-  []
-  (let [conv-config (impl/create-conv-layer-config 3 3 2 2 1 1 1 1 1)
-        input-mat (m/array :vectorz (repeat 9 1))
-        input-conv (impl/create-convolution-rows input-mat conv-config)
-        output-mat (m/array :vectors (repeat 9 0))]
-    (impl/convolution-to-input-matrix! input-conv output-mat conv-config)))
+  ([]
+   (let [channels 1
+         conv-config (impl/create-conv-layer-config 3 3 2 2 0 0 1 1 channels)
+         input-mat (m/array :vectorz (flatten (repeat 9 (repeat channels 1))))
+         input-conv (impl/create-convolution-rows input-mat conv-config)
+         output-mat (m/array :vectors (flatten (repeat 9 (repeat channels 0))))]
+     (impl/convolution-to-input-vector! input-conv output-mat conv-config))))
+
+
+(defn run-conv-input-copy
+  ([]
+   (let [conv-config (impl/create-conv-layer-config 3 3 2 2 1 1 1 1 1)
+         input-mat (m/array :vectorz (range 1 10))
+         input-conv (m/array :vectorz (impl/create-convolution-rows (m/zero-array :vectorz [9]) conv-config))]
+     (impl/input-vector-to-convolution! input-mat input-conv conv-config))))
 
 
 ;;compare using views to using concrete rep and then copy result
@@ -158,10 +167,12 @@ for testing against other conv net implementations."
         packed-gradient-seq (m/array :vectorz gradient-seq)
         packed-gradient-output (m/zero-array :vectorz [(* 28 28)])]
 
-    (dotimes [outer 5]
+    (dotimes [outer 10]
      (println "backward-view")
      (time (dotimes [iter 100]
-             (m/mset! gradient-view 0.0)
+             ;;Clear gradient.  Because used as accumulator needs to be done every step
+             (doseq [grad-row gradient-seq]
+               (m/mset! grad-row 0.0))
              (impl/convolution-backward! output-gradients input-conv-rows
                                          weights weight-gradient bias-gradient
                                          gradient-seq conv-config)
@@ -170,7 +181,8 @@ for testing against other conv net implementations."
      (println "backward-packed")
      (time (dotimes [iter 100]
              (m/mset! packed-gradient-output 0.0)
+             (m/mset! packed-gradient-seq 0.0)
              (impl/convolution-backward! output-gradients input-conv-rows
                                          weights weight-gradient bias-gradient
                                          packed-gradient-seq conv-config)
-             (impl/convolution-to-input-matrix! packed-gradient-seq packed-gradient-output conv-config))))))
+             (impl/convolution-to-input-vector! packed-gradient-seq packed-gradient-output conv-config))))))

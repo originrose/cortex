@@ -100,7 +100,7 @@
 
 
 ;; SCALE
-;; Module implementing simple scaling functionality 
+;; Module implementing simple scaling functionality
 ;; Scale factor of 1.0 works as identity layer
 (defrecord Scale [output input-gradient ^double factor]
   cp/PModule
@@ -409,8 +409,8 @@
   "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
 of the output of a conv-net ignoring channels."
   ^long [^long input-dim ^long pad ^long kernel-size ^long stride]
-  (long (+ (long (/ (- (+ input-dim (* 2 pad))  kernel-size)
-                    stride))
+  (long (+ (quot (- (+ input-dim (* 2 pad))  kernel-size)
+                 stride)
            1)))
 
 (defn columnar-sum
@@ -466,59 +466,121 @@ the perf hit of a copy then don't use padding."
         padded-input-matrix)
       (m/reshape interleaved-input-vector [height (* width num-channels)]))))
 
-
-(defn convolution-to-input-matrix!
-  "Given a convolution sequence and the convolutional layer config
-produce an input vector using summation over overlapping entries.
-Mutates input vector"
-  [conv-sequence input-vector
-   {:keys [^long width ^long height
-           ^long k-width ^long k-height
-           ^long padx ^long pady
-           ^long stride-w ^long stride-h
-           ^long num-channels] :as conv-layer-config}]
-  (let [output-width (get-padded-strided-dimension width padx k-width stride-w)
-        output-height (get-padded-strided-dimension height pady k-height stride-w)
-        kernel-stride (* k-width num-channels)
-        input-stride (* width num-channels)
-        num-rows (m/row-count conv-sequence)]
-    (loop [idx 0]
-      (when (< idx num-rows)
-        (let [input-row (m/get-row conv-sequence idx)]
-          (let [output-x (long (rem idx output-width))
-                output-y (long (/ idx output-width))
+(def convolution-operation-sequence
+  (memoize
+   (fn [{:keys [^long width ^long height
+                ^long k-width ^long k-height
+                ^long padx ^long pady
+                ^long stride-w ^long stride-h
+                ^long num-channels] :as conv-layer-config}]
+     (let [output-width (get-padded-strided-dimension width padx k-width stride-w)
+           output-height (get-padded-strided-dimension height pady k-height stride-w)
+           ;;A 'row' for each output pixel
+           num-rows (* output-width output-height)]
+       (flatten
+        (for [^long idx (range num-rows)]
+          (let [output-x (rem idx output-width)
+                output-y (quot idx output-width)
                 input-left (- (* output-x stride-w) padx)
                 input-top (- (* output-y stride-h) pady)]
-            (loop [conv-y 0]
-              (when (< conv-y k-height)
-                (let [y-write-offset (+ input-top conv-y)]
-                  (when (and (>= y-write-offset 0)
-                             (< y-write-offset height))
-                    (loop [conv-x 0]
-                      (when (< conv-x k-width)
-                        (let [x-write-offset (+ input-left conv-x)]
-                          (when (and (>= x-write-offset 0)
-                                     (< x-write-offset width))
-                            ;;write the pixel.  It would be ideal
-                            ;;if there was an operator to mutableadd
-                            ;;a sub-vector.  In that case we could probably
-                            ;;copy a row here instead of write pixel by pixel
-                            (loop [chan 0]
-                              (when (< chan num-channels)
-                                (let [input-offset (+ (* conv-y kernel-stride)
-                                                      (* conv-x num-channels)
-                                                      chan)
-                                      ^double conv-val (m/mget input-row input-offset)
-                                      write-offset (+ (* y-write-offset input-stride)
-                                                      (* x-write-offset num-channels)
-                                                      chan)
-                                      ^double sum-val (m/mget input-vector write-offset)]
-                                  (m/mset! input-vector write-offset (+ sum-val conv-val)))
-                                (recur (inc chan))))))
-                        (recur (inc conv-x))))))
-                (recur (inc conv-y))))))
-        (recur (inc idx))))
+            (for [^long conv-y (range k-height)]
+              (let [input-y (+ input-top conv-y)
+                    input-x input-left]
+                {:input-x input-x :input-y input-y :conv-x 0 :conv-y conv-y
+                 :output-x output-x :output-y output-y})))))))))
+
+
+(def convolution-input-sequence
+  (memoize
+   (fn [{:keys [^long width ^long height
+                ^long k-width ^long k-height
+                ^long padx ^long pady
+                ^long stride-w ^long stride-h
+                ^long num-channels] :as conv-layer-config}]
+     ;;Trim out rows that are completely invalid w/r/t the input non-padded matrix
+     (let [valid-rows (filter #(let [{:keys [^long input-y ^long input-x]} %]
+                                 (and (>= input-y 0)
+                                      (< input-y height)
+                                      (>= (+ input-x k-width) 0)
+                                      (< input-x width)))
+                              (convolution-operation-sequence conv-layer-config))
+           output-width (get-padded-strided-dimension width padx k-width stride-w)
+           output-height (get-padded-strided-dimension height pady k-height stride-w)]
+       ;;Transform each entry such that the x-op stays in bounds.  Also, change output-x,output-y
+       ;;into an output-row-index that indicates which row in the convolution matrix this item corresponds to.
+       (map (fn [{:keys [^long input-x ^long input-y ^long conv-x ^long conv-y ^long output-x ^long output-y]
+                  :as conv-window}]
+              (let [input-offset-x (max input-x 0)
+                    conv-x (- input-offset-x input-x)
+                    k-width (- k-width conv-x)
+                    input-end (min width (+ input-offset-x k-width))
+                    write-len (- input-end input-offset-x)
+                    conv-row-index (+ (* output-y output-width) output-x)]
+                (assoc conv-window :conv-x conv-x :input-x input-offset-x
+                       :write-len write-len :conv-row-index conv-row-index)))
+            valid-rows)))))
+
+
+(defn convolution-to-input-vector!
+  [conv-matrix input-vector {:keys [^long width ^long height
+                                    ^long k-width ^long k-height
+                                    ^long padx ^long pady
+                                    ^long stride-w ^long stride-h
+                                    ^long num-channels] :as conv-layer-config}]
+  (let [kernel-stride (* k-width num-channels)
+        input-stride (* width num-channels)]
+    (doseq [input-item (convolution-input-sequence conv-layer-config)]
+      (let [{:keys [^long input-x ^long input-y
+                    ^long conv-x ^long conv-y
+                    ^long write-len ^long conv-row-index]} input-item
+            input-row (m/get-row conv-matrix conv-row-index)]
+        (loop [write-idx 0]
+          (when (< write-idx write-len)
+            (loop [chan 0]
+              (when (< chan num-channels)
+                (let [read-offset (+ (* conv-y kernel-stride)
+                                     (* (+ conv-x write-idx) num-channels)
+                                     chan)
+                      write-offset (+ (* input-y input-stride)
+                                      (* (+ input-x write-idx) num-channels)
+                                      chan)
+                      ^double accum (m/mget input-vector write-offset)
+                      ^double conv-val (m/mget input-row read-offset)]
+                  (m/mset! input-vector write-offset (+ accum conv-val)))
+                (recur (inc chan))))
+            (recur (inc write-idx))))))
     input-vector))
+
+
+(defn input-vector-to-convolution!
+  [input-vector conv-matrix {:keys [^long width ^long height
+                                    ^long k-width ^long k-height
+                                    ^long padx ^long pady
+                                    ^long stride-w ^long stride-h
+                                    ^long num-channels] :as conv-layer-config}]
+  (let [kernel-stride (* k-width num-channels)
+        input-stride (* width num-channels)
+        num-rows (m/row-count conv-matrix)]
+    (doseq [input-item (convolution-input-sequence conv-layer-config)]
+      (let [{:keys [^long input-x ^long input-y
+                    ^long conv-x ^long conv-y
+                    ^long write-len ^long conv-row-index]} input-item
+            conv-row (m/get-row conv-matrix conv-row-index)]
+        (loop [write-idx 0]
+          (when (< write-idx write-len)
+            (loop [chan 0]
+              (when (< chan num-channels)
+                (let [conv-offset (+ (* conv-y kernel-stride)
+                                     (* (+ conv-x write-idx) num-channels)
+                                     chan)
+                      input-offset (+ (* input-y input-stride)
+                                      (* (+ input-x write-idx) num-channels)
+                                      chan)
+                      ^double input-val (m/mget input-vector input-offset)]
+                  (m/mset! conv-row conv-offset input-val))
+                (recur (inc chan))))
+            (recur (inc write-idx))))))
+    conv-matrix))
 
 
 (defn convolution-sequence
@@ -566,15 +628,6 @@ Should be output-width*output-height rows.  Padding is applied as zeros across c
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Convolution backward pass utility functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn gradient-vector-to-output-gradient
-  "Given the gradient vector coming from downstream reshape it
-such that we can use the linear layer's backprop step to produce
-the weight and bias gradient update and the upstream gradient
-information."
-  [gradient-vector ^long num-kernels]
-  (let [num-gradient-rows (/ (long (first (m/shape gradient-vector))) num-kernels)
-        gradient-matrix (m/reshape gradient-vector [num-gradient-rows num-kernels])]
-    (columnar-sum gradient-matrix)))
 
 (defn get-gradient-convolution-sequence
   "returns [conv-sequence input-mat-view] for the backpass steps of nn layers
@@ -595,18 +648,6 @@ using convolutional steps"
      input-mat-view]))
 
 
-(defn linear-input-gradient-to-input-image
-  "Given the results of the linear backward pass we have an input gradient that is
-  a vector of k-width * k-height * num-channels.  We need to de-convolve this using opposite
-  operation as we did when we convolved the input."
-  [input-gradient {:keys [^long width ^long height ^long k-width ^long k-height
-                          ^long padx ^long pady ^long stride-w ^long stride-h
-                          ^long num-channels] :as conv-layer-config}]
-  (let [[conv-sequence input-mat-view] (get-gradient-convolution-sequence conv-layer-config)]
-    (doall (map #(m/add! % input-gradient) conv-sequence))
-    (m/array :vectorz (m/as-vector input-mat-view))))
-
-
 
 (defn convolution-backward!
   ([output-gradient input-conv-sequence weights
@@ -617,7 +658,7 @@ using convolutional steps"
             ^long stride-w ^long stride-h
             ^long num-channels] :as conv-layer-config}]
    (let [^long kernel-count (first (m/shape weights))
-         output-row-count (long (/ (long (first (m/shape output-gradient))) kernel-count))]
+         output-row-count (quot (long (first (m/shape output-gradient))) kernel-count)]
      (loop [idx 0]
        (when (< idx output-row-count)
          (let [input-gradient-row (m/get-row input-gradient-conv-sequence idx)
@@ -688,7 +729,9 @@ using convolutional steps"
       ;;twice...Potentially this isn't the fastest possible solution but it can't
       ;;be far from it.  If we work batching through the entire system at the matrix/input
       ;;level then we should see some speed benefit.
-      (let [input-convolved-rows (m/array :vectorz (create-convolution-rows input conv-layer-config))
+      (let [input-convolved-rows (or (:input-convolved-rows this)
+                                     (m/array :vectorz (first (get-gradient-convolution-sequence conv-layer-config))))
+            _ (input-vector-to-convolution! input input-convolved-rows conv-layer-config)
             output (convolution-forward weights bias input-convolved-rows)]
         [output input-convolved-rows]))
 
@@ -704,14 +747,17 @@ using convolutional steps"
       (let [input-convolved-rows (:input-convolved-rows this)
             gradient-convolved-rows (or (:gradient-convolved-rows this)
                                         (m/array :vectorz (first (get-gradient-convolution-sequence conv-layer-config))))
-            gradient-matrix (or (:input-gradient this)
+            input-gradient (or (:input-gradient this)
                                 (m/zero-array :vectors (m/shape input)))]
-        (m/mset! gradient-matrix 0.0)
+        ;;Reset packed accumulator
+        (m/mset! input-gradient 0.0)
+        ;;Reset convolution accumulator
+        (m/mset! gradient-convolved-rows 0.0)
         (convolution-backward! output-gradient input-convolved-rows weights weight-gradient
                                bias-gradient gradient-convolved-rows conv-layer-config)
-        (convolution-to-input-matrix! gradient-convolved-rows gradient-matrix conv-layer-config)
+        (convolution-to-input-vector! gradient-convolved-rows input-gradient conv-layer-config)
         (assoc this
-               :input-gradient gradient-matrix
+               :input-gradient input-gradient
                :gradient-convolved-rows gradient-convolved-rows)))
 
     (input-gradient [this]
@@ -738,28 +784,42 @@ using convolutional steps"
 record which item from the input row we actually looked at.  Returns
 [output output-indexes].  Note that this does not change the number of channels
 so it needs to remember the max per-channel."
-  [input output output-indexes {:keys [^long k-width ^long k-height
-                                       ^long num-channels] :as conv-layer-config}]
+  [input output output-indexes
+   {:keys [^long height ^long width
+           ^long padx ^long pady
+           ^long k-width ^long k-height
+           ^long stride-w ^long stride-h
+           ^long num-channels] :as conv-layer-config}]
   ;;Each input row has k-width*num-channels*k-height in it.
   ;;Each output index gets num-channels written to it.
-  (let [input-convolved-rows (create-convolution-rows input conv-layer-config)
-        num-kernel-items (* k-width k-height)]
-    (doall (map-indexed (fn [^long idx input-row]
-                          (loop [kernel-item 0]
-                            (when (< kernel-item num-kernel-items)
-                              (loop [channel 0]
-                                (when (< channel num-channels)
-                                  (let [write-offset (+ (* idx num-channels) channel)
-                                        read-offset (+ (* kernel-item num-channels) channel)
-                                        ^double input-item (m/mget input-row read-offset)]
-                                    (let [^double output-item (m/mget output write-offset)]
-                                      (when (or (= 0 kernel-item)
-                                                (> input-item output-item))
-                                        (m/mset! output write-offset input-item)
-                                        (m/mset! output-indexes write-offset (double kernel-item)))))
-                                  (recur (inc channel))))
-                              (recur (inc kernel-item)))))
-                        input-convolved-rows))
+  (let [conv-sequence (convolution-operation-sequence conv-layer-config)]
+    (doseq [conv-item conv-sequence]
+      (let [{:keys [^long input-x ^long input-y ^long conv-x ^long conv-y
+                    ^long output-x ^long output-y]} conv-item
+            output-width (get-padded-strided-dimension width padx k-width stride-w)
+            output-offset (* num-channels (+ (* output-y output-width) output-x))]
+        (loop [conv-x conv-x]
+          (when (< conv-x k-width)
+            (let [input-offset-x (+ input-x conv-x)
+                  valid-input? (and (>= input-y 0)
+                                    (< input-y height)
+                                    (>= input-x 0)
+                                    (< input-x width))
+                  kernel-index (+ (* conv-y k-width) conv-x)
+                  input-offset (* num-channels (+ (* input-y width) input-offset-x))]
+              (loop [chan 0]
+                (when (< chan num-channels)
+                  (let [^double input-val (if valid-input?
+                                            (m/mget input (+ input-offset chan))
+                                            0.0)
+                        output-offset (+ output-offset chan)
+                        ^double existing-value (m/mget output output-offset)]
+                    (when (or (= kernel-index 0)
+                              (> input-val existing-value))
+                      (m/mset! output output-offset input-val)
+                      (m/mset! output-indexes output-offset kernel-index)))
+                  (recur (inc chan)))))
+            (recur (inc conv-x))))))
     [output output-indexes]))
 
 
@@ -768,22 +828,41 @@ so it needs to remember the max per-channel."
 combined with the output gradient and the output indexes which tell you which kernel
 index the output came from."
   [output-gradient output-indexes input-gradient
-   {:keys [^long k-width ^long k-height
+   {:keys [^long width ^long height
+           ^long k-width ^long k-height
+           ^long padx ^long pady
+           ^long stride-w ^long stride-h
            ^long num-channels] :as conv-layer-config}]
-  (let [[conv-sequence input-mat-view] (get-gradient-convolution-sequence conv-layer-config)
-        num-kernel-items (* k-width k-height)]
-    (doall (map-indexed (fn [^long idx input-row]
-                          (loop [channel 0]
-                            (when (< channel num-channels)
-                              (let [write-offset (+ (* idx num-channels) channel)
-                                    ^double output-item (m/mget output-gradient write-offset)
-                                    kernel-item (long (m/mget output-indexes write-offset))
-                                    read-offset (+ (* kernel-item num-channels) channel)
-                                    ^double read-item (m/mget input-row read-offset)]
-                                (m/mset! input-row read-offset (+ read-item output-item)))
-                              (recur (inc channel)))))
-                        conv-sequence))
-    (m/assign! input-gradient (m/as-vector input-mat-view))))
+  (m/mset! input-gradient 0.0)
+  (let [output-width (get-padded-strided-dimension width padx k-width stride-w)
+        output-height (get-padded-strided-dimension height pady k-height stride-h)
+        num-pixels (* output-width output-height)]
+    (loop [pixel 0]
+      (when (< pixel num-pixels)
+        (let [output-offset (* pixel num-channels)
+              output-x (rem pixel output-width)
+              output-y (quot pixel output-width)]
+          (loop [chan 0]
+            (when (< chan num-channels)
+              (let [output-offset (+ output-offset chan)
+                    kernel-index (long (m/mget output-indexes output-offset))
+                    conv-x (rem kernel-index k-width)
+                    conv-y (quot kernel-index k-width)
+                    input-x (- (+ (* output-x stride-w) conv-x) padx)
+                    input-y (- (+ (* output-y stride-h) conv-y) pady)]
+                (when (and (>= input-y 0)
+                           (< input-y height)
+                           (>= input-x 0)
+                           (< input-x width))
+                  (let [^double output-gradient-value (m/mget output-gradient output-offset)
+                        input-offset (+ (* num-channels (+ (* input-y width)
+                                                           input-x))
+                                        chan)
+                        ^double input-gradient-value (m/mget input-gradient input-offset)]
+                    (m/mset! input-gradient input-offset (+ input-gradient-value
+                                                            output-gradient-value)))))
+              (recur (inc chan)))))
+        (recur (inc pixel))))))
 
 
 ;;Max pooling layer.  There are other pooling layer types (average,a sochiastic)
