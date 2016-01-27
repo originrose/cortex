@@ -3,7 +3,8 @@
   (:require [cortex.util :as util :refer [error]]
             [cortex.impl.layers :as impl]
             [cortex.impl.wiring])
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m])
+  (:refer-clojure :exclude [identity]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -49,6 +50,11 @@
   "Creates a scaling layer with the specified shape and multiplication factor"
   [shape factor]
   (cortex.impl.layers.Scale. (util/empty-array shape) (util/empty-array shape) (double factor)))
+
+(defn identity
+  "Creates an identity layer with the specified shape"
+  ([shape factor]
+    (scale shape 1.0)))
 
 (defn softmax
   "Creates a softmax module of the given shape."
