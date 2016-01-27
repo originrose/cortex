@@ -45,6 +45,11 @@
       (double probability)
       (m/ensure-mutable (m/new-array :vectorz shape)))))
 
+(defn scale
+  "Creates a scaling layer with the specified shape and multiplication factor"
+  [shape factor]
+  (cortex.impl.layers.Scale. (util/empty-array shape) (util/empty-array shape) (double factor)))
+
 (defn softmax
   "Creates a softmax module of the given shape."
   ([shape]
