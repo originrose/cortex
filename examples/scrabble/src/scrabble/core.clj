@@ -1,13 +1,9 @@
 (ns scrabble.core
   (:require
     [clojure.core.matrix :as m]
-    [cortex.optimise :as opt]
     [cortex.layers :as layers]
     [cortex.optimise :as opt]
     [cortex.core :as core]
-    [clojure.core.matrix.random :as rand]
-    [cortex.util :as util]
-    [cortex.protocols :as cp]
     [cortex.network :as net]
     [clojure.pprint])
   (:gen-class))
@@ -80,7 +76,7 @@
 (defn create-optimizer
   [network]
   ;(opt/adadelta-optimiser (core/parameter-count network))
-  (opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
+  (opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum})
   )
 
 
@@ -94,9 +90,20 @@
         optimizer (create-optimizer network)]
     (net/train network optimizer loss-fn training-data training-labels batch-size n-epochs)))
 
+(defn classify [network character]
+  (let [score (-> (->> (net/run network [(char->bit-array character)])
+                        (first)
+                        (map #(if (> % 0.5) 1 0))
+                        (clojure.string/join))
+                  (Integer/parseInt 2))]
+    (println character " is " score)))
+
 (defn evaluate
   [network]
-  (net/evaluate network training-data training-labels))
+ (classify network \j)
+ (classify network \k)
+ (net/evaluate network training-data training-labels)
+  )
 
 
 (defn train-and-evaluate
