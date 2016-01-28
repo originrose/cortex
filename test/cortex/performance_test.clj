@@ -52,7 +52,7 @@
          (.mmuli left-m right-m result-m))))))
 
 
-(deftest matrix-multiply-test
+(defn matrix-multiply-test []
   (doseq [image-dim image-dims]
     (println "###" image-dim)
     (doseq [impl implementations]
