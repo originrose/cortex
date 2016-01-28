@@ -100,13 +100,15 @@
 
 
 ;; SCALE
-;; Module implementing simple scaling functionality
-;; Scale factor of 1.0 works as identity layer
-(defrecord Scale [output input-gradient ^double factor]
+;; Module implementing simple scaling functionality and addition with a constant
+;; - factor of nil works as identity 
+;; - constant of nil works as identity
+(defrecord Scale [output input-gradient factor constant]
   cp/PModule
     (calc [this input]
       (m/assign! output input)
-      (when (not= factor 1.0) (m/scale! output factor))
+      (when factor (m/mul! output factor))
+      (when constant (m/add! output constant))
       this)
 
     (output [this]
@@ -115,13 +117,14 @@
   cp/PNeuralTraining
     (forward [this input]
       (m/assign! output input)
-      (when (not= factor 1.0) (m/scale! output factor))
+      (when factor (m/mul! output factor))
+      (when constant (m/add! output constant))
       this)
 
     (backward [this input output-gradient]
       (let []
         (m/assign! input-gradient output-gradient)
-        (when (not= factor 1.0) (m/scale! input-gradient factor))
+        (when factor (m/mul! input-gradient factor))
         this))
 
     (input-gradient [this]

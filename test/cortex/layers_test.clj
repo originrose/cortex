@@ -9,3 +9,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.clojure-test :refer (defspec)]))
+
+(deftest test-scale
+  (let [a (layers/scale [2] [1 2] [30 40])]
+    (is (m/equals [31 42] (calc-output a [1 1])))))

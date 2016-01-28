@@ -47,9 +47,14 @@
       (util/empty-array shape))))
 
 (defn scale
-  "Creates a scaling layer with the specified shape and multiplication factor"
-  [shape factor]
-  (cortex.impl.layers.Scale. (util/empty-array shape) (util/empty-array shape) (double factor)))
+  "Creates a scaling layer with the specified shape and multiplication factor
+   An optional constant offset may also be provided"
+  ([shape factor]
+    (scale shape factor nil))
+  ([shape factor constant]
+    (let [factor (if (and factor (number? factor) (== 1.0 (double factor))) nil factor)
+          constant (if (and constant (m/zero-matrix? constant)) nil constant)]
+      (cortex.impl.layers.Scale. (util/empty-array shape) (util/empty-array shape) factor constant))))
 
 (defn identity
   "Creates an identity layer with the specified shape"

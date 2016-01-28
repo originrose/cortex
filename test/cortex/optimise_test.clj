@@ -52,7 +52,7 @@
             (stack-module
               [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
                (layers/logistic [2])]))
-        o (adadelta-optimiser (parameter-count m))]
+        o (sgd-optimiser (parameter-count m))]
     (optimiser-test m o)))
 
 (defmacro pr-local
