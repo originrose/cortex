@@ -1,16 +1,20 @@
 (ns cortex.network-test
-  (:use cortex.core)
   (:require
-    [clojure.test :refer [deftest is are]]
+    [cortex.core :refer [calc output forward backward input-gradient parameters gradient parameter-count]]
+    #?(:cljs
+        [cljs.test :refer-macros [deftest is are testing]]
+        :clj
+        [clojure.test :refer [deftest is are testing]])
     [cortex.optimise :as opt]
     [clojure.core.matrix :as mat]
     [clojure.core.matrix.random :as randm]
+    #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.util :as util]
     [cortex.network :as net]
     [cortex.core :as core]
     [cortex.layers :as layers]))
 
-(mat/set-current-implementation :vectorz)
+(mat/set-current-implementation #?(:clj :vectorz :cljs :ndarray))
 
 ; a	b	| a XOR b
 ; 1	1	     0
@@ -21,7 +25,7 @@
 (def XOR-LABELS [[0] [1] [1] [0]])
 
 (defn abs-diff
-  ^Double [^Double x ^Double y]
+  [x y]
   (Math/abs (- x y)))
 
 (deftest xor-test

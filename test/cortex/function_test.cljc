@@ -5,12 +5,10 @@
         [cljs.test :refer-macros [deftest is testing]]
         :clj
         [clojure.test :refer [deftest is testing]])
-    #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.core :refer [calc output forward backward input-gradient parameters gradient parameter-count]]
     [clojure.core.matrix :as m]
+    #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.layers :as layers]))
-
-#?(:cljs (m/set-current-implementation :ndarray))
 
 (deftest test-logistic-module
   (testing "basic logistic functionality"
@@ -26,7 +24,7 @@
  
   (testing "forward and backward pass"
     (let [m (layers/logistic [3])]
-     
+
       (let [input [-1000 0 1000]
             fm (forward m input)]
         (is (m/equals [0 0.5 1] (output fm)))

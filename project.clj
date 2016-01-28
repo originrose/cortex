@@ -2,6 +2,7 @@
   :description "A neural network toolkit for Clojure."
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.taoensso/timbre "4.2.1"]
+                 [net.mikera/core.matrix "0.45.0-CLJS-SNAPSHOT"]
                  [net.mikera/vectorz-clj "0.41.0"]
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.2.1"]
@@ -22,7 +23,7 @@
                        :test {
                               :source-paths ["src" "test"]
                               :compiler     {:output-to     "resources/test/unit-tests.js"
-                                             :optimizations :whitespace
+                                             :optimizations :none
                                              :main          cortex.test
                                              :pretty-print  true}}}
 
