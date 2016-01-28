@@ -59,3 +59,20 @@
       (time-matrix-multiply impl image-dim))
     (clatrix-in-place-mul image-dim)
     (println "###")))
+
+
+(deftest roll-unroll-test
+  (doseq [image-dim image-dims]
+    (let [[lhs _] (create-large-convolution-matrix-and-weights :vectorz image-dim)
+          input-mat (m/array :vectorz (repeat (* image-dim image-dim) 1.0))
+          conv-config (impl/create-conv-layer-config
+                       image-dim image-dim 5 5 0 0 1 1 1)]
+      (println "###Image dim: " image-dim)
+
+      (print "roll time: ")
+      (time (dotimes [iter (/ iter-count 10)]
+              (impl/input-vector-to-convolution! input-mat lhs conv-config)))
+      (print "unroll time: ")
+      (time (dotimes [iter (/ iter-count 10)]
+              (impl/convolution-to-input-vector! lhs input-mat conv-config)))
+      )))

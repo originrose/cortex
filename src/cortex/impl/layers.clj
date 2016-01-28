@@ -536,22 +536,15 @@ the perf hit of a copy then don't use padding."
       (let [{:keys [^long input-x ^long input-y
                     ^long conv-x ^long conv-y
                     ^long write-len ^long conv-row-index]} input-item
-            input-row (m/get-row conv-matrix conv-row-index)]
-        (loop [write-idx 0]
-          (when (< write-idx write-len)
-            (loop [chan 0]
-              (when (< chan num-channels)
-                (let [read-offset (+ (* conv-y kernel-stride)
-                                     (* (+ conv-x write-idx) num-channels)
-                                     chan)
-                      write-offset (+ (* input-y input-stride)
-                                      (* (+ input-x write-idx) num-channels)
-                                      chan)
-                      ^double accum (m/mget input-vector write-offset)
-                      ^double conv-val (m/mget input-row read-offset)]
-                  (m/mset! input-vector write-offset (+ accum conv-val)))
-                (recur (inc chan))))
-            (recur (inc write-idx))))))
+            input-row (m/get-row conv-matrix conv-row-index)
+            write-idx 0
+            conv-offset (+ (* conv-y kernel-stride)
+                           (* (+ conv-x write-idx) num-channels))
+            input-offset (+ (* input-y input-stride)
+                            (* (+ input-x write-idx) num-channels))
+            write-num-elems (* write-len num-channels)]
+        (m/add! (m/subvector input-vector input-offset write-num-elems)
+                (m/subvector input-row conv-offset write-num-elems))))
     input-vector))
 
 
@@ -568,21 +561,15 @@ the perf hit of a copy then don't use padding."
       (let [{:keys [^long input-x ^long input-y
                     ^long conv-x ^long conv-y
                     ^long write-len ^long conv-row-index]} input-item
-            conv-row (m/get-row conv-matrix conv-row-index)]
-        (loop [write-idx 0]
-          (when (< write-idx write-len)
-            (loop [chan 0]
-              (when (< chan num-channels)
-                (let [conv-offset (+ (* conv-y kernel-stride)
-                                     (* (+ conv-x write-idx) num-channels)
-                                     chan)
-                      input-offset (+ (* input-y input-stride)
-                                      (* (+ input-x write-idx) num-channels)
-                                      chan)
-                      ^double input-val (m/mget input-vector input-offset)]
-                  (m/mset! conv-row conv-offset input-val))
-                (recur (inc chan))))
-            (recur (inc write-idx))))))
+            conv-row (m/get-row conv-matrix conv-row-index)
+            write-idx 0
+            conv-offset (+ (* conv-y kernel-stride)
+                           (* (+ conv-x write-idx) num-channels))
+            input-offset (+ (* input-y input-stride)
+                            (* (+ input-x write-idx) num-channels))
+            write-num-elems (* write-len num-channels)]
+        (m/assign! (m/subvector conv-row conv-offset write-num-elems)
+                   (m/subvector input-vector input-offset write-num-elems))))
     conv-matrix))
 
 
