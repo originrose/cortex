@@ -75,8 +75,7 @@
                           (train-step input answer network loss-fn))
                         network
                         (map vector input-seq label-seq))]
-    (m/div! (core/gradient network) (double (count input-seq)))
-    (core/optimise optimizer network)))
+    (core/optimise optimizer network (double (count input-seq)))))
 
 (defn train
   [network optimizer loss-fn training-data training-labels batch-size n-epochs & [test-data test-labels]]

@@ -10,8 +10,12 @@
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]]
                    :java-source-paths ["test"]}}
 
+  :source-paths ["src" "test"]
+
   :resource-paths ["resources"]
 
   :jvm-opts  ["-Xmx8g"
               "-XX:+UseConcMarkSweepGC"
-              "-XX:-OmitStackTraceInFastThrow"])
+              "-XX:-OmitStackTraceInFastThrow"]
+
+  :main cortex.run-all-tests)
