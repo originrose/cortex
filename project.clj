@@ -4,7 +4,8 @@
                  [com.taoensso/timbre "4.2.1"]
                  [net.mikera/vectorz-clj "0.42.0"]
                  [org.clojure/test.check "0.9.0"]
-                 [thinktopic/matrix.fressian "0.2.1"]]
+                 [thinktopic/matrix.fressian "0.2.1"]
+                 [clatrix "0.5.0"]]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]]
                    :java-source-paths ["test"]}}

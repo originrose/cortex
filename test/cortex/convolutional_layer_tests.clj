@@ -60,7 +60,7 @@
 ;;4 channels * output of pool layer
 (def pool-layer-output-size (* 4 pool-layer-width pool-layer-height))
 ;;4 channels * input sizes to pool layer
-(def pool-layer-input-size (* 4 2 2))
+ (def pool-layer-input-size (* 4 2 2))
 
 
 (deftest pool-layer-basic
