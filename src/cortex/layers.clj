@@ -47,7 +47,7 @@
       (util/empty-array shape))))
 
 (defn scale
-  "Creates a scaling layer with the specified shape and multiplication factor
+  "Creates a linear scaling layer with the specified shape and multiplication factor
    An optional constant offset may also be provided"
   ([shape factor]
     (scale shape factor nil))
@@ -126,7 +126,8 @@
     (cortex.impl.wiring.Combine. combine-fn nil {:gradient-fn gradient-fn})))
 
 (defn normaliser
-  "Constructs a normaliser of the given shape"
+  "Constructs a normaliser of the given shape. A normaliser layer scales input to mean 0.0 and s.d. 1.0,
+   Adjusting scaling factors over time during training as new input is provided."
   ([shape]
     (normaliser shape nil))
   ([shape {:keys [learn-rate normaliser-factor] :as options}]
