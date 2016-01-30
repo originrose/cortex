@@ -14,7 +14,7 @@
     [cortex.core :as core]
     [cortex.layers :as layers]))
 
-(mat/set-current-implementation #?(:clj :vectorz :cljs :ndarray))
+(mat/set-current-implementation #?(:clj :vectorz :cljs :thing-ndarray))
 
 ; a	b	| a XOR b
 ; 1	1	     0
