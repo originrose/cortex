@@ -10,6 +10,8 @@
     #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.layers :as layers]))
 
+(m/set-current-implementation #?(:clj :vectorz :cljs :thing-ndarray))
+
 (deftest test-logistic-module
   (testing "basic logistic functionality"
     (let [m (layers/logistic [3])]
