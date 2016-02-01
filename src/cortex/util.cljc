@@ -15,7 +15,7 @@
 #?(:clj (defn timestamp [] (System/nanoTime))
    :cljs (defn timestamp [] (.getTime (js/Date.))))
 
-(def EMPTY-VECTOR (m/new-array []))
+(def EMPTY-VECTOR (m/new-array [0]))
 
 #?(:clj
     (do
