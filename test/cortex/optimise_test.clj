@@ -60,7 +60,7 @@
               [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
                (layers/logistic [2])]))
         o (sgd-optimiser (parameter-count m))]
-    (optimiser-test m o {:iterations 300 :print-iterations true :tolerance 0.1})))
+    (optimiser-test m o {:iterations 300 :print-iterations false :tolerance 0.1})))
 
 (defmacro pr-local
   [varname]

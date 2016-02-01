@@ -139,7 +139,8 @@
   (calc [this input]
     (m/emap! (fn ^double [^double _ ^double in] (if (neg? in) negval 1.0)) dotvec input)
     (m/assign! output input)
-    (m/mul! output dotvec))
+    (m/mul! output dotvec)
+    this)
 
   (output [this]
     (:output this))
@@ -162,7 +163,8 @@
   cp/PModule
   (calc [this input]
     (m/assign! output input)
-    (m/tanh! output))
+    (m/tanh! output)
+    this)
 
   (output [this]
     (:output this))

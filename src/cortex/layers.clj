@@ -75,14 +75,14 @@
 
    An optional factor may be provided to scale negative values, which otherwise defaults to 0.0"
   ([shape & {:keys [negval]
-            :or {negval 0.0 }}]
+             :or {negval 0.0}}]
     (when-not (coll? shape)
       (error "relu layer constructor requires a shape vector"))
     (cortex.impl.layers.RectifiedLinear.
         (util/empty-array shape)
         (util/empty-array shape)
         (util/empty-array shape)
-        negval)))
+        (double negval))))
 
 (defn linear
   "Constructs a weighted linear transformation module using a dense matrix and bias vector.
