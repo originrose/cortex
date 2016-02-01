@@ -4,21 +4,28 @@
   (:require [clojure.core.matrix :as m]
             [cortex.layers :as layers]))
 
-;; simple optimiser testing function: try to optimse a linear transform
-(defn optimiser-test [m o]
-  (let [target [0.3 0.7]
-        input [1 1]]
-    (loop [i 0
-           m m
-           o o]
-      (let [m (forward m input)
-            m (backward m input (m/mul (m/sub (output m) target) 2.0))
-            [o m] (optimise o m)
-            dist (m/length (m/sub (output m) target))]
-        ;; (println (output m))
-        (if (< i 150)
-          (recur (inc i) m o)
-          (is (< dist 0.01)))))))
+;; simple optimiser testing function: try to optimse a transformation
+(defn optimiser-test 
+  ([m o]
+    (optimiser-test m o nil))
+  ([m o {:keys [iterations tolerance print-iterations]
+         :as options}]
+    (let [target [0.3 0.7]
+          input [1 1]
+          iterations (long (or iterations 200))
+          tolerance (double (or tolerance 0.01))]
+      (loop [i 0
+             m m
+             o o]
+        (let [m (forward m input)
+              m (backward m input (m/mul (m/sub (output m) target) 2.0))
+              [o m] (optimise o m)
+              result (calc-output m input)
+              dist (m/length (m/sub result target))]
+          (when print-iterations (println (str i " : error = " dist " : output = " result))) 
+          (if (< i iterations)
+            (recur (inc i) m o)
+            (is (< dist tolerance))))))))
 
 (deftest test-adadelta
   (let [m (layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
@@ -53,7 +60,7 @@
               [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
                (layers/logistic [2])]))
         o (sgd-optimiser (parameter-count m))]
-    (optimiser-test m o)))
+    (optimiser-test m o {:iterations 300 :print-iterations true :tolerance 0.1})))
 
 (defmacro pr-local
   [varname]
