@@ -34,7 +34,6 @@
               [(layers/linear-layer 2 3)
                (layers/logistic [3])
                (layers/linear-layer 3 1)])
-
         training-data XOR-DATA
         training-labels XOR-LABELS
         n-epochs 1000
@@ -46,7 +45,6 @@
         network (net/train net optimizer loss-fn training-data training-labels batch-size n-epochs)
         score-percent (net/evaluate net training-data training-labels)]
     (is (< (abs-diff score-percent 1.0) 0.001))))
-
 
 (deftest linear-model-test
   "Define a random dataset and create the labels from some fixed parameters so we know exactly
@@ -60,8 +58,6 @@
         model (net/train model optimizer loss x-data y-data 10 1)
         mse (net/evaluate-mse model x-data y-data)]
     (is (< mse 1))))
-
-
 
 
 ; Data from: Dominick Salvator and Derrick Reagle
