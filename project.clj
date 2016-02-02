@@ -13,19 +13,21 @@
                  [doo "0.1.6-SNAPSHOT"]
                  [thi.ng/ndarray "0.3.1-SNAPSHOT"]]
 
-  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]]
+  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]
+                                  [criterium/criterium "0.4.3"]
+                                  [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]
+                                  ]
                    :java-source-paths ["test"]}}
 
   :plugins [[lein-cljsbuild "1.1.2"]]
 
   :cljsbuild {;;You can't use none optimizations in general because then the files reference files under out/
-              :builds {
-                       :test {
-                              :source-paths ["src" "test"]
-                              :compiler     {:output-to     "resources/test/unit-tests.js"
-                                             :optimizations :none
-                                             :main          cortex.test
-                                             :pretty-print  true}}}
+              :builds [{:id :test
+                        :source-paths ["src" "test"]
+                        :compiler     {:output-to     "resources/test/unit-tests.js"
+                                       :optimizations :none
+                                       :main          cortex.test
+                                       :pretty-print  true}}]
 
               :test-commands {"unit-tests"   ["phantomjs"
                                               "resources/test/runner.js"
