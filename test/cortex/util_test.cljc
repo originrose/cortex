@@ -1,6 +1,9 @@
 (ns cortex.util-test
-  (:require [cortex.util :as util]
-            [clojure.test :refer [deftest is are]]))
+  (:require #?(:cljs
+                [cljs.test :refer-macros [deftest is testing]]
+                :clj
+                [clojure.test :refer [deftest is testing]])
+            [cortex.util :as util]))
 
 
 (deftest confusion-test
