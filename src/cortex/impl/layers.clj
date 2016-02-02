@@ -238,10 +238,12 @@
 ;; has mutable parameters and accumlators for gradient
 (defrecord Linear [weights bias]
   cp/PModule
-    (calc [this input]
-      (let [output (m/inner-product weights input)]
-        (m/add! output bias)
-        (assoc this :output output)))
+  (calc [this input]
+    (println (m/shape input))
+    (let [output (m/inner-product weights input)]
+      (println (m/shape output))
+      (m/add! output bias)
+      (assoc this :output output)))
 
     (output [this]
       (:output this))

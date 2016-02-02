@@ -8,7 +8,9 @@
             [cortex.core :as core]
             [clojure.core.matrix.random :as rand]
             [cortex.network :as net]
-            [cortex.description :as desc])
+            [cortex.description :as desc]
+            [cortex.caffe :as caffe]
+            [clojure.java.io :as io])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -85,6 +87,19 @@
         fraction-correct (evaluate network)]
     (println (format "Network score: %g" fraction-correct))
     (println (format "Network mse-score %g" (evaluate-mse network)))))
+
+
+(defn load-caffe-mnist
+  []
+  (let [proto-model (caffe/load-text-caffe-file (io/resource "lenet.prototxt"))
+        trained-model (caffe/load-binary-caffe-file (io/resource "lenet_iter_10000.caffemodel"))]
+    (caffe/instantiate-model proto-model trained-model)))
+
+
+(defn evaluate-caffe-mnist
+  []
+  (let [network (load-caffe-mnist)]
+    (net/evaluate-softmax network test-data test-labels)))
 
 (defn -main
   [& args]

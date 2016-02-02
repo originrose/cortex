@@ -5,12 +5,14 @@
                  [net.mikera/vectorz-clj "0.43.0"]
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.2.1"]
-                 [clatrix "0.5.0"]]
+                 [com.google.protobuf/protobuf-java "2.6.1"]]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]]
                    :java-source-paths ["test"]}}
 
   :source-paths ["src" "test"]
+
+  :java-source-paths ["java"]
 
   :resource-paths ["resources"]
 
