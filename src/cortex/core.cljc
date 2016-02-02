@@ -63,19 +63,20 @@
 
 (defn optimise
   "Optimises a module using the given optimiser. Returns an [optimiser module] pair"
+  ([optimiser module ^long batch-count]
+   ;;Faster to create local copies of what could be quite large views.  This also means the
+   ;;optimizer can copy those into itself and mutate them without affecting anything outside
+   (let [grads (m/array :vectorz (gradient module))
+         params (m/array :vectorz (parameters module))
+         _ (m/mul! grads (/ 1.0 batch-count))
+         optimiser (cp/compute-parameters optimiser grads params)
+         module (cp/update-parameters module (parameters optimiser))]
+     [optimiser module]))
   ([optimiser module]
-    (let [optimiser (cp/compute-parameters optimiser (gradient module) (parameters module))
-          module (cp/update-parameters module (parameters optimiser))]
-      [optimiser module])))
+   (optimise optimiser module 1)))
 
 ;; ===========================================================================
 ;; Module construction and combinator functions
-
-(defn function-module
-  "Wraps a Clojure function in a cortex module"
-  ([f]
-    (when-not (fn? f) (error "function-module requires a Clojure function"))
-    (cortex.impl.wiring.FunctionModule. f nil)))
 
 (defn stack-module
   "Creates a linear stack of modules"

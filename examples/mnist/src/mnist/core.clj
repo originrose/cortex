@@ -7,7 +7,10 @@
             [cortex.optimise :as opt]
             [cortex.core :as core]
             [clojure.core.matrix.random :as rand]
-            [cortex.network :as net])
+            [cortex.network :as net]
+            [cortex.description :as desc]
+            [cortex.caffe :as caffe]
+            [clojure.java.io :as io])
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -32,53 +35,37 @@
 (def output-width (last (m/shape training-labels)))
 
 
-
-(def n-epochs 500)
-(def learning-rate 0.001)
-(def momentum 0.9)
+(def n-epochs 10)
 (def batch-size 10)
 (def loss-fn (opt/mse-loss))
 (def hidden-layer-size 80)
 
+
 (defn create-network
   []
-  (let [network-modules [(layers/linear-layer input-width hidden-layer-size)
-                         (layers/logistic [hidden-layer-size])
-                         (layers/linear-layer hidden-layer-size output-width)]]
-    (core/stack-module network-modules)))
-
-
-(defn create-relu-softmax-network
-  []
-  (core/stack-module
-   [(layers/linear-layer input-width hidden-layer-size)
-    (layers/relu [hidden-layer-size])
-    (layers/linear-layer hidden-layer-size hidden-layer-size)
-    (layers/relu [hidden-layer-size])
-    (layers/linear-layer hidden-layer-size hidden-layer-size)
-    (layers/relu [hidden-layer-size])
-    (layers/linear-layer hidden-layer-size output-width)
-    (layers/softmax [output-width])
-    ]))
-
-
-(def network-fn create-relu-softmax-network)
-;(def network-fn create-network)
+  (let [network-desc [(desc/input 28 28 1)
+                      (desc/convolutional 5 0 1 20)
+                      (desc/max-pooling 2 0 2)
+                      (desc/convolutional 5 0 1 50)
+                      (desc/max-pooling 2 0 2)
+                      (desc/linear->relu 500)
+                      (desc/softmax 10)]
+        built-network (desc/build-full-network-description network-desc)]
+    (desc/create-network built-network)))
 
 
 (defn create-optimizer
   [network]
   (opt/adadelta-optimiser (core/parameter-count network))
-  ;(opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum} )
   )
 
 (defn test-train-step
   []
-  (net/train-step (first training-data) (first training-labels) (network-fn) loss-fn))
+  (net/train-step (first training-data) (first training-labels) (create-network) loss-fn))
 
 (defn train
   []
-  (let [network (network-fn)
+  (let [network (create-network)
         optimizer (create-optimizer network)]
     (net/train network optimizer loss-fn training-data training-labels batch-size n-epochs test-data test-labels)))
 
@@ -100,6 +87,19 @@
         fraction-correct (evaluate network)]
     (println (format "Network score: %g" fraction-correct))
     (println (format "Network mse-score %g" (evaluate-mse network)))))
+
+
+(defn load-caffe-mnist
+  []
+  (let [proto-model (caffe/load-text-caffe-file (io/resource "lenet.prototxt"))
+        trained-model (caffe/load-binary-caffe-file (io/resource "lenet_iter_10000.caffemodel"))]
+    (caffe/instantiate-model proto-model trained-model)))
+
+
+(defn evaluate-caffe-mnist
+  []
+  (let [network (load-caffe-mnist)]
+    (net/evaluate-softmax network test-data test-labels)))
 
 (defn -main
   [& args]

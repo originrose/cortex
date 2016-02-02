@@ -3,9 +3,10 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.taoensso/timbre "4.2.1"]
                  [net.mikera/core.matrix "0.45.0-CLJS-SNAPSHOT"]
-                 [net.mikera/vectorz-clj "0.41.0"]
+                 [net.mikera/vectorz-clj "0.43.0"]
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.2.1"]
+                 [com.google.protobuf/protobuf-java "2.6.1"]
 
                  ;; cljs
                  [org.clojure/clojurescript "1.7.228" :scope "provided"]
@@ -32,9 +33,14 @@
               :test-commands {"unit-tests"   ["phantomjs"
                                               "resources/test/runner.js"
                                               "resources/test/unit-tests.js"]}}
+  :source-paths ["src" "test"]
+
+  :java-source-paths ["java"]
 
   :resource-paths ["resources"]
 
   :jvm-opts  ["-Xmx8g"
               "-XX:+UseConcMarkSweepGC"
-              "-XX:-OmitStackTraceInFastThrow"])
+              "-XX:-OmitStackTraceInFastThrow"]
+
+  :main cortex.run-all-tests)

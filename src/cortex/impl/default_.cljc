@@ -27,6 +27,21 @@
       ([m]
         EMPTY-VECTOR)))
 
+;; default neural training protocol assumes:
+;; - forward pass is simply running the calculation
+;; - no ability to back-propagate gradients
+;; - zero length input gradient
+(extend-protocol cp/PNeuralTraining
+  Object
+    (forward [this input]
+      (cp/calc this input))
+
+    (backward [this input output-gradient]
+      this)
+
+    (input-gradient [this]
+      EMPTY-VECTOR))
+
 ;; default parameter count implementation is to... err... count the parameters. duh!
 (extend-protocol cp/PParameterCount
   #?(:clj Object :cljs object)

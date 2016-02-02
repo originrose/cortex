@@ -59,20 +59,23 @@
          :cljs (- end start))))
 
 (defn tanh'
-  " tanh'(x) = 1 - tanh(x)^2 "
-  [th]
-  (if (number? th)
-    (let [th (double th)] (- 1 (* th th)))
-    (let [r (m/array :vectorz th)]
+  "Compute the derivative of the tanh function for a given output.  Works on any array shape.
+
+     tanh'(y) = 1 - tanh(y)^2 "
+  [y]
+  (if (number? y)
+    (let [y (double y)] (- 1 (* y y)))
+    (let [r (m/array :vectorz y)]
       (m/fill! r 1)
-      (m/add-scaled-product! r th th -1.0)
+      (m/add-scaled-product! r y y -1.0)
       r)))
 
-(defn sigmoid'
-  "sigma'(x) = sigma(x) * (1-sigma(x)) "
-  [s]
-  (let [sz (m/logistic s)]
-    (m/emul sz (m/sub 1.0 sz))))
+(defn logistic'
+  "Compute the derivative of the logistic (sigmoid) function for a given output. Works on any array shape.
+
+     sigma'(y) = y * (1 - y) "
+  [y]
+  (m/emul y (m/sub 1.0 y)))
 
 (defn weight-matrix
   [rows cols]
@@ -89,6 +92,11 @@
   "Constructs an array of the given shape with random normally distributed element values"
   ([shape-vector]
     (rand-matrix/sample-normal shape-vector)))
+
+(defn empty-array
+  "Constructs a new empty (zero-filled) array of the given shape"
+  ([shape]
+    (m/new-array :vectorz shape)))
 
 (defn mse-gradient-fn
   "Returns the MSE error gradient for a given output and target value"
@@ -191,7 +199,7 @@
       (range (m/column-count input)))))
 
 
-(defn estimate-gradient 
+(defn estimate-gradient
   "Computes a numerical approximation of the derivative of the function f at with respectr to input x"
   ([f x]
     (let [x+dx (m/add )])))
