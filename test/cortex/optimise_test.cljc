@@ -6,7 +6,7 @@
             [clojure.core.matrix :as m]
             [cortex.layers :as layers]
             [cortex.optimise :refer [adadelta-optimiser sgd-optimiser]]
-            [cortex.core :refer [output forward backward parameter-count optimise stack-module]]))
+            [cortex.core :refer [output forward backward parameter-count optimise stack-module calc-output]]))
 
 ;; simple optimiser testing function: try to optimse a transformation
 (defn optimiser-test 
