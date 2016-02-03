@@ -5,7 +5,7 @@
         [cljs.test :refer-macros [deftest is testing]]
         :clj
         [clojure.test :refer [deftest is testing]])
-    [cortex.core :refer [calc output forward backward input-gradient parameters gradient parameter-count]]
+    [cortex.core :refer [calc output forward backward input-gradient parameters gradient parameter-count calc-output]]
     [clojure.core.matrix :as m]
     #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.layers :as layers]
