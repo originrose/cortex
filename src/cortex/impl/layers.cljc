@@ -236,9 +236,24 @@
 
     (update-parameters [this parameters]
       (let [param-view (cp/parameters this)]
-        (m/assign! param-view parameters))
-      (let [gradient-view (cp/gradient this)]
-        (m/assign! gradient-view 0.0))
+        #?(:clj
+            (m/assign! param-view parameters)
+           :cljs
+            (do
+              (let [w (:weights this)
+                    w-update (m/array (take (m/ecount (:weights this)) (m/eseq parameters)))
+                    b (:bias this)
+                    b-update (m/array (drop (m/ecount (:weights this)) (m/eseq parameters)))]
+              (m/assign! (m/as-vector w) (m/as-vector w-update))
+              (m/assign! (m/as-vector b) (m/as-vector b-update))))))
+
+      #?(:clj
+          (let [gradient-view (cp/gradient this)]
+            (m/assign! gradient-view 0.0))
+         :cljs
+          (do
+            (m/assign! (:weight-gradient this) 0.0)
+            (m/assign! (:bias-gradient this) 0.0)))
       this)
 
   cp/PGradient
