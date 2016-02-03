@@ -32,7 +32,7 @@
 ;; - no ability to back-propagate gradients
 ;; - zero length input gradient
 (extend-protocol cp/PNeuralTraining
-  Object
+  #?(:clj Object :cljs object)
     (forward [this input]
       (cp/calc this input))
 
