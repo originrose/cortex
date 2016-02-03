@@ -38,10 +38,8 @@
         training-labels XOR-LABELS
         n-epochs 1000
         loss-fn (opt/mse-loss)
-        learning-rate 0.01
-        momentum 0.9
         batch-size 1
-        optimizer (opt/sgd-optimiser (core/parameter-count net) { :learn-rate learning-rate :momentum momentum })
+        optimizer (opt/sgd-optimiser (core/parameter-count net))
         network (net/train net optimizer loss-fn training-data training-labels batch-size n-epochs)
         score-percent (net/evaluate net training-data training-labels)]
     (is (< (abs-diff score-percent 1.0) 0.001))))
