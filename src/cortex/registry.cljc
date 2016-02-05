@@ -8,10 +8,22 @@ fully qualified name using the register-module function."
 (defn register-module* [module-name module-cons]
   (swap! module-registry* assoc module-name (fn [params] (module-cons params))))
 
+#?(:clj
+    (defmacro register-module [module-name])
+   :cljs
+
 (defmacro register-module [module-name]
   "Register a module with the module registry."
-  `(register-module* ~(name module-name) (fn [params#] (new ~module-name params#))))
+  `(register-module* ~(name module-name) (fn [params#] (new ~module-name params#)))))
+
 
 (defn lookup-module [module-name]
   "Look up a module from the module registry."
-  (get @module-registry* module-name))
+  #?(:clj 
+      (let [last-dot (.lastIndexOf module-name ".")
+            ns-name (.substring module-name 0 last-dot)
+            item-name (.substring module-name (+ 1 last-dot))
+            cons-fn (resolve (symbol ns-name (str "map->" item-name)))]
+        cons-fn)
+     :cljs
+      (get @module-registry* module-name)))
