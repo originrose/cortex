@@ -11,7 +11,7 @@
 
 ;; LOGISTIC
 ;; Module implementing a Logistic activation function over a numerical array
-(register-module cortex.impl.layers.Logistic)
+#?(:cljs (register-module cortex.impl.layers.Logistic))
 (defrecord Logistic [output input-gradient]
   cp/PModule
     (calc [this input]
@@ -43,7 +43,7 @@
 ;; DROPOUT
 ;; Module implementing "dropout" functionality when training
 ;; Works as a identity function otherwise
-(register-module cortex.impl.layers.Dropout)
+#?(:cljs (register-module cortex.impl.layers.Dropout))
 (defrecord Dropout [output input-gradient ^double probability dropout]
   cp/PModule
     (calc [this input]
@@ -76,7 +76,7 @@
 ;; Module implementing simple scaling functionality and addition with a constant
 ;; - factor of nil works as identity
 ;; - constant of nil works as identity
-(register-module cortex.impl.layers.Scale)
+#?(:cljs (register-module cortex.impl.layers.Scale))
 (defrecord Scale [output input-gradient factor constant]
   cp/PModule
     (calc [this input]
@@ -108,7 +108,7 @@
 ;;There is an option that torch uses which is if the input is less than 0
 ;;then multiply it by a special value (negval).
 ;;https://github.com/torch/nn/blob/master/lib/THNN/generic/LeakyReLU.c
-(register-module cortex.impl.layers.RectifiedLinear)
+#?(:cljs (register-module cortex.impl.layers.RectifiedLinear))
 (defrecord RectifiedLinear [output input-gradient dotvec negval]
   cp/PModule
   (calc [this input]
@@ -134,7 +134,7 @@
   (input-gradient [this]
     input-gradient))
 
-(register-module cortex.impl.layers.Tanh)
+#?(:cljs (register-module cortex.impl.layers.Tanh))
 (defrecord Tanh [output input-gradient]
   cp/PModule
   (calc [this input]
@@ -176,7 +176,7 @@
   [input-gradient output output-gradient input]
   (m/assign! input-gradient output-gradient))
 
-(register-module cortex.impl.layers.Softmax)
+#?(:cljs (register-module cortex.impl.layers.Softmax))
 (defrecord Softmax [output input-gradient]
   cp/PModule
   (calc [this input]
@@ -212,7 +212,7 @@
 ;; LINEAR
 ;; function that implements a linear transformation (weights + bias)
 ;; has mutable parameters and accumlators for gradient
-(register-module cortex.impl.layers.Linear)
+#?(:cljs (register-module cortex.impl.layers.Linear))
 (defrecord Linear [weights bias]
   cp/PModule
   (calc [this input]
@@ -274,7 +274,7 @@
 (def DEFAULT-NORMALISER-LEARN-RATE 0.001)
 (def DEFAULT-NORMALISER-FACTOR 0.001)
 
-(register-module cortex.impl.layers.Normaliser)
+#?(:cljs (register-module cortex.impl.layers.Normaliser))
 (defrecord Normaliser [output input-gradient sd mean acc-ss acc-mean tmp]
   cp/PModule
     (calc [this input]
@@ -343,7 +343,7 @@
     (util/rand-gaussian)
     x))
 
-(register-module cortex.impl.layers.DenoisingAutoencoder)
+#?(:cljs (register-module cortex.impl.layers.DenoisingAutoencoder))
 (defrecord DenoisingAutoencoder
   [up down input-tmp output-tmp ]
   cp/PModule
@@ -892,7 +892,7 @@ index the output came from."
 
 ;;Max pooling layer.  There are other pooling layer types (average,a sochiastic)
 ;;that may be implemented later but for now we only need max pooling.
-(register-module cortex.impl.layers.Pooling)
+#?(:cljs (register-module cortex.impl.layers.Pooling))
 (defrecord Pooling [output output-indexes input-gradient conv-layer-config]
   cp/PModule
   (cp/calc [this input]

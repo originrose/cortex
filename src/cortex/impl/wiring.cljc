@@ -42,7 +42,7 @@
 
 ;; SPLIT
 ;; Runs a collection of modules on the same input, returning a vector of outputs
-(register-module cortex.impl.wiring.Split)
+#?(:cljs (register-module cortex.impl.wiring.Split))
 (defrecord Split
   [^IPersistentVector modules]
    cp/PModule
@@ -118,7 +118,7 @@
 
 ;; COMBINE
 ;; Combines a vector of input elements, returning a combined result
-(register-module cortex.impl.wiring.Combine)
+#?(:cljs (register-module cortex.impl.wiring.Combine))
 (defrecord Combine
   [^IFn combine-fn]
    cp/PModule
@@ -146,7 +146,7 @@
 
 ;; STACK
 ;; Wrapper for a linear stack of modules
-(register-module cortex.impl.wiring.StackModule)
+#?(:cljs (register-module cortex.impl.wiring.StackModule))
 (defrecord StackModule
   [modules]
   cp/PModule
