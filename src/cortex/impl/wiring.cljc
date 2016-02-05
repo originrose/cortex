@@ -2,6 +2,7 @@
   "Namespace for standard 'wiring' modules that can be used to compose and combine modules with
    various other functionality"
   (:require [cortex.protocols :as cp]
+            [cortex.impl.default- :as default :refer [record->map]]
             [clojure.core.matrix :as m]
             [cortex.util :as util :refer [error EMPTY-VECTOR]]
             [cortex.serialization :as cs])
@@ -226,7 +227,7 @@
 
     cp/PSerialize
     (->map [this]
-      (let [typed-map (dissoc (cs/record->map this) :modules)
+      (let [typed-map (dissoc (record->map this) :modules)
             modules (mapv cs/module->map (:modules this))]
         (assoc typed-map :modules modules)))
 

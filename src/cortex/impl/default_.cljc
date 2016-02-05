@@ -72,3 +72,14 @@
               m (cp/backward m input output-gradient)]
           m))))
 
+;;default serialization implementation for generic modules
+(defn record->map
+  [rec]
+  (assoc (into {} rec) :record-type (.getName (type rec))))
+
+(extend-protocol cp/PSerialize
+  #?(:clj Object :cljs object)
+  (->map [this]
+    (record->map this))
+  (map-> [this map-data]
+    (into this map-data)))
