@@ -1,19 +1,16 @@
 (ns cortex.spiral-test
   (:require
-    [clojure.test :refer [deftest is are]]
-    [cortex.optimise :as opt]
     [clojure.core.matrix :as m]
-    [clojure.core.matrix.random :as randm]
+    [cortex.optimise :as opt]
     [cortex.util :as util]
     [cortex.network :as net]
     [cortex.core :as core]
     [cortex.layers :as layers]))
 
-
-
 (def num-points 200)
 (def num-classes 3)
-(m/set-current-implementation :vectorz)
+
+(m/set-current-implementation #?(:clj :vectorz :cljs :thing-ndarray))
 
 (defn create-spiral
   [start-theta end-theta start-radius end-radius num-items]
@@ -63,7 +60,6 @@
         network (net/train network optimizer loss-fn all-data all-labels 10 100)
         score (net/evaluate-softmax network all-data all-labels)]
     [score network]))
-
 
 (defonce score-network (atom nil))
 
