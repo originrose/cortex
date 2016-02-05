@@ -1,6 +1,7 @@
 (ns cortex.serialization
   (:require [clojure.core.matrix :as m]
             [cortex.protocols :as cp]
+            [cortex.registry :refer [lookup-module]]
             ;; FIXME: remove when fressian is cross platform
             #?(:clj  [thinktopic.matrix.fressian :as mf])
             #?(:cljs [fressian-cljs.core :as fressian])
@@ -10,56 +11,20 @@
 
 #?(:cljs (enable-console-print!))
 
-#?(:cljs
-    ;; cljs doesn't have the same introspection functionality...
-    ;; is there some better way of doing this?
-    (do
-      (declare cortex.impl.wiring.StackModule)
-      (declare cortex.impl.layers.Softmax)
-      (declare cortex.impl.layers.Linear)
-      (declare cortex.impl.layers.Logistic)
-      (declare cortex.impl.layers.RectifiedLinear)
-      (defn symbol-name->cons [cons-str params]
-        (let [cons-map
-              {"cortex.impl.wiring.StackModule"        (new cortex.impl.wiring.StackModule params)
-               "cortex.impl.layers.Softmax"            (new cortex.impl.layers.Softmax params)
-               "cortex.impl.layers.Linear"             (new cortex.impl.layers.Linear params)
-               "cortex.impl.layers.RectifiedLinear"    (new cortex.impl.layers.RectifiedLinear params)}
-              ]
-          (if-let [o (get cons-map cons-str)]
-            o
-            (println "Couldn't find constructor for: " cons-str))))))
-
-
-(declare map->module)
-
-(defn record-type-name->map-constructor
-  [record-name]
-  (let [last-dot (.lastIndexOf record-name ".")
-        ns-name (.substring record-name 0 last-dot)
-        item-name (.substring record-name (+ 1 last-dot))
-        cons-str (symbol ns-name (str "map->" item-name))
-        cons-fn #?(:clj (resolve cons-str) :cljs cons-str)]
-    cons-fn))
-
 (defn typed-map->empty-record
-  [map-data]
-  #?(:clj (let [obj-cons (record-type-name->map-constructor (:record-type map-data))]
-            (obj-cons {}))
-     :cljs (symbol-name->cons (:record-type map-data) {})))
+  [{:keys [record-type] :as map-data}]
+  (if-let [o (lookup-module record-type)]
+    (o {})
+    (println "Couldn't find constructor for: " record-type)))
 
-
-(defn module->map
-  [mod]
-  (cp/->map mod))
-
+(defn module->map [module]
+  (cp/->map module))
 
 (defn map->module
   [map-data]
   (let [new-obj (typed-map->empty-record map-data)
         map-data (dissoc map-data :record-type)]
     (cp/map-> new-obj map-data)))
-
 
 
 ;; FIXME: remove when fressian is cross platform
@@ -105,6 +70,6 @@
                                 (m/reshape array shape)))))))
 
 (defn read-network!
-  [os]
-  (let [map-net (defressian os)]
-    (map->module map-net)))
+  [s]
+  (-> (defression s)
+      (map->module)))

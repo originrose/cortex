@@ -5,7 +5,10 @@
             [cortex.impl.default- :as default :refer [record->map]]
             [clojure.core.matrix :as m]
             [cortex.util :as util :refer [error EMPTY-VECTOR]]
-            [cortex.serialization :as cs])
+            [cortex.serialization :as cs]
+            [cortex.registry :refer [register-module]]
+            #?(:clj [cortex.registry :refer [register-module]]
+               :cljs [cortex.registry :refer-macros [register-module]]))
 
   #?(:clj (:import [clojure.lang IFn IPersistentVector])))
 
@@ -16,6 +19,7 @@
 ;; FUNCTION
 ;; Wrapper class for a standard Clojure function
 ;; supports an option :gradient-fn
+;(register-module cortex.impl.wiring.FunctionModule)
 (defrecord FunctionModule
   [#?(:clj ^IFn function :cljs function)]
   cp/PModule
@@ -38,6 +42,7 @@
 
 ;; SPLIT
 ;; Runs a collection of modules on the same input, returning a vector of outputs
+(register-module cortex.impl.wiring.Split)
 (defrecord Split
   [^IPersistentVector modules]
    cp/PModule
@@ -113,6 +118,7 @@
 
 ;; COMBINE
 ;; Combines a vector of input elements, returning a combined result
+(register-module cortex.impl.wiring.Combine)
 (defrecord Combine
   [^IFn combine-fn]
    cp/PModule
@@ -140,6 +146,7 @@
 
 ;; STACK
 ;; Wrapper for a linear stack of modules
+(register-module cortex.impl.wiring.StackModule)
 (defrecord StackModule
   [modules]
   cp/PModule
