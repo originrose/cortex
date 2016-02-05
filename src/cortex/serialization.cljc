@@ -71,5 +71,5 @@
 
 (defn read-network!
   [s]
-  (-> (defression s)
+  (-> (defressian s)
       (map->module)))
