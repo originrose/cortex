@@ -19,8 +19,8 @@
 #?(:cljs (enable-console-print!))
 
 (defn- parse-int2 [string]
-  #?(:clj (Integer/parseInt string 2))
-  :cljs (js/parseInt string 2))
+  #?(:clj (Integer/parseInt string 2)
+     :cljs (js/parseInt string 2)))
 
 (defn- charval [character]
   (.indexOf "abcdefghijklmnopqrstuvwxyz" #?(:clj (str character) :cljs character)))
