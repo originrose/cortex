@@ -737,6 +737,7 @@ using convolutional steps"
 ;;
 
 
+#?(:cljs (register-module cortex.impl.layers.Convolutional))
 (defrecord Convolutional [weights bias weight-gradient bias-gradient
                           conv-layer-config]
     cp/PModule
