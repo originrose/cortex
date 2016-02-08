@@ -1,7 +1,10 @@
 (ns cortex.util-test
-  (:require [cortex.util :as util]
-            [clojure.core.matrix :as m]
-            [clojure.test :refer [deftest is are]]))
+  (:require #?(:cljs
+                [cljs.test :refer-macros [deftest is testing]]
+                :clj
+                [clojure.test :refer [deftest is testing]])
+            [cortex.util :as util]
+            [clojure.core.matrix :as m]))
 
 (deftest confusion-test
   (let [cf (util/confusion-matrix ["cat" "dog" "rabbit"])

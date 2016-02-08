@@ -1,16 +1,17 @@
-(ns cortex.impl.default
+(ns cortex.impl.default-
   "Default implementations for coretx protocols."
-  (:require [cortex.protocols :as cp])
-  (:require [clojure.core.matrix :as m])
-  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]]))
+  (:require [cortex.protocols :as cp]
+            [clojure.core.matrix :as m]
+            [cortex.util :as util :refer [error EMPTY-VECTOR]]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; default to assuming zero parameters
 (extend-protocol cp/PParameters
-  Object
-	  (parameters 
+  #?(:clj Object :cljs object)
+  (parameters 
       ([m]
         ;; default to assuming zero parameters
         EMPTY-VECTOR))
@@ -21,7 +22,7 @@
 
 ;; default gradient function assumes zero parameters
 (extend-protocol cp/PGradient
-  Object
+  #?(:clj Object :cljs object)
     (gradient 
       ([m]
         EMPTY-VECTOR)))
@@ -31,7 +32,7 @@
 ;; - no ability to back-propagate gradients
 ;; - zero length input gradient
 (extend-protocol cp/PNeuralTraining
-  Object
+  #?(:clj Object :cljs object)
     (forward [this input]
       (cp/calc this input))
 
@@ -43,14 +44,14 @@
 
 ;; default parameter count implementation is to... err... count the parameters. duh!
 (extend-protocol cp/PParameterCount
-  Object
+  #?(:clj Object :cljs object)
     (parameter-count 
       ([m]
         (m/ecount (cp/parameters m)))))
 
 ;; Default loss gradient function returns :loss-gradient-fn (may be nil)
 (extend-protocol cp/PLossGradientFunction
-  Object
+  #?(:clj Object :cljs object)
     (loss-gradient-fn 
       ([m]
         (:loss-gradient-fn m))))
@@ -61,7 +62,7 @@
 ;; 3. Compute outpout gradient
 ;; 4. Run backward pass
 (extend-protocol cp/PTraining
-  Object
+  #?(:clj Object :cljs object)
     (train 
       ([m input target]
         (let [m (cp/forward m input)
@@ -71,6 +72,14 @@
               m (cp/backward m input output-gradient)]
           m))))
 
+;;default serialization implementation for generic modules
+(defn record->map
+  [rec]
+  (assoc (into {} rec) :record-type (.getName (type rec))))
 
-
-
+(extend-protocol cp/PSerialize
+  #?(:clj Object :cljs object)
+  (->map [this]
+    (record->map this))
+  (map-> [this map-data]
+    (into this map-data)))

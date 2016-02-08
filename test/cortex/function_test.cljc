@@ -1,11 +1,17 @@
 (ns cortex.function-test
   "Tests for behaviour of mathematical function modules"
-  (:use [clojure.test])
-  (:use [cortex.core])
-  (:require [clojure.core.matrix :as m]
-            [cortex.layers :as layers]
-            [cortex.util :as util]))
+  (:require
+    #?(:cljs
+        [cljs.test :refer-macros [deftest is testing]]
+        :clj
+        [clojure.test :refer [deftest is testing]])
+    [cortex.core :refer [calc output forward backward input-gradient parameters gradient parameter-count calc-output]]
+    [clojure.core.matrix :as m]
+    #?(:cljs [thi.ng.ndarray.core :as nd])
+    [cortex.layers :as layers]
+    [cortex.util :as util]))
 
+(m/set-current-implementation #?(:clj :vectorz :cljs :thing-ndarray))
 
 (deftest test-logistic-module
   (testing "basic logistic functionality"

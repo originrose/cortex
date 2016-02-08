@@ -1,16 +1,20 @@
 (ns cortex.network-test
-  (:use cortex.core)
   (:require
-    [clojure.test :refer [deftest is are]]
+    [cortex.core :refer [calc output forward backward input-gradient parameters gradient parameter-count]]
+    #?(:cljs
+        [cljs.test :refer-macros [deftest is are testing]]
+        :clj
+        [clojure.test :refer [deftest is are testing]])
     [cortex.optimise :as opt]
     [clojure.core.matrix :as mat]
     [clojure.core.matrix.random :as randm]
+    #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.util :as util]
     [cortex.network :as net]
     [cortex.core :as core]
     [cortex.layers :as layers]))
 
-(mat/set-current-implementation :vectorz)
+(mat/set-current-implementation #?(:clj :vectorz :cljs :thing-ndarray))
 
 ; a	b	| a XOR b
 ; 1	1	     0
@@ -21,7 +25,7 @@
 (def XOR-LABELS [[0] [1] [1] [0]])
 
 (defn abs-diff
-  ^Double [^Double x ^Double y]
+  [x y]
   (Math/abs (- x y)))
 
 (deftest xor-test
@@ -30,19 +34,15 @@
               [(layers/linear-layer 2 3)
                (layers/logistic [3])
                (layers/linear-layer 3 1)])
-
         training-data XOR-DATA
         training-labels XOR-LABELS
         n-epochs 1000
         loss-fn (opt/mse-loss)
-        learning-rate 0.01
-        momentum 0.9
         batch-size 1
-        optimizer (opt/sgd-optimiser (core/parameter-count net) { :learn-rate learning-rate :momentum momentum })
+        optimizer (opt/sgd-optimiser (core/parameter-count net))
         network (net/train net optimizer loss-fn training-data training-labels batch-size n-epochs)
         score-percent (net/evaluate net training-data training-labels)]
     (is (< (abs-diff score-percent 1.0) 0.001))))
-
 
 (deftest linear-model-test
   "Define a random dataset and create the labels from some fixed parameters so we know exactly
@@ -56,8 +56,6 @@
         model (net/train model optimizer loss x-data y-data 10 1)
         mse (net/evaluate-mse model x-data y-data)]
     (is (< mse 1))))
-
-
 
 
 ; Data from: Dominick Salvator and Derrick Reagle

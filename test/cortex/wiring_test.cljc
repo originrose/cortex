@@ -1,7 +1,11 @@
 (ns cortex.wiring-test
-  (:use [clojure.test])
-  (:use [cortex.core])
-  (:require [clojure.core.matrix :as m]
+  (:require [cortex.core :refer [calc stack-module parameters output forward
+                                 backward input-gradient calc-output]]
+            #?(:cljs
+                [cljs.test :refer-macros [deftest is testing]]
+                :clj
+                [clojure.test :refer [deftest is testing]])
+            [clojure.core.matrix :as m]
             [cortex.layers :as layers]))
 
 (deftest test-function-module

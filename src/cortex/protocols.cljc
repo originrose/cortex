@@ -1,8 +1,10 @@
 (ns cortex.protocols
-  "Protocols for cortex ML Module implementations")
+  "Protocols for cortex ML Module implementations"
+  (:refer-clojure :exclude [clone]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 (defprotocol PModule
   "Protocol for a generic module. All cortex modules must implement this."

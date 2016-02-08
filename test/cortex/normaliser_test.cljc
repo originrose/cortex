@@ -1,9 +1,13 @@
 (ns cortex.normaliser-test
-  (:use [clojure.test])
-  (:use [cortex core optimise])
-  (:require [clojure.core.matrix :as m]
+  (:require #?(:cljs
+                [cljs.test :refer-macros [deftest is testing]]
+               :clj
+                [clojure.test :refer [deftest is testing]])
+            [clojure.core.matrix :as m]
             [clojure.core.matrix.stats :as stats]
-            [cortex.layers :as layers]))
+            [cortex.layers :as layers]
+            [cortex.optimise :refer [adadelta-optimiser]]
+            [cortex.core :refer [output forward backward parameter-count optimise]]))
 
 (def DATA 
   [[-1 10  0]

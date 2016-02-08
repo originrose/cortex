@@ -1,45 +1,17 @@
 (ns cortex.impl.layers
-  (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]])
-  (:require [clojure.core.matrix :as m])
-  (:import [java.lang Math])
-  (:import [java.util Random]))
+  (:require [cortex.protocols :as cp]
+            [cortex.util :as util :refer [error EMPTY-VECTOR]]
+            [clojure.core.matrix :as m]
+            #?(:clj [cortex.registry :refer [register-module]]
+               :cljs [cortex.registry :refer-macros [register-module]])))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
-
-;; LOGISTIC
-;; Module implementing a Logistic activation function over a numerical array
-(defrecord Logistic [output input-gradient]
-  cp/PModule
-    (calc [this input]
-      (m/assign! output input)
-      (m/logistic! output)
-      this)
-
-    (output [this]
-      (:output this))
-
-  cp/PNeuralTraining
-    (forward [this input]
-      (cp/calc this input))
-
-    (backward [this input output-gradient]
-      (let []
-        ;; input gradient = output * (1 - output) * output-gradient
-        (m/assign! input-gradient 1.0)
-        (m/sub! input-gradient output)
-        (m/mul! input-gradient output output-gradient)
-
-        ;; finally return this, input-gradient has been updated in-place
-        this))
-
-    (input-gradient [this]
-      input-gradient))
-
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; LOGISTIC
 ;; Module implementing a Logistic activation function over a numerical array
+#?(:cljs (register-module cortex.impl.layers.Logistic))
 (defrecord Logistic [output input-gradient]
   cp/PModule
     (calc [this input]
@@ -71,6 +43,7 @@
 ;; DROPOUT
 ;; Module implementing "dropout" functionality when training
 ;; Works as a identity function otherwise
+#?(:cljs (register-module cortex.impl.layers.Dropout))
 (defrecord Dropout [output input-gradient ^double probability dropout]
   cp/PModule
     (calc [this input]
@@ -103,6 +76,7 @@
 ;; Module implementing simple scaling functionality and addition with a constant
 ;; - factor of nil works as identity
 ;; - constant of nil works as identity
+#?(:cljs (register-module cortex.impl.layers.Scale))
 (defrecord Scale [output input-gradient factor constant]
   cp/PModule
     (calc [this input]
@@ -134,6 +108,7 @@
 ;;There is an option that torch uses which is if the input is less than 0
 ;;then multiply it by a special value (negval).
 ;;https://github.com/torch/nn/blob/master/lib/THNN/generic/LeakyReLU.c
+#?(:cljs (register-module cortex.impl.layers.RectifiedLinear))
 (defrecord RectifiedLinear [output input-gradient dotvec negval]
   cp/PModule
   (calc [this input]
@@ -159,6 +134,7 @@
   (input-gradient [this]
     input-gradient))
 
+#?(:cljs (register-module cortex.impl.layers.Tanh))
 (defrecord Tanh [output input-gradient]
   cp/PModule
   (calc [this input]
@@ -200,7 +176,7 @@
   [input-gradient output output-gradient input]
   (m/assign! input-gradient output-gradient))
 
-
+#?(:cljs (register-module cortex.impl.layers.Softmax))
 (defrecord Softmax [output input-gradient]
   cp/PModule
   (calc [this input]
@@ -236,6 +212,7 @@
 ;; LINEAR
 ;; function that implements a linear transformation (weights + bias)
 ;; has mutable parameters and accumlators for gradient
+#?(:cljs (register-module cortex.impl.layers.Linear))
 (defrecord Linear [weights bias]
   cp/PModule
   (calc [this input]
@@ -267,9 +244,24 @@
 
     (update-parameters [this parameters]
       (let [param-view (cp/parameters this)]
-        (m/assign! param-view parameters))
-      (let [gradient-view (cp/gradient this)]
-        (m/assign! gradient-view 0.0))
+        #?(:clj
+            (m/assign! param-view parameters)
+           :cljs
+            (do
+              (let [w (:weights this)
+                    w-update (m/array (take (m/ecount (:weights this)) (m/eseq parameters)))
+                    b (:bias this)
+                    b-update (m/array (drop (m/ecount (:weights this)) (m/eseq parameters)))]
+              (m/assign! (m/as-vector w) (m/as-vector w-update))
+              (m/assign! (m/as-vector b) (m/as-vector b-update))))))
+
+      #?(:clj
+          (let [gradient-view (cp/gradient this)]
+            (m/assign! gradient-view 0.0))
+         :cljs
+          (do
+            (m/assign! (:weight-gradient this) 0.0)
+            (m/assign! (:bias-gradient this) 0.0)))
       this)
 
   cp/PGradient
@@ -282,6 +274,7 @@
 (def DEFAULT-NORMALISER-LEARN-RATE 0.001)
 (def DEFAULT-NORMALISER-FACTOR 0.001)
 
+#?(:cljs (register-module cortex.impl.layers.Normaliser))
 (defrecord Normaliser [output input-gradient sd mean acc-ss acc-mean tmp]
   cp/PModule
     (calc [this input]
@@ -332,7 +325,7 @@
       input-gradient)
 
   cp/PParameters
-	  (parameters
+  (parameters
       [this]
         ;; no external parameters to optimise
         EMPTY-VECTOR)
@@ -344,17 +337,13 @@
         (m/sqrt! sd)
         this))
 
-
-
 ;; DENOISING AUTOENCODER
-(def ^Random NOISE-RANDOM (Random.))
-
 (defn noise-fn ^double [^double x]
-  (let [r NOISE-RANDOM]
-    (if (< 0.2 (.nextDouble r))
-     (.nextGaussian r)
-     x)))
+  (if (< 0.2 (util/rand-normal))
+    (util/rand-gaussian)
+    x))
 
+#?(:cljs (register-module cortex.impl.layers.DenoisingAutoencoder))
 (defrecord DenoisingAutoencoder
   [up down input-tmp output-tmp ]
   cp/PModule
@@ -748,6 +737,7 @@ using convolutional steps"
 ;;
 
 
+#?(:cljs (register-module cortex.impl.layers.Convolutional))
 (defrecord Convolutional [weights bias weight-gradient bias-gradient
                           conv-layer-config]
     cp/PModule
@@ -903,6 +893,7 @@ index the output came from."
 
 ;;Max pooling layer.  There are other pooling layer types (average,a sochiastic)
 ;;that may be implemented later but for now we only need max pooling.
+#?(:cljs (register-module cortex.impl.layers.Pooling))
 (defrecord Pooling [output output-indexes input-gradient conv-layer-config]
   cp/PModule
   (cp/calc [this input]

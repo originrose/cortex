@@ -1,8 +1,12 @@
 (ns cortex.optimise-test
-  (:use [clojure.test])
-  (:use [cortex core optimise])
-  (:require [clojure.core.matrix :as m]
-            [cortex.layers :as layers]))
+  (:require #?(:cljs
+                [cljs.test :refer-macros [deftest is testing]]
+                :clj
+                [clojure.test :refer [deftest is testing]])
+            [clojure.core.matrix :as m]
+            [cortex.layers :as layers]
+            [cortex.optimise :refer [adadelta-optimiser sgd-optimiser]]
+            [cortex.core :refer [output forward backward parameter-count optimise stack-module calc-output]]))
 
 ;; simple optimiser testing function: try to optimse a transformation
 (defn optimiser-test 

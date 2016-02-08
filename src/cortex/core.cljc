@@ -1,14 +1,16 @@
 (ns cortex.core
   "Main cortex API function namespace"
-  (:require [cortex.impl.wiring :as wiring])
-  (:require [cortex.impl default])
-  (:require [cortex.protocols :as cp])
-  (:require [cortex.layers :as layers]
-            [cortex.util :as util :refer [error]])
-  (:require [clojure.core.matrix :as m]))
+  (:refer-clojure :exclude [clone])
+  (:require [cortex.impl.wiring :as wiring]
+            [cortex.impl.default- :as cortex.impl.default]
+            [cortex.protocols :as cp]
+            [cortex.layers :as layers]
+            [cortex.util :as util :refer [error]]
+            [clojure.core.matrix :as m]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; ===========================================================================
 ;; Main module API functions
@@ -21,7 +23,7 @@
 (defn output
   "Gets the ouput for a module. Throws an exception if not available."
   ([m]
-    (or (cp/output m) (error "No output available for module: " (class m)))))
+    (or (cp/output m) (error "No output available for module: " #?(:clj (class m) :cljs (type m))))))
 
 (defn calc-output
   "Runs the calculation for a module. Returns the module output."
@@ -86,3 +88,4 @@
   "clones a module, including all internal state structures. New module will be independent of the original."
   ([m]
     (cp/clone m)))
+

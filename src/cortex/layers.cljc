@@ -1,13 +1,14 @@
 (ns cortex.layers
-  (:require [cortex.protocols :as cp])
-  (:require [cortex.util :as util :refer [error]]
+  (:require [cortex.protocols :as cp]
+            [cortex.util :as util :refer [error]]
             [cortex.impl.layers :as impl]
-            [cortex.impl.wiring])
-  (:require [clojure.core.matrix :as m])
+            [cortex.impl.wiring]
+            [clojure.core.matrix :as m])
   (:refer-clojure :exclude [identity]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; ===========================================================================
 ;; Layer constructors

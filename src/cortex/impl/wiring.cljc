@@ -2,19 +2,26 @@
   "Namespace for standard 'wiring' modules that can be used to compose and combine modules with
    various other functionality"
   (:require [cortex.protocols :as cp]
-            [clojure.core.matrix :as m])
-  (:require [cortex.util :as util :refer [error EMPTY-VECTOR]]
-            [cortex.serialization :as cs])
-  (:import [clojure.lang IFn IPersistentVector]))
+            [cortex.impl.default- :as default :refer [record->map]]
+            [clojure.core.matrix :as m]
+            [cortex.util :as util :refer [error EMPTY-VECTOR]]
+            [cortex.serialization :as cs]
+            [cortex.registry :refer [register-module]]
+            #?(:clj [cortex.registry :refer [register-module]]
+               :cljs [cortex.registry :refer-macros [register-module]]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
+  #?(:clj (:import [clojure.lang IFn IPersistentVector])))
+
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* :warn-on-boxed)))
 
 ;; FUNCTION
 ;; Wrapper class for a standard Clojure function
 ;; supports an option :gradient-fn
+;(register-module cortex.impl.wiring.FunctionModule)
 (defrecord FunctionModule
-  [^IFn function]
+  [#?(:clj ^IFn function :cljs function)]
   cp/PModule
     (cp/calc [m input]
       (assoc m :output (function input)))
@@ -35,6 +42,7 @@
 
 ;; SPLIT
 ;; Runs a collection of modules on the same input, returning a vector of outputs
+#?(:cljs (register-module cortex.impl.wiring.Split))
 (defrecord Split
   [^IPersistentVector modules]
    cp/PModule
@@ -110,6 +118,7 @@
 
 ;; COMBINE
 ;; Combines a vector of input elements, returning a combined result
+#?(:cljs (register-module cortex.impl.wiring.Combine))
 (defrecord Combine
   [^IFn combine-fn]
    cp/PModule
@@ -137,6 +146,7 @@
 
 ;; STACK
 ;; Wrapper for a linear stack of modules
+#?(:cljs (register-module cortex.impl.wiring.StackModule))
 (defrecord StackModule
   [modules]
   cp/PModule
@@ -224,7 +234,7 @@
 
     cp/PSerialize
     (->map [this]
-      (let [typed-map (dissoc (cs/record->map this) :modules)
+      (let [typed-map (dissoc (record->map this) :modules)
             modules (mapv cs/module->map (:modules this))]
         (assoc typed-map :modules modules)))
 

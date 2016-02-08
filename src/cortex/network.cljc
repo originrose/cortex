@@ -3,13 +3,13 @@
   (:require [clojure.core.matrix :as m]
             [cortex.protocols :as cp]
             [clojure.core.matrix.linear :as linear]
-            [clojure.core.matrix.random :as rand]
             [cortex.optimise :as opt]
             [cortex.core :as core]
             [cortex.util :as util]))
 
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* true)
+#?(:clj (do
+          (set! *warn-on-reflection* true)
+          (set! *unchecked-math* true)))
 
 (defn run
   [network test-data]
