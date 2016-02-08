@@ -13,6 +13,8 @@
                  [doo "0.1.6-SNAPSHOT"]
                  [thi.ng/ndarray "0.3.1-SNAPSHOT"]
                  [caffe-protobuf "0.1.0"]
+                 ;;If source paths includes test...
+                 [net.mikera/clojure-utils "0.6.2"]
                  ]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]
