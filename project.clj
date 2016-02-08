@@ -6,7 +6,7 @@
                  [net.mikera/vectorz-clj "0.43.0"]
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.2.1"]
-                 [com.google.protobuf/protobuf-java "2.6.1"]
+                 [caffe-protobuf "0.1.0"]]
 
                  ;; cljs
                  [org.clojure/clojurescript "1.7.228" :scope "provided"]
