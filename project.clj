@@ -5,7 +5,7 @@
                  [net.mikera/vectorz-clj "0.43.1-SNAPSHOT"]
                  [net.mikera/core.matrix "0.50.0-SNAPSHOT"]
                  [org.clojure/test.check "0.9.0"]
-                 [thinktopic/matrix.fressian "0.2.1"]
+                 [thinktopic/matrix.fressian "0.3.0-SNAPSHOT"]
 
                  ;; cljs
                  [org.clojure/clojurescript "1.7.228" :scope "provided"]
