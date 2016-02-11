@@ -207,3 +207,9 @@ as the input"
                     output-indexes
                     input-gradient
                     conv-config)))
+
+
+(defn k-sparse
+  [k]
+  #?(:clj (impl/->KSparse k)
+     :cljs (throw (js/Error. "KSparse is not implemented for clojurescript"))))

@@ -3,7 +3,8 @@
             [cortex.util :as util :refer [error EMPTY-VECTOR]]
             [clojure.core.matrix :as m]
             #?(:clj [cortex.registry :refer [register-module]]
-               :cljs [cortex.registry :refer-macros [register-module]])))
+               :cljs [cortex.registry :refer-macros [register-module]]))
+  #?(:clj (:import [java.util PriorityQueue])))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)
@@ -914,3 +915,50 @@ index the output came from."
 
   (input-gradient [this]
     (:input-gradient this)))
+
+
+#?(:clj
+   (defrecord KSparse [^long k]
+     cp/PModule
+     (cp/calc [this input]
+       (let [^PriorityQueue queue (or (:queue this)
+                                      (PriorityQueue. k (reify java.util.Comparator
+                                                          (compare ^int [this o1 o2]
+                                                            (int (- (double (o1 0)) (double (o2 0))))))))
+             output (or (:output this)
+                        (m/new-array :vectorz (m/shape input)))
+             dotvec (or (:dotvec this)
+                        (m/new-array :vectorz (m/shape input)))]
+         (m/assign! dotvec 0.0)
+         (m/assign! output input)
+         (.clear queue)
+         (doall (m/emap-indexed! (fn [idx value]
+                                   (.add queue [value (first idx)])
+                                   (when (> (.size queue) k)
+                                     (.remove queue (.peek queue)))
+                                   value)
+                                 output))
+         (doseq [[value idx] (seq queue)]
+           (m/mset! dotvec idx 1.0))
+         (m/mul! output dotvec)
+         (assoc this :queue queue
+                :output output
+                :dotvec dotvec)))
+
+
+     (cp/output [m]
+       (:output m))
+
+     cp/PNeuralTraining
+     (forward [this input]
+       (cp/calc this input))
+
+     (backward [this input output-gradient]
+       (let [input-gradient (or (:input-gradient this)
+                                (m/new-array :vectorz (m/shape output-gradient)))]
+         (m/assign! input-gradient output-gradient)
+         (m/mul! input-gradient (:dotvec this))
+         (assoc this :input-gradient input-gradient)))
+
+     (input-gradient [this]
+       (:input-gradient this))))

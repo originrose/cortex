@@ -11,19 +11,25 @@
 
 (defn new-mutable-vector
   [size]
-  (m/mutable (m/new-vector :vectorz size)))
+  (m/mutable (m/array :vectorz (repeat size 0))))
 
 (defn sqrt-with-epsilon!
   "res[i] = sqrt(vec[i] + epsilon)"
   [output-vec squared-vec epsilon]
+  (println "1")
   (m/assign! output-vec squared-vec)
+  (println "2")
+  (println (type output-vec))
   (m/add! output-vec epsilon)
+  (println "3")
   (m/sqrt! output-vec))
 
 
 (defn compute-squared-running-average!
   [accumulator data-vec ^double decay-rate]
+  (println "mul")
   (m/mul! accumulator (- 1.0 decay-rate))
+  (println "add-scaled" (type accumulator) (type data-vec) (m/shape data-vec))
   (m/add-scaled-product! accumulator data-vec data-vec decay-rate))
 
 (defn adadelta-step!
@@ -34,13 +40,17 @@ Returns new parameters"
   (let [decay-rate (double 0.05)
         epsilon 1e-8]
 
+    (println "Adadelta-step")
     ;;Compute squared gradient running average and mean squared gradient
     (compute-squared-running-average! grad-sq-accum gradient decay-rate)
 
+    (println "Adadelta-step")
     (sqrt-with-epsilon! rms-grad grad-sq-accum epsilon)
+    (println "Adadelta-step")
     ;;Compute mean squared parameter update from past squared parameter update
     (sqrt-with-epsilon! rms-dx dx-sq-accum epsilon)
 
+        (println "Adadelta-step 1")
     ;;Compute update
     ;;x(t) = -1.0 * (rms-gx/rms-grad) * gradient
     ;;Epsilon is important both as initial condition *and* in ensuring
@@ -51,9 +61,12 @@ Returns new parameters"
     (m/mul! dx rms-dx)
     (m/div! dx rms-grad)
 
+        (println "Adadelta-step 2")
+
     ;;Accumulate gradients
     (compute-squared-running-average! dx-sq-accum dx decay-rate)
 
+        (println "Adadelta-step 3")
     ;;Compute new parameters and return them.
     (m/add parameters dx)
     ))
@@ -160,7 +173,7 @@ Returns new parameters"
         (m/sub! r target)
         (m/scale! r (/ 2.0 (double (m/ecount v)))))))
 
-(defn mse-loss 
+(defn mse-loss
   "Returns a Mean Squared Error (MSE) loss function"
   ([]
     (MSELoss.)))

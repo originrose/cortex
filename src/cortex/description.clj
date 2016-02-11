@@ -30,6 +30,8 @@
 (defn linear->logistic [num-output] [{:type :linear :output-size num-output}
                                      {:type :logistic}])
 
+(defn k-sparse [k] {:type :k-sparse :k k})
+
 
 (defn convolutional
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels]
@@ -127,6 +129,12 @@
     (assoc (carry-image-dims-forward previous item)
            :input-size io-size :output-size io-size)))
 
+(defmethod build-desc :k-sparse
+  [previous item]
+  (let [io-size (:output-size previous)]
+    (assoc (carry-image-dims-forward previous item)
+           :input-size io-size :output-size io-size)))
+
 
 (defmethod build-desc :softmax
   [previous item]
@@ -209,6 +217,10 @@
 (defmethod create-module :softmax
   [desc]
   (layers/softmax [(:output-size desc)]))
+
+(defmethod create-module :k-sparse
+  [desc]
+  (layers/k-sparse (:k desc)))
 
 (defmethod create-module :convolutional
   [{:keys [input-width input-height input-channels

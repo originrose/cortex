@@ -15,6 +15,7 @@
                  [caffe-protobuf "0.1.0"]
                  ;;If source paths includes test...
                  [net.mikera/clojure-utils "0.6.2"]
+                 [thinktopic/netlib-ccm "0.1.0-SNAPSHOT"]
                  ]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.3.1"]

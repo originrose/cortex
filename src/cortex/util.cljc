@@ -21,10 +21,10 @@
     (do
       (def ^Random RAND-GENERATOR (Random.))
 
-      (defn rand-normal []
+      (defn rand-normal ^double []
         (.nextDouble RAND-GENERATOR))
 
-      (defn rand-gaussian []
+      (defn rand-gaussian ^double []
         (.nextGaussian RAND-GENERATOR)))
     :cljs
     (do
