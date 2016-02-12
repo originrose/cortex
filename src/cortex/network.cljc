@@ -66,12 +66,10 @@
 
 (defn train-step
   [input answer network loss-fn]
-  (let [_ (println "forward")
-        network (core/forward network input)
+  (let [network (core/forward network input)
         temp-answer (core/output network)
         loss (cp/loss loss-fn temp-answer answer)
         loss-gradient (cp/loss-gradient loss-fn temp-answer answer)]
-    _ (println "backward")
     (core/backward (assoc network :loss loss) input loss-gradient)))
 
 
@@ -81,7 +79,6 @@
                           (train-step input answer network loss-fn))
                         network
                         (map vector input-seq label-seq))]
-    (println "optimize")
     (core/optimise optimizer network (double (count input-seq)))))
 
 (defn train
@@ -91,7 +88,6 @@
         epoch-count (atom 0)
         [optimizer network] (reduce (fn [opt-network batch-index-seq]
                                       (let [_ (swap! epoch-count inc)
-                                        _ (println "Running epoch:" @epoch-count)
                                             [optimizer network]
                                             (reduce (fn [[optimizer network] batch-indexes]
                                                       (let [input-seq (mapv training-data batch-indexes)

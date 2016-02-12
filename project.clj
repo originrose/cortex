@@ -6,43 +6,45 @@
                  [net.mikera/core.matrix "0.50.0-SNAPSHOT"]
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.3.0-SNAPSHOT"]
-
-                 ;; cljs
-                 [org.clojure/clojurescript "1.7.228" :scope "provided"]
-                 [net.unit8/fressian-cljs "0.2.0"]
-                 [doo "0.1.6-SNAPSHOT"]
-                 [thinktopic/ndarray "0.4.0-SNAPSHOT"]
                  [caffe-protobuf "0.1.0"]
-                 ;;If source paths includes test...
-                 [net.mikera/clojure-utils "0.6.2"]
-;                 [thinktopic/netlib-ccm "0.1.0-SNAPSHOT"]
+                 ;[thinktopic/netlib-ccm "0.1.0-SNAPSHOT"]
                  ]
 
-  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"] ;; allows JUnit testing for cortex
+  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
                                   [criterium/criterium "0.4.3"] ;; benchmarking tool
-                                  [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]] ;; alternate core.matrix implementation
-                                  ]
-                   :java-source-paths ["test"]}}
+                                  [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]] ;; alternate core.matrix implementation
+                   :source-paths ["src" "test"]
+                   :java-source-paths ["test"]}
 
-  :plugins [[lein-cljsbuild "1.1.2"]]
+             :test {:dependencies [[net.mikera/cljunit "0.4.0"]
+                                   [criterium/criterium "0.4.3"]
+                                   [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]
+                                   [net.mikera/clojure-utils "0.6.2"]]
+                    :source-paths ["src" "test"]
+                    :java-source-paths ["test"]
+                    :main cortex.run-all-tests}
 
-  :cljsbuild {;;You can't use none optimizations in general because then the files reference files under out/
-              :builds [{:id :test
-                        :source-paths ["src" "test"]
-                        :compiler     {:output-to     "resources/test/unit-tests.js"
-                                       :optimizations :none
-                                       :main          cortex.test
-                                       :pretty-print  true}}]
+             :cljs {:dependencies [[org.clojure/clojurescript "1.7.228" :scope "provided"]
+                                   ;[net.unit8/fressian-cljs "0.2.0"]
+                                   [doo "0.1.6-SNAPSHOT"]
+                                   [thinktopic/aljabr "0.1.0-SNAPSHOT"]]
 
-              :test-commands {"unit-tests"   ["phantomjs"
-                                              "resources/test/runner.js"
-                                              "resources/test/unit-tests.js"]}}
-  :source-paths ["src" "test"]
+                    :plugins [[lein-cljsbuild "1.1.2"]]
 
+                    :cljsbuild {:builds [{:id :test
+                                          :source-paths ["src" "test"]
+                                          :compiler     {:output-to "resources/test/unit-tests.js"
+                                                         :output-dir "resources/test/out"
+                                                         :asset-path "out"
+                                                         :optimizations :none
+                                                         :main 'cortex.test
+                                                         :pretty-print true}}]
+
+                                :test-commands {"unit-tests"   ["phantomjs"
+                                                                "resources/test/runner.js"
+                                                                "resources/test/unit-tests.js"]}}}}
   :resource-paths ["resources"]
 
   :jvm-opts  ["-Xmx8g"
               "-XX:+UseConcMarkSweepGC"
-              "-XX:-OmitStackTraceInFastThrow"]
-
-  :main cortex.run-all-tests)
+              "-XX:-OmitStackTraceInFastThrow"])
