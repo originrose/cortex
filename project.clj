@@ -18,9 +18,9 @@
 ;                 [thinktopic/netlib-ccm "0.1.0-SNAPSHOT"]
                  ]
 
-  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]
-                                  [criterium/criterium "0.4.3"]
-                                  [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]
+  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"] ;; allows JUnit testing for cortex
+                                  [criterium/criterium "0.4.3"] ;; benchmarking tool
+                                  [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]] ;; alternate core.matrix implementation
                                   ]
                    :java-source-paths ["test"]}}
 
