@@ -2,7 +2,8 @@
   (require [clojure.core.matrix :as m]))
 
 
-(def ^:dynamic *current-matrix-implementation* :vectorz)
+#?(:clj (def ^:dynamic *current-matrix-implementation* :vectorz)
+   :cljs (def ^:dynamic *current-matrix-implementation* :think-ndarray))
 
 (defn set-current-matrix-implementation!
   [new-impl]
@@ -13,3 +14,4 @@
 
 (defn array [data] (m/array (impl) data))
 (defn new-array [shape] (m/new-array (impl) shape))
+(defn zero-array [shape] (m/zero-array (impl) shape))

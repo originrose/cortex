@@ -7,7 +7,8 @@
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.3.0-SNAPSHOT"]
                  [caffe-protobuf "0.1.0"]
-                 ;[thinktopic/netlib-ccm "0.1.0-SNAPSHOT"]
+                                        ;[thinktopic/netlib-ccm "0.1.0-SNAPSHOT"]
+                 [net.mikera/clojure-utils "0.6.2"]
                  ]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
@@ -19,7 +20,7 @@
              :test {:dependencies [[net.mikera/cljunit "0.4.0"]
                                    [criterium/criterium "0.4.3"]
                                    [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]
-                                   [net.mikera/clojure-utils "0.6.2"]]
+               ]
                     :source-paths ["src" "test"]
                     :java-source-paths ["test"]
                     :main cortex.run-all-tests}
