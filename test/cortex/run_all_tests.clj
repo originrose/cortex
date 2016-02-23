@@ -18,6 +18,5 @@
             [clojure.test])
   (:gen-class))
 
-
 (defn -main [& args]
   (clojure.test/run-all-tests))

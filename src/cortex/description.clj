@@ -32,6 +32,7 @@
 
 (defn k-sparse [k] {:type :k-sparse :k k})
 
+(defn dropout [probability] {:type :dropout :probability probability})
 
 (defn convolutional
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels]
@@ -115,26 +116,30 @@
              :output-data-format data-format))
     item))
 
+(defn build-pass-through-desc
+  "These layer types do not change their data types from input to output"
+  [previous item]
+  (let [io-size (:output-size previous)]
+    (assoc (carry-image-dims-forward previous item)
+           :input-size io-size :output-size io-size)))
+
 ;;Pure activation layers can be placed on images as well as
 ;;on vectors.
 (defmethod build-desc :relu
   [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc (carry-image-dims-forward previous item)
-           :input-size io-size :output-size io-size)))
+  (build-pass-through-desc previous item))
 
 (defmethod build-desc :logistic
   [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc (carry-image-dims-forward previous item)
-           :input-size io-size :output-size io-size)))
+  (build-pass-through-desc previous item))
 
 (defmethod build-desc :k-sparse
   [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc (carry-image-dims-forward previous item)
-           :input-size io-size :output-size io-size)))
+  (build-pass-through-desc previous item))
 
+(defmethod build-desc :dropout
+  [previous item]
+  (build-pass-through-desc previous item))
 
 (defmethod build-desc :softmax
   [previous item]
@@ -242,6 +247,10 @@
                       kernel-width kernel-height pad-x pad-y
                       stride-x stride-y))
 
+(defmethod create-module :dropout
+  [desc]
+  (layers/dropout [(:output-size desc)] (:probability desc)))
+
 (defn build-full-network-description
   "build step verifies the network and fills in the implicit entries calculating
   things like the convolutional layer's output size."
@@ -258,3 +267,8 @@
   [built-descriptions]
   (let [modules (filterv identity (map create-module built-descriptions))]
     (core/stack-module modules)))
+
+
+(defn build-and-create-network
+  [input-desc-seq]
+  (create-network (build-full-network-description input-desc-seq)))
