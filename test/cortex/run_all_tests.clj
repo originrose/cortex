@@ -21,4 +21,5 @@
 (defn -main [& args]
   (if (= 0 (count args))
     (clojure.test/run-all-tests)
-    (cortex.performance-test/MNIST-convolution-network-train)))
+    (do
+      (cortex.performance-test/MNIST-convolution-network-train))))

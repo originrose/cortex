@@ -11,7 +11,7 @@
 
 (extend-protocol blas/PBLASBase
   INDArray
-  (supports-blas? [c] true)
+  (supports-blas? [c] (cp/as-double-array c))
   (gemm! [c trans-a? trans-b? alpha a b beta]
     (let [alpha (double alpha)
           beta (double beta)

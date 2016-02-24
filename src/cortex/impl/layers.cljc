@@ -2,6 +2,9 @@
   (:require [cortex.protocols :as cp]
             [cortex.util :as util :refer [error EMPTY-VECTOR]]
             [clojure.core.matrix :as m]
+            [core.blas.protocols :as blas]
+            [cortex.backends :as b]
+            [cortex.impl.vectorz-blas]
             #?(:clj [cortex.registry :refer [register-module]]
                :cljs [cortex.registry :refer-macros [register-module]]))
   #?(:clj (:import [java.util PriorityQueue])))
@@ -199,16 +202,49 @@
   (input-gradient [this]
     input-gradient))
 
+;;Found through perf testing...probably needs to be
+;;specified somehow through the backend
+(defn blas-gemv-cutoff ^long [] 500000)
+
+(defn linear-forward!
+  [this input]
+  (let [weights (:weights this)
+        bias (:bias this)
+        elem-count (long (m/ecount weights))]
+    (if (and (blas/supports-blas? input)
+             (blas/supports-blas? weights)
+             (blas/supports-blas? bias)
+             (= (count (m/shape weights)) 2))
+      (let [output (or (:output this)
+                       (b/new-array (m/shape bias)))]
+        (m/assign! output bias)
+        (blas/gemv! output false 1.0 weights input 1.0)
+        (assoc this :output output))
+      (let [output (m/inner-product weights input)]
+        (m/add! output bias)
+        (assoc this :output output)))))
+
 
 (defn linear-backward!
   "linear backward pass.  Returns a new input gradient."
-  [input output-gradient weights bias weight-gradient bias-gradient]
-  (let [bg output-gradient
+  [this input output-gradient]
+  (let [weights (:weights this)
+        bias (:bias this)
+        weight-gradient (:weight-gradient this)
+        bias-gradient (:bias-gradient this)
         wg (m/outer-product output-gradient input)
-        ig (m/inner-product (m/transpose weights) output-gradient)]
-    (m/add! weight-gradient (m/as-vector wg))
-    (m/add! bias-gradient bg)
-    ig))
+        elem-count (long (m/ecount weights))]
+    (m/add! (m/as-vector weight-gradient) (m/as-vector wg))
+    (m/add! bias-gradient output-gradient)
+    (if (and (blas/supports-blas? weights)
+             (blas/supports-blas? output-gradient)
+             (= 2 (count (m/shape weights))))
+     (let [input-gradient (or (:input-gradient this)
+                              (b/new-array (m/shape input)))]
+       (blas/gemv! input-gradient true 1.0 weights output-gradient 0.0)
+       (assoc this :input-gradient input-gradient))
+     (do
+       (assoc this :input-gradient (m/inner-product (m/transpose weights) output-gradient))))))
 
 ;; LINEAR
 ;; function that implements a linear transformation (weights + bias)
@@ -217,9 +253,7 @@
 (defrecord Linear [weights bias]
   cp/PModule
   (calc [this input]
-    (let [output (m/inner-product weights input)]
-      (m/add! output bias)
-      (assoc this :output output)))
+    (linear-forward! this input))
 
     (output [this]
       (:output this))
@@ -231,10 +265,7 @@
         (assoc :input input)))
 
     (backward [this input output-gradient]
-      (assoc this :input-gradient
-             (linear-backward! input output-gradient (:weights this) (:bias this)
-                               (:weight-gradient this)
-                               (:bias-gradient this))))
+      (linear-backward! this input output-gradient))
 
     (input-gradient [this]
       (:input-gradient this))
@@ -622,12 +653,23 @@ Should be output-width*output-height rows.  Padding is applied as zeros across c
 
 
 (defn convolution-forward
-  [weights bias input-convolved-rows]
-  (let [weights-t (m/transpose weights)
-        result (m/inner-product input-convolved-rows weights-t)]
-    (doseq [row (m/rows result)]
-      (m/add! row bias))
-    (m/as-vector result)))
+  [this weights bias input-convolved-rows]
+  (if (and (blas/supports-blas? weights)
+           (blas/supports-blas? input-convolved-rows))
+    (let [output (or (:output-mat this)
+                     (b/new-array [(m/row-count input-convolved-rows)
+                                   (m/row-count weights)]))]
+      (m/assign! output bias)
+      (blas/gemm! output false true 1.0
+                  input-convolved-rows weights
+                  1.0)
+      (assoc this :output-mat output
+             :output (m/as-vector output)))
+    (let [weights-t (m/transpose weights)
+          result (m/inner-product input-convolved-rows weights-t)]
+      (doseq [row (m/rows result)]
+        (m/add! row bias))
+      (assoc this :output (m/as-vector result)))))
 
 
 
@@ -759,11 +801,12 @@ using convolutional steps"
             packed-conv-matrix (if-let [conv-matrix (:packed-conv-matrix this)]
                                  (do (doall (map m/assign! conv-matrix conv-rows))
                                      conv-matrix)
-                                 (m/array :vectorz (seq conv-rows)))
-            output (convolution-forward weights bias packed-conv-matrix)]
-        (assoc this :output output
-               :input-data input-data
-               :packed-conv-matrix packed-conv-matrix)))
+                                 (m/array :vectorz (seq conv-rows)))]
+        (convolution-forward
+         (assoc this
+                :input-data input-data
+                :packed-conv-matrix packed-conv-matrix)
+         weights bias packed-conv-matrix)))
 
     (cp/output [m]
       (:output m))

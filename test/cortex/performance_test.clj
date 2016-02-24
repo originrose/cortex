@@ -6,6 +6,7 @@
             [cortex.optimise :as opt]
             [cortex.backends :as b]
             [cortex.protocols :as cp]
+            [core.blas.protocols :as blas]
             [clojure.test :refer [deftest is are]]
             [clojure.pprint]))
 
@@ -173,6 +174,31 @@
                  (m/assign! final-input-gradient (m/as-vector final-view)))))))))
 
 
+;;Find out which sizes are faster in blas, and which are faster in vectorz
+(defn dgemv-size-perftest
+  []
+  (doseq [output-size [10 500]
+          input-size [1250]]
+    (println (format "output-size %d input-size %d" output-size input-size))
+    (let [input (b/array (repeat input-size 1))
+          output (b/new-array [output-size])
+          weights (b/array (repeat output-size (range 1 (inc input-size))))
+          iter-count 100]
+      (println "gemv no transpose:")
+      (print "blas")
+      (time (dotimes [iter iter-count]
+              (blas/gemv! output false 1.0 weights (b/array (repeat input-size 1)) 1.0)))
+      (print "vectorz")
+      (time (dotimes [iter iter-count]
+              (m/inner-product weights (b/array (repeat input-size 1)))))
+
+      (println "gemv transpose  :")
+      (print "blas")
+      (time (dotimes [iter iter-count]
+              (blas/gemv! input true 1.0 weights (b/new-array [output-size]) 0.0)))
+      (print "vectorz")
+      (time (dotimes [iter iter-count]
+              (m/inner-product (m/transpose weights)  (b/new-array [output-size])))))))
 
 
 
@@ -200,8 +226,8 @@
         [optimizer network] (core/optimise optimizer network 1)
         batch-count 50000]
     (println "running 50 batches of MNIST (10 images a batch)...")
-    (time (dotimes [iter batch-count]
-            (dotimes [iter 10]
-              (cp/forward network input)
-              (cp/backward network input output-gradient))
-            (core/optimise optimizer network 1)))))
+    (print "forward,backward ")
+    (time (dotimes [iter (* batch-count 10)]
+            (cp/forward network input)
+            ;(cp/backward network input output-gradient)
+            ))))
