@@ -14,11 +14,11 @@ fully qualified name using the register-module function."
 
 (defn lookup-module [module-name]
   "Look up a module from the module registry."
-  #?(:clj 
-      (let [last-dot (.lastIndexOf module-name ".")
-            ns-name (.substring module-name 0 last-dot)
-            item-name (.substring module-name (+ 1 last-dot))
-            cons-fn (resolve (symbol ns-name (str "map->" item-name)))]
-        cons-fn)
-     :cljs
-      (get @module-registry* module-name)))
+  #?(:clj
+     (let [module-name (.replace module-name \_ \-)
+           last-dot (.lastIndexOf module-name ".")
+           ns-name (.substring module-name 0 last-dot)
+           item-name (.substring module-name (+ 1 last-dot))
+           cons-fn (resolve (symbol ns-name (str "map->" item-name)))]
+       cons-fn)
+     :cljs (get @module-registry* module-name)))
