@@ -19,4 +19,6 @@
   (:gen-class))
 
 (defn -main [& args]
-  (clojure.test/run-all-tests))
+  (if (= 0 (count args))
+    (clojure.test/run-all-tests)
+    (cortex.performance-test/MNIST-convolution-network-train)))

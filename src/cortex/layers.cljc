@@ -3,7 +3,8 @@
             [cortex.util :as util :refer [error]]
             [cortex.impl.layers :as impl]
             [cortex.impl.wiring]
-            [clojure.core.matrix :as m])
+            [clojure.core.matrix :as m]
+            [cortex.backends :as b])
   (:refer-clojure :exclude [identity]))
 
 #?(:clj (do
@@ -174,11 +175,11 @@
         weights (or custom-weights
                     (util/weight-matrix num-kernels (* kernel-width kernel-height num-input-channels)))
         bias (or custom-bias
-                 (m/zero-array :vectorz [num-kernels]))
+                 (b/zero-array [num-kernels]))
         output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)
         output-height (impl/get-padded-strided-dimension input-height pad-y kernel-height stride-y)
-        weight-gradient (m/zero-array :vectorz (m/shape weights))
-        bias-gradient (m/zero-array :vectorz (m/shape bias))]
+        weight-gradient (b/zero-array (m/shape weights))
+        bias-gradient (b/zero-array (m/shape bias))]
     (impl/->Convolutional weights bias
                           weight-gradient
                           bias-gradient

@@ -3,6 +3,7 @@
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
     [cortex.protocols :as cp]
+    [cortex.backends :as b]
     #?(:cljs [goog.string :refer [format]]))
 
   #?(:clj (:import [mikera.vectorz Vectorz]))
@@ -80,13 +81,12 @@
 (defn weight-matrix
   [rows cols]
   (let [weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
-    (m/mutable
-     (m/array
-      (mapv (fn [_]
-              (repeatedly cols
-                          #(* weight-scale
-                              (rand-gaussian))))
-            (range rows))))))
+    (b/array
+     (mapv (fn [_]
+             (repeatedly cols
+                         #(* weight-scale
+                             (rand-gaussian))))
+           (range rows)))))
 
 (defn random-matrix
   "Constructs an array of the given shape with random normally distributed element values"

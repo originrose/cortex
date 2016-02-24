@@ -2,12 +2,11 @@
   :description "A neural network toolkit for Clojure."
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.taoensso/timbre "4.2.1"]
-                 [net.mikera/vectorz-clj "0.43.1"]
-                 [net.mikera/core.matrix "0.50.0-SNAPSHOT"]
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.3.0-SNAPSHOT"]
+                 [net.mikera/vectorz-clj "0.43.1"]
+                 [net.mikera/core.matrix "0.50.0-SNAPSHOT"]
                  [caffe-protobuf "0.1.0"]
-                                        ;[thinktopic/netlib-ccm "0.1.0-SNAPSHOT"]
                  [net.mikera/clojure-utils "0.6.2"]
                  ]
 
