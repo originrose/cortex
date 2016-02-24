@@ -66,12 +66,21 @@
   ([optimiser module ^long batch-count]
    ;;Faster to create local copies of what could be quite large views.  This also means the
    ;;optimizer can copy those into itself and mutate them without affecting anything outside
-   (let [grads (m/array :vectorz (gradient module))
-         params (m/array :vectorz (parameters module))
-         _ (m/mul! grads (/ 1.0 batch-count))
+   (let [mod-params (parameters module)
+         mod-gradient (gradient module)
+         params (or (:packed-params optimiser)
+                    (m/new-array [(m/ecount mod-params)]))
+         grads (or (:packed-grads optimiser)
+                   (m/new-array [(m/ecount mod-gradient)]))
+         _ (m/assign! params mod-params)
+         _ (m/assign! grads mod-gradient)
+         _ (when-not (= 0 batch-count)
+             (m/mul! grads (/ 1.0 batch-count)))
          optimiser (cp/compute-parameters optimiser grads params)
          module (cp/update-parameters module (parameters optimiser))]
-     [optimiser module]))
+     [(assoc optimiser
+             :packed-params params
+             :packed-grads grads) module]))
   ([optimiser module]
    (optimise optimiser module 1)))
 
@@ -88,4 +97,3 @@
   "clones a module, including all internal state structures. New module will be independent of the original."
   ([m]
     (cp/clone m)))
-

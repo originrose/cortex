@@ -3,11 +3,13 @@
             [cortex.util :as util :refer [error EMPTY-VECTOR]]
             [clojure.core.matrix :as m]
             [core.blas.protocols :as blas]
+            [clojure.core.matrix.protocols :as mp]
             [cortex.backends :as b]
             [cortex.impl.vectorz-blas]
             #?(:clj [cortex.registry :refer [register-module]]
                :cljs [cortex.registry :refer-macros [register-module]]))
-  #?(:clj (:import [java.util PriorityQueue])))
+  #?(:clj (:import [java.util PriorityQueue]
+                   [cortex.impl ConvOps])))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)
@@ -211,10 +213,12 @@
   (let [weights (:weights this)
         bias (:bias this)
         elem-count (long (m/ecount weights))]
-    (if (and (blas/supports-blas? input)
-             (blas/supports-blas? weights)
-             (blas/supports-blas? bias)
-             (= (count (m/shape weights)) 2))
+    (if (and
+         (> elem-count (blas-gemv-cutoff))
+         (blas/supports-blas? input)
+         (blas/supports-blas? weights)
+         (blas/supports-blas? bias)
+         (= (count (m/shape weights)) 2))
       (let [output (or (:output this)
                        (b/new-array (m/shape bias)))]
         (m/assign! output bias)
@@ -236,7 +240,8 @@
         elem-count (long (m/ecount weights))]
     (m/add! (m/as-vector weight-gradient) (m/as-vector wg))
     (m/add! bias-gradient output-gradient)
-    (if (and (blas/supports-blas? weights)
+    (if (and (> elem-count (blas-gemv-cutoff))
+             (blas/supports-blas? weights)
              (blas/supports-blas? output-gradient)
              (= 2 (count (m/shape weights))))
      (let [input-gradient (or (:input-gradient this)
@@ -651,32 +656,6 @@ Should be output-width*output-height rows.  Padding is applied as zeros across c
     (convolution-sequence input-matrix output-width output-height
                           conv-layer-config)))
 
-
-(defn convolution-forward
-  [this weights bias input-convolved-rows]
-  (if (and (blas/supports-blas? weights)
-           (blas/supports-blas? input-convolved-rows))
-    (let [output (or (:output-mat this)
-                     (b/new-array [(m/row-count input-convolved-rows)
-                                   (m/row-count weights)]))]
-      (m/assign! output bias)
-      (blas/gemm! output false true 1.0
-                  input-convolved-rows weights
-                  1.0)
-      (assoc this :output-mat output
-             :output (m/as-vector output)))
-    (let [weights-t (m/transpose weights)
-          result (m/inner-product input-convolved-rows weights-t)]
-      (doseq [row (m/rows result)]
-        (m/add! row bias))
-      (assoc this :output (m/as-vector result)))))
-
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Convolution backward pass utility functions
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (defn get-gradient-convolution-sequence
   "returns [conv-sequence input-mat-view] for the backpass steps of nn layers
 using convolutional steps"
@@ -695,54 +674,249 @@ using convolutional steps"
      input-mat-view
      input-matrix]))
 
+
+(defn core-matrix-unroll-input!
+  [this input]
+  (let [conv-layer-config (:conv-layer-config this)
+        input-data (or (:input-data this)
+                       (let [[conv-rows input-view padded-backing-matrix]
+                             (get-gradient-convolution-sequence conv-layer-config)]
+                         [(into [] conv-rows) (m/as-vector input-view) padded-backing-matrix]))
+        [conv-rows input-view padded-backing-matrix] input-data
+
+        ;;If there is any padding, then we have to clear the backing matrix
+        _ (when-not (= (m/shape input) (m/shape (m/as-vector padded-backing-matrix)))
+            (m/scale! padded-backing-matrix 0.0))
+        _ (m/assign! input-view input)
+        packed-conv-matrix  (if-let [conv-matrix (:packed-conv-matrix this)]
+                              (let [packed-rows (vec (m/rows conv-matrix))
+                                    row-count (count packed-rows)]
+                                (loop [row-idx 0]
+                                  (when (< row-idx row-count)
+                                    (m/assign! (packed-rows row-idx) (conv-rows row-idx))
+                                    (recur (inc row-idx))))
+                                conv-matrix)
+                              (b/array (seq conv-rows)))]
+    (assoc this :input-data input-data
+           :packed-conv-matrix packed-conv-matrix)))
+
+#?(:cljs (defn unroll-input!
+           [this input]
+           (core-matrix-unroll-input!)))
+
+#?(:clj (defn unroll-input!
+          [this input]
+          (let [conv-layer-config (:conv-layer-config this)
+                input-data (or (:input-data this)
+                               (let [[conv-rows input-view padded-backing-matrix]
+                                     (get-gradient-convolution-sequence conv-layer-config)]
+                                 [(into [] conv-rows) (m/as-vector input-view)
+                                  padded-backing-matrix]))
+                [conv-rows input-view padded-backing-matrix] input-data
+
+                packed-conv-matrix (or (:packed-conv-matrix this)
+                                       (b/new-array [(count conv-rows)
+                                                     (m/ecount (first conv-rows))]))
+                {:keys [^long width ^long height
+                        ^long k-width ^long k-height
+                        ^long padx ^long pady
+                        ^long stride-w ^long stride-h
+                        ^long num-channels]} conv-layer-config
+                input-ary (mp/as-double-array input)
+                packed-ary (mp/as-double-array packed-conv-matrix)
+                this (assoc this
+                            :input-data input-data
+                            :packed-conv-matrix packed-conv-matrix)]
+            (if (and input-ary packed-ary)
+              (do
+               (ConvOps/unrollInput width height k-width k-height
+                                    padx pady stride-w stride-h
+                                    num-channels input-ary packed-ary)
+               this)
+              (core-matrix-unroll-input! this input)))))
+
+
+(defn convolution-forward!
+  [this weights bias packed-unrolled-input]
+  (if (and (blas/supports-blas? weights)
+           (blas/supports-blas? packed-unrolled-input))
+    (let [output (or (:output-mat this)
+                     (b/new-array [(m/row-count packed-unrolled-input)
+                                   (m/row-count weights)]))]
+      (m/assign! output bias)
+      (blas/gemm! output false true 1.0
+                  packed-unrolled-input weights
+                  1.0)
+      (assoc this :output-mat output
+             :output (m/as-vector output)))
+    (let [weights-t (m/transpose weights)
+          output (m/inner-product packed-unrolled-input weights-t)]
+      (m/add! output bias)
+      (assoc this :output (m/as-vector output)))))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Convolution backward pass utility functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
 (defn convolution-copying-roll
   [packed-gradient gradient-view-rows gradient-view]
   (doall (map m/assign! gradient-view-rows packed-gradient))
   (m/array :vectorz (m/as-vector gradient-view)))
 
+(defn non-blas-convolution-backward!
+  [weights bias input output-gradient {:keys [conv-layer-config] :as this}]
+  (let [packed-conv-matrix (:packed-conv-matrix this)
+        [conv-rows input-view padded-backing-matrix] (:input-data this)
+        input-gradient (or (:input-gradient this)
+                           (b/array (repeat (first (m/shape input)) 0.0)))
+        ;;Note that at this point packed-conv-matrix holds the input exploded into convolutions
+        ;;We are going to use the padded backing matrix as an accumulator
+        _ (m/scale! padded-backing-matrix 0.0)
+        ;;the backward pass is optimized to only minimally access conv-rows.
+        ;;This is because they
+        ;;are views of views (m/as-vector (m/submatrix ...)) which implies a significant
+        ;;performance hit at this time.
+        {:keys [^long width ^long height
+                ^long k-width ^long k-height
+                ^long padx ^long pady
+                ^long stride-w ^long stride-h
+                ^long num-channels]}  conv-layer-config
+        ;;We use an accumulator here because the input-gradient-conv-sequence
+        ;;could be a set of view-on-views or some other deep abstraction.
+        ;;Using an accumulator is a significant performance helper during the tight
+        ;;per-kernel gradient accumulation
+        ^long kernel-count (first (m/shape weights))
+        output-row-count (quot (long (first (m/shape output-gradient))) kernel-count)
+        accum (b/zero-array [(* k-width k-height num-channels)])
+        weight-gradient (or (:weight-gradient this)
+                            (b/new-array (m/shape weights)))
+        bias-gradient (or (:bias-gradient this)
+                          (b/new-array [kernel-count]))]
+    (loop [idx 0]
+      (when (< idx output-row-count)
+        (let [input-gradient-row (m/get-row conv-rows idx)
+              input-row (m/get-row packed-conv-matrix idx)]
+          (m/assign! accum input-gradient-row)
+          (loop [kern-idx 0]
+            (when (< kern-idx kernel-count)
+              (let [weight-row (m/get-row weights kern-idx)
+                    weight-gradient-row (m/get-row weight-gradient kern-idx)
+                    output-gradient-offset (+ (* idx kernel-count)
+                                              kern-idx)
+                    ^double gradient (m/mget output-gradient output-gradient-offset)
+                    ^double bias-gradient-val (m/mget bias-gradient kern-idx)]
+                (m/add-scaled! accum weight-row gradient)
+                (m/add-scaled! weight-gradient-row input-row gradient)
+                (m/mset! bias-gradient kern-idx (+ gradient bias-gradient-val)))
+              (recur (inc kern-idx))))
+          (m/assign! input-gradient-row accum))
+        (recur (inc idx))))
+    (m/assign! input-gradient (m/as-vector input-view))
+    (assoc this
+           :input-gradient input-gradient
+           :weight-gradient weight-gradient
+           :bias-gradient bias-gradient)))
+
+(defn core-matrix-roll-input-gradient!
+  [this input-gradient packed-conv-matrix]
+  (let [input-data (:input-data this)
+        [conv-rows input-view padded-backing-matrix] input-data]
+    ;;Summation into the input gradient.  This *cannot* be parallelized at all at the moment,
+    ;;probably some perf loss.  What you don't see is that conv rows are views into the padded
+    ;;backing matrix.  In essence we are rolling back up the unrolled input
+    (m/mset! padded-backing-matrix 0.0)
+    (let [row-count (m/row-count packed-conv-matrix)
+          packed-conv-matrix packed-conv-matrix]
+      (loop [row-idx 0]
+        (when (< row-idx row-count)
+          (let [input-row (m/get-row packed-conv-matrix row-idx)
+                output-row (conv-rows row-idx)]
+            (m/add! output-row input-row))
+          (recur (inc row-idx)))))
+    ;;This assignment is a nop in the case where input-gradient is input view
+    (m/assign! input-gradient input-view)
+    this))
+
+#?(:cljs (defn roll-input-gradient!
+           [this input-gradient packed-conv-matrix]
+           (core-matrix-roll-input-gradient! this input-gradient packed-conv-matrix)))
+
+#?(:clj (defn roll-input-gradient!
+          [this input-gradient packed-conv-matrix]
+          (let [gradient-ary (mp/as-double-array input-gradient)
+                packed-ary (mp/as-double-array packed-conv-matrix)
+                conv-layer-config (:conv-layer-config this)
+                {:keys [^long width ^long height
+                        ^long k-width ^long k-height
+                        ^long padx ^long pady
+                        ^long stride-w ^long stride-h
+                        ^long num-channels]} conv-layer-config]
+            (if (and gradient-ary packed-ary)
+              (do
+                (java.util.Arrays/fill ^doubles gradient-ary 0.0)
+                (ConvOps/rollInput width height k-width k-height padx pady
+                                   stride-w stride-h num-channels
+                                   gradient-ary packed-ary)
+                this)
+              (core-matrix-roll-input-gradient! this input-gradient packed-conv-matrix)))))
+
+
+(defn blas-convolution-backward!
+  [weights bias input output-gradient {:keys [conv-layer-config] :as this}]
+  (let [input-data (:input-data this)
+        [conv-rows input-view padded-backing-matrix] input-data
+        packed-input-matrix (:packed-conv-matrix this)
+        {:keys  [^long width ^long height ^long k-width ^long k-height
+                 ^long padx ^long pady ^long stride-w ^long stride-h
+                 ^long num-channels]} conv-layer-config
+        output-width (get-padded-strided-dimension width padx k-width stride-w)
+        output-height (get-padded-strided-dimension height pady k-height stride-w)
+        n-kernels (m/row-count weights)
+        n-output-pixels (* output-height output-width)
+
+        output-gradient-matrix (or (:output-gradient-matrix this)
+                                   (b/new-array [n-output-pixels n-kernels]))
+
+        input-stride (* k-width k-height num-channels)
+        ;;Note that in the non-padded case there is no need to have separate
+        ;;input-view and input-gradient objects.  The gradient we pass upstream
+        ;;does need to be dense, however.
+        input-gradient (or (:input-gradient this)
+                           (b/new-array (m/shape input)))
+        weight-gradient (or (:weight-gradient this)
+                            (b/new-array (m/shape weights)))
+        bias-gradient (or (:bias-gradient this)
+                          (b/new-array [n-kernels]))
+        vector-of-ones (or (:vector-of-ones this)
+                           (b/array (repeat n-output-pixels 1.0)))]
+    (m/assign! (m/as-vector output-gradient-matrix) output-gradient)
+
+    (blas/gemm! weight-gradient true false 1.0 output-gradient-matrix packed-input-matrix
+                1.0)
+    (blas/gemm! packed-input-matrix false false 1.0 output-gradient-matrix weights
+                0.0)
+    (blas/gemv! bias-gradient true 1.0 output-gradient-matrix vector-of-ones
+                1.0)
+
+    (assoc (roll-input-gradient! this input-gradient packed-input-matrix)
+           :input-gradient input-gradient
+           :bias-gradient bias-gradient
+           :weight-gradient weight-gradient
+           :vector-of-ones vector-of-ones)))
+
 (defn convolution-backward!
-  ([output-gradient input-conv-sequence weights
-    weight-gradient bias-gradient input-gradient-conv-sequence
-    {:keys [^long width ^long height
-            ^long k-width ^long k-height
-            ^long padx ^long pady
-            ^long stride-w ^long stride-h
-            ^long num-channels] :as conv-layer-config}]
-   ;;We use an accumulator here because the input-gradient-conv-sequence
-   ;;could be a set of view-on-views or some other deep abstraction.
-   ;;Using an accumulator is a significant performance helper during the tight
-   ;;per-kernel gradient accumulation
-   (let [^long kernel-count (first (m/shape weights))
-         output-row-count (quot (long (first (m/shape output-gradient))) kernel-count)
-         accum (m/zero-array :vectorz [(* k-width k-height num-channels)])]
-     (loop [idx 0]
-       (when (< idx output-row-count)
-         (let [input-gradient-row (m/get-row input-gradient-conv-sequence idx)
-               input-row (m/get-row input-conv-sequence idx)]
-           (m/assign! accum input-gradient-row)
-           (loop [kern-idx 0]
-             (when (< kern-idx kernel-count)
-               (let [weight-row (m/get-row weights kern-idx)
-                     weight-gradient-row (m/get-row weight-gradient kern-idx)
-                     output-gradient-offset (+ (* idx kernel-count)
-                                               kern-idx)
-                     ^double gradient (m/mget output-gradient output-gradient-offset)
-                     ^double bias-gradient-val (m/mget bias-gradient kern-idx)]
-                 (m/add-scaled! accum weight-row gradient)
-                 (m/add-scaled! weight-gradient-row input-row gradient)
-                 (m/mset! bias-gradient kern-idx (+ gradient bias-gradient-val)))
-               (recur (inc kern-idx))))
-           (m/assign! input-gradient-row accum))
-         (recur (inc idx))))))
-  ;;Easier access for testing
-  ([output-gradient input weights weight-gradient bias-gradient conv-layer-config]
-   (let [input-conv-sequence (create-convolution-rows input conv-layer-config)
-         [gradient-conv-sequence gradient-mat-view padded-backing-matrix]
-         (get-gradient-convolution-sequence conv-layer-config)
-         gradient-conv-sequence (into [] gradient-conv-sequence)]
-     (convolution-backward! output-gradient input-conv-sequence weights weight-gradient
-                            bias-gradient gradient-conv-sequence conv-layer-config)
-     (m/as-vector gradient-mat-view))))
+  ([this input output-gradient]
+   (let [weights (:weights this)
+         packed-conv-matrix (:packed-conv-matrix this)
+         bias (:bias this)]
+    (if (and (blas/supports-blas? (:packed-conv-matrix this))
+             (blas/supports-blas? weights)
+             (blas/supports-blas? bias))
+      (blas-convolution-backward! weights bias input output-gradient this)
+      (non-blas-convolution-backward! weights bias input output-gradient this)))))
 
 
 
@@ -785,28 +959,9 @@ using convolutional steps"
                           conv-layer-config]
     cp/PModule
     (cp/calc [this input]
-      ;;It turns out that creating a new matrix with padding and such is faster than
-      ;;copying single channel resultsg
-      (let [input-data (or (:input-data this)
-                           (let [[conv-rows input-view padded-backing-matrix]
-                                 (get-gradient-convolution-sequence conv-layer-config)]
-                             [(into [] conv-rows) input-view padded-backing-matrix]))
-            [conv-rows input-view padded-backing-matrix] input-data
-            _ (sub-vector-assignment! (:padx conv-layer-config)
-                                      (:pady conv-layer-config)
-                                      (:width conv-layer-config)
-                                      (:num-channels conv-layer-config)
-                                      padded-backing-matrix
-                                      input)
-            packed-conv-matrix (if-let [conv-matrix (:packed-conv-matrix this)]
-                                 (do (doall (map m/assign! conv-matrix conv-rows))
-                                     conv-matrix)
-                                 (m/array :vectorz (seq conv-rows)))]
-        (convolution-forward
-         (assoc this
-                :input-data input-data
-                :packed-conv-matrix packed-conv-matrix)
-         weights bias packed-conv-matrix)))
+      (let [this (unroll-input! this input)
+            packed-conv-matrix (:packed-conv-matrix this)]
+        (convolution-forward! this weights bias packed-conv-matrix)))
 
     (cp/output [m]
       (:output m))
@@ -816,19 +971,7 @@ using convolutional steps"
       (cp/calc this input))
 
     (backward [this input output-gradient]
-      (let [packed-conv-matrix (:packed-conv-matrix this)
-            [conv-rows input-view padded-backing-matrix] (:input-data this)
-            input-gradient (or (:input-gradient this)
-                               (m/array :vectorz (repeat (first (m/shape input)) 0.0)))]
-        ;;Note that at this point packed-conv-matrix holds the input exploded into convolutions
-        (m/mset! padded-backing-matrix 0.0)
-        ;;the backward pass is optimized to only minimally access conv-rows.  This is because they
-        ;;are views of views (m/as-vector (m/submatrix ...)) which implies a significant
-        ;;performance hit at this time.
-        (convolution-backward! output-gradient packed-conv-matrix weights weight-gradient
-                               bias-gradient conv-rows conv-layer-config)
-        (m/assign! input-gradient (m/as-vector input-view))
-        (assoc this :input-gradient input-gradient)))
+      (convolution-backward! this input output-gradient))
 
     (input-gradient [this]
       (:input-gradient this))
@@ -849,7 +992,7 @@ using convolutional steps"
       (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
 
 
-(defn max-pooling-forward!
+(defn max-pooling-forward-default!
   "The forward pass writes to two things; output and output-indexes.  The indexes
 record which item from the input row we actually looked at.  Returns
 [output output-indexes].  Note that this does not change the number of channels
@@ -862,28 +1005,43 @@ so it needs to remember the max per-channel."
            ^long num-channels] :as conv-layer-config}]
   ;;Each input row has k-width*num-channels*k-height in it.
   ;;Each output index gets num-channels written to it.
-  (let [conv-sequence (convolution-operation-sequence conv-layer-config)]
+  (let [conv-sequence (convolution-operation-sequence conv-layer-config)
+        height (long height)
+        width (long width)
+        padx (long padx)
+        pady (long pady)
+        k-width (long k-width)
+        k-height (long k-height)
+        stride-w (long stride-w)
+        stride-h (long stride-h)
+        num-channels (long num-channels)
+        output-width (get-padded-strided-dimension width padx k-width stride-w)]
     (doseq [conv-item conv-sequence]
       (let [{:keys [^long input-x ^long input-y ^long conv-x ^long conv-y
                     ^long output-x ^long output-y]} conv-item
-            output-width (get-padded-strided-dimension width padx k-width stride-w)
+            input-x (long input-x)
+            input-y (long input-y)
+            conv-x (long conv-x)
+            conv-y (long conv-y)
+            output-x (long output-x)
+            output-y (long output-y)
             output-offset (* num-channels (+ (* output-y output-width) output-x))]
         (loop [conv-x conv-x]
           (when (< conv-x k-width)
             (let [input-offset-x (+ input-x conv-x)
                   valid-input? (and (>= input-y 0)
                                     (< input-y height)
-                                    (>= input-x 0)
-                                    (< input-x width))
+                                    (>= input-offset-x 0)
+                                    (< input-offset-x width))
                   kernel-index (+ (* conv-y k-width) conv-x)
                   input-offset (* num-channels (+ (* input-y width) input-offset-x))]
               (loop [chan 0]
                 (when (< chan num-channels)
-                  (let [^double input-val (if valid-input?
+                  (let [input-val (double (if valid-input?
                                             (m/mget input (+ input-offset chan))
-                                            0.0)
+                                            0.0))
                         output-offset (+ output-offset chan)
-                        ^double existing-value (m/mget output output-offset)]
+                        existing-value (double (m/mget output output-offset))]
                     (when (or (= kernel-index 0)
                               (> input-val existing-value))
                       (m/mset! output output-offset input-val)
@@ -891,6 +1049,24 @@ so it needs to remember the max per-channel."
                   (recur (inc chan)))))
             (recur (inc conv-x))))))
     [output output-indexes]))
+
+
+#?(:cljs(defn max-pooling-forward!
+          [input output output-indexes conv-config]
+          (max-pooling-forward-default! input output output-indexes conv-config))
+
+   :clj(defn max-pooling-forward!
+         [input output output-indexes conv-config]
+         (let [input-ary (mp/as-double-array input)
+               output-ary (mp/as-double-array output)
+               output-indexes-ary (mp/as-double-array output-indexes)
+               {:keys [width height k-width k-height padx pady stride-w stride-h
+                       num-channels]} conv-config]
+           (if (and input-ary output-ary output-indexes-ary)
+             (ConvOps/maxPooling width height k-width k-height padx pady
+                                 stride-w stride-h num-channels
+                                 input-ary output-ary output-indexes-ary)
+             (max-pooling-forward-default! input output output-indexes conv-config)))))
 
 
 (defn max-pooling-backward!

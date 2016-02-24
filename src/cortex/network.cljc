@@ -84,25 +84,28 @@
 (defn train
   [network optimizer loss-fn training-data training-labels batch-size n-epochs & [test-data test-labels]]
   (let [epoch-batches (repeatedly n-epochs
-                                  #(into [] (partition batch-size (shuffle (range (count training-data))))))
+                                  #(into [] (partition batch-size
+                                                       (shuffle (range (count training-data))))))
         epoch-count (atom 0)
-        [optimizer network] (reduce (fn [opt-network batch-index-seq]
-                                      (let [_ (swap! epoch-count inc)
-                                            [optimizer network]
-                                            (reduce (fn [[optimizer network] batch-indexes]
-                                                      (let [input-seq (mapv training-data batch-indexes)
-                                                            answer-seq (mapv training-labels batch-indexes)
-                                                            [optimizer network] (train-batch input-seq
-                                                                                             answer-seq
-                                                                                             network optimizer loss-fn)]
-                                                        [optimizer network]))
-                                                    opt-network
-                                                    batch-index-seq)]
-                                        (when test-data
-                                          (println "epoch mse-loss:" (evaluate-mse network test-data test-labels)))
-                                        [optimizer network]))
-                                    [optimizer network]
-                                    epoch-batches)]
+        [optimizer network]
+        (reduce (fn [opt-network batch-index-seq]
+                  (let [_ (swap! epoch-count inc)
+                        [optimizer network]
+                        (reduce (fn [[optimizer network] batch-indexes]
+                                  (let [input-seq (mapv training-data batch-indexes)
+                                        answer-seq (mapv training-labels batch-indexes)
+                                        [optimizer network]
+                                        (train-batch input-seq
+                                                     answer-seq
+                                                     network optimizer loss-fn)]
+                                    [optimizer network]))
+                                opt-network
+                                batch-index-seq)]
+                    (when test-data
+                      (println "epoch mse-loss:" (evaluate-mse network test-data test-labels)))
+                    [optimizer network]))
+                [optimizer network]
+                epoch-batches)]
     network))
 
 

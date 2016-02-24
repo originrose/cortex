@@ -11,6 +11,9 @@
                  [core.blas "1.0.2"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]
 
+
+  :java-source-paths ["java"]
+
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
                                   [criterium/criterium "0.4.3"] ;; benchmarking tool
                                   [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]] ;; alternate core.matrix implementation

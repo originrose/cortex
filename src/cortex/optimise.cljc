@@ -1,9 +1,11 @@
 (ns cortex.optimise
   "Namespace for optimisation algorithms, loss functions and optimiser objects"
   (:require [cortex.protocols :as cp]
+            [clojure.core.matrix.protocols :as mp]
             [cortex.util :as util :refer [error]]
             [clojure.core.matrix.linear :as linear]
-            [clojure.core.matrix :as m]))
+            [clojure.core.matrix :as m])
+  #?(:clj (:import [cortex.impl OptOps])))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)
@@ -26,7 +28,8 @@
   (m/mul! accumulator (- 1.0 decay-rate))
   (m/add-scaled-product! accumulator data-vec data-vec decay-rate))
 
-(defn adadelta-step!
+
+(defn adadelta-step-core-matrix!
   "http://www.matthewzeiler.com/pubs/googleTR2012/googleTR2012.pdf
 Mutates: grad-sq-accum dx-sq-accum rms-grad rms-dx dx
 Returns new parameters"
@@ -37,9 +40,12 @@ Returns new parameters"
     ;;Compute squared gradient running average and mean squared gradient
     (compute-squared-running-average! grad-sq-accum gradient decay-rate)
 
+
     (sqrt-with-epsilon! rms-grad grad-sq-accum epsilon)
+
     ;;Compute mean squared parameter update from past squared parameter update
     (sqrt-with-epsilon! rms-dx dx-sq-accum epsilon)
+
 
     ;;Compute update
     ;;x(t) = -1.0 * (rms-gx/rms-grad) * gradient
@@ -55,8 +61,29 @@ Returns new parameters"
     (compute-squared-running-average! dx-sq-accum dx decay-rate)
 
     ;;Compute new parameters and return them.
-    (m/add parameters dx)
-    ))
+    (m/add! parameters dx)
+    parameters))
+
+#?(:cljs (def adadelta-step! adadelta-step-core-matrix!)
+   :clj (defn adadelta-step!
+          [decay-rate epsilon grad-sq-accum dx-sq-accum rms-grad rms-dx dx
+           gradient parameters]
+          (let [grad-sq-ary (mp/as-double-array grad-sq-accum)
+                dx-sq-ary (mp/as-double-array dx-sq-accum)
+                gradient-ary (mp/as-double-array gradient)
+                parameters-ary (mp/as-double-array parameters)]
+
+            (if (and grad-sq-ary
+                     dx-sq-ary
+                     gradient-ary
+                     parameters-ary)
+              (do
+                (OptOps/adadeltaStep decay-rate epsilon grad-sq-ary dx-sq-ary
+                                     gradient-ary parameters-ary)
+                parameters)
+              (adadelta-step-core-matrix! decay-rate epsilon grad-sq-accum
+                                          dx-sq-accum rms-grad rms-dx dx
+                                          gradient parameters)))))
 
 ;; ==============================================
 ;; ADADELTA optimiser

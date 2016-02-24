@@ -1,7 +1,9 @@
 (ns cortex.convolutional-layer-tests
   (:require [clojure.core.matrix :as m]
+            [cortex.protocols :as cp]
             [cortex.impl.layers :as impl]
             [cortex.core :as core]
+            [cortex.backends :as b]
             [clojure.test :refer [deftest is are]]
             [clojure.pprint]))
 
@@ -102,7 +104,6 @@
 
 (def conv-layer-pad-config (impl/create-conv-layer-config 3 3 2 2 0 0 1 1 1))
 
-
 (defn run-conv-backward
   "Run the convolutional backward pass with known input values.  Very useful
 for testing against other conv net implementations."
@@ -112,19 +113,24 @@ for testing against other conv net implementations."
                                                    pad pad
                                                    stride stride
                                                    num-channels)
-        input (m/array :vectorz (flatten (map #(repeat num-channels %) (range 1 (+ (* input-dim input-dim) 1)))))
-        weights (m/array :vectorz (map #(repeat (* k-dim k-dim num-channels) %) (range 1 (+ n-kernels 1))))
+        input (b/array (flatten (map #(repeat num-channels %)
+                                     (range 1 (+ (* input-dim input-dim) 1)))))
+        weights (b/array (map #(repeat (* k-dim k-dim num-channels) %)
+                              (range 1 (+ n-kernels 1))))
         output-dim (impl/get-padded-strided-dimension input-dim pad k-dim stride)
-        output-gradient (m/array :vectorz (repeat (* output-dim output-dim n-kernels) 1))
-        weight-gradient (m/zero-array :vectorz (m/shape weights))
-        bias-gradient (m/zero-array :vectorz [n-kernels])
-        input-gradient (impl/convolution-backward! output-gradient input weights
-                                                   weight-gradient bias-gradient conv-config)
+        output-gradient (b/array (repeat (* output-dim output-dim n-kernels) 1))
+        weight-gradient (b/new-array (m/shape weights))
+        bias (b/zero-array [n-kernels])
+        bias-gradient (b/new-array (m/shape bias))
+        conv-layer (impl/->Convolutional weights bias
+                                         weight-gradient bias-gradient
+                                         conv-config)
+        conv-layer (cp/forward conv-layer input)
+        conv-layer (cp/backward conv-layer input output-gradient)
         result      {:output-gradient output-gradient
-                     :weights weights
-                     :input-gradient input-gradient
-                     :weight-gradient weight-gradient
-                     :bias-gradient bias-gradient }]
+                     :input-gradient (:input-gradient conv-layer)
+                     :weight-gradient (:weight-gradient conv-layer)
+                     :bias-gradient (:bias-gradient conv-layer)}]
     result))
 
 
