@@ -198,7 +198,7 @@
                                          (m/pack (core/gradient network))
                                          (m/pack (core/parameters network)))
         [optimizer network] (core/optimise optimizer network 1)
-        batch-count 50]
+        batch-count 50000]
     (println "running 50 batches of MNIST (10 images a batch)...")
     (time (dotimes [iter batch-count]
             (dotimes [iter 10]

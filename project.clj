@@ -8,7 +8,8 @@
                  [net.mikera/core.matrix "0.50.0-SNAPSHOT"]
                  [caffe-protobuf "0.1.0"]
                  [net.mikera/clojure-utils "0.6.2"]
-                 ]
+                 [core.blas "1.0.2"]
+                 [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
                                   [criterium/criterium "0.4.3"] ;; benchmarking tool
