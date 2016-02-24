@@ -7,8 +7,10 @@
             [cortex.backends :as b]
             [cortex.protocols :as cp]
             [core.blas.protocols :as blas]
+            [clojure.core.matrix.protocols :as mp]
             [clojure.test :refer [deftest is are]]
-            [clojure.pprint]))
+            [clojure.pprint])
+  (:import [java.nio DoubleBuffer]))
 
 
 ;;The point of this file is to highlight a couple operations in detail that
@@ -177,28 +179,33 @@
 ;;Find out which sizes are faster in blas, and which are faster in vectorz
 (defn dgemv-size-perftest
   []
-  (doseq [output-size [10 500]
-          input-size [1250]]
-    (println (format "output-size %d input-size %d" output-size input-size))
-    (let [input (b/array (repeat input-size 1))
-          output (b/new-array [output-size])
-          weights (b/array (repeat output-size (range 1 (inc input-size))))
-          iter-count 100]
-      (println "gemv no transpose:")
-      (print "blas")
-      (time (dotimes [iter iter-count]
-              (blas/gemv! output false 1.0 weights (b/array (repeat input-size 1)) 1.0)))
-      (print "vectorz")
-      (time (dotimes [iter iter-count]
-              (m/inner-product weights (b/array (repeat input-size 1)))))
+  (dotimes [outer 10]
+   (doseq [output-size [10 500]
+           input-size [1250]]
+     (println (format "output-size %d input-size %d" output-size input-size))
+     (let [input (b/array (repeat input-size 1))
+           output (b/new-array [output-size])
+           weights (b/array (repeat output-size (range 1 (inc input-size))))
+           input-backing (DoubleBuffer/wrap (mp/as-double-array input))
+           output-backing (DoubleBuffer/wrap (mp/as-double-array output))
+           weights-backing (DoubleBuffer/wrap (mp/as-double-array weights))
+           iter-count 100]
 
-      (println "gemv transpose  :")
-      (print "blas")
-      (time (dotimes [iter iter-count]
-              (blas/gemv! input true 1.0 weights (b/new-array [output-size]) 0.0)))
-      (print "vectorz")
-      (time (dotimes [iter iter-count]
-              (m/inner-product (m/transpose weights)  (b/new-array [output-size])))))))
+       (println "gemv no transpose:")
+       (print "blas")
+       (time (dotimes [iter iter-count]
+               (blas/gemv! output false 1.0 weights input 1.0)))
+       (print "vectorz")
+       (time (dotimes [iter iter-count]
+               (m/inner-product weights input)))
+
+       (println "gemv transpose  :")
+       (print "blas")
+       (time (dotimes [iter iter-count]
+               (blas/gemv! input true 1.0 weights output 0.0)))
+       (print "vectorz")
+       (time (dotimes [iter iter-count]
+               (m/inner-product (m/transpose weights) output)))))))
 
 
 

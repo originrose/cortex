@@ -236,16 +236,21 @@
         bias (:bias this)
         weight-gradient (:weight-gradient this)
         bias-gradient (:bias-gradient this)
-        wg (m/outer-product output-gradient input)
         elem-count (long (m/ecount weights))]
-    (m/add! (m/as-vector weight-gradient) (m/as-vector wg))
+    (if (and (mp/as-double-array weight-gradient)
+             (mp/as-double-array output-gradient)
+             (mp/as-double-array input))
+      (ConvOps/addOuterProduct (mp/as-double-array weight-gradient)
+                               (mp/as-double-array input)
+                               (mp/as-double-array output-gradient))
+      (m/add! (m/as-vector weight-gradient) (m/as-vector
+                                             (m/outer-product output-gradient input))))
     (m/add! bias-gradient output-gradient)
-    (if (and (> elem-count (blas-gemv-cutoff))
-             (blas/supports-blas? weights)
+    (if (and (blas/supports-blas? weights)
              (blas/supports-blas? output-gradient)
              (= 2 (count (m/shape weights))))
      (let [input-gradient (or (:input-gradient this)
-                              (b/new-array (m/shape input)))]
+                              (m/mutable (b/new-array (m/shape input))))]
        (blas/gemv! input-gradient true 1.0 weights output-gradient 0.0)
        (assoc this :input-gradient input-gradient))
      (do

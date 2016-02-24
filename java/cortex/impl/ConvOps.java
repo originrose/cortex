@@ -153,4 +153,18 @@ public final class ConvOps
     	    }
     	}
     }
+
+    //Weight gradient gets weight-gradient + input scaled by gradient
+    public static void addOuterProduct( double[] weight_gradient
+					, double[] input, double[] gradient )
+    {
+	int num_columns = input.length;
+	int num_rows = gradient.length;
+	int wg_idx = 0;
+	for ( int row = 0; row < num_rows; ++row ) {
+	    for (int col = 0; col < num_columns; ++col, ++wg_idx ) {
+		weight_gradient[wg_idx] += input[col] * gradient[row];
+	    }
+	}
+    }
 }
