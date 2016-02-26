@@ -217,8 +217,7 @@
          (> elem-count (blas-gemv-cutoff))
          (blas/supports-blas? input)
          (blas/supports-blas? weights)
-         (blas/supports-blas? bias)
-         (= (count (m/shape weights)) 2))
+         (blas/supports-blas? bias))
       (let [output (or (:output this)
                        (b/new-array (m/shape bias)))]
         (m/assign! output bias)

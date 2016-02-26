@@ -9,18 +9,15 @@
 
 
 
-(defn matrix-shape
-  [a-mat]
-  [(.rowCount a-mat) (.columnCount a-mat)])
 (extend-protocol blas/PBLASBase
   INDArray
   (supports-blas? [c] (cp/as-double-array c))
   (gemm! [c trans-a? trans-b? alpha a b beta]
     (let [alpha (double alpha)
           beta (double beta)
-          a-shape (matrix-shape a)
-          b-shape (matrix-shape b)
-          c-shape (matrix-shape c)
+          a-shape (m/shape a)
+          b-shape (m/shape b)
+          c-shape (m/shape c)
           a-col-count (second a-shape)
           b-col-count (second b-shape)
           c-col-count (second c-shape)
