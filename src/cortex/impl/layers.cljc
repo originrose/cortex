@@ -247,8 +247,7 @@
                                              (m/outer-product output-gradient input))))
     (m/add! bias-gradient output-gradient)
     (if (and (blas/supports-blas? weights)
-             (blas/supports-blas? output-gradient)
-             (= 2 (count (m/shape weights))))
+             (blas/supports-blas? output-gradient))
      (let [input-gradient (or (:input-gradient this)
                               (m/mutable (b/new-array (m/shape input))))]
        (blas/gemv! input-gradient true 1.0 weights output-gradient 0.0)
@@ -907,6 +906,7 @@ using convolutional steps"
                 1.0)
 
     (assoc (roll-input-gradient! this input-gradient packed-input-matrix)
+           :output-gradient-matrix output-gradient-matrix
            :input-gradient input-gradient
            :bias-gradient bias-gradient
            :weight-gradient weight-gradient

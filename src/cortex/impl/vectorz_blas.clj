@@ -9,15 +9,18 @@
 
 
 
+(defn matrix-shape
+  [a-mat]
+  [(.rowCount a-mat) (.columnCount a-mat)])
 (extend-protocol blas/PBLASBase
   INDArray
   (supports-blas? [c] (cp/as-double-array c))
   (gemm! [c trans-a? trans-b? alpha a b beta]
     (let [alpha (double alpha)
           beta (double beta)
-          a-shape (m/shape a)
-          b-shape (m/shape b)
-          c-shape (m/shape c)
+          a-shape (matrix-shape a)
+          b-shape (matrix-shape b)
+          c-shape (matrix-shape c)
           a-col-count (second a-shape)
           b-col-count (second b-shape)
           c-col-count (second c-shape)
@@ -51,19 +54,19 @@
   (gemv! [c trans-a? alpha a b beta]
     (let [alpha (double alpha)
           beta (double beta)
-          a-shape (m/shape a)
-          a-row-count (first a-shape)
-          a-col-count (second a-shape)
+          a-row-count (.rowCount a)
+          a-col-count (.columnCount a)
+          a-shape [a-row-count a-col-count]
           a-shape (if trans-a?
-                    [(a-shape 1) (a-shape 0)]
+                    [a-col-count a-row-count]
                     a-shape)
           M (first a-shape)
           N (second a-shape)
           a-data (cp/as-double-array a)
           b-data (cp/as-double-array b)
           c-data (cp/as-double-array c)
-          _ (when-not (or (= N (count b-data))
-                          (= N (count c-data)))
+          _ (when-not (or (= N (alength b-data))
+                          (= N (alength c-data)))
               (throw (Exception. "GEMV mismatch")))
           ;;The matrix is already transposed according to blas
           ;;so we reverse this here
