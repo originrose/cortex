@@ -5,7 +5,7 @@
             [core.blas.protocols :as blas]
             [clojure.core.matrix.protocols :as mp]
             [cortex.backends :as b]
-            [cortex.impl.vectorz-blas]
+            #?(:clj [cortex.impl.vectorz-blas])
             #?(:clj [cortex.registry :refer [register-module]]
                :cljs [cortex.registry :refer-macros [register-module]]))
   #?(:clj (:import [java.util PriorityQueue]
@@ -236,14 +236,17 @@
         weight-gradient (:weight-gradient this)
         bias-gradient (:bias-gradient this)
         elem-count (long (m/ecount weights))]
-    (if (and (mp/as-double-array weight-gradient)
-             (mp/as-double-array output-gradient)
-             (mp/as-double-array input))
-      (ConvOps/addOuterProduct (mp/as-double-array weight-gradient)
-                               (mp/as-double-array input)
-                               (mp/as-double-array output-gradient))
-      (m/add! (m/as-vector weight-gradient) (m/as-vector
-                                             (m/outer-product output-gradient input))))
+    #?(:clj
+       (if (and (mp/as-double-array weight-gradient)
+                (mp/as-double-array output-gradient)
+                (mp/as-double-array input))
+         (ConvOps/addOuterProduct (mp/as-double-array weight-gradient)
+                                  (mp/as-double-array input)
+                                  (mp/as-double-array output-gradient))
+         (m/add! (m/as-vector weight-gradient) (m/as-vector
+                                                (m/outer-product output-gradient input))))
+       :cljs (m/add! (m/as-vector weight-gradient) (m/as-vector
+                                                    (m/outer-product output-gradient input))))
     (m/add! bias-gradient output-gradient)
     (if (and (blas/supports-blas? weights)
              (blas/supports-blas? output-gradient))
@@ -705,7 +708,7 @@ using convolutional steps"
 
 #?(:cljs (defn unroll-input!
            [this input]
-           (core-matrix-unroll-input!)))
+           (core-matrix-unroll-input! this input)))
 
 #?(:clj (defn unroll-input!
           [this input]

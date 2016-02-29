@@ -17,15 +17,15 @@
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
                                   [criterium/criterium "0.4.3"] ;; benchmarking tool
                                   [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]] ;; alternate core.matrix implementation
-                   :source-paths ["src" "test"]
-                   :java-source-paths ["test"]}
+                   :source-paths ["src" "test/cljc" "test/clj"]
+                   :java-source-paths ["test/clj"]}
 
              :test {:dependencies [[net.mikera/cljunit "0.4.0"]
                                    [criterium/criterium "0.4.3"]
                                    [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]
-               ]
-                    :source-paths ["src" "test"]
-                    :java-source-paths ["test"]
+                                   ]
+                    :source-paths ["src" "test/cljc" "test/cljs"]
+                    :java-source-paths ["test/clj"]
                     :main cortex.run-all-tests}
 
              :cljs {:dependencies [[org.clojure/clojurescript "1.7.228" :scope "provided"]
@@ -36,9 +36,9 @@
                     :plugins [[lein-cljsbuild "1.1.2"]]
 
                     :cljsbuild {:builds [{:id :test
-                                          :source-paths ["src" "test"]
-                                          :compiler     {:output-to "resources/test/unit-tests.js"
-                                                         :output-dir "resources/test/out"
+                                          :source-paths ["src" "test/cljc" "test/cljs"]
+                                          :compiler     {:output-to "target/js/unit-tests.js"
+                                                         :output-dir "target/js/out"
                                                          :asset-path "out"
                                                          :optimizations :none
                                                          :main 'cortex.test
