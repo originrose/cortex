@@ -1,4 +1,4 @@
-package cortex;
+package clj.cortex;
 
 import mikera.cljunit.ClojureTest;
 
