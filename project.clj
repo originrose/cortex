@@ -1,12 +1,12 @@
 (defproject thinktopic/cortex "0.1.0-SNAPSHOT"
   :description "A neural network toolkit for Clojure."
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [com.taoensso/timbre "4.2.1"]
+                 [com.taoensso/timbre "4.3.1"]
                  [org.clojure/test.check "0.9.0"]
-                 [thinktopic/matrix.fressian "0.3.0-SNAPSHOT"]
+                 [thinktopic/matrix.fressian "0.3.0"]
                  [net.mikera/vectorz-clj "0.43.1"]
-                 [net.mikera/core.matrix "0.50.0-SNAPSHOT"]
-                 [caffe-protobuf "0.1.0"]
+                 [net.mikera/core.matrix "0.50.0"]
+                 [thinktopic/caffe-protobuf "0.1.0"]
                  [net.mikera/clojure-utils "0.6.2"]
                  [core.blas "1.0.2"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]
@@ -15,13 +15,13 @@
   :java-source-paths ["java"]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
-                                  [criterium/criterium "0.4.3"] ;; benchmarking tool
+                                  [criterium/criterium "0.4.4"] ;; benchmarking tool
                                   [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]] ;; alternate core.matrix implementation
                    :source-paths ["src" "test/cljc" "test/clj"]
                    :java-source-paths ["test/clj"]}
 
              :test {:dependencies [[net.mikera/cljunit "0.4.0"]
-                                   [criterium/criterium "0.4.3"]
+                                   [criterium/criterium "0.4.4"]
                                    [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]
                                    ]
                     :source-paths ["src" "test/cljc" "test/cljs"]
@@ -30,8 +30,8 @@
 
              :cljs {:dependencies [[org.clojure/clojurescript "1.7.228" :scope "provided"]
                                    ;[net.unit8/fressian-cljs "0.2.0"]
-                                   [doo "0.1.6-SNAPSHOT"]
-                                   [thinktopic/aljabr "0.1.0-SNAPSHOT"]]
+                                   [doo "0.1.6"]
+                                   [thinktopic/aljabr "0.1.0"]]
 
                     :plugins [[lein-cljsbuild "1.1.2"]]
 
