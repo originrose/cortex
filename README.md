@@ -3,7 +3,7 @@
 Neural networks, regression and feature learning in Clojure.
 
 
-TODO:
+### TODO:
 
 * more activation functions (e.g. tanh)
 * more loss functions (e.g. negative log likelihood)
@@ -11,4 +11,4 @@ TODO:
 
 * composite layer types
  - port additive and multiplicative layers CMulTable, CAddTable from Torch for recurrent nets and LSTM
-
+ 
