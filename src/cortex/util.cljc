@@ -83,9 +83,9 @@
   (let [weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
     (b/array
      (mapv (fn [_]
-             (repeatedly cols
-                         #(* weight-scale
-                             (rand-gaussian))))
+             (vec (repeatedly cols
+                              #(* weight-scale
+                                  (rand-gaussian)))))
            (range rows)))))
 
 (defn random-matrix

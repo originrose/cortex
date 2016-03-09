@@ -75,7 +75,7 @@
 ;;default serialization implementation for generic modules
 (defn record->map
   [rec]
-  (assoc (into {} rec) :record-type (.getName (type rec))))
+  (assoc (into {} rec) :record-type (.getName (class rec))))
 
 (extend-protocol cp/PSerialize
   #?(:clj Object :cljs object)
