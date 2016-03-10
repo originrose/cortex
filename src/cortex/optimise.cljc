@@ -171,10 +171,17 @@ Returns new parameters"
 ;; Loss Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn sub-with-nulls 
+  "Subtracts b from 0. Returns 0.0 for elements where b is nil" 
+  [a b]
+  (let [a (m/mutable a)]
+    (m/emap! (fn [av bv] (if (number? bv) (- (double av) (double bv)) 0.0)) 
+             a b)))
+
 (defn mean-squared-error
   "Computes the mean squared error of an activation array and a target array"
   ([activation target]
-    (/ (double (m/esum (m/square (m/sub activation target))))
+    (/ (double (m/esum (m/square (sub-with-nulls activation target))))
        (double (m/ecount activation)))))
 
 (deftype MSELoss []
@@ -183,8 +190,7 @@ Returns new parameters"
       (mean-squared-error v target))
 
     (loss-gradient [this v target]
-      (let [r (m/mutable v)]
-        (m/sub! r target)
+      (let [r (sub-with-nulls v target)]
         (m/scale! r (/ 2.0 (double (m/ecount v)))))))
 
 (defn mse-loss
