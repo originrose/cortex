@@ -175,7 +175,7 @@ Returns new parameters"
   "Replaces non-numbers in the target vector with the activation (to ensure zero gradient)"
   [activation target]
   (if (= Object (m/element-type target))
-    (m/emap (fn [a b] (if (number? b) b a)) activation target)
+    (m/emap (fn [a b] (if (number? b) b a)) (m/coerce target activation) target)
     target))
 
 (defn mean-squared-error
