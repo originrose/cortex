@@ -50,18 +50,27 @@
                   [nil nil]
                   (range (count coll)))))
 
+
 (defn softmax-results-to-unit-vectors
   [results]
   (let [zeros (apply vector (repeat (first (m/shape (first results))) 0))]
-    (mapv #(m/array (assoc zeros (max-index (into [] (seq  %))) 1.0))
-                      results)))
+    (mapv #(assoc zeros (max-index (into [] (seq  %))) 1.0)
+          results)))
+
+
+(defn softmax-results
+  ^double [results labels]
+  (let [correct (count (filter #(m/equals (first %) (second %))
+                               (map vector
+                                    (softmax-results-to-unit-vectors results)
+                                    labels)))]
+    (double (/ correct (count labels)))))
+
 
 (defn evaluate-softmax
   "evaluate the network assuming single classification and last layer is softmax"
-  [network test-data test-labels]
-  (let [results (softmax-results-to-unit-vectors (run network test-data))
-        correct (count (filter #(m/equals (first %) (second %)) (map vector results test-labels)))]
-    (double (/ correct (count test-labels)))))
+  ^double [network test-data test-labels]
+  (softmax-results (run network test-data) test-labels))
 
 
 (defn train-step
