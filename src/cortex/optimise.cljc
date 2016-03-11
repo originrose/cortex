@@ -171,6 +171,9 @@ Returns new parameters"
 ;; Loss Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; OK, this is a bit hacky and probably not ideally implemented yet
+;; But the idea is that we should treat a null in the target vector as a missing value
+;; and therefore propagate zero gradient. Should probably be true for all loss functions.
 (defn process-nulls
   "Replaces non-numbers in the target vector with the activation (to ensure zero gradient)"
   [activation target]
