@@ -26,9 +26,9 @@
 (def pad-amounts [0 1 2])
 
 (defn create-conv-layer-config
-  [image-dim channel-count pad-amount]
+  [image-dim channel-count pad-amount kernel-count]
   (impl/create-conv-layer-config
-   image-dim image-dim 5 5 pad-amount pad-amount 1 1 channel-count))
+   image-dim image-dim 5 5 pad-amount pad-amount 1 1 channel-count kernel-count))
 
 (defn create-large-convolution-matrix-and-weights
   [implementation image-dim channel-count pad-amount]

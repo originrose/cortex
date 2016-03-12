@@ -4,7 +4,8 @@
             [cortex.impl.layers :as impl]
             [cortex.impl.wiring]
             [clojure.core.matrix :as m]
-            [cortex.backends :as b])
+            [cortex.backends :as b]
+            [cortex.impl.layers.convolution :as conv])
   (:refer-clojure :exclude [identity]))
 
 #?(:clj (do
@@ -167,20 +168,23 @@
         ^long num-input-channels num-input-channels
         ^long kernel-width kernel-width
         ^long kernel-height kernel-height
-        conv-config (impl/create-conv-layer-config input-width input-height
+        conv-config (conv/create-conv-layer-config input-width input-height
                                                    kernel-width kernel-height
                                                    pad-x pad-y
                                                    stride-x stride-y
-                                                   num-input-channels)
+                                                   num-input-channels
+                                                   num-kernels)
         weights (or custom-weights
-                    (util/weight-matrix num-kernels (* kernel-width kernel-height num-input-channels)))
+                    (util/weight-matrix num-kernels (* kernel-width
+                                                       kernel-height
+                                                       num-input-channels)))
         bias (or custom-bias
-                 (b/zero-array [num-kernels]))
-        output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)
-        output-height (impl/get-padded-strided-dimension input-height pad-y kernel-height stride-y)
+                 (b/zero-array [1 num-kernels]))
+        output-width (conv/get-output-width conv-config)
+        output-height (conv/get-output-height conv-config)
         weight-gradient (b/zero-array (m/shape weights))
         bias-gradient (b/zero-array (m/shape bias))]
-    (impl/->Convolutional weights bias
+    (conv/->Convolutional weights bias
                           weight-gradient
                           bias-gradient
                           conv-config)))
@@ -194,20 +198,12 @@ as the input"
   (let [^long num-input-channels num-input-channels
         ^long input-width input-width
         ^long input-height input-height
-        conv-config (impl/create-conv-layer-config input-width input-height
+        conv-config (conv/create-conv-layer-config input-width input-height
                                                    kernel-width kernel-height
                                                    pad-x pad-y
                                                    stride-x stride-y
-                                                   num-input-channels)
-        output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)
-        output-height (impl/get-padded-strided-dimension input-height pad-y kernel-height stride-y)
-        output (m/zero-array :vectorz [(* output-width output-height num-input-channels)])
-        output-indexes (m/zero-array :vectorz (m/shape output))
-        input-gradient (m/zero-array :vectorz [(* input-width input-height num-input-channels)])]
-    (impl/->Pooling output
-                    output-indexes
-                    input-gradient
-                    conv-config)))
+                                                   num-input-channels)]
+    (conv/->Pooling conv-config)))
 
 
 (defn k-sparse

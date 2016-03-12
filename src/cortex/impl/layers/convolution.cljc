@@ -53,37 +53,52 @@ of the output of a conv-net ignoring channels."
 (defrecord ConvLayerConfig
     [^long width ^long height ^long k-width ^long k-height
      ^long padx ^long pady ^long stride-w ^long stride-h
-     ^long num-kernels ^long num-channels])
+     ^long num-in-channels ^long num-out-channels])
 
 
-(defn output-width
+(defn get-output-width
   ^long [^ConvLayerConfig conv]
   (get-padded-strided-dimension (.width conv) (.padx conv) (.k-width conv) (.stride-w conv)))
 
-(defn output-height
+(defn get-output-height
   ^long [^ConvLayerConfig conv]
   (get-padded-strided-dimension (.height conv) (.pady conv) (.k-height conv) (.stride-h conv)))
 
 
 (defn create-conv-layer-config
-  [width height kernel-width kernel-height
-   padx pady stride-w stride-h num-channels
-   num-kernels]
-  (->ConvLayerConfig width height kernel-width kernel-height
-                     padx pady stride-w stride-h num-kernels
-                     num-channels))
+  ([width height kernel-width kernel-height
+    padx pady stride-w stride-h num-in-channels
+    num-out-channels]
+   (->ConvLayerConfig width height kernel-width kernel-height
+                      padx pady stride-w stride-h
+                      num-in-channels num-out-channels))
+  ([width height kernel-width kernel-height
+    padx pady stride-w stride-h num-in-channels]
+   (create-conv-layer-config width height kernel-width kernel-height
+                             padx pady stride-w stride-h num-in-channels
+                             num-in-channels)))
+
+(defn create-convolution-matrix
+  [^ConvLayerConfig config]
+  (let [output-width (get-output-width config)
+        output-height (get-output-height config)
+        kernel-stride (* (.k-width config) (.k-height config))
+        n-cols (* kernel-stride (.num-in-channels config))
+        n-rows (* output-width output-height)]
+    (b/new-array [n-rows n-cols])))
+
 
 (defmacro convolution-outer-kernel
   [config & body]
   `(let [^ConvLayerConfig config# ~config
-         ~'output-width (output-width config#)
-         ~'output-height (output-height config#)
-         ~'num-channels (.num-channels config#)
-         ~'num-kernels (.num-kernels config#)
+         ~'output-width (get-output-width config#)
+         ~'output-height (get-output-height config#)
+         ~'num-in-channels (.num-in-channels config#)
+         ~'num-out-channels (.num-out-channels config#)
          ~'input-planar-stride (* (.width config#) (.height config#))
-         ~'output-planar-stride (* output-width output-height ~'num-kernels)
+         ~'output-planar-stride (* ~'output-width ~'output-height ~'num-out-channels)
          ~'output-channel-stride (* (.k-width config#) (.k-height config#))
-         ~'output-column-stride (* ~'output-channel-stride ~'num-channels)
+         ~'output-column-stride (* ~'output-channel-stride ~'num-in-channels)
          ~'width (.width config#)
          ~'height (.height config#)
          ~'k-width (.k-width config#)
@@ -93,7 +108,7 @@ of the output of a conv-net ignoring channels."
          ~'padx (.padx config#)
          ~'pady (.pady config#)]
      (c-for
-      [~'chan 0 (< ~'chan ~'num-channels) (inc ~'chan)]
+      [~'chan 0 (< ~'chan ~'num-in-channels) (inc ~'chan)]
       (let [~'chan-input-offset (* ~'chan ~'input-planar-stride)
             ~'chan-output-offset (* ~'chan ~'output-planar-stride)]
        (c-for
@@ -107,31 +122,34 @@ of the output of a conv-net ignoring channels."
 
 (defmacro convolution-roll-unroll-inner-kernel
   [& body]
-  `(let [~'chan-conv-offset (* ~'chan ~'output-channel-stride)]
+  `(let [~'chan-conv-offset (* ~'chan ~'output-channel-stride)
+         ~'output-offset (+ (* ~'out-y ~'output-width)
+                            ~'out-x)]
     (c-for
      [~'k-y 0 (< ~'k-y ~'k-height) (inc ~'k-y)]
      (c-for
       [~'k-x 0 (< ~'k-x ~'k-width) (inc ~'k-x)]
       (let [~'input-x (+ ~'input-rel-x ~'k-x)
             ~'input-y (+ ~'input-rel-y ~'k-y)
-            ~'output-conv-addr (+ (* ~'out-y ~'out-x ~'output-column-stride)
+            ~'output-conv-addr (+ (* ~'output-offset
+                                     ~'output-column-stride)
                                   ~'chan-conv-offset
                                   (* ~'k-y ~'k-width)
                                   ~'k-x)
             ~'input-addr  (+ (* ~'input-y ~'width)
                              ~'input-x
                              ~'chan-input-offset)
-            ~'input-valid? (and (> ~'input-x 0)
-                                (<= ~'input-x ~'width)
-                                (> ~'input-y 0)
-                                (<= ~'input-y ~'height))]
+            ~'input-valid? (and (>= ~'input-x 0)
+                                (< ~'input-x ~'width)
+                                (>= ~'input-y 0)
+                                (< ~'input-y ~'height))]
         ~@body)))))
 
 
 
 (defn planar-input->convolution!
   [input output ^ConvLayerConfig config]
-  (let [^doubles input-ary (mp/as-double-array input)
+  (let [^doubles input-ary (mp/to-double-array input)
         ^doubles output-ary (mp/as-double-array output)]
     (convolution-outer-kernel
      config
@@ -141,6 +159,11 @@ of the output of a conv-net ignoring channels."
                                 0.0))]
         (aset output-ary output-conv-addr input-val)))))
   output)
+
+(defn planar-input->convolution
+  [input ^ConvLayerConfig config]
+  (let [output (create-convolution-matrix config)]
+    (planar-input->convolution! input output config)))
 
 
 (defn convolution->planar-output!
@@ -162,15 +185,6 @@ of the output of a conv-net ignoring channels."
   input-gradient)
 
 
-(defn create-convolution-matrix
-  [^ConvLayerConfig config]
-  (let [output-width (output-width config)
-        output-height (output-height config)
-        kernel-stride (* (.k-width config) (.k-height config))
-        n-cols (* kernel-stride (.num-channels config))
-        n-rows (* output-width output-height)]
-    (b/new-array [n-rows n-cols])))
-
 
 (defn planar-convolution-forward!
   [layer input]
@@ -179,17 +193,26 @@ of the output of a conv-net ignoring channels."
         ^ConvLayerConfig config (:conv-config layer)
         conv-matrix (or (:conv-matrix layer)
                         (create-convolution-matrix config))
-        output-width (output-width config)
-        output-height (output-height config)
-        output-stride (* output-width (.num-kernels config))
+        output-width (get-output-width config)
+        output-height (get-output-height config)
+        output-channel-stride (* output-width output-height)
         output (or (:output layer)
-                   (b/new-array [output-height output-stride]))]
+                   (b/new-array [(.num-out-channels config) output-channel-stride]))
+        ones (or (:ones layer)
+                 (m/fill! (b/new-array [1 output-channel-stride])
+                          1.0))]
     (planar-input->convolution! input conv-matrix config)
-    (m/assign! output bias)
     (if (blas/supports-blas? weights)
-      (blas/gemm! output false true 1.0 weights conv-matrix 1.0)
-      (m/add! output (m/inner-product weights (m/transpose conv-matrix))))
-    (assoc layer :conv-matrix conv-matrix :output output)))
+      (do
+        (blas/gemm! output true false 1.0 bias ones 0.0)
+        (blas/gemm! output false true 1.0 weights conv-matrix 1.0))
+      (do
+        (m/assign! output (m/inner-product weights (m/transpose conv-matrix)))
+        (m/add! output (m/inner-product (m/transpose bias) ones))))
+    (assoc layer
+           :conv-matrix conv-matrix
+           :output output
+           :ones ones)))
 
 
 (defn planar-convolution-backward!
@@ -197,11 +220,13 @@ of the output of a conv-net ignoring channels."
   (let [weights (:weights layer)
         bias (:bias layer)
         ^ConvLayerConfig config (:conv-config layer)
-        output-width (output-width config)
-        output-height (output-height config)
+        output-width (get-output-width config)
+        output-height (get-output-height config)
         n-output (* output-width output-height)
-        n-kernels (.num-kernels config)
+        n-kernels (.num-out-channels config)
         conv-matrix (:conv-matrix layer)
+        ones (:ones layer)
+        output-channel-stride (* output-width output-height)
         weight-gradient (or (:weight-gradient layer)
                             (b/new-array (m/shape weights)))
         bias-gradient (or (:bias-gradient layer)
@@ -211,15 +236,17 @@ of the output of a conv-net ignoring channels."
         input-gradient (or (:input-gradient layer)
                            (b/new-array (m/shape input)))]
     (m/assign! (m/as-vector output-gradient-matrix) output-gradient)
-    (m/add! bias-gradient output-gradient)
     ;;conv-matrix is assumed to hold the actual input
     (if (blas/supports-blas? weights)
       (do
+        (blas/gemm! bias-gradient false true 1.0 ones output-gradient-matrix 1.0)
         (blas/gemm! weight-gradient false false 1.0 output-gradient-matrix conv-matrix 1.0)
         (blas/gemm! conv-matrix true false 1.0 output-gradient-matrix weights 0.0))
       (do
-        (m/add! weight-gradient (m/inner-product output-gradient-matrix conv-matrix))
-        (m/assign! conv-matrix (m/inner-product (m/transpose output-gradient-matrix) weights))))
+        (let [output-gradient-transpose (m/transpose output-gradient-matrix)]
+          (m/add! bias-gradient (m/inner-product ones output-gradient-transpose))
+          (m/add! weight-gradient (m/inner-product output-gradient-matrix conv-matrix))
+          (m/assign! conv-matrix (m/inner-product output-gradient-transpose weights)))))
     (convolution->planar-output! conv-matrix input-gradient config)
     (assoc layer
            :weight-gradient weight-gradient
@@ -253,8 +280,7 @@ of the output of a conv-net ignoring channels."
 
 
 #?(:cljs (register-module cortex.impl.layers.Convolutional))
-(defrecord Convolutional [weights bias weight-gradient bias-gradient
-                          conv-layer-config]
+(defrecord Convolutional [weights bias conv-config]
     cp/PModule
     (cp/calc [this input]
       (planar-convolution-forward! this input))
@@ -291,9 +317,9 @@ of the output of a conv-net ignoring channels."
 (defn planar-max-pooling-forward!
   [layer input]
   (let [^ConvLayerConfig config (:conv-config layer)
-        output-width (output-width config)
-        output-height (output-height config)
-        n-output (* output-width output-height (.num-channels config))
+        output-width (get-output-width config)
+        output-height (get-output-height config)
+        n-output (* output-width output-height (.num-in-channels config))
         output (or (:output layer)
                    (b/new-array [n-output]))
         ^ints output-indexes (or (:output-indexes layer)
@@ -357,7 +383,7 @@ of the output of a conv-net ignoring channels."
 ;;Max pooling layer.  There are other pooling layer types (average,a sochiastic)
 ;;that may be implemented later but for now we only need max pooling.
 #?(:cljs (register-module cortex.impl.layers.Pooling))
-(defrecord Pooling [output output-indexes input-gradient conv-layer-config]
+(defrecord Pooling [conv-config]
   cp/PModule
   (cp/calc [this input]
     (planar-max-pooling-forward! this input))
