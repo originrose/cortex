@@ -105,9 +105,9 @@
 
 (defn linear-layer
   "Creates a linear layer with a new randomised weight matrix for the given number of inputs and outputs"
-  ([n-inputs n-outputs]
-    (linear (util/weight-matrix n-outputs n-inputs)
-            (util/empty-array [n-outputs]))))
+  ([n-inputs n-outputs & {:keys [weights bias]}]
+    (linear (or weights (util/weight-matrix n-outputs n-inputs))
+            (or bias (util/empty-array [n-outputs])))))
 
 (defn split
   "Creates a split later using a collection of modules. The split layer returns the outputs of each

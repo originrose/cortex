@@ -172,6 +172,7 @@
            :output-size output-size
            :input-data-format input-data-format :output-data-format output-data-format)))
 
+
 (defmethod build-desc :max-pooling
   [previous item]
   (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y]} item
@@ -198,11 +199,8 @@
 
 (defmethod create-module :linear
   [desc]
-  (let [{:keys [input-size output-size weights bias]} desc
-        retval (layers/linear-layer input-size output-size)]
-    (if (and weights bias)
-      (assoc retval :weights weights :bias bias)
-      retval)))
+  (let [{:keys [input-size output-size weights bias]} desc]
+    (layers/linear-layer input-size output-size :weights weights :bias bias)))
 
 (defmethod create-module :logistic
   [desc]
@@ -220,17 +218,17 @@
   [desc]
   (layers/k-sparse (:k desc)))
 
+
 (defmethod create-module :convolutional
   [{:keys [input-width input-height input-channels
            kernel-width kernel-height pad-x pad-y
            stride-x stride-y num-kernels
            weights bias] :as desc}]
-  (let [retval (layers/convolutional input-width input-height input-channels
-                                     kernel-width kernel-height pad-x pad-y
-                                     stride-x stride-y num-kernels)]
-    (if (and weights bias)
-      (assoc retval :weights weights :bias bias)
-      retval)))
+  (layers/convolutional input-width input-height input-channels
+                        kernel-width kernel-height pad-x pad-y
+                        stride-x stride-y num-kernels
+                        :weights weights :bias bias))
+
 
 (defmethod create-module :max-pooling
   [{:keys [input-width input-height input-channels
@@ -239,6 +237,7 @@
   (layers/max-pooling input-width input-height input-channels
                       kernel-width kernel-height pad-x pad-y
                       stride-x stride-y))
+
 
 (defmethod create-module :dropout
   [desc]

@@ -8,7 +8,8 @@ is accomplished in description.clj"}
   (:require [clojure.java.io :as io]
             [cortex.serialization :as s]
             [cortex.description :as desc]
-            [clojure.core.matrix :as m])
+            [clojure.core.matrix :as m]
+            [cortex.backends :as b])
   (:import [caffe Caffe Caffe$NetParameter]
            [com.google.protobuf CodedInputStream TextFormat]))
 
@@ -65,11 +66,14 @@ is accomplished in description.clj"}
   (let [blobs (.getBlobsList layer-param)
         weights (.getDataList (first blobs))
         weight-shape (into [] (.getDimList (.getShape (first blobs))))
-        bias (m/array :vectorz (seq (.getDataList (second blobs))))
         [n-kernels _ kern-width kern-height] weight-shape
+        bias (m/reshape
+              (b/array (seq (.getDataList (second blobs))))
+              [1 n-kernels])
         n-channels (quot (count weights) (* kern-width kern-height n-kernels))
         kern-stride (* kern-width kern-height n-channels)
-        weights (m/reshape (m/array :vectorz (seq weights)) [n-kernels (* kern-width kern-height n-channels)])
+        weights (m/reshape (b/array (seq weights))
+                           [n-kernels (* kern-width kern-height n-channels)])
         param-map (conv-param-to-map (.getConvolutionParam layer-param))]
     (assoc param-map
            :type :convolutional
@@ -90,8 +94,8 @@ is accomplished in description.clj"}
   (let [blobs (.getBlobsList layer-param)
         weights (.getDataList (first blobs))
         [n-output n-input] (into [] (.getDimList (.getShape (first blobs))))
-        bias (m/array :vectorz (seq (.getDataList (second blobs))))
-        weights (m/reshape (m/array :vectorz (seq weights)) [n-output n-input])
+        bias (b/array  (seq (.getDataList (second blobs))))
+        weights (m/reshape (b/array (seq weights)) [n-output n-input])
         ]
     (assoc (first (desc/linear n-output))
            :weights weights
