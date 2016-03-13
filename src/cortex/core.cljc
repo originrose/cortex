@@ -5,6 +5,7 @@
             [cortex.impl.default- :as cortex.impl.default]
             [cortex.protocols :as cp]
             [cortex.layers :as layers]
+            [cortex.backends :as b]
             [cortex.util :as util :refer [error]]
             [clojure.core.matrix :as m]))
 
@@ -69,9 +70,9 @@
    (let [mod-params (parameters module)
          mod-gradient (gradient module)
          params (or (:packed-params optimiser)
-                    (m/new-array [(m/ecount mod-params)]))
+                    (b/new-array [(m/ecount mod-params)]))
          grads (or (:packed-grads optimiser)
-                   (m/new-array [(m/ecount mod-gradient)]))
+                   (b/new-array [(m/ecount mod-gradient)]))
          _ (m/assign! params mod-params)
          _ (m/assign! grads mod-gradient)
          _ (when-not (= 0 batch-count)

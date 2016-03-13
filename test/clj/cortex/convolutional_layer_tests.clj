@@ -84,19 +84,18 @@
         output-gradient (b/array  [1 2 3 4])
         backward-pool-layer (core/backward forward-pool-layer input output-gradient)
         input-gradient (core/input-gradient backward-pool-layer)]
-    (is (= (map double (range 13 17))
+    (is (= (map double [4 8 12 16])
            (m/eseq (core/output forward-pool-layer))))
-    (is (= (map double (flatten (concat (repeat 3 [0 0 0 0])
-                                        [[1 2 3 4]])))
+    (is (= (map double (flatten (map #(vector 0 0 0 %) (range 1 5))))
            (m/eseq input-gradient)))
     (let [input (b/array  (range 16 0 -1))
           forward-pool-layer (core/forward backward-pool-layer input)
           output-gradient (b/array  [1 2 3 4])
           backward-pool-layer (core/backward forward-pool-layer input output-gradient)
           input-gradient (core/input-gradient backward-pool-layer)]
-      (is (= (map double (range 16 12 -1))
+      (is (= (map double [16 12 8 4])
              (m/eseq (core/output forward-pool-layer))))
-      (is (= (map double (flatten (concat [[1 2 3 4]] (repeat 3 [0 0 0 0]))))
+      (is (= (map double (flatten (map #(vector % 0 0 0) (range 1 5))))
              (m/eseq input-gradient))))))
 
 
@@ -112,14 +111,15 @@ for testing against other conv net implementations."
                                                    k-dim k-dim
                                                    pad pad
                                                    stride stride
-                                                   num-channels)
+                                                   num-channels
+                                                   n-kernels)
         input (b/array (flatten (map #(repeat num-channels %)
                                      (range 1 (+ (* input-dim input-dim) 1)))))
         weights (b/array (map #(repeat (* k-dim k-dim num-channels) %)
                               (range 1 (+ n-kernels 1))))
         output-dim (conv/get-padded-strided-dimension input-dim pad k-dim stride)
         output-gradient (b/array (repeat (* output-dim output-dim n-kernels) 1))
-        bias (b/zero-array [n-kernels])
+        bias (b/zero-array [1 n-kernels])
         conv-layer (conv/->Convolutional weights bias
                                          conv-config)
         conv-layer (cp/forward conv-layer input)
@@ -137,7 +137,7 @@ for testing against other conv net implementations."
         weight-gradient (:weight-gradient result)
         input-gradient (:input-gradient result)]
     (is (= (m/eseq weight-gradient)
-           (map double (flatten (repeat 4 [5 5 5 10 10 10 10 10 10 20 20 20])))))
+           (map double (flatten (repeat 4 [2 4 4 8 5 10 10 20 8 16 16 32])))))
     (is (= (m/eseq bias-gradient)
            (map double [4 4 4 4])))
     (is (= (m/eseq input-gradient)

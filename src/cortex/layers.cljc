@@ -163,7 +163,7 @@
   [input-width input-height num-input-channels
    kernel-width kernel-height pad-x pad-y stride-x stride-y
    num-kernels
-   & {:keys [custom-weights custom-bias]}]
+   & {:keys [weights bias]}]
   (let [^long input-width input-width
         ^long num-input-channels num-input-channels
         ^long kernel-width kernel-width
@@ -174,20 +174,13 @@
                                                    stride-x stride-y
                                                    num-input-channels
                                                    num-kernels)
-        weights (or custom-weights
+        weights (or weights
                     (util/weight-matrix num-kernels (* kernel-width
                                                        kernel-height
                                                        num-input-channels)))
-        bias (or custom-bias
-                 (b/zero-array [1 num-kernels]))
-        output-width (conv/get-output-width conv-config)
-        output-height (conv/get-output-height conv-config)
-        weight-gradient (b/zero-array (m/shape weights))
-        bias-gradient (b/zero-array (m/shape bias))]
-    (conv/->Convolutional weights bias
-                          weight-gradient
-                          bias-gradient
-                          conv-config)))
+        bias (or bias
+                 (b/zero-array [1 num-kernels]))]
+    (conv/->Convolutional weights bias conv-config)))
 
 
 (defn max-pooling

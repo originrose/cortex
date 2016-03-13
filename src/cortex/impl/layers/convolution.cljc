@@ -96,7 +96,7 @@ of the output of a conv-net ignoring channels."
          ~'num-in-channels (.num-in-channels config#)
          ~'num-out-channels (.num-out-channels config#)
          ~'input-planar-stride (* (.width config#) (.height config#))
-         ~'output-planar-stride (* ~'output-width ~'output-height ~'num-out-channels)
+         ~'output-planar-stride (* ~'output-width ~'output-height)
          ~'output-channel-stride (* (.k-width config#) (.k-height config#))
          ~'output-column-stride (* ~'output-channel-stride ~'num-in-channels)
          ~'width (.width config#)
@@ -200,8 +200,16 @@ of the output of a conv-net ignoring channels."
                    (b/new-array [(.num-out-channels config) output-channel-stride]))
         ones (or (:ones layer)
                  (m/fill! (b/new-array [1 output-channel-stride])
-                          1.0))]
+                          1.0))
+        num-kernels (.num-out-channels config)]
     (planar-input->convolution! input conv-matrix config)
+    (when-not (and (= num-kernels (m/row-count weights))
+                   (= 2 (count (m/shape bias)))
+                   (= num-kernels (m/column-count bias)))
+      (throw (Exception.
+              (println
+               (format "Misconfigured convolution layer: weights %s bias %s num-kernels %d"
+                       (m/shape weights) (m/shape bias) num-kernels)))))
     (if (blas/supports-blas? weights)
       (do
         (blas/gemm! output true false 1.0 bias ones 0.0)
@@ -340,7 +348,7 @@ of the output of a conv-net ignoring channels."
         (when (or (= 0 k-idx)
                   (> input-val output-val))
           (aset output-indexes output-addr k-idx)
-          (aset output-ary output-addr output-val)))))
+          (aset output-ary output-addr input-val)))))
     (assoc layer
            :output output
            :output-indexes output-indexes)))
@@ -373,10 +381,10 @@ of the output of a conv-net ignoring channels."
            addr (+ (* input-y width)
                    input-x
                    chan-input-offset)]
-       (when (and (> input-x 0)
-                  (<= input-x width)
-                  (> input-y 0)
-                  (<= input-y height))
+       (when (and (>= input-x 0)
+                  (< input-x width)
+                  (>= input-y 0)
+                  (< input-y height))
          (aset input-ary addr output-val))))
     (assoc layer :input-gradient input-gradient)))
 
