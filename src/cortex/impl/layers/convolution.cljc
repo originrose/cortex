@@ -14,6 +14,9 @@
   #?(:clj (:import [java.util PriorityQueue]
                    [cortex.impl ConvOps])))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 (defn interleaved->planar!
   "in-place mutation to take channel data and convert to planar"
@@ -207,9 +210,8 @@ of the output of a conv-net ignoring channels."
                    (= 2 (count (m/shape bias)))
                    (= num-kernels (m/column-count bias)))
       (throw (Exception.
-              (println
-               (format "Misconfigured convolution layer: weights %s bias %s num-kernels %d"
-                       (m/shape weights) (m/shape bias) num-kernels)))))
+              (format "Misconfigured convolution layer: weights %s bias %s num-kernels %d"
+                      (m/shape weights) (m/shape bias) num-kernels))))
     (if (blas/supports-blas? weights)
       (do
         (blas/gemm! output true false 1.0 bias ones 0.0)
