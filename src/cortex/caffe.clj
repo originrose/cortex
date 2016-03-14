@@ -126,14 +126,16 @@ is accomplished in description.clj"}
         [input-batch-size n-channels width height] dims]
     (assoc (first (desc/input width height n-channels)) :output-data-format :planar)))
 
+
+(defn caffe->description
+  [proto-model trained-model]
+  (let [all-layers (rest (.getLayerList trained-model))
+        input-layer (model-to-input proto-model)]
+    (concat [input-layer] (map #(read-layer %) all-layers))))
+
+
 (defn instantiate-model
   "Given caffe models loaded with the above functions (load-X-caffe-file)
 instantiate a cortex network"
   [proto-model trained-model]
-  (let [all-layers (rest (.getLayerList trained-model))
-        input-layer (model-to-input proto-model)
-        full-desc (desc/build-full-network-description (concat [input-layer] (map #(read-layer %) all-layers)))]
-    ;;Very useful to print the network desc sometimes.
-    ;(clojure.pprint/pprint full-desc)
-    (desc/create-network
-     full-desc)))
+  (desc/build-and-create-network (caffe->description proto-model trained-model)))
