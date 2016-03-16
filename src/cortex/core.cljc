@@ -81,7 +81,8 @@
          module (cp/update-parameters module (parameters optimiser))]
      [(assoc optimiser
              :packed-params params
-             :packed-grads grads) module]))
+             :packed-grads grads) 
+      module]))
   ([optimiser module]
    (optimise optimiser module 1)))
 
