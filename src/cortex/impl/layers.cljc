@@ -186,7 +186,8 @@
 (defrecord Softmax [output input-gradient]
   cp/PModule
   (calc [this input]
-    (softmax-forward! input output))
+    (softmax-forward! input output)
+    this)
 
   (output [this]
     (:output this))
