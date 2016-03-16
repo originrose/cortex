@@ -142,7 +142,7 @@ Returns new parameters"
   ([size {:keys [learn-rate momentum] :as options}]
    (let [dx (new-mutable-vector size)]
       (m/assign! dx 0.0)
-      (SGDOptimiser. dx))))
+      (SGDOptimiser. dx nil options))))
 
 (extend-protocol cp/PGradientOptimiser
   SGDOptimiser
