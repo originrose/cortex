@@ -203,3 +203,5 @@ as the input"
   [k]
   #?(:clj (impl/->KSparse k)
      :cljs (throw (js/Error. "KSparse is not implemented for clojurescript"))))
+
+(defn guassian-noise [] (impl/->GaussianForwardNoise))

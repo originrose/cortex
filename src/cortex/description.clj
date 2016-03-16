@@ -18,25 +18,32 @@
                              :output-height height
                              :output-channels channels}]))
 
-(defn linear [num-output] [{:type :linear :output-size num-output}])
+(defn linear [num-output & {:keys [weights bias]}]
+  [{:type :linear :output-size num-output
+    :weights weights :bias bias}])
 
 (defn softmax [num-classes] [{:type :linear :output-size num-classes}
                              {:type :softmax}])
 
 (defn relu [] [{:type :relu}])
-(defn linear->relu [num-output] [{:type :linear :output-size num-output}
-                                 {:type :relu}])
+(defn linear->relu [num-output & opts]
+  [(first (apply linear num-output opts))
+   {:type :relu}])
 
 (defn logistic [] {:type :logistic})
-(defn linear->logistic [num-output] [{:type :linear :output-size num-output}
-                                     {:type :logistic}])
+(defn linear->logistic [num-output & opts]
+  [(first (apply linear num-output opts))
+   {:type :logistic}])
+
+(defn gaussian-noise [] { :type :guassian-noise})
 
 (defn k-sparse [k] {:type :k-sparse :k k})
 
 (defn dropout [probability] {:type :dropout :probability probability})
 
 (defn convolutional
-  ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels]
+  ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
+    & {:keys [weights bias]} ]
    (when (or (= 0 stride-x)
              (= 0 stride-y))
      (throw (Exception. "Convolutional layers must of stride >= 1")))
@@ -47,7 +54,7 @@
      (throw (Exception. "Convolutional layers must of num-kernels >= 1")))
    [{:type :convolutional :kernel-width kernel-width :kernel-height kernel-height
      :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
-     :num-kernels num-kernels}])
+     :num-kernels num-kernels :weights weights :bias bias}])
   ([kernel-dim pad stride num-kernels]
    (convolutional kernel-dim kernel-dim pad pad stride stride num-kernels)))
 
@@ -142,6 +149,10 @@
   [previous item]
   (build-pass-through-desc previous item))
 
+(defmethod build-desc :guassian-noise
+  [previous item]
+  (build-pass-through-desc previous item))
+
 (defmethod build-desc :softmax
   [previous item]
   (let [io-size (:output-size previous)]
@@ -217,6 +228,10 @@
 (defmethod create-module :k-sparse
   [desc]
   (layers/k-sparse (:k desc)))
+
+(defmethod create-module :guassian-noise
+  [desc]
+  (layers/guassian-noise))
 
 
 (defmethod create-module :convolutional
