@@ -177,9 +177,14 @@ Returns new parameters"
 (defn process-nulls
   "Replaces non-numbers in the target vector with the activation (to ensure zero gradient)"
   [activation target]
-  (if (= Object (m/element-type target))
-    (m/emap (fn [a b] (if (number? a) a b)) target activation)
-    target))
+  (cond
+    ;; if the target vector is nil, just use the current activation (i.e. completely zero gradient)
+    (nil? target)
+      activation
+    ;; if the target potentially contains nils, replace nils with the corresponding activation
+    (= Object (m/element-type target))
+      (m/emap (fn [a b] (if (number? a) a b)) target activation)
+    :else target))
 
 (defn mean-squared-error
   "Computes the mean squared error of an activation array and a target array"
