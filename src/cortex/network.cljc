@@ -74,6 +74,9 @@
 
 
 (defn train-step
+  "Trains a network for a single training example. 
+   
+   Returns network with updated gradient."
   [input answer network loss-fn]
   (let [network (core/forward network input)
         temp-answer (core/output network)
