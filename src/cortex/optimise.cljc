@@ -109,8 +109,7 @@ Returns new parameters"
                              dx gradient parameters))))
   cp/PParameters
   (parameters [this]
-    (:parameters this))
-  )
+    [(:parameters this)]))
 
 (defn adadelta-optimiser
   "Constructs a new AdaDelta optimiser of the given size (parameter length)"
@@ -163,7 +162,7 @@ Returns new parameters"
 (extend-protocol cp/PParameters
   SGDOptimiser
     (parameters [this]
-      (:parameters this)))
+      [(:parameters this)]))
 
 
 
