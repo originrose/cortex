@@ -79,8 +79,12 @@
   (m/emul y (m/sub 1.0 y)))
 
 (defn weight-matrix
+  "Creates a randomised weight matrix. 
+
+   Weights are gaussian values scaled acoording to 1/sqrt(no. columns). This ensures that outputs are distributed
+   on a similar scale to inputs, and provides reasonable initial gradient propagation."
   [rows cols]
-  (let [weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
+  (let [weight-scale (Math/sqrt (/ 1.0 (double cols)))]
     (b/array
      (mapv (fn [_]
              (vec (repeatedly cols
