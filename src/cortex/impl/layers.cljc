@@ -489,3 +489,28 @@
 
      (input-gradient [this]
        (:input-gradient this))))
+
+
+(defrecord GaussianForwardNoise []
+  cp/PModule
+  (calc [this input]
+    (let [output (:or (:output this)
+                      (b/new-array (m/shape input)))]
+      (m/assign! output input)
+      (m/emap! noise-fn output)
+      (assoc this :output output)))
+  (output [m]
+    (:output m))
+
+  cp/PNeuralTraining
+  (forward [this input]
+    (cp/calc this input))
+
+  (backward [this input output-gradient]
+    (let [input-gradient (or (:input-gradient this)
+                             (b/new-array (m/shape output-gradient)))]
+      (m/assign! input-gradient output-gradient)
+      (assoc this :input-gradient input-gradient)))
+
+  (input-gradient [this]
+    (:input-gradient this)))
