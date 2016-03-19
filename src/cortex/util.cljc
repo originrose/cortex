@@ -238,3 +238,14 @@
   [sparse]
   (doseq [item sparse]
     (m/fill! item 0.0)))
+
+
+(defn get-or-new-array
+  [item kywd shape]
+  (or (get item kywd)
+      (b/new-array shape)))
+
+(defn get-or-array
+  [item kywd data]
+  (or (get item kywd)
+      (b/array data)))

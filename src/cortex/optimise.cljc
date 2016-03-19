@@ -87,42 +87,39 @@ Returns new parameters"
 
 ;; ==============================================
 ;; ADADELTA optimiser
-
-(defrecord AdaDelta [msgrad     ;; mean squared gradient
-                     msdx       ;; mean squared delta update
-                     dx         ;; latest delta update
-                     parameters ;; updated parameters
-                     rms-g      ;; root mean squared gt
-                     rms-dx     ;; root mean squared (delta x)t-1
-                     ]
+(defrecord AdaDelta []
   cp/PGradientOptimiser
   (compute-parameters [adadelta gradient parameters]
     (let [decay-rate (double (or (:decay-rate adadelta) 0.05))
           epsilon (double (or (:epsilon adadelta) 0.000001))
-          msgrad (:msgrad adadelta)
-          msdx (:msdx adadelta)
-          dx (:dx adadelta)]
-      (assoc adadelta :parameters
-             (adadelta-step! decay-rate epsilon
-                             msgrad msdx
-                             rms-g rms-dx
-                             dx gradient parameters))))
+          elem-count (long (m/ecount parameters))
+          msgrad     (util/get-or-new-array adadelta :msgrad [elem-count])
+          msdx       (util/get-or-new-array adadelta :msdx [elem-count])
+          dx         (util/get-or-new-array adadelta :dx [elem-count])
+          rms-g      (util/get-or-new-array adadelta :rms-g [elem-count])
+          rms-dx     (util/get-or-new-array adadelta :rms-dx [elem-count])]
+      (assoc adadelta
+             :msgrad msgrad
+             :msdx msdx
+             :dx dx
+             :rms-g rms-g
+             :rms-dx rms-dx
+             :parameters (adadelta-step! decay-rate epsilon
+                                         msgrad msdx
+                                         rms-g rms-dx
+                                         dx gradient parameters))))
   cp/PParameters
   (parameters [this]
     [(:parameters this)]))
 
+
 (defn adadelta-optimiser
   "Constructs a new AdaDelta optimiser of the given size (parameter length)"
-  ([size]
-    (let [msgrad (new-mutable-vector size)
-          msdx (new-mutable-vector size)
-          dx (new-mutable-vector size)
-          rms-g (new-mutable-vector size)
-          rms-dx (new-mutable-vector size)]
-      (m/assign! msgrad 0.00)
-      (m/assign! msdx 0.00)
-      (m/assign! dx 0.0)
-      (AdaDelta. msgrad msdx dx nil rms-g rms-dx))))
+  ([]
+   (->AdaDelta))
+  ([param-count]
+   (println "Adadelta constructor with param count has been deprecated")
+   (->AdaDelta)))
 
 
 ;; ==============================================
