@@ -386,7 +386,8 @@
   cp/PNeuralTraining
     (forward [this input]
       (m/assign! input-tmp input)
-      (m/emap! noise-fn input-tmp) ;; input-tmp contains input with noise
+      ;; TODO: figure out how to apply noise
+      ;; (m/emap! noise-fn input-tmp) ;; input-tmp contains input with noise
       (let [noise-up (cp/calc up input-tmp)
             _ (m/assign! output-tmp (cp/output noise-up)) ;; output-tmp contains noisy output from up
             up (cp/forward up input)
