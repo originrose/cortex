@@ -49,13 +49,14 @@
 
 ;; DROPOUT
 ;; Module implementing "dropout" functionality when training
+;; dropout field stores 0.0 or 1.0/probability as multiplicative noise
 ;; Works as a identity function otherwise
 #?(:cljs (register-module cortex.impl.layers.Dropout))
 (defrecord Dropout [output input-gradient ^double probability dropout]
   cp/PModule
     (calc [this input]
       (m/assign! output input)
-       this)
+      this)
 
     (output [this]
       (:output this))
