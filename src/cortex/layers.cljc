@@ -149,7 +149,7 @@
       (cortex.impl.layers.Normaliser. output input-gradient sd mean acc-ss acc-mean tmp nil options))))
 
 (defn denoising-autoencoder
-  "Constructs a denoining auto-encoder, using the specified up and down modules.
+  "Constructs a denoising auto-encoder, using the specified up and down modules.
 
    Shape of output of up must match input of down, and vice-versa."
   ([up down]
