@@ -185,34 +185,48 @@ Returns new parameters"
 (defn mean-squared-error
   "Computes the mean squared error of an activation array and a target array"
   ([activation target]
-    (let [target (process-nulls activation target)]
+   (let [target (process-nulls activation target)]
       (/ (double (m/esum (m/square (m/sub activation target))))
          (double (m/ecount activation))))))
 
-(deftype MSELoss []
+(defrecord MSELoss []
   cp/PLossFunction
-    (loss [this v target]
-      (mean-squared-error v target))
+  (loss [this v target]
+    (mean-squared-error v target))
 
-    (loss-gradient [this v target]
-      (let [target (process-nulls v target)
-            r (m/sub v target)]
-        (m/scale! r (/ 2.0 (double (m/ecount v)))))))
+  (loss-gradient [this v target]
+    (let [target (process-nulls v target)
+          r (m/sub v target)]
+      (m/scale! r (/ 2.0 (double (m/ecount v)))))))
 
 (defn mse-loss
   "Returns a Mean Squared Error (MSE) loss function"
   ([]
-    (MSELoss.)))
+    (->MSELoss)))
 
 (def SMALL-NUM 1e-30)
 
-(deftype CrossEntropyLoss []
+;;Non mutually exclusive ce loss
+(defrecord CrossEntropyLoss []
   cp/PLossFunction
-    (loss [this v target]
-      (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM v)))
-            b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 (double SMALL-NUM)) a)))
-            c (m/esum (m/sub a b))]
-        c))
+  (loss [this v target]
+    ;;np.sum(np.nan_to_num(-y*np.log(a)-(1-y)*np.log(1-a)))
+    (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM v)))
+          b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 (double SMALL-NUM)) v)))
+          c (/ (double (m/esum (m/sub a b)))
+               (double (m/ecount v)))]
+      c))
 
-    (loss-gradient [this v target]
-      (m/sub v target)))
+  (loss-gradient [this v target]
+    (m/sub v target)))
+
+
+;;Mutually exclusive ce loss
+(defrecord SoftmaxCrossEntropyLoss []
+  cp/PLossFunction
+  (loss [this v target]
+    (let [c (double (m/esum (m/mul target (m/log (m/add SMALL-NUM v)))))]
+      (/ (- c) (double (m/ecount v)))))
+
+  (loss-gradient [this v target]
+    (m/sub v target)))

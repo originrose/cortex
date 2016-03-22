@@ -84,10 +84,10 @@
 
 (deftest core-test
   (let [net (layers/linear-layer 2 1)
-        n-epochs 10000
+        n-epochs 5
         batch-size 1
         loss (opt/mse-loss)
-        optimizer (opt/adadelta-optimiser (core/parameter-count net))
+        optimizer (opt/adadelta-optimiser)
         data CORN-DATA
         labels CORN-LABELS
         results CORN-RESULTS

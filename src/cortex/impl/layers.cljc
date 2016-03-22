@@ -372,13 +372,13 @@
     (util/rand-gaussian)
     x))
 
-#?(:cljs (register-module cortex.impl.layers.DenoisingAutoencoder))
-(defrecord DenoisingAutoencoder
+#?(:cljs (register-module cortex.impl.layers.Autoencoder))
+(defrecord Autoencoder
   [up down input-tmp output-tmp ]
   cp/PModule
     (cp/calc [m input]
       (let [up (cp/calc up input)]
-        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+        (Autoencoder. up down input-tmp output-tmp)))
 
     (cp/output [m]
       (cp/output up))
@@ -386,13 +386,14 @@
   cp/PNeuralTraining
     (forward [this input]
       (m/assign! input-tmp input)
-      (m/emap! noise-fn input-tmp) ;; input-tmp contains input with noise
+      ;; TODO: figure out how to apply noise
+      ;; (m/emap! noise-fn input-tmp) ;; input-tmp contains input with noise
       (let [noise-up (cp/calc up input-tmp)
             _ (m/assign! output-tmp (cp/output noise-up)) ;; output-tmp contains noisy output from up
             up (cp/forward up input)
             down (cp/forward down output-tmp)
             ]
-        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+        (Autoencoder. up down input-tmp output-tmp)))
 
     (backward [this input output-gradient]
       (let [down (cp/backward down output-tmp (m/sub input (cp/output down)))
@@ -400,7 +401,7 @@
             _ (m/add! output-tmp (cp/input-gradient down)) ;; output-tmp contains gradient
             up (cp/backward up input output-tmp)
             ]
-        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+        (Autoencoder. up down input-tmp output-tmp)))
 
     (input-gradient [this]
       (cp/input-gradient up))
@@ -418,14 +419,14 @@
             ndown (cp/parameter-count down)
             up (cp/update-parameters up (m/subvector parameters 0 nup))
             down (cp/update-parameters down (m/subvector parameters nup ndown))]
-        (DenoisingAutoencoder. up down input-tmp output-tmp)))
+        (Autoencoder. up down input-tmp output-tmp)))
 
     cp/PModuleClone
       (clone [this]
-        (DenoisingAutoencoder. (cp/clone up)
-                               (cp/clone down)
-                               (m/clone input-tmp)
-                               (m/clone output-tmp))))
+        (Autoencoder. (cp/clone up)
+                      (cp/clone down)
+                      (m/clone input-tmp)
+                      (m/clone output-tmp))))
 
 
 #?(:clj

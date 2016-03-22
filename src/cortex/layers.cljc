@@ -148,15 +148,20 @@
       (m/fill! acc-ss 1.0)
       (cortex.impl.layers.Normaliser. output input-gradient sd mean acc-ss acc-mean tmp nil options))))
 
-(defn denoising-autoencoder
-  "Constructs a denoising auto-encoder, using the specified up and down modules.
+(defn autoencoder
+  "Constructs an auto-encoder, using the specified 'up' and 'down' modules.
 
+   During model usagem, only the 'up' module is used. During training, the 'down' module attempts to
+   regenerate the input of the 'up' modulefrom the output of the 'up' module.
+
+   For a denoising auto-encoder, you may put a later that generates noise in the 'down' module.
    Shape of output of up must match input of down, and vice-versa."
   ([up down]
-    (denoising-autoencoder up down nil))
+    (autoencoder up down nil))
   ([up down options]
-    (cortex.impl.layers.DenoisingAutoencoder. up down (m/clone (cp/output down)) (m/clone (cp/output up))
-                                              nil options)))
+    (cortex.impl.layers.Autoencoder. up down
+                                     (m/clone (cp/output down)) (m/clone (cp/output up))
+                                     nil options)))
 
 
 (defn convolutional
