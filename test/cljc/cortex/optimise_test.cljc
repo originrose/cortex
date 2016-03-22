@@ -60,7 +60,7 @@
   (is (m/equals [1 2 3] (cortex.optimise/process-nulls [10 2 0] [1 nil 3]))))
 
 (deftest test-denoise
-  (let [m (layers/denoising-autoencoder
+  (let [m (layers/autoencoder
             (stack-module
               [(layers/linear [[0.1 0.2] [0.3 0.4]] [0.1 0.1])
                (layers/logistic [2])])
