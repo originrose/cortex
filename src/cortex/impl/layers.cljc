@@ -62,17 +62,16 @@
 
   cp/PNeuralTraining
     (forward [this input]
-      (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) 1.0 0.0)) dropout)
+      (let [inv-prob (double (/ 1.0 probability))]
+        (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0)) dropout))
       (m/assign! output input)
       (m/mul! output dropout)
-      (m/scale! output (/ 1.0 probability))
       this)
 
     (backward [this input output-gradient]
       (let []
         (m/assign! input-gradient output-gradient)
         (m/mul! input-gradient dropout)
-        (m/scale! input-gradient (/ 1.0 probability))
         this))
 
     (input-gradient [this]
