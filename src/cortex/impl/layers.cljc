@@ -211,6 +211,7 @@
 (defn blas-gemv-cutoff ^long [] 500000)
 
 (defn linear-forward!
+  "Linear backward pass.  Returns module updated with a new output."
   [this input]
   (let [weights (:weights this)
         bias (:bias this)
@@ -231,7 +232,7 @@
 
 
 (defn linear-backward!
-  "linear backward pass.  Returns a new input gradient."
+  "Linear backward pass.  Returns module updated with a new input gradient."
   [this input output-gradient]
   (let [weights (:weights this)
         bias (:bias this)
@@ -265,8 +266,8 @@
 #?(:cljs (register-module cortex.impl.layers.Linear))
 (defrecord Linear [weights bias]
   cp/PModule
-  (calc [this input]
-    (linear-forward! this input))
+    (calc [this input]
+      (linear-forward! this input))
 
     (output [this]
       (:output this))
