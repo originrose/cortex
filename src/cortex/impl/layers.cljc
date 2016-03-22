@@ -5,6 +5,7 @@
             [core.blas.protocols :as blas]
             [clojure.core.matrix.protocols :as mp]
             [cortex.backends :as b]
+            [cortex.util :as util]
             #?(:clj [cortex.impl.vectorz-blas])
             #?(:clj [cortex.registry :refer [register-module]]
                :cljs [cortex.registry :refer-macros [register-module]]))
@@ -283,34 +284,18 @@
       (:input-gradient this))
 
   cp/PParameters
-    (parameters [this]
-      (m/join (m/as-vector (:weights this)) (m/as-vector (:bias this))))
+  (parameters [this]
+    [(:weights this) (:bias this)])
 
-    (update-parameters [this parameters]
-      (let [param-view (cp/parameters this)]
-        #?(:clj
-            (m/assign! param-view parameters)
-           :cljs
-            (do
-              (let [w (:weights this)
-                    w-update (m/array (take (m/ecount (:weights this)) (m/eseq parameters)))
-                    b (:bias this)
-                    b-update (m/array (drop (m/ecount (:weights this)) (m/eseq parameters)))]
-              (m/assign! (m/as-vector w) (m/as-vector w-update))
-              (m/assign! (m/as-vector b) (m/as-vector b-update))))))
-
-      #?(:clj
-          (let [gradient-view (cp/gradient this)]
-            (m/assign! gradient-view 0.0))
-         :cljs
-          (do
-            (m/assign! (:weight-gradient this) 0.0)
-            (m/assign! (:bias-gradient this) 0.0)))
-      this)
+  (update-parameters [this parameters]
+    (let [param-view (cp/parameters this)]
+      (util/assign-packed-to-sparse! param-view parameters)
+      (util/zero-sparse! (cp/gradient this)))
+    this)
 
   cp/PGradient
-    (gradient [this]
-      (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
+  (gradient [this]
+    [(:weight-gradient this) (:bias-gradient this)]))
 
 ;; NORMALISER
 ;; Module which normalises outputs towards mean 0.0, sd 1.0
@@ -420,13 +405,13 @@
     (input-gradient [this]
       (cp/input-gradient up))
 
-  cp/PGradient
+    cp/PGradient
     (gradient [this]
-      (m/join (cp/gradient up) (cp/gradient down)))
+      (concat (cp/gradient up) (cp/gradient down)))
 
-  cp/PParameters
+    cp/PParameters
     (parameters [this]
-      (m/join (cp/parameters up) (cp/parameters down)))
+      (concat (cp/parameters up) (cp/parameters down)))
 
     (update-parameters [this parameters]
       (let [nup (cp/parameter-count up)

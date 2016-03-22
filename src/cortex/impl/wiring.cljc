@@ -27,7 +27,7 @@
       (assoc m :output (function input)))
     (cp/output [m]
       (:output m))
-    
+
   cp/PNeuralTraining
     (forward [this input]
       (assoc this :output (function input)))
@@ -52,11 +52,11 @@
                   :output (mapv cp/output new-modules))))
      (cp/output [m]
        (:output m))
-     
+
        cp/PGradient
     (gradient [this]
       (apply m/join (map cp/gradient modules)))
-    
+
   cp/PModuleClone
     (clone [this]
       (let [mod (Split. (mapv cp/clone modules))
@@ -64,7 +64,7 @@
                   (update mod :input/gradient m/clone)
                   mod)]
         mod))
-    
+
   cp/PNeuralTraining
     (forward [this input]
       (let [n (long (count modules))]
@@ -96,7 +96,7 @@
 
   cp/PParameters
     (parameters [this]
-      (apply m/join (map cp/parameters modules)))
+      (mapcat cp/parameters modules))
 
     (update-parameters [this parameters]
       (let [n (long (count modules))]
@@ -126,12 +126,12 @@
        (assoc m :output (apply combine-fn input)))
      (cp/output [m]
        (:output m))
-         
+
   cp/PModuleClone
     (clone [this]
       ;; we are stateless, so nothing to do!
-      this) 
-    
+      this)
+
   cp/PNeuralTraining
     (forward [this input]
       (assoc this :output (apply combine-fn input)))
@@ -204,11 +204,11 @@
 
   cp/PGradient
     (gradient [this]
-      (apply m/join (map cp/gradient modules)))
+      (mapcat cp/gradient modules))
 
   cp/PParameters
     (parameters [this]
-      (apply m/join (map cp/parameters modules)))
+      (mapcat cp/parameters modules))
 
     (update-parameters [this parameters]
       (let [n (long (count modules))]
@@ -218,8 +218,9 @@
           (if (< i n)
             (let [module (nth modules i)
                   pc (long (cp/parameter-count module))
-                  new-module-params (m/subvector parameters offset pc)
-                  module (cp/update-parameters module new-module-params)]
+                  module (if (= 0 pc)
+                           module
+                           (cp/update-parameters module (m/subvector parameters offset pc)))]
               (recur
                 (inc i)
                 (+ offset pc)

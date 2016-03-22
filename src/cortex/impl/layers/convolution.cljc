@@ -6,6 +6,7 @@
             [clojure.core.matrix.protocols :as mp]
             [cortex.backends :as b]
             [cortex.impl.layers :as layers]
+            [cortex.util :as util]
             #?(:clj [cortex.impl.vectorz-blas])
             #?(:clj [cortex.registry :refer [register-module]]
                :cljs [cortex.registry :refer-macros [register-module]])
@@ -310,18 +311,17 @@ of the output of a conv-net ignoring channels."
 
     cp/PParameters
     (parameters [this]
-      (m/join (m/as-vector (:weights this)) (m/as-vector (:bias this))))
+      [(:weights this) (:bias this)])
 
     (update-parameters [this parameters]
       (let [param-view (cp/parameters this)]
-        (m/assign! param-view parameters))
-      (let [gradient-view (cp/gradient this)]
-        (m/assign! gradient-view 0.0))
+        (util/assign-packed-to-sparse! param-view parameters)
+        (util/zero-sparse! (cp/gradient this)))
       this)
 
     cp/PGradient
     (gradient [this]
-      (m/join (m/as-vector (:weight-gradient this)) (m/as-vector (:bias-gradient this)))))
+      [(:weight-gradient this) (:bias-gradient this)]))
 
 
 (defn planar-max-pooling-forward!
