@@ -35,7 +35,8 @@
         input (b/array  (flatten (map #(repeat num-channels %)
                                               (range 1 (+ (* input-dim input-dim) 1)))))
         weights (b/array  (map #(repeat (* k-dim k-dim num-channels) %)
-                                       (range 1 (+ n-kernels 1))))
+                                       ;(range 1 (+ n-kernels 1))))
+                                       (take n-kernels (repeat -1))))
         bias (b/zero-array  [1 n-kernels])]
     (conv/->Convolutional weights bias conv-config)))
 
@@ -99,6 +100,46 @@
              (m/eseq input-gradient))))))
 
 
+(deftest pool-layer-negative-input
+  "Test the pooling layer output when input is negative" 
+  (let [pool-layer (conv/->Pooling pool-layer-config)
+        input (b/array (range -8 8))
+        forward-pool-layer (core/forward pool-layer input)
+        output-gradient (b/array  [1 2 3 4])
+        backward-pool-layer (core/backward forward-pool-layer input output-gradient)
+        input-gradient (core/input-gradient backward-pool-layer)]
+    (is (= (map double [-5 -1 3 7])
+           (m/eseq (core/output forward-pool-layer))))
+    (is (= (map double (flatten (map #(vector 0 0 0 %) (range 1 5))))
+           (m/eseq input-gradient)))
+    (let [input (b/array  (range 8 -8 -1))
+          forward-pool-layer (core/forward backward-pool-layer input)
+          output-gradient (b/array  [1 2 3 4])
+          backward-pool-layer (core/backward forward-pool-layer input output-gradient)
+          input-gradient (core/input-gradient backward-pool-layer)]
+      (is (= (map double [8 4 0 -4])
+             (m/eseq (core/output forward-pool-layer))))
+      (is (= (map double (flatten (map #(vector % 0 0 0) (range 1 5))))
+             (m/eseq input-gradient))))))
+
+
+(deftest pool-layer-negative-weights
+  "Test the pooling layer output when input-size and pooling size are not exactly divisible 
+which causes a partial window at the boundry"
+  (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 2 2 0 0 2 2 1 1))
+        input (b/array (repeat 36 -11))
+        forward-pool-layer (core/forward pool-layer input)]
+    (is (= (map double (into [] (repeat 9 -11)))
+           (m/eseq (core/output forward-pool-layer))))
+    (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 3 3 0 0 2 2 1 1))
+          forward-pool-layer (core/forward pool-layer input)]
+      (is (= (map double (into [] (repeat 9 -11)))
+           (m/eseq (core/output forward-pool-layer)))))
+    (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 3 3 0 0 2 2 1 1))
+          input (b/array (repeat 36 11))
+          forward-pool-layer (core/forward pool-layer input)]
+      (is (= (map double (into [] (repeat 9 11)))
+           (m/eseq (core/output forward-pool-layer)))))))
 
 
 (def conv-layer-pad-config (conv/create-conv-layer-config 3 3 2 2 0 0 1 1 1))
