@@ -35,8 +35,7 @@
         input (b/array  (flatten (map #(repeat num-channels %)
                                               (range 1 (+ (* input-dim input-dim) 1)))))
         weights (b/array  (map #(repeat (* k-dim k-dim num-channels) %)
-                                       ;(range 1 (+ n-kernels 1))))
-                                       (take n-kernels (repeat -1))))
+                                       (range 1 (+ n-kernels 1))))
         bias (b/zero-array  [1 n-kernels])]
     (conv/->Convolutional weights bias conv-config)))
 
