@@ -49,8 +49,8 @@
   "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
 of the output of a conv-net ignoring channels."
   ^long [^long input-dim ^long pad ^long kernel-size ^long stride]
-  (long (+ (quot (- (+ input-dim (* 2 pad))  kernel-size)
-                 stride)
+  (long (+ (Math/ceil (/ (- (+ input-dim (* 2 pad))  kernel-size)
+                         stride))
            1)))
 
 
