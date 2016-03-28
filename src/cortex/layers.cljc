@@ -91,9 +91,11 @@
   "Constructs a weighted linear transformation module using a dense matrix and bias vector.
    Shape of input and output are determined by the weight matrix."
   ([weights bias]
+    (linear weights bias nil))
+  ([weights bias options]
     (let [weights (m/array :vectorz weights)
           bias (m/array :vectorz bias)
-          wm (cortex.impl.layers.Linear. weights bias)
+          wm (cortex.impl.layers.Linear. weights bias nil options)
           [n-outputs n-inputs] (m/shape weights)
           n-outputs (long n-outputs)
           n-inputs (long n-inputs)]

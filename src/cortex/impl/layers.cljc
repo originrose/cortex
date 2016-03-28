@@ -292,6 +292,11 @@
   (update-parameters [this parameters]
     (let [param-view (cp/parameters this)]
       (util/assign-packed-to-sparse! param-view parameters)
+      
+      ;; apply L2 weight constraint if needed
+      (if-let [l2max (:l2-max-constraint this)]
+        (doseq [v (m/slice-views weights)] (m/mul! v (/ (double l2max) (double (m/magnitude v))))))
+      
       (util/zero-sparse! (cp/gradient this)))
     this)
 
