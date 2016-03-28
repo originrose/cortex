@@ -390,16 +390,16 @@
       (m/assign! input-tmp input)
       ;; TODO: figure out how to apply noise
       ;; (m/emap! noise-fn input-tmp) ;; input-tmp contains input with noise
-      (let [noise-up (cp/calc up input-tmp)
-            _ (m/assign! output-tmp (cp/output noise-up)) ;; output-tmp contains noisy output from up
-            up (cp/forward up input)
+      (let [up (cp/forward up input)
+            _ (m/assign! output-tmp (cp/output up)) ;; output-tmp contains output from up
             down (cp/forward down output-tmp)
             ]
         (Autoencoder. up down input-tmp output-tmp)))
 
     (backward [this input output-gradient]
-      (let [down (cp/backward down output-tmp (m/sub (cp/output down) input))
-            _ (m/assign! output-tmp output-gradient)
+      (let [error (m/sub (cp/output down) input)
+            down (cp/backward down output-tmp error)
+            _ (m/assign! output-tmp output-gradient) ;; use output-tmp for gradient
             _ (m/add! output-tmp (cp/input-gradient down)) ;; output-tmp contains gradient
             up (cp/backward up input output-tmp)
             ]
