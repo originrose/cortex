@@ -63,7 +63,8 @@
 
   cp/PNeuralTraining
     (forward [this input]
-      (let [inv-prob (double (/ 1.0 probability))]
+      (let [probability (double probability)
+            inv-prob (double (/ 1.0 probability))]
         (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0)) dropout))
       (m/assign! output input)
       (m/mul! output dropout)
