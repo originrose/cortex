@@ -100,7 +100,7 @@
 
 
 (deftest pool-layer-negative-input
-  "Test the pooling layer output when input is negative" 
+  "Test the pooling layer output when input is negative"
   (let [pool-layer (conv/->Pooling pool-layer-config)
         input (b/array (range -8 8))
         forward-pool-layer (core/forward pool-layer input)
@@ -123,7 +123,7 @@
 
 
 (deftest pool-layer-negative-weights
-  "Test the pooling layer output when input-size and pooling size are not exactly divisible 
+  "Test the pooling layer output when input-size and pooling size are not exactly divisible
 which causes a partial window at the boundry"
   (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 2 2 0 0 2 2 1 1))
         input (b/array (repeat 36 -11))
@@ -179,6 +179,6 @@ for testing against other conv net implementations."
     (is (= (m/eseq weight-gradient)
            (map double (flatten (repeat 4 [2 4 4 8 5 10 10 20 8 16 16 32])))))
     (is (= (m/eseq bias-gradient)
-           (map double [4 4 4 4])))
+           (map double [9 9 9 9])))
     (is (= (m/eseq input-gradient)
            (map double (repeat (* 9 3) 10))))))
