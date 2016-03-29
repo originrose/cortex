@@ -295,7 +295,11 @@
       
       ;; apply L2 weight constraint if needed
       (if-let [l2max (:l2-max-constraint this)]
-        (doseq [v (m/slice-views weights)] (m/mul! v (/ (double l2max) (double (m/magnitude v))))))
+        (doseq [v (m/slice-views weights)] 
+          (let [vmag (double (m/magnitude v))
+                l2max (double l2max)]
+            (when (> vmag l2max) 
+              (m/mul! v (/ l2max vmag))))))
       
       (util/zero-sparse! (cp/gradient this)))
     this)
