@@ -84,7 +84,7 @@
 
 (deftest core-test
   (let [net (layers/linear-layer 2 1)
-        n-epochs 5
+        n-epochs 5000
         batch-size 1
         loss (opt/mse-loss)
         optimizer (opt/adadelta-optimiser)
