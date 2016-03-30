@@ -216,7 +216,7 @@
   [this input]
   (let [bias (:bias this)
         weights (:weights this)
-        this (if (:output this) this (assoc this :output (b/new-array (m/shape bias))))
+        this (if (:output this) this (assoc this :output (b/new-array (m/shape bias)))) ;; ensure in-place output array
         output (:output this)]
     (if (and 
           (blas/supports-blas? input)
@@ -226,7 +226,7 @@
       (do
         (m/assign! output bias)
         (blas/gemv! output false 1.0 weights input 1.0)
-        (assoc this :output output))
+        this)
       (do
         (m/set-inner-product! output weights input)
         (m/add! output bias)
