@@ -378,7 +378,7 @@
         (m/sqrt! sd)
         this))
 
-;; DENOISING AUTOENCODER
+;; AUTOENCODER
 (defn noise-fn ^double [^double x]
   (if (< 0.2 (util/rand-normal))
     (util/rand-gaussian)
@@ -386,7 +386,7 @@
 
 #?(:cljs (register-module cortex.impl.layers.Autoencoder))
 (defrecord Autoencoder
-  [up down input-tmp output-tmp ]
+  [up down input-tmp output-tmp]
   cp/PModule
     (cp/calc [m input]
       (let [up (cp/calc up input)]
