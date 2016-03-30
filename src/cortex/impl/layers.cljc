@@ -212,24 +212,25 @@
 (defn blas-gemv-cutoff ^long [] 500000)
 
 (defn linear-forward!
-  "Linear backward pass.  Returns module updated with a new output."
+  "Linear forward pass.  Returns module updated with a new output."
   [this input]
-  (let [weights (:weights this)
-        bias (:bias this)
-        elem-count (long (m/ecount weights))]
-    (if (and
-         (> elem-count (blas-gemv-cutoff))
-         (blas/supports-blas? input)
-         (blas/supports-blas? weights)
-         (blas/supports-blas? bias))
-      (let [output (or (:output this)
-                       (b/new-array (m/shape bias)))]
+  (let [bias (:bias this)
+        weights (:weights this)
+        this (if (:output this) this (assoc this :output (b/new-array (m/shape bias))))
+        output (:output this)]
+    (if (and 
+          (blas/supports-blas? input)
+          (blas/supports-blas? weights)
+          (blas/supports-blas? bias)
+          (> (long (m/ecount weights)) (blas-gemv-cutoff)))
+      (do
         (m/assign! output bias)
         (blas/gemv! output false 1.0 weights input 1.0)
         (assoc this :output output))
-      (let [output (m/inner-product weights input)]
+      (do
+        (m/set-inner-product! output weights input)
         (m/add! output bias)
-        (assoc this :output output)))))
+        this))))
 
 
 (defn linear-backward!
