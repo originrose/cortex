@@ -42,7 +42,7 @@
    During training, units will be included with the given probability."
   ([shape probability]
     (when-not (coll? shape)
-      (error "logistic layer constructor requires a shape vector"))
+      (error "Dropout layer constructor requires a shape vector"))
     (cortex.impl.layers.Dropout.
       (util/empty-array shape)
       (util/empty-array shape)

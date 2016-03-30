@@ -290,8 +290,8 @@
     [(:weights this) (:bias this)])
 
   (update-parameters [this parameters]
-    (let [param-view (cp/parameters this)]
-      (util/assign-packed-to-sparse! param-view parameters)
+    (let [param-view (m/join (m/as-vector weights) (m/as-vector bias))]
+      (m/assign! param-view parameters)
       
       ;; apply L2 weight constraint if needed
       (if-let [l2max (:l2-max-constraint this)]
@@ -301,7 +301,8 @@
             (when (> vmag l2max) 
               (m/mul! v (/ l2max vmag))))))
       
-      (util/zero-sparse! (cp/gradient this)))
+      (m/fill! (:weight-gradient this) 0.0)
+      (m/fill! (:bias-gradient this) 0.0))
     this)
 
   cp/PGradient
