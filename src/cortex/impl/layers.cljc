@@ -259,7 +259,8 @@
        (blas/gemv! input-gradient true 1.0 weights output-gradient 0.0)
        (assoc this :input-gradient input-gradient))
      (do
-       (assoc this :input-gradient (m/inner-product (m/transpose weights) output-gradient))))))
+       (m/set-inner-product! (:input-gradient this) (m/transpose weights) output-gradient)
+       this))))
 
 ;; LINEAR
 ;; function that implements a linear transformation (weights + bias)
