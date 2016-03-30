@@ -277,9 +277,7 @@
 
   cp/PNeuralTraining
     (forward [this input]
-      (-> this
-        (cp/calc input)
-        (assoc :input input)))
+      (cp/calc this input))
 
     (backward [this input output-gradient]
       (linear-backward! this input output-gradient))

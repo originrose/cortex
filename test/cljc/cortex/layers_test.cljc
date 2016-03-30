@@ -78,6 +78,11 @@
           input [1 2]]
       (is (m/equals [15 89]
                      (calc-output a input)))))
+  (testing "idempotent in-place updates"
+    (let [a (layers/linear [[1 2] [-3 -4]] [10 100])
+          input [1 2]
+          a (calc a input)]
+      (is (identical? a (calc a input)))))
   (testing "backprop gradients"
     (let [a (layers/linear [[1 2] [-3 -4]] [10 100])
           input [1 2]
