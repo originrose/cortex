@@ -440,6 +440,61 @@
                       (m/clone input-tmp)
                       (m/clone output-tmp))))
 
+;(defrecord ReflectiveEncoder
+;  [up down input-tmp output-tmp]
+;  cp/PModule
+;    (cp/calc [this input]
+;      (let [new-up (cp/calc up input)]
+;        (if (identical? new-up up)
+;          this
+;          (ReflectiveEncoder. new-up down input-tmp output-tmp))))
+;
+;    (cp/output [m]
+;      (cp/output up))
+;
+;  cp/PNeuralTraining
+;    (forward [this input]
+;      (m/assign! input-tmp input)
+;      (let [up (cp/calc up input)
+;            _ (m/assign! output-tmp (cp/output up)) ;; output-tmp contains output from up
+;            down (cp/forward down output-tmp)
+;            ]
+;        (ReflectiveEncoder. up down input-tmp output-tmp)))
+;
+;    (backward [this input output-gradient]
+;      (let [down (cp/backward down output-tmp error)
+;            _ (m/assign! input-tmp (cp/output down)) ;; use input-tmp for reconstructed input
+;            up (cp/forward up input-tmp)
+;            _ (m/add! output-tmp (cp/input-gradient down)) ;; output-tmp contains gradient
+;            up (cp/backward up input output-tmp)
+;            ]
+;        (ReflectiveEncoder. up down input-tmp output-tmp)))
+;
+;    (input-gradient [this]
+;      (cp/input-gradient up))
+;
+;    cp/PGradient
+;    (gradient [this]
+;      (concat (cp/gradient up) (cp/gradient down)))
+;
+;    cp/PParameters
+;    (parameters [this]
+;      (concat (cp/parameters up) (cp/parameters down)))
+;
+;    (update-parameters [this parameters]
+;      (let [nup (cp/parameter-count up)
+;            ndown (cp/parameter-count down)
+;            up (cp/update-parameters up (m/subvector parameters 0 nup))
+;            down (cp/update-parameters down (m/subvector parameters nup ndown))]
+;        (ReflectiveEncoder. up down input-tmp output-tmp)))
+;
+;    cp/PModuleClone
+;      (clone [this]
+;        (ReflectiveEncoder. (cp/clone up)
+;                            (cp/clone down)
+;                            (m/clone input-tmp)
+;                            (m/clone output-tmp))))
+
 
 #?(:clj
    (defrecord KSparse [^long k]
