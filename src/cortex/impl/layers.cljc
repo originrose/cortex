@@ -241,17 +241,7 @@
         weight-gradient (:weight-gradient this)
         bias-gradient (:bias-gradient this)
         elem-count (long (m/ecount weights))]
-    #?(:clj
-       (if (and (mp/as-double-array weight-gradient)
-                (mp/as-double-array output-gradient)
-                (mp/as-double-array input))
-         (ConvOps/addOuterProduct (mp/as-double-array weight-gradient)
-                                  (mp/as-double-array input)
-                                  (mp/as-double-array output-gradient))
-         (m/add! (m/as-vector weight-gradient) (m/as-vector
-                                                (m/outer-product output-gradient input))))
-       :cljs (m/add! (m/as-vector weight-gradient) (m/as-vector
-                                                    (m/outer-product output-gradient input))))
+    (m/add-outer-product! weight-gradient output-gradient input)
     (m/add! bias-gradient output-gradient)
     (if (and (blas/supports-blas? weights)
              (blas/supports-blas? output-gradient))

@@ -101,7 +101,7 @@
           n-inputs (long n-inputs)]
       (when-not (== n-outputs (m/dimension-count bias 0)) (error "Mismatched weight and bias shapes"))
       (-> wm
-        (assoc :weight-gradient (util/empty-array [(* n-outputs n-inputs)]))
+        (assoc :weight-gradient (util/empty-array [n-outputs n-inputs]))
         (assoc :bias-gradient (util/empty-array [n-outputs]))
         (assoc :input-gradient (util/empty-array [n-inputs]))))))
 
