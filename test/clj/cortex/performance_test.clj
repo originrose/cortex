@@ -1,5 +1,6 @@
 (ns cortex.performance-test
   (:require [clojure.core.matrix :as m]
+            [cortex.layers :as layers]
             [cortex.impl.layers :as impl]
             [cortex.core :as core]
             [cortex.description :as desc]
@@ -42,3 +43,14 @@
                 (cp/forward network input)
                 (cp/backward network input output-gradient))
               (core/optimise optimizer network 1))))))
+
+;; miscellaneous performance tests
+(comment
+  ;; testing for linear layer computation
+  (let [a (layers/linear-layer 1000 1000)
+        input (vec (range 1000))
+        ograd (vec (range 1000))
+        a (time (core/forward a input))
+        a (time (core/backward a input ograd))]
+    :OK)
+  )
