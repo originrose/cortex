@@ -7,6 +7,7 @@
             [cortex.optimise :as opt]
             [cortex.backends :as b]
             [cortex.protocols :as cp]
+            [criterium.core :as q]
             [core.blas.protocols :as blas]
             [clojure.core.matrix.protocols :as mp]
             [clojure.test :refer [deftest is are]]
@@ -47,10 +48,17 @@
 ;; miscellaneous performance tests
 (comment
   ;; testing for linear layer computation
-  (let [a (layers/linear-layer 1000 1000)
-        input (vec (range 1000))
-        ograd (vec (range 1000))
+  (let [SIZE 1000
+        a (layers/linear-layer SIZE SIZE)
+        input (m/array :vectorz (range SIZE))
+        ograd (m/array :vectorz (range SIZE))
         a (time (core/forward a input))
-        a (time (core/backward a input ograd))]
-    :OK)
+        _ (q/quick-bench (core/backward a input ograd))])
+  
+  ;; testing for outer products
+  (let [SIZE 1000
+        m (m/new-array [SIZE SIZE])
+        a (m/array :vectorz (range SIZE))
+        b (m/array :vectorz (range SIZE))]
+    (q/quick-bench (m/add-outer-product! m a b)))
   )
