@@ -33,7 +33,6 @@
 
 (defn join-item-list
   [item-seq]
-  (throw (Exception. "shouldn't get here"))
   (let [vecs (map m/as-vector item-seq)]
     (if (seq vecs)
       (apply m/join vecs)
