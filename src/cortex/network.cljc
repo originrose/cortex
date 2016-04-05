@@ -31,14 +31,14 @@
 
 (defn evaluate-mse
   "evaluate the network using aggregate mse error.  Returns average error over dataset"
-  [network test-data test-labels]
+  ^double [network test-data test-labels]
   (let [loss-fn (opt/mse-loss)
         results (run network test-data)
         total-error (reduce (fn [sum [result target]]
                               (+ sum (cp/loss loss-fn result target)))
                             0
                             (map vector results test-labels))]
-    (/ total-error (count test-data))))
+    (double (/ total-error (count test-data)))))
 
 (defn max-index
   [coll]
@@ -50,21 +50,33 @@
                   [nil nil]
                   (range (count coll)))))
 
+
 (defn softmax-results-to-unit-vectors
   [results]
   (let [zeros (apply vector (repeat (first (m/shape (first results))) 0))]
-    (mapv #(m/array (assoc zeros (max-index (into [] (seq  %))) 1.0))
-                      results)))
+    (mapv #(assoc zeros (max-index (into [] (seq  %))) 1.0)
+          results)))
+
+
+(defn softmax-results
+  ^double [results labels]
+  (let [correct (count (filter #(m/equals (first %) (second %))
+                               (map vector
+                                    (softmax-results-to-unit-vectors results)
+                                    labels)))]
+    (double (/ correct (count labels)))))
+
 
 (defn evaluate-softmax
   "evaluate the network assuming single classification and last layer is softmax"
-  [network test-data test-labels]
-  (let [results (softmax-results-to-unit-vectors (run network test-data))
-        correct (count (filter #(m/equals (first %) (second %)) (map vector results test-labels)))]
-    (double (/ correct (count test-labels)))))
+  ^double [network test-data test-labels]
+  (softmax-results (run network test-data) test-labels))
 
 
 (defn train-step
+  "Trains a network for a single training example. 
+   
+   Returns network with updated gradient."
   [input answer network loss-fn]
   (let [network (core/forward network input)
         temp-answer (core/output network)
@@ -84,23 +96,56 @@
 (defn train
   [network optimizer loss-fn training-data training-labels batch-size n-epochs & [test-data test-labels]]
   (let [epoch-batches (repeatedly n-epochs
-                                  #(into [] (partition batch-size (shuffle (range (count training-data))))))
+                                  #(into [] (partition batch-size
+                                                       (shuffle (range (count training-data))))))
         epoch-count (atom 0)
-        [optimizer network] (reduce (fn [opt-network batch-index-seq]
-                                      (let [_ (swap! epoch-count inc)
-                                            [optimizer network]
-                                            (reduce (fn [[optimizer network] batch-indexes]
-                                                      (let [input-seq (mapv training-data batch-indexes)
-                                                            answer-seq (mapv training-labels batch-indexes)
-                                                            [optimizer network] (train-batch input-seq
-                                                                                             answer-seq
-                                                                                             network optimizer loss-fn)]
-                                                        [optimizer network]))
-                                                    opt-network
-                                                    batch-index-seq)]
-                                        (when test-data
-                                          (println "epoch mse-loss:" (evaluate-mse network test-data test-labels)))
-                                        [optimizer network]))
-                                    [optimizer network]
-                                    epoch-batches)]
+        [optimizer network]
+        (reduce (fn [opt-network batch-index-seq]
+                  (let [_ (swap! epoch-count inc)
+                        [optimizer network]
+                        (reduce (fn [[optimizer network] batch-indexes]
+                                  (let [input-seq (mapv training-data batch-indexes)
+                                        answer-seq (mapv training-labels batch-indexes)
+                                        [optimizer network]
+                                        (train-batch input-seq
+                                                     answer-seq
+                                                     network optimizer loss-fn)]
+                                    [optimizer network]))
+                                opt-network
+                                batch-index-seq)]
+                    (when test-data
+                      (println "epoch mse-loss:" (evaluate-mse network test-data test-labels)))
+                    [optimizer network]))
+                [optimizer network]
+                epoch-batches)]
     network))
+
+
+(defn train-until-error-stabilizes
+  [network optimizer loss-fn training-data training-labels batch-size cv-data cv-labels]
+  (loop [network network
+         optimizer optimizer
+         mean-error-derivative -1.0
+         last-error 0.0]
+    (if (< mean-error-derivative 0.0)
+      (let [epoch-data (vec (partition batch-size (shuffle (range (count training-data)))))
+            [optimizer network]
+            (reduce (fn [[optimizer network] batch-indexes]
+                      (let [input-seq (mapv training-data batch-indexes)
+                            answer-seq (mapv training-labels batch-indexes)
+                            [optimizer network] (train-batch input-seq
+                                                             answer-seq
+                                                             network optimizer loss-fn)]
+                        [optimizer network]))
+                    [optimizer network]
+                    epoch-data)
+            epoch-error (evaluate-mse network cv-data cv-labels)
+            _ (println "epoch error:" epoch-error)
+            ;;While this error is smaller than last error, continue
+            epoch-derivative (if (= 0.0 last-error)
+                               (- epoch-error)
+                               (- epoch-error last-error))
+            mean-error-derivative (+ (* 0.8 mean-error-derivative) (* 0.2 epoch-derivative))
+            last-error epoch-error]
+        (recur network optimizer mean-error-derivative last-error))
+      network)))

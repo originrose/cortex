@@ -1,9 +1,11 @@
 (ns cortex.optimise
   "Namespace for optimisation algorithms, loss functions and optimiser objects"
   (:require [cortex.protocols :as cp]
+            [clojure.core.matrix.protocols :as mp]
             [cortex.util :as util :refer [error]]
             [clojure.core.matrix.linear :as linear]
-            [clojure.core.matrix :as m]))
+            [clojure.core.matrix :as m])
+  #?(:clj (:import [cortex.impl AdamOptimizer OptOps])))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)
@@ -12,6 +14,32 @@
 (defn new-mutable-vector
   [size]
   (m/mutable (m/array :vectorz (repeat size 0))))
+
+;; ==============================================
+;; Adam
+
+#?(:clj
+    (do
+      (defrecord Adam [^AdamOptimizer optimizer]
+        cp/PGradientOptimiser
+        (compute-parameters [this gradient parameter]
+          (.step optimizer (mp/as-double-array gradient) (mp/as-double-array parameter))
+          (assoc this :parameters parameter))
+        cp/PParameters
+        (parameters [this]
+          [(:parameters this)]))
+
+      (defn adam
+        "Returns a PGradientOptimiser that uses Adam to perform gradient
+        descent. For more information on the algorithm, see the paper at
+        http://arxiv.org/pdf/1412.6980v8.pdf
+        The implementation is in Java and is located at
+        cortex/java/cortex/impl/AdamOptimizer.java"
+        [& {:keys [a b1 b2 e]
+            :or { a 0.001 b1 0.9 b2 0.999 e 1e-8}}]
+        (->Adam (AdamOptimizer. a b1 b2 e)))))
+
+;; ==============================================
 
 (defn sqrt-with-epsilon!
   "res[i] = sqrt(vec[i] + epsilon)"
@@ -26,7 +54,8 @@
   (m/mul! accumulator (- 1.0 decay-rate))
   (m/add-scaled-product! accumulator data-vec data-vec decay-rate))
 
-(defn adadelta-step!
+
+(defn adadelta-step-core-matrix!
   "http://www.matthewzeiler.com/pubs/googleTR2012/googleTR2012.pdf
 Mutates: grad-sq-accum dx-sq-accum rms-grad rms-dx dx
 Returns new parameters"
@@ -37,9 +66,12 @@ Returns new parameters"
     ;;Compute squared gradient running average and mean squared gradient
     (compute-squared-running-average! grad-sq-accum gradient decay-rate)
 
+
     (sqrt-with-epsilon! rms-grad grad-sq-accum epsilon)
+
     ;;Compute mean squared parameter update from past squared parameter update
     (sqrt-with-epsilon! rms-dx dx-sq-accum epsilon)
+
 
     ;;Compute update
     ;;x(t) = -1.0 * (rms-gx/rms-grad) * gradient
@@ -55,49 +87,102 @@ Returns new parameters"
     (compute-squared-running-average! dx-sq-accum dx decay-rate)
 
     ;;Compute new parameters and return them.
-    (m/add parameters dx)
-    ))
+    (m/add! parameters dx)
+    parameters))
+
+#?(:cljs (def adadelta-step! adadelta-step-core-matrix!)
+   :clj (defn adadelta-step!
+          [decay-rate epsilon grad-sq-accum dx-sq-accum rms-grad rms-dx dx
+           gradient parameters]
+          (let [grad-sq-ary (mp/as-double-array grad-sq-accum)
+                dx-sq-ary (mp/as-double-array dx-sq-accum)
+                gradient-ary (mp/as-double-array gradient)
+                parameters-ary (mp/as-double-array parameters)]
+
+            (if (and grad-sq-ary
+                     dx-sq-ary
+                     gradient-ary
+                     parameters-ary)
+              (do
+                (OptOps/adadeltaStep decay-rate epsilon grad-sq-ary dx-sq-ary
+                                     gradient-ary parameters-ary)
+                parameters)
+              (adadelta-step-core-matrix! decay-rate epsilon grad-sq-accum
+                                          dx-sq-accum rms-grad rms-dx dx
+                                          gradient parameters)))))
 
 ;; ==============================================
 ;; ADADELTA optimiser
-
-(defrecord AdaDelta [msgrad     ;; mean squared gradient
-                     msdx       ;; mean squared delta update
-                     dx         ;; latest delta update
-                     parameters ;; updated parameters
-                     rms-g      ;; root mean squared gt
-                     rms-dx     ;; root mean squared (delta x)t-1
-                     ]
+(defrecord AdaDelta []
   cp/PGradientOptimiser
   (compute-parameters [adadelta gradient parameters]
     (let [decay-rate (double (or (:decay-rate adadelta) 0.05))
           epsilon (double (or (:epsilon adadelta) 0.000001))
-          msgrad (:msgrad adadelta)
-          msdx (:msdx adadelta)
-          dx (:dx adadelta)]
-      (assoc adadelta :parameters
-             (adadelta-step! decay-rate epsilon
-                             msgrad msdx
-                             rms-g rms-dx
-                             dx gradient parameters))))
+          elem-count (long (m/ecount parameters))
+          msgrad     (util/get-or-new-array adadelta :msgrad [elem-count])
+          msdx       (util/get-or-new-array adadelta :msdx [elem-count])
+          dx         (util/get-or-new-array adadelta :dx [elem-count])
+          rms-g      (util/get-or-new-array adadelta :rms-g [elem-count])
+          rms-dx     (util/get-or-new-array adadelta :rms-dx [elem-count])]
+      (assoc adadelta
+             :msgrad msgrad
+             :msdx msdx
+             :dx dx
+             :rms-g rms-g
+             :rms-dx rms-dx
+             :parameters (adadelta-step! decay-rate epsilon
+                                         msgrad msdx
+                                         rms-g rms-dx
+                                         dx gradient parameters))))
   cp/PParameters
   (parameters [this]
-    (:parameters this))
-  )
+    [(:parameters this)]))
+
 
 (defn adadelta-optimiser
   "Constructs a new AdaDelta optimiser of the given size (parameter length)"
-  ([size]
-    (let [msgrad (new-mutable-vector size)
-          msdx (new-mutable-vector size)
-          dx (new-mutable-vector size)
-          rms-g (new-mutable-vector size)
-          rms-dx (new-mutable-vector size)]
-      (m/assign! msgrad 0.00)
-      (m/assign! msdx 0.00)
-      (m/assign! dx 0.0)
-      (AdaDelta. msgrad msdx dx nil rms-g rms-dx))))
+  ([]
+   (->AdaDelta))
+  ([param-count]
+   (println "Adadelta constructor with param count has been deprecated")
+   (->AdaDelta)))
 
+;; ==============================================
+;; Mikera optimiser
+;; TODO: complete conversion of algorithm
+
+;(def ^:const MIKERA-DEFAULT-LEARN-RATE 0.01)
+;(def ^:const MIKERA-DEFAULT-DECAY 0.95)
+;
+;(defn mikera-optimiser
+;  "Constructs a new mikera optimiser of the given size (parameter length)"
+;  ([size]
+;    (sgd-optimiser size nil))
+;  ([size {:keys [learn-rate decay] :as options}]
+;    (MikeraOptimiser. (new-mutable-vector size)
+;                      (new-mutable-vector size)
+;                      (new-mutable-vector size)
+;                      (new-mutable-vector size)
+;                      nil
+;                      options)))
+;
+;(defrecord MikeraOptimiser [parameters
+;                            mean-x
+;                            mean-g2
+;                            dx]
+;  cp/PGradientOptimiser
+;    (compute-parameters [this gradient parameters]
+;      (let [learn-rate (double (or (:learn-rate this) MIKERA-DEFAULT-LEARN-RATE))
+;            decay (double (or (:decay this) MIKERA-DEFAULT-DECAY))]
+;
+;        (m/assign! dx parameters)
+;        (m/sub! dx mean-x)
+;
+;        ;; accumulate the latest gradient
+;        (m/add-scaled! dx gradient (* -1.0 learn-rate))
+;
+;        ;; return the updated adadelta record. Mutable gradients have been updated
+;        (assoc this :parameters (m/add parameters dx)))))
 
 ;; ==============================================
 ;; SGD optimiser with momentum
@@ -115,7 +200,7 @@ Returns new parameters"
   ([size {:keys [learn-rate momentum] :as options}]
    (let [dx (new-mutable-vector size)]
       (m/assign! dx 0.0)
-      (SGDOptimiser. dx))))
+      (SGDOptimiser. dx nil options))))
 
 (extend-protocol cp/PGradientOptimiser
   SGDOptimiser
@@ -136,7 +221,7 @@ Returns new parameters"
 (extend-protocol cp/PParameters
   SGDOptimiser
     (parameters [this]
-      (:parameters this)))
+      [(:parameters this)]))
 
 
 
@@ -144,36 +229,66 @@ Returns new parameters"
 ;; Loss Functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; OK, this is a bit hacky and probably not ideally implemented yet
+;; But the idea is that we should treat a null in the target vector as a missing value
+;; and therefore propagate zero gradient. Should probably be true for all loss functions.
+(defn process-nulls
+  "Replaces non-numbers in the target vector with the activation (to ensure zero gradient)"
+  [activation target]
+  (cond
+    ;; if the target vector is nil, just use the current activation (i.e. completely zero gradient)
+    (nil? target)
+      activation
+    ;; if the target potentially contains nils, replace nils with the corresponding activation
+    (= Object (m/element-type target))
+      (m/emap (fn [a b] (if (number? a) a b)) target activation)
+    :else target))
+
 (defn mean-squared-error
   "Computes the mean squared error of an activation array and a target array"
   ([activation target]
-    (/ (double (m/esum (m/square (m/sub activation target))))
-       (double (m/ecount activation)))))
+   (let [target (process-nulls activation target)]
+      (/ (double (m/esum (m/square (m/sub activation target))))
+         (double (m/ecount activation))))))
 
-(deftype MSELoss []
+(defrecord MSELoss []
   cp/PLossFunction
-    (loss [this v target]
-      (mean-squared-error v target))
+  (loss [this v target]
+    (mean-squared-error v target))
 
-    (loss-gradient [this v target]
-      (let [r (m/mutable v)]
-        (m/sub! r target)
-        (m/scale! r (/ 2.0 (double (m/ecount v)))))))
+  (loss-gradient [this v target]
+    (let [target (process-nulls v target)
+          r (m/sub v target)]
+      (m/scale! r (/ 2.0 (double (m/ecount v)))))))
 
 (defn mse-loss
   "Returns a Mean Squared Error (MSE) loss function"
   ([]
-    (MSELoss.)))
+    (->MSELoss)))
 
 (def SMALL-NUM 1e-30)
 
-(deftype CrossEntropyLoss []
+;;Non mutually exclusive ce loss
+(defrecord CrossEntropyLoss []
   cp/PLossFunction
-    (loss [this v target]
-      (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM v)))
-            b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 (double SMALL-NUM)) a)))
-            c (m/esum (m/sub a b))]
-        c))
+  (loss [this v target]
+    ;;np.sum(np.nan_to_num(-y*np.log(a)-(1-y)*np.log(1-a)))
+    (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM v)))
+          b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 (double SMALL-NUM)) v)))
+          c (/ (double (m/esum (m/sub a b)))
+               (double (m/ecount v)))]
+      c))
 
-    (loss-gradient [this v target]
-      (m/sub v target)))
+  (loss-gradient [this v target]
+    (m/sub v target)))
+
+
+;;Mutually exclusive ce loss
+(defrecord SoftmaxCrossEntropyLoss []
+  cp/PLossFunction
+  (loss [this v target]
+    (let [c (double (m/esum (m/mul target (m/log (m/add SMALL-NUM v)))))]
+      (/ (- c) (double (m/ecount v)))))
+
+  (loss-gradient [this v target]
+    (m/sub v target)))

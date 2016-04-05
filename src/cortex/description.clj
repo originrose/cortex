@@ -1,6 +1,7 @@
 (ns cortex.description
   (:require [cortex.layers :as layers]
             [cortex.impl.layers :as impl]
+            [cortex.impl.layers.convolution :as conv]
             [cortex.core :as core]
             [clojure.core.matrix :as m]))
 
@@ -17,24 +18,32 @@
                              :output-height height
                              :output-channels channels}]))
 
-(defn linear [num-output] [{:type :linear :output-size num-output}])
+(defn linear [num-output & {:keys [weights bias]}]
+  [{:type :linear :output-size num-output
+    :weights weights :bias bias}])
 
 (defn softmax [num-classes] [{:type :linear :output-size num-classes}
                              {:type :softmax}])
 
 (defn relu [] [{:type :relu}])
-(defn linear->relu [num-output] [{:type :linear :output-size num-output}
-                                 {:type :relu}])
+(defn linear->relu [num-output & opts]
+  [(first (apply linear num-output opts))
+   {:type :relu}])
 
 (defn logistic [] {:type :logistic})
-(defn linear->logistic [num-output] [{:type :linear :output-size num-output}
-                                     {:type :logistic}])
+(defn linear->logistic [num-output & opts]
+  [(first (apply linear num-output opts))
+   {:type :logistic}])
+
+(defn gaussian-noise [] { :type :guassian-noise})
 
 (defn k-sparse [k] {:type :k-sparse :k k})
 
+(defn dropout [probability] {:type :dropout :probability probability})
 
 (defn convolutional
-  ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels]
+  ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
+    & {:keys [weights bias]} ]
    (when (or (= 0 stride-x)
              (= 0 stride-y))
      (throw (Exception. "Convolutional layers must of stride >= 1")))
@@ -45,7 +54,7 @@
      (throw (Exception. "Convolutional layers must of num-kernels >= 1")))
    [{:type :convolutional :kernel-width kernel-width :kernel-height kernel-height
      :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
-     :num-kernels num-kernels}])
+     :num-kernels num-kernels :weights weights :bias bias}])
   ([kernel-dim pad stride num-kernels]
    (convolutional kernel-dim kernel-dim pad pad stride stride num-kernels)))
 
@@ -101,13 +110,13 @@
         result (assoc (->> (carry-data-format-forward previous item)
                            (carry-input-image-dims-forward previous))
                       :input-size input-size
-                      :output-data-format :interleaved)]
+                      :output-data-format :planar)]
     result))
 
 (defn carry-image-dims-forward
   [previous item]
   (if-let [channels (:output-channels previous)]
-    (let [data-format (get previous :output-data-format :interleaved)]
+    (let [data-format (get previous :output-data-format :planar)]
       (assoc item :output-channels channels
              :output-width (:output-width previous)
              :output-height (:output-height previous)
@@ -115,26 +124,34 @@
              :output-data-format data-format))
     item))
 
+(defn build-pass-through-desc
+  "These layer types do not change their data types from input to output"
+  [previous item]
+  (let [io-size (:output-size previous)]
+    (assoc (carry-image-dims-forward previous item)
+           :input-size io-size :output-size io-size)))
+
 ;;Pure activation layers can be placed on images as well as
 ;;on vectors.
 (defmethod build-desc :relu
   [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc (carry-image-dims-forward previous item)
-           :input-size io-size :output-size io-size)))
+  (build-pass-through-desc previous item))
 
 (defmethod build-desc :logistic
   [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc (carry-image-dims-forward previous item)
-           :input-size io-size :output-size io-size)))
+  (build-pass-through-desc previous item))
 
 (defmethod build-desc :k-sparse
   [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc (carry-image-dims-forward previous item)
-           :input-size io-size :output-size io-size)))
+  (build-pass-through-desc previous item))
 
+(defmethod build-desc :dropout
+  [previous item]
+  (build-pass-through-desc previous item))
+
+(defmethod build-desc :guassian-noise
+  [previous item]
+  (build-pass-through-desc previous item))
 
 (defmethod build-desc :softmax
   [previous item]
@@ -150,16 +167,22 @@
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)
-        output-height (impl/get-padded-strided-dimension input-height pad-y kernel-height stride-y)
+        output-width (conv/get-padded-strided-dimension input-width pad-x
+                                                        kernel-width stride-x)
+        output-height (conv/get-padded-strided-dimension input-height pad-y
+                                                         kernel-height stride-y)
         output-channels num-kernels
         output-size (* output-width output-height output-channels)
-        input-data-format (get previous :output-data-format :interleaved)
-        output-data-format (get item :output-data-format :interleaved)]
-    (assoc item :input-width input-width :input-height input-height :input-channels input-channels
-           :output-width output-width :output-height output-height :output-channels output-channels
+        input-data-format (get previous :output-data-format :planar)
+        output-data-format (get item :output-data-format :planar)]
+    (assoc item
+           :input-width input-width :input-height input-height
+           :input-channels input-channels
+           :output-width output-width :output-height output-height
+           :output-channels output-channels
            :output-size output-size
            :input-data-format input-data-format :output-data-format output-data-format)))
+
 
 (defmethod build-desc :max-pooling
   [previous item]
@@ -167,13 +190,17 @@
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (impl/get-padded-strided-dimension input-width pad-x kernel-width stride-x)
-        output-height (impl/get-padded-strided-dimension input-height pad-y kernel-height stride-y)
+        output-width (conv/get-padded-strided-dimension input-width pad-x
+                                                        kernel-width stride-x)
+        output-height (conv/get-padded-strided-dimension input-height pad-y
+                                                         kernel-height stride-y)
         output-channels input-channels
         output-size (* output-width output-height output-channels)
         input-data-format (get previous :output-data-format :interleaved)]
-    (assoc item :input-width input-width :input-height input-height :input-channels input-channels
-           :output-width output-width :output-height output-height :output-channels output-channels
+    (assoc item :input-width input-width :input-height input-height
+           :input-channels input-channels
+           :output-width output-width :output-height output-height
+           :output-channels output-channels
            :output-size output-size :input-data-format input-data-format
            :output-data-format input-data-format)))
 
@@ -181,30 +208,10 @@
 
 (defmethod create-module :input [desc] nil)
 
-(defn handle-planar-weights
-  [desc weights]
-  (if (and (= :planar (:input-data-format desc))
-           (> (:input-channels desc) 1))
-    (let [^long channels (:input-channels desc)]
-      (println "fixing planar" (dissoc desc :weights :bias))
-      (doseq [row (m/rows weights)]
-        (let [^long elem-count (first (m/shape row))
-              item-count (quot elem-count channels)
-              elem-sequences (partition item-count (m/eseq row))
-              interleaved-elems (apply interleave elem-sequences)]
-         (when-not (= 0 (rem elem-count item-count))
-           (throw (Exception. "Weight element count is not divisible by number of channels")))
-         (m/assign! row interleaved-elems)))
-      weights)
-    weights))
-
 (defmethod create-module :linear
   [desc]
-  (let [{:keys [input-size output-size weights bias]} desc
-        retval (layers/linear-layer input-size output-size)]
-    (if (and weights bias)
-      (assoc retval :weights (handle-planar-weights desc weights) :bias bias)
-      retval)))
+  (let [{:keys [input-size output-size weights bias]} desc]
+    (layers/linear-layer input-size output-size :weights weights :bias bias)))
 
 (defmethod create-module :logistic
   [desc]
@@ -222,17 +229,21 @@
   [desc]
   (layers/k-sparse (:k desc)))
 
+(defmethod create-module :guassian-noise
+  [desc]
+  (layers/guassian-noise))
+
+
 (defmethod create-module :convolutional
   [{:keys [input-width input-height input-channels
            kernel-width kernel-height pad-x pad-y
            stride-x stride-y num-kernels
            weights bias] :as desc}]
-  (let [retval (layers/convolutional input-width input-height input-channels
-                                     kernel-width kernel-height pad-x pad-y
-                                     stride-x stride-y num-kernels)]
-    (if (and weights bias)
-      (assoc retval :weights (handle-planar-weights desc weights) :bias bias)
-      retval)))
+  (layers/convolutional input-width input-height input-channels
+                        kernel-width kernel-height pad-x pad-y
+                        stride-x stride-y num-kernels
+                        :weights weights :bias bias))
+
 
 (defmethod create-module :max-pooling
   [{:keys [input-width input-height input-channels
@@ -241,6 +252,11 @@
   (layers/max-pooling input-width input-height input-channels
                       kernel-width kernel-height pad-x pad-y
                       stride-x stride-y))
+
+
+(defmethod create-module :dropout
+  [desc]
+  (layers/dropout [(:output-size desc)] (:probability desc)))
 
 (defn build-full-network-description
   "build step verifies the network and fills in the implicit entries calculating
@@ -258,3 +274,8 @@
   [built-descriptions]
   (let [modules (filterv identity (map create-module built-descriptions))]
     (core/stack-module modules)))
+
+
+(defn build-and-create-network
+  [input-desc-seq]
+  (create-network (build-full-network-description input-desc-seq)))

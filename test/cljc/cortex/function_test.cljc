@@ -6,6 +6,7 @@
         :clj
         [clojure.test :refer [deftest is testing]])
     [cortex.core :refer [calc output forward backward input-gradient parameters gradient parameter-count calc-output]]
+    [cortex.backends :as b]
     [clojure.core.matrix :as m]
     #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.layers :as layers]
@@ -70,6 +71,28 @@
   (testing "Backward pass"
     (let [wm (layers/linear [[1 2] [3 4]] [0 10])
           wm (backward wm [1 2] [1 2])]
-      (is (m/equals [1 2 2 4] (:weight-gradient wm)))
+      (is (m/equals [[1 2] [2 4]] (:weight-gradient wm)))
+      (is (m/equals [1 2] (:bias-gradient wm)))
+      (is (m/equals [7 10] (:input-gradient wm))))))
+
+
+(deftest test-linear-fastpath-module
+  (testing "Parameters"
+    (let [wm (layers/linear (b/array [[1 2] [3 4]]) (b/array [0 10]))
+          parm (parameters wm)
+          grad (gradient wm)]
+      (is (== 6 (parameter-count wm)))
+      (is (m/equals [1 2 3 4 0 10] parm))
+      (is (= (m/shape parm) (m/shape grad)))
+      (is (m/zero-matrix? grad))))
+
+  (testing "Calculation"
+    (let [wm (layers/linear (b/array [[1 2] [3 4]]) (b/array [0 10]))
+          wm (calc wm (b/array [1 2]))]
+      (is (m/equals [5 21] (output wm)))))
+  (testing "Backward pass"
+    (let [wm (layers/linear (b/array [[1 2] [3 4]]) (b/array [0 10]))
+          wm (backward wm (b/array [1 2]) (b/array [1 2]))]
+      (is (m/equals [[1 2] [2 4]] (:weight-gradient wm)))
       (is (m/equals [1 2] (:bias-gradient wm)))
       (is (m/equals [7 10] (:input-gradient wm))))))

@@ -3,7 +3,7 @@
             [cortex.util :as util]
             [cortex.layers :as layers]
             [clojure.core.matrix :as m]
-            [thinktopic.datasets.mnist :as mnist]
+            [cortex-datasets.mnist :as mnist]
             [cortex.optimise :as opt]
             [cortex.core :as core]
             [clojure.core.matrix.random :as rand]
@@ -16,29 +16,16 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-(defn- mnist-labels
-    [class-labels]
-    (let [n-labels (count class-labels)
-          labels (m/zero-array [n-labels 10])]
-        (doseq [i (range n-labels)]
-            (m/mset! labels i (nth class-labels i) 1.0))
-        labels))
+
+(def training-data (future (mnist/training-data)))
+(def training-labels (future (mnist/training-labels)))
+(def test-data  (future (mnist/test-data)))
+(def test-labels (future (mnist/test-labels)))
 
 
-(defonce training-data (into [] (m/rows @mnist/data-store)))
-(defonce training-labels (into [] (m/rows (mnist-labels @mnist/label-store))))
-(defonce test-data  (into [] (m/rows @mnist/test-data-store)))
-(defonce test-labels (into [] (m/rows (mnist-labels @mnist/test-label-store))))
-
-
-(def input-width (last (m/shape training-data)))
-(def output-width (last (m/shape training-labels)))
-
-
-(def n-epochs 10)
+(def n-epochs 2)
 (def batch-size 10)
 (def loss-fn (opt/mse-loss))
-(def hidden-layer-size 80)
 
 
 (defn create-network
@@ -56,27 +43,29 @@
 
 (defn create-optimizer
   [network]
-  (opt/adadelta-optimiser (core/parameter-count network))
-  )
+  (opt/adam))
 
 (defn test-train-step
   []
-  (net/train-step (first training-data) (first training-labels) (create-network) loss-fn))
+  (net/train-step (first @training-data) (first @training-labels) (create-network) loss-fn))
 
 (defn train
   []
   (let [network (create-network)
         optimizer (create-optimizer network)]
-    (net/train network optimizer loss-fn training-data training-labels batch-size n-epochs test-data test-labels)))
+    (net/train network optimizer loss-fn
+               @training-data
+               @training-labels batch-size n-epochs
+               @test-data @test-labels)))
 
 
 (defn evaluate
   [network]
-  (net/evaluate-softmax network test-data test-labels))
+  (net/evaluate-softmax network @test-data @test-labels))
 
 (defn evaluate-mse
   [network]
-  (net/evaluate-mse network test-data test-labels))
+  (net/evaluate-mse network @test-data @test-labels))
 
 (def last-trained-network (atom nil))
 
@@ -99,7 +88,7 @@
 (defn evaluate-caffe-mnist
   []
   (let [network (load-caffe-mnist)]
-    (net/evaluate-softmax network test-data test-labels)))
+    (net/evaluate-softmax network @test-data @test-labels)))
 
 (defn -main
   [& args]

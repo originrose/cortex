@@ -27,7 +27,7 @@
       (assoc m :output (function input)))
     (cp/output [m]
       (:output m))
-    
+
   cp/PNeuralTraining
     (forward [this input]
       (assoc this :output (function input)))
@@ -52,11 +52,11 @@
                   :output (mapv cp/output new-modules))))
      (cp/output [m]
        (:output m))
-     
+
        cp/PGradient
     (gradient [this]
       (apply m/join (map cp/gradient modules)))
-    
+
   cp/PModuleClone
     (clone [this]
       (let [mod (Split. (mapv cp/clone modules))
@@ -64,7 +64,7 @@
                   (update mod :input/gradient m/clone)
                   mod)]
         mod))
-    
+
   cp/PNeuralTraining
     (forward [this input]
       (let [n (long (count modules))]
@@ -96,7 +96,7 @@
 
   cp/PParameters
     (parameters [this]
-      (apply m/join (map cp/parameters modules)))
+      (mapcat cp/parameters modules))
 
     (update-parameters [this parameters]
       (let [n (long (count modules))]
@@ -126,12 +126,12 @@
        (assoc m :output (apply combine-fn input)))
      (cp/output [m]
        (:output m))
-         
+
   cp/PModuleClone
     (clone [this]
       ;; we are stateless, so nothing to do!
-      this) 
-    
+      this)
+
   cp/PNeuralTraining
     (forward [this input]
       (assoc this :output (apply combine-fn input)))
@@ -150,7 +150,7 @@
 (defrecord StackModule
   [modules]
   cp/PModule
-    (calc [m input]
+    (calc [this input]
       (let [n (count modules)]
         (loop [i 0
                v input
@@ -158,10 +158,16 @@
           (if (< i n)
             (let [layer (nth modules i)
                   new-layer (cp/calc layer v)]
-              (recur (inc i) (cp/output new-layer) (assoc new-modules i new-layer)))
-            (StackModule. new-modules)))))
+              (recur (inc i)
+                     (cp/output new-layer)
+                     (if (identical? layer new-layer)
+                       new-modules
+                       (assoc new-modules i new-layer))))
+            (if (identical? modules new-modules)
+              this
+              (StackModule. new-modules))))))
 
-    (output [m]
+    (output [this]
       (cp/output (last modules)))
 
   cp/PNeuralTraining
@@ -171,11 +177,14 @@
                v input
                this this]
           (if (< i n)
-            (let [module (cp/forward (nth modules i) v)]
+            (let [module (nth modules i)
+                  new-module (cp/forward module v)]
               (recur
                 (inc i)
-                (cp/output module)
-                (assoc-in this [:modules i] module)))
+                (cp/output new-module)
+                (if (identical? module new-module)
+                  this
+                  (assoc-in this [:modules i] new-module))))
             this))))
 
     (backward [this input output-gradient]
@@ -184,13 +193,16 @@
                output-gradient output-gradient
                this this]
           (if (<= 0 i)
-            (let [module (cp/backward (nth modules i)
-                                      (if (> i 0) (cp/output (nth modules (dec i))) input)
-                                      output-gradient)]
+            (let [module (nth modules i)
+                  new-module (cp/backward module
+                                          (if (> i 0) (cp/output (nth modules (dec i))) input)
+                                          output-gradient)]
               (recur
                 (dec i)
-                (cp/input-gradient module)
-                (assoc-in this [:modules i] module)))
+                (cp/input-gradient new-module)
+                (if (identical? module new-module)
+                  this
+                  (assoc-in this [:modules i] new-module))))
             this))))
 
     (input-gradient [this]
@@ -204,11 +216,11 @@
 
   cp/PGradient
     (gradient [this]
-      (apply m/join (map cp/gradient modules)))
+      (mapcat cp/gradient modules))
 
   cp/PParameters
     (parameters [this]
-      (apply m/join (map cp/parameters modules)))
+      (mapcat cp/parameters modules))
 
     (update-parameters [this parameters]
       (let [n (long (count modules))]
@@ -218,8 +230,9 @@
           (if (< i n)
             (let [module (nth modules i)
                   pc (long (cp/parameter-count module))
-                  new-module-params (m/subvector parameters offset pc)
-                  module (cp/update-parameters module new-module-params)]
+                  module (if (= 0 pc)
+                           module
+                           (cp/update-parameters module (m/subvector parameters offset pc)))]
               (recur
                 (inc i)
                 (+ offset pc)

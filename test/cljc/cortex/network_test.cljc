@@ -84,12 +84,10 @@
 
 (deftest core-test
   (let [net (layers/linear-layer 2 1)
-        learning-rate 0.00001
-        momentum 0.9
-        n-epochs 10000
+        n-epochs 5000
         batch-size 1
         loss (opt/mse-loss)
-        optimizer (opt/sgd-optimiser (core/parameter-count net) {:learn-rate learning-rate :momentum momentum})
+        optimizer (opt/adadelta-optimiser)
         data CORN-DATA
         labels CORN-LABELS
         results CORN-RESULTS

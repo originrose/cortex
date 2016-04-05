@@ -11,11 +11,11 @@
 ;; default to assuming zero parameters
 (extend-protocol cp/PParameters
   #?(:clj Object :cljs object)
-  (parameters 
+  (parameters
       ([m]
         ;; default to assuming zero parameters
         EMPTY-VECTOR))
-    (update-parameters 
+    (update-parameters
       ([m parameters]
         (when (> 0 (long (m/ecount parameters))) (error "Non-zero length for parameter update"))
         m)))
@@ -23,7 +23,7 @@
 ;; default gradient function assumes zero parameters
 (extend-protocol cp/PGradient
   #?(:clj Object :cljs object)
-    (gradient 
+    (gradient
       ([m]
         EMPTY-VECTOR)))
 
@@ -45,14 +45,14 @@
 ;; default parameter count implementation is to... err... count the parameters. duh!
 (extend-protocol cp/PParameterCount
   #?(:clj Object :cljs object)
-    (parameter-count 
+    (parameter-count
       ([m]
-        (m/ecount (cp/parameters m)))))
+       (reduce + (map m/ecount (cp/parameters m))))))
 
 ;; Default loss gradient function returns :loss-gradient-fn (may be nil)
 (extend-protocol cp/PLossGradientFunction
   #?(:clj Object :cljs object)
-    (loss-gradient-fn 
+    (loss-gradient-fn
       ([m]
         (:loss-gradient-fn m))))
 
@@ -63,7 +63,7 @@
 ;; 4. Run backward pass
 (extend-protocol cp/PTraining
   #?(:clj Object :cljs object)
-    (train 
+    (train
       ([m input target]
         (let [m (cp/forward m input)
               output (cp/output m)
@@ -75,7 +75,8 @@
 ;;default serialization implementation for generic modules
 (defn record->map
   [rec]
-  (assoc (into {} rec) :record-type (.getName (type rec))))
+  (let [^Class klass (class rec)]
+    (assoc (into {} rec) :record-type (.getName klass))))
 
 (extend-protocol cp/PSerialize
   #?(:clj Object :cljs object)

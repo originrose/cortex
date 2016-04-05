@@ -12,6 +12,8 @@ pom.xml.asc
 /.project
 /.classpath
 /.settings/
+examples/mnist/.lein-*
+examples/mnist/.nrepl-port
 examples/mnist/checkouts
 examples/mnist/target
 examples/scrabble/checkouts

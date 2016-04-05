@@ -3,6 +3,7 @@
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
     [cortex.protocols :as cp]
+    [cortex.backends :as b]
     #?(:cljs [goog.string :refer [format]]))
 
   #?(:clj (:import [mikera.vectorz Vectorz]))
@@ -78,15 +79,18 @@
   (m/emul y (m/sub 1.0 y)))
 
 (defn weight-matrix
+  "Creates a randomised weight matrix.
+
+   Weights are gaussian values scaled acoording to 1/sqrt(no. columns). This ensures that outputs are distributed
+   on a similar scale to inputs, and provides reasonable initial gradient propagation."
   [rows cols]
-  (let [weight-scale (Math/sqrt (/ 1.0 (* (double rows) (double cols))))]
-    (m/mutable
-     (m/array
-      (mapv (fn [_]
-              (repeatedly cols
-                          #(* weight-scale
-                              (rand-gaussian))))
-            (range rows))))))
+  (let [weight-scale (Math/sqrt (/ 1.0 (double cols)))]
+    (b/array
+     (mapv (fn [_]
+             (vec (repeatedly cols
+                              #(* weight-scale
+                                  (rand-gaussian)))))
+           (range rows)))))
 
 (defn random-matrix
   "Constructs an array of the given shape with random normally distributed element values"
@@ -202,4 +206,46 @@
 (defn estimate-gradient
   "Computes a numerical approximation of the derivative of the function f at with respectr to input x"
   ([f x]
-    (let [x+dx (m/add )])))
+   (let [x+dx (m/add )])))
+
+
+(defn assign-sparse-to-packed!
+  [packed-data sparse-data]
+  (let [packed-data (if packed-data
+                      packed-data
+                      (let [elem-count (reduce + (map m/ecount sparse-data))]
+                        (b/new-array [elem-count])))]
+    (reduce (fn [^long offset next-item]
+              (let [item-vec (m/as-vector next-item)
+                    item-len (long (m/ecount item-vec))]
+                (m/assign! (m/subvector packed-data offset item-len) item-vec)
+                (+ offset item-len)))
+            0
+            sparse-data)
+    packed-data))
+
+(defn assign-packed-to-sparse!
+  [sparse packed]
+  (reduce (fn [^long offset next-item]
+            (let [elem-count (long (m/ecount next-item))]
+             (m/assign! (m/as-vector next-item)
+                        (m/subvector packed offset elem-count))
+             (+ offset elem-count)))
+          0
+          sparse))
+
+(defn zero-sparse!
+  [sparse]
+  (doseq [item sparse]
+    (m/fill! item 0.0)))
+
+
+(defn get-or-new-array
+  [item kywd shape]
+  (or (get item kywd)
+      (b/new-array shape)))
+
+(defn get-or-array
+  [item kywd data]
+  (or (get item kywd)
+      (b/array data)))

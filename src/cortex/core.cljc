@@ -5,6 +5,7 @@
             [cortex.impl.default- :as cortex.impl.default]
             [cortex.protocols :as cp]
             [cortex.layers :as layers]
+            [cortex.backends :as b]
             [cortex.util :as util :refer [error]]
             [clojure.core.matrix :as m]))
 
@@ -28,12 +29,19 @@
 (defn calc-output
   "Runs the calculation for a module. Returns the module output."
   ([m input]
-    (cp/output (cp/calc m input))))
+   (cp/output (cp/calc m input))))
+
+(defn join-item-list
+  [item-seq]
+  (let [vecs (map m/as-vector item-seq)]
+    (if (seq vecs)
+      (apply m/join vecs)
+      [])))
 
 (defn parameters
   "Gets the vector of parameters for a module (possibly empty)"
   ([m]
-    (cp/parameters m)))
+   (join-item-list (cp/parameters m))))
 
 (defn parameter-count
   "Gets the number of parameters for a given module."
@@ -43,7 +51,7 @@
 (defn gradient
   "Gets the accumulated gradient vector for a module (possibly empty)"
   ([m]
-    (cp/gradient m)))
+   (join-item-list (cp/gradient m))))
 
 (defn forward
   "Runs the forward training pass on a neural network module."
@@ -59,19 +67,29 @@
 (defn input-gradient
   "Gets the input gradient for a module. Throws an exception if not available."
   ([m]
-    (or (cp/input-gradient m) (error "No input gradient available - maybe run backward pass first?"))))
+   (or (cp/input-gradient m) (error "No input gradient available - maybe run backward pass first?"))))
+
 
 (defn optimise
   "Optimises a module using the given optimiser. Returns an [optimiser module] pair"
   ([optimiser module ^long batch-count]
    ;;Faster to create local copies of what could be quite large views.  This also means the
    ;;optimizer can copy those into itself and mutate them without affecting anything outside
-   (let [grads (m/array :vectorz (gradient module))
-         params (m/array :vectorz (parameters module))
-         _ (m/mul! grads (/ 1.0 batch-count))
+   (let [mod-params (cp/parameters module)
+         mod-gradient (cp/gradient module)
+         params (util/assign-sparse-to-packed! (:packed-params optimiser) mod-params)
+         grads (util/assign-sparse-to-packed! (:packed-grads optimiser) mod-gradient)
+         ;;It would be more efficient to fold this multiplication into the
+         ;;compute function call itself instead of an operation outside of it.
+         _ (when-not (= 0 batch-count)
+             (m/mul! grads (/ 1.0 batch-count)))
          optimiser (cp/compute-parameters optimiser grads params)
-         module (cp/update-parameters module (parameters optimiser))]
-     [optimiser module]))
+         parameters (parameters optimiser)
+         module (cp/update-parameters module parameters)]
+     [(assoc optimiser
+             :packed-params params
+             :packed-grads grads)
+      module]))
   ([optimiser module]
    (optimise optimiser module 1)))
 
@@ -88,4 +106,3 @@
   "clones a module, including all internal state structures. New module will be independent of the original."
   ([m]
     (cp/clone m)))
-
