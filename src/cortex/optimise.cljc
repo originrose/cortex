@@ -24,10 +24,10 @@
         cp/PGradientOptimiser
         (compute-parameters [this gradient parameter]
           (.step optimizer (mp/as-double-array gradient) (mp/as-double-array parameter))
-          this)
+          (assoc this :parameters parameter))
         cp/PParameters
         (parameters [this]
-          (.theta optimizer)))
+          (:parameters this)))
 
       (defn adam
         "Returns a PGradientOptimiser that uses Adam to perform gradient
@@ -163,7 +163,7 @@ Returns new parameters"
 ;                      (new-mutable-vector size)
 ;                      (new-mutable-vector size)
 ;                      (new-mutable-vector size)
-;                      nil 
+;                      nil
 ;                      options)))
 ;
 ;(defrecord MikeraOptimiser [parameters

@@ -33,6 +33,7 @@
 
 (defn join-item-list
   [item-seq]
+  (throw (Exception. "shouldn't get here"))
   (let [vecs (map m/as-vector item-seq)]
     (if (seq vecs)
       (apply m/join vecs)
@@ -84,7 +85,7 @@
          _ (when-not (= 0 batch-count)
              (m/mul! grads (/ 1.0 batch-count)))
          optimiser (cp/compute-parameters optimiser grads params)
-         module (cp/update-parameters module (parameters optimiser))]
+         module (cp/update-parameters module (cp/parameters optimiser))]
      [(assoc optimiser
              :packed-params params
              :packed-grads grads)

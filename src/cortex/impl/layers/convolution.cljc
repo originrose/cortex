@@ -127,11 +127,11 @@ of the output of a conv-net ignoring channels."
            (let [~'input-rel-x (- (* ~'out-x ~'stride-w) ~'padx)]
              ~@body))))))))
 
-(defn in-bounds?
+(defmacro in-bounds?
   "is value within the range of [min-val, max-val)"
-  [^long value ^long min-val ^long max-val]
-  (and (>= value min-val)
-       (< value max-val)))
+  [value min-val max-val]
+  `(and (>= ~value ~min-val)
+        (< ~value ~max-val)))
 
 
 (defmacro convolution-roll-unroll-inner-kernel

@@ -43,7 +43,7 @@
 
 (defn create-optimizer
   [network]
-  (opt/adadelta-optimiser (core/parameter-count network)))
+  (opt/adam))
 
 (defn test-train-step
   []
