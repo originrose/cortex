@@ -84,7 +84,8 @@
          _ (when-not (= 0 batch-count)
              (m/mul! grads (/ 1.0 batch-count)))
          optimiser (cp/compute-parameters optimiser grads params)
-         module (cp/update-parameters module (cp/parameters optimiser))]
+         parameters (parameters optimiser)
+         module (cp/update-parameters module parameters)]
      [(assoc optimiser
              :packed-params params
              :packed-grads grads)

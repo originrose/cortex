@@ -27,7 +27,7 @@
           (assoc this :parameters parameter))
         cp/PParameters
         (parameters [this]
-          (:parameters this)))
+          [(:parameters this)]))
 
       (defn adam
         "Returns a PGradientOptimiser that uses Adam to perform gradient

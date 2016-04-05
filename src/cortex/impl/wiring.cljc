@@ -158,9 +158,9 @@
           (if (< i n)
             (let [layer (nth modules i)
                   new-layer (cp/calc layer v)]
-              (recur (inc i) 
-                     (cp/output new-layer) 
-                     (if (identical? layer new-layer) 
+              (recur (inc i)
+                     (cp/output new-layer)
+                     (if (identical? layer new-layer)
                        new-modules
                        (assoc new-modules i new-layer))))
             (if (identical? modules new-modules)
