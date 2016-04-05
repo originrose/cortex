@@ -5,7 +5,7 @@
             [cortex.util :as util :refer [error]]
             [clojure.core.matrix.linear :as linear]
             [clojure.core.matrix :as m])
-  #?(:clj (:import [cortex.impl OptOps])))
+  #?(:clj (:import [cortex.impl AdamOptimizer OptOps])))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)
@@ -14,6 +14,32 @@
 (defn new-mutable-vector
   [size]
   (m/mutable (m/array :vectorz (repeat size 0))))
+
+;; ==============================================
+;; Adam
+
+#?(:clj
+    (do
+      (defrecord Adam [^AdamOptimizer optimizer]
+        cp/PGradientOptimiser
+        (compute-parameters [this gradient parameter]
+          (.step optimizer (mp/as-double-array gradient) (mp/as-double-array parameter))
+          this)
+        cp/PParameters
+        (parameters [this]
+          (.theta optimizer)))
+
+      (defn adam
+        "Returns a PGradientOptimiser that uses Adam to perform gradient
+        descent. For more information on the algorithm, see the paper at
+        http://arxiv.org/pdf/1412.6980v8.pdf
+        The implementation is in Java and is located at
+        cortex/java/cortex/impl/AdamOptimizer.java"
+        [& {:keys [a b1 b2 e]
+            :or { a 0.001 b1 0.9 b2 0.999 e 1e-8}}]
+        (->Adam (AdamOptimizer. a b1 b2 e)))))
+
+;; ==============================================
 
 (defn sqrt-with-epsilon!
   "res[i] = sqrt(vec[i] + epsilon)"
