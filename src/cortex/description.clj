@@ -297,6 +297,10 @@
       (assoc retval :num-kernels (:num-out-channels conv-config) :weights (m/clone weights) :bias (m/clone bias))
       retval)))
 
+(defn conv-config->input
+  [config]
+  (input (:width config) (:height config) (:num-in-channels config)))
+
 
 (extend-protocol PNetworkToDescription
   cortex.impl.layers.Logistic
@@ -312,14 +316,10 @@
   (layer->input [layer] (input (m/column-count (:weights layer))))
   (layer->description [layer] (linear (m/row-count (:weights layer)) :weights (m/clone (:weights layer)) :bias (m/clone (:bias layer))))
   cortex.impl.layers.convolution.Convolutional
-  (layer->input [layer]
-    (let [config (:conv-config layer)]
-      (input (:width config) (:height config) (:num-in-channels config))))
+  (layer->input [layer] (conv-config->input (:conv-config layer)))
   (layer->description [layer] (conv-config->description (:conv-config layer) :convolutional (:weights layer) (:bias layer)))
   cortex.impl.layers.convolution.Pooling
-  (layer->input [layer]
-    (let [config (:conv-config layer)]
-      (input (:width config) (:height config) (:num-in-channels config))))
+  (layer->input [layer] (conv-config->input (:conv-config layer)))
   (layer->description [layer] (conv-config->description (:conv-config layer) :max-pooling))
   cortex.impl.wiring.StackModule
   (layer->input [layer] (layer->input (first (:modules layer))))
