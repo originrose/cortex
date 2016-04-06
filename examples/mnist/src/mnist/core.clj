@@ -36,7 +36,7 @@
                       (desc/convolutional 5 0 1 50)
                       (desc/max-pooling 2 0 2)
                       (desc/linear->relu 500)
-                      (desc/softmax 10)]
+                      (desc/linear->softmax 10)]
         built-network (desc/build-full-network-description network-desc)]
     (desc/create-network built-network)))
 

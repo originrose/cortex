@@ -22,8 +22,10 @@
   [{:type :linear :output-size num-output
     :weights weights :bias bias}])
 
-(defn softmax [num-classes] [{:type :linear :output-size num-classes}
-                             {:type :softmax}])
+(defn softmax [] {:type :softmax})
+
+(defn linear->softmax [num-classes] [{:type :linear :output-size num-classes}
+                                     {:type :softmax}])
 
 (defn relu [] [{:type :relu}])
 (defn linear->relu [num-output & opts]
@@ -80,7 +82,7 @@
    (convolutional 5 0 1 50)
    (max-pooling 2 0 2)
    (linear->relu 500)
-   (softmax 10)])
+   (linear->softmax 10)])
 
 
 (defmulti build-desc (fn [result item]
@@ -279,3 +281,55 @@
 (defn build-and-create-network
   [input-desc-seq]
   (create-network (build-full-network-description input-desc-seq)))
+
+
+(defprotocol PNetworkToDescription
+  (layer->input [layer])
+  (layer->description [layer]))
+
+(defn conv-config->description
+  [conv-config layer-type & [weights bias]]
+  (let [retval
+        {:type layer-type :kernel-width (:k-width conv-config) :kernel-height (:k-height conv-config)
+         :pad-x (:padx conv-config) :pad-y (:pady conv-config)
+         :stride-x (:stride-w conv-config) :stride-y (:stride-h conv-config)}]
+    (if (= layer-type :convolutional)
+      (assoc retval :num-kernels (:num-out-channels conv-config) :weights (m/clone weights) :bias (m/clone bias))
+      retval)))
+
+
+(extend-protocol PNetworkToDescription
+  cortex.impl.layers.Logistic
+  (layer->input [layer] (input (m/ecount (:output layer))))
+  (layer->description [layer] (logistic))
+  cortex.impl.layers.RectifiedLinear
+  (layer->input [layer] (input (m/ecount (:output layer))))
+  (layer->description [layer] (relu))
+  cortex.impl.layers.Softmax
+  (layer->input [layer] (input (m/ecount (:output layer))))
+  (layer->description [layer] (softmax))
+  cortex.impl.layers.Linear
+  (layer->input [layer] (input (m/column-count (:weights layer))))
+  (layer->description [layer] (linear (m/row-count (:weights layer)) :weights (m/clone (:weights layer)) :bias (m/clone (:bias layer))))
+  cortex.impl.layers.convolution.Convolutional
+  (layer->input [layer]
+    (let [config (:conv-config layer)]
+      (input (:width config) (:height config) (:num-in-channels config))))
+  (layer->description [layer] (conv-config->description (:conv-config layer) :convolutional (:weights layer) (:bias layer)))
+  cortex.impl.layers.convolution.Pooling
+  (layer->input [layer]
+    (let [config (:conv-config layer)]
+      (input (:width config) (:height config) (:num-in-channels config))))
+  (layer->description [layer] (conv-config->description (:conv-config layer) :max-pooling))
+  cortex.impl.wiring.StackModule
+  (layer->input [layer] (layer->input (first (:modules layer))))
+  (layer->description [layer]
+    (let [modules (:modules layer)]
+      (map layer->description modules))))
+
+
+(defn network->description
+  [network]
+  (vec
+   (conj (layer->description network)
+         (layer->input network))))

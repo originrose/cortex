@@ -16,7 +16,7 @@
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
                                   [criterium/criterium "0.4.4"] ;; benchmarking tool
-                                  [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]] ;; alternate core.matrix implementation
+                                  ] ;; alternate core.matrix implementation
                    :source-paths ["src" "test/cljc" "test/clj"]
                    :java-source-paths ["test/clj"]}
 
