@@ -6,7 +6,7 @@ public final class AdamOptimizer {
 
 	public int parameterCount;
 	public final double alpha, beta1, beta2, one_minus_beta1, one_minus_beta2, epsilon;
-	public double[] theta, m, v;
+	public double[] m, v;
 	public double t, pow_beta1_t, pow_beta2_t;
 
 	public AdamOptimizer(double alpha, double beta1, double beta2, double epsilon) {
@@ -35,7 +35,6 @@ public final class AdamOptimizer {
 			v[i] = beta2 * v[i] + one_minus_beta2 * gradient[i] * gradient[i];
 			theta[i] -= alpha * m[i] / (1 - pow_beta1_t) / (Math.sqrt(v[i] / (1 - pow_beta2_t)) + epsilon);
 		}
-		this.theta = theta;
 	}
 
 	/* Testing */
