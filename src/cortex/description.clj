@@ -324,8 +324,7 @@
   cortex.impl.wiring.StackModule
   (layer->input [layer] (layer->input (first (:modules layer))))
   (layer->description [layer]
-    (let [modules (:modules layer)]
-      (map layer->description modules))))
+    (map layer->description (:modules layer))))
 
 
 (defn network->description
