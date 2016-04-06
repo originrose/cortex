@@ -11,7 +11,6 @@
                  [core.blas "1.0.2"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]
 
-
   :java-source-paths ["java"]
 
   :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
@@ -22,14 +21,12 @@
 
              :test {:dependencies [[net.mikera/cljunit "0.4.0"]
                                    [criterium/criterium "0.4.4"]
-                                   [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]
-                                   ]
+                                   [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]]
                     :source-paths ["src" "test/cljc" "test/cljs"]
                     :java-source-paths ["test/clj"]
                     :main cortex.run-all-tests}
 
              :cljs {:dependencies [[org.clojure/clojurescript "1.7.228" :scope "provided"]
-                                   ;[net.unit8/fressian-cljs "0.2.0"]
                                    [doo "0.1.6"]
                                    [thinktopic/aljabr "0.1.0"]]
 
@@ -47,8 +44,21 @@
                                 :test-commands {"unit-tests"   ["phantomjs"
                                                                 "resources/test/runner.js"
                                                                 "resources/test/unit-tests.js"]}}}}
+
+  :plugins [[s3-wagon-private "1.1.2"]]
+  :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
+                                :passphrase :env
+                                :username :env
+                                :releases false}
+                  "releases"  {:url "s3p://thinktopic.jars/releases/"
+                               :passphrase :env
+                               :username :env
+                               :snapshots false}}
+
   :resource-paths ["resources"]
 
   :jvm-opts  ["-Xmx8g"
               "-XX:+UseConcMarkSweepGC"
-              "-XX:-OmitStackTraceInFastThrow"])
+              "-XX:-OmitStackTraceInFastThrow"]
+
+  )
