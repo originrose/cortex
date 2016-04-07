@@ -3,7 +3,7 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.taoensso/timbre "4.3.1"]
                  [org.clojure/test.check "0.9.0"]
-                 [thinktopic/matrix.fressian "0.3.0"]
+                 [thinktopic/matrix.fressian "0.3.1"]
                  [net.mikera/vectorz-clj "0.44.0"]
                  [net.mikera/core.matrix "0.51.0"]
                  [thinktopic/caffe-protobuf "0.1.0"]
@@ -28,7 +28,7 @@
 
              :cljs {:dependencies [[org.clojure/clojurescript "1.7.228" :scope "provided"]
                                    [doo "0.1.6"]
-                                   [thinktopic/aljabr "0.1.0"]]
+                                   [thinktopic/aljabr "0.1.1"]]
 
                     :plugins [[lein-cljsbuild "1.1.2"]]
 
