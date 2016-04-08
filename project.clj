@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex "0.1.0"
+(defproject thinktopic/cortex "0.1.1-SNAPSHOT"
   :description "A neural network toolkit for Clojure."
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.taoensso/timbre "4.3.1"]
@@ -53,7 +53,8 @@
                   "releases"  {:url "s3p://thinktopic.jars/releases/"
                                :passphrase :env
                                :username :env
-                               :snapshots false}}
+                               :snapshots false
+                               :sign-releases false}}
 
   :resource-paths ["resources"]
 
