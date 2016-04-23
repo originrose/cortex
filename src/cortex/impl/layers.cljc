@@ -49,30 +49,31 @@
 
 ;; DROPOUT
 ;; Module implementing "dropout" functionality when training
+;; dropout field stores 0.0 or 1.0/probability as multiplicative noise
 ;; Works as a identity function otherwise
 #?(:cljs (register-module cortex.impl.layers.Dropout))
-(defrecord Dropout [output input-gradient ^double probability dropout]
+(defrecord Dropout [output input-gradient probability dropout]
   cp/PModule
     (calc [this input]
       (m/assign! output input)
-       this)
+      this)
 
     (output [this]
       (:output this))
 
   cp/PNeuralTraining
     (forward [this input]
-      (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) 1.0 0.0)) dropout)
+      (let [probability (double probability)
+            inv-prob (/ 1.0 probability)]
+        (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0)) dropout))
       (m/assign! output input)
       (m/mul! output dropout)
-      (m/scale! output (/ 1.0 probability))
       this)
 
     (backward [this input output-gradient]
       (let []
         (m/assign! input-gradient output-gradient)
         (m/mul! input-gradient dropout)
-        (m/scale! input-gradient (/ 1.0 probability))
         this))
 
     (input-gradient [this]
@@ -211,44 +212,36 @@
 (defn blas-gemv-cutoff ^long [] 500000)
 
 (defn linear-forward!
+  "Linear forward pass.  Returns module updated with a new output."
   [this input]
-  (let [weights (:weights this)
-        bias (:bias this)
-        elem-count (long (m/ecount weights))]
-    (if (and
-         (> elem-count (blas-gemv-cutoff))
-         (blas/supports-blas? input)
-         (blas/supports-blas? weights)
-         (blas/supports-blas? bias))
-      (let [output (or (:output this)
-                       (b/new-array (m/shape bias)))]
+  (let [bias (:bias this)
+        weights (:weights this)
+        this (if (:output this) this (assoc this :output (b/new-array (m/shape bias)))) ;; ensure in-place output array
+        output (:output this)]
+    (if (and 
+          (blas/supports-blas? input)
+          (blas/supports-blas? weights)
+          (blas/supports-blas? bias)
+          (> (long (m/ecount weights)) (blas-gemv-cutoff)))
+      (do
         (m/assign! output bias)
         (blas/gemv! output false 1.0 weights input 1.0)
-        (assoc this :output output))
-      (let [output (m/inner-product weights input)]
+        this)
+      (do
+        (m/set-inner-product! output weights input)
         (m/add! output bias)
-        (assoc this :output output)))))
+        this))))
 
 
 (defn linear-backward!
-  "linear backward pass.  Returns a new input gradient."
+  "Linear backward pass.  Returns module updated with a new input gradient."
   [this input output-gradient]
   (let [weights (:weights this)
         bias (:bias this)
         weight-gradient (:weight-gradient this)
         bias-gradient (:bias-gradient this)
         elem-count (long (m/ecount weights))]
-    #?(:clj
-       (if (and (mp/as-double-array weight-gradient)
-                (mp/as-double-array output-gradient)
-                (mp/as-double-array input))
-         (ConvOps/addOuterProduct (mp/as-double-array weight-gradient)
-                                  (mp/as-double-array input)
-                                  (mp/as-double-array output-gradient))
-         (m/add! (m/as-vector weight-gradient) (m/as-vector
-                                                (m/outer-product output-gradient input))))
-       :cljs (m/add! (m/as-vector weight-gradient) (m/as-vector
-                                                    (m/outer-product output-gradient input))))
+    (m/add-outer-product! weight-gradient output-gradient input)
     (m/add! bias-gradient output-gradient)
     (if (and (blas/supports-blas? weights)
              (blas/supports-blas? output-gradient))
@@ -257,7 +250,8 @@
        (blas/gemv! input-gradient true 1.0 weights output-gradient 0.0)
        (assoc this :input-gradient input-gradient))
      (do
-       (assoc this :input-gradient (m/inner-product (m/transpose weights) output-gradient))))))
+       (m/set-inner-product! (:input-gradient this) (m/transpose weights) output-gradient)
+       this))))
 
 ;; LINEAR
 ;; function that implements a linear transformation (weights + bias)
@@ -265,17 +259,15 @@
 #?(:cljs (register-module cortex.impl.layers.Linear))
 (defrecord Linear [weights bias]
   cp/PModule
-  (calc [this input]
-    (linear-forward! this input))
+    (calc [this input]
+      (linear-forward! this input))
 
     (output [this]
       (:output this))
 
   cp/PNeuralTraining
     (forward [this input]
-      (-> this
-        (cp/calc input)
-        (assoc :input input)))
+      (cp/calc this input))
 
     (backward [this input output-gradient]
       (linear-backward! this input output-gradient))
@@ -288,9 +280,19 @@
     [(:weights this) (:bias this)])
 
   (update-parameters [this parameters]
-    (let [param-view (cp/parameters this)]
-      (util/assign-packed-to-sparse! param-view parameters)
-      (util/zero-sparse! (cp/gradient this)))
+    (let [param-view (m/join (m/as-vector weights) (m/as-vector bias))]
+      (m/assign! param-view parameters)
+      
+      ;; apply L2 weight constraint if needed
+      (if-let [l2max (:l2-max-constraint this)]
+        (doseq [v (m/slice-views weights)] 
+          (let [vmag (double (m/magnitude v))
+                l2max (double l2max)]
+            (when (> vmag l2max) 
+              (m/mul! v (/ l2max vmag))))))
+      
+      (m/fill! (:weight-gradient this) 0.0)
+      (m/fill! (:bias-gradient this) 0.0))
     this)
 
   cp/PGradient
@@ -366,7 +368,7 @@
         (m/sqrt! sd)
         this))
 
-;; DENOISING AUTOENCODER
+;; AUTOENCODER
 (defn noise-fn ^double [^double x]
   (if (< 0.2 (util/rand-normal))
     (util/rand-gaussian)
@@ -374,7 +376,7 @@
 
 #?(:cljs (register-module cortex.impl.layers.Autoencoder))
 (defrecord Autoencoder
-  [up down input-tmp output-tmp ]
+  [up down input-tmp output-tmp]
   cp/PModule
     (cp/calc [m input]
       (let [up (cp/calc up input)]
@@ -388,16 +390,16 @@
       (m/assign! input-tmp input)
       ;; TODO: figure out how to apply noise
       ;; (m/emap! noise-fn input-tmp) ;; input-tmp contains input with noise
-      (let [noise-up (cp/calc up input-tmp)
-            _ (m/assign! output-tmp (cp/output noise-up)) ;; output-tmp contains noisy output from up
-            up (cp/forward up input)
+      (let [up (cp/forward up input)
+            _ (m/assign! output-tmp (cp/output up)) ;; output-tmp contains output from up
             down (cp/forward down output-tmp)
             ]
         (Autoencoder. up down input-tmp output-tmp)))
 
     (backward [this input output-gradient]
-      (let [down (cp/backward down output-tmp (m/sub input (cp/output down)))
-            _ (m/assign! output-tmp output-gradient)
+      (let [error (m/sub (cp/output down) input)
+            down (cp/backward down output-tmp error)
+            _ (m/assign! output-tmp output-gradient) ;; use output-tmp for gradient
             _ (m/add! output-tmp (cp/input-gradient down)) ;; output-tmp contains gradient
             up (cp/backward up input output-tmp)
             ]
@@ -427,6 +429,61 @@
                       (cp/clone down)
                       (m/clone input-tmp)
                       (m/clone output-tmp))))
+
+;(defrecord ReflectiveEncoder
+;  [up down input-tmp output-tmp]
+;  cp/PModule
+;    (cp/calc [this input]
+;      (let [new-up (cp/calc up input)]
+;        (if (identical? new-up up)
+;          this
+;          (ReflectiveEncoder. new-up down input-tmp output-tmp))))
+;
+;    (cp/output [m]
+;      (cp/output up))
+;
+;  cp/PNeuralTraining
+;    (forward [this input]
+;      (m/assign! input-tmp input)
+;      (let [up (cp/calc up input)
+;            _ (m/assign! output-tmp (cp/output up)) ;; output-tmp contains output from up
+;            down (cp/forward down output-tmp)
+;            ]
+;        (ReflectiveEncoder. up down input-tmp output-tmp)))
+;
+;    (backward [this input output-gradient]
+;      (let [down (cp/backward down output-tmp error)
+;            _ (m/assign! input-tmp (cp/output down)) ;; use input-tmp for reconstructed input
+;            up (cp/forward up input-tmp)
+;            _ (m/add! output-tmp (cp/input-gradient down)) ;; output-tmp contains gradient
+;            up (cp/backward up input output-tmp)
+;            ]
+;        (ReflectiveEncoder. up down input-tmp output-tmp)))
+;
+;    (input-gradient [this]
+;      (cp/input-gradient up))
+;
+;    cp/PGradient
+;    (gradient [this]
+;      (concat (cp/gradient up) (cp/gradient down)))
+;
+;    cp/PParameters
+;    (parameters [this]
+;      (concat (cp/parameters up) (cp/parameters down)))
+;
+;    (update-parameters [this parameters]
+;      (let [nup (cp/parameter-count up)
+;            ndown (cp/parameter-count down)
+;            up (cp/update-parameters up (m/subvector parameters 0 nup))
+;            down (cp/update-parameters down (m/subvector parameters nup ndown))]
+;        (ReflectiveEncoder. up down input-tmp output-tmp)))
+;
+;    cp/PModuleClone
+;      (clone [this]
+;        (ReflectiveEncoder. (cp/clone up)
+;                            (cp/clone down)
+;                            (m/clone input-tmp)
+;                            (m/clone output-tmp))))
 
 
 #?(:clj

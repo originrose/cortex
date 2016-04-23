@@ -1,11 +1,13 @@
 (ns cortex.performance-test
   (:require [clojure.core.matrix :as m]
+            [cortex.layers :as layers]
             [cortex.impl.layers :as impl]
             [cortex.core :as core]
             [cortex.description :as desc]
             [cortex.optimise :as opt]
             [cortex.backends :as b]
             [cortex.protocols :as cp]
+            [criterium.core :as q]
             [core.blas.protocols :as blas]
             [clojure.core.matrix.protocols :as mp]
             [clojure.test :refer [deftest is are]]
@@ -42,3 +44,21 @@
                 (cp/forward network input)
                 (cp/backward network input output-gradient))
               (core/optimise optimizer network 1))))))
+
+;; miscellaneous performance tests
+(comment
+  ;; testing for linear layer computation
+  (let [SIZE 1000
+        a (layers/linear-layer SIZE SIZE)
+        input (m/array :vectorz (range SIZE))
+        ograd (m/array :vectorz (range SIZE))
+        a (time (core/forward a input))
+        _ (q/quick-bench (core/backward a input ograd))])
+  
+  ;; testing for outer products
+  (let [SIZE 1000
+        m (m/new-array [SIZE SIZE])
+        a (m/array :vectorz (range SIZE))
+        b (m/array :vectorz (range SIZE))]
+    (q/quick-bench (m/add-outer-product! m a b)))
+  )

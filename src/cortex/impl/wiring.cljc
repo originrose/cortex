@@ -150,7 +150,7 @@
 (defrecord StackModule
   [modules]
   cp/PModule
-    (calc [m input]
+    (calc [this input]
       (let [n (count modules)]
         (loop [i 0
                v input
@@ -158,10 +158,16 @@
           (if (< i n)
             (let [layer (nth modules i)
                   new-layer (cp/calc layer v)]
-              (recur (inc i) (cp/output new-layer) (assoc new-modules i new-layer)))
-            (StackModule. new-modules)))))
+              (recur (inc i)
+                     (cp/output new-layer)
+                     (if (identical? layer new-layer)
+                       new-modules
+                       (assoc new-modules i new-layer))))
+            (if (identical? modules new-modules)
+              this
+              (StackModule. new-modules))))))
 
-    (output [m]
+    (output [this]
       (cp/output (last modules)))
 
   cp/PNeuralTraining
@@ -171,11 +177,14 @@
                v input
                this this]
           (if (< i n)
-            (let [module (cp/forward (nth modules i) v)]
+            (let [module (nth modules i)
+                  new-module (cp/forward module v)]
               (recur
                 (inc i)
-                (cp/output module)
-                (assoc-in this [:modules i] module)))
+                (cp/output new-module)
+                (if (identical? module new-module)
+                  this
+                  (assoc-in this [:modules i] new-module))))
             this))))
 
     (backward [this input output-gradient]
@@ -184,13 +193,16 @@
                output-gradient output-gradient
                this this]
           (if (<= 0 i)
-            (let [module (cp/backward (nth modules i)
-                                      (if (> i 0) (cp/output (nth modules (dec i))) input)
-                                      output-gradient)]
+            (let [module (nth modules i)
+                  new-module (cp/backward module
+                                          (if (> i 0) (cp/output (nth modules (dec i))) input)
+                                          output-gradient)]
               (recur
                 (dec i)
-                (cp/input-gradient module)
-                (assoc-in this [:modules i] module)))
+                (cp/input-gradient new-module)
+                (if (identical? module new-module)
+                  this
+                  (assoc-in this [:modules i] new-module))))
             this))))
 
     (input-gradient [this]

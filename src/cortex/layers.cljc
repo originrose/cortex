@@ -42,7 +42,7 @@
    During training, units will be included with the given probability."
   ([shape probability]
     (when-not (coll? shape)
-      (error "logistic layer constructor requires a shape vector"))
+      (error "Dropout layer constructor requires a shape vector"))
     (cortex.impl.layers.Dropout.
       (util/empty-array shape)
       (util/empty-array shape)
@@ -91,23 +91,26 @@
   "Constructs a weighted linear transformation module using a dense matrix and bias vector.
    Shape of input and output are determined by the weight matrix."
   ([weights bias]
+    (linear weights bias nil))
+  ([weights bias options]
     (let [weights (m/array :vectorz weights)
           bias (m/array :vectorz bias)
-          wm (cortex.impl.layers.Linear. weights bias)
+          wm (cortex.impl.layers.Linear. weights bias nil options)
           [n-outputs n-inputs] (m/shape weights)
           n-outputs (long n-outputs)
           n-inputs (long n-inputs)]
       (when-not (== n-outputs (m/dimension-count bias 0)) (error "Mismatched weight and bias shapes"))
       (-> wm
-        (assoc :weight-gradient (util/empty-array [(* n-outputs n-inputs)]))
+        (assoc :weight-gradient (util/empty-array [n-outputs n-inputs]))
         (assoc :bias-gradient (util/empty-array [n-outputs]))
         (assoc :input-gradient (util/empty-array [n-inputs]))))))
 
 (defn linear-layer
   "Creates a linear layer with a new randomised weight matrix for the given number of inputs and outputs"
-  ([n-inputs n-outputs & {:keys [weights bias]}]
+  ([n-inputs n-outputs & {:keys [weights bias l2-max-constraint] :as options}]
     (linear (or weights (util/weight-matrix n-outputs n-inputs))
-            (or bias (util/empty-array [n-outputs])))))
+            (or bias (util/empty-array [n-outputs]))
+            options)))
 
 (defn split
   "Creates a split later using a collection of modules. The split layer returns the outputs of each

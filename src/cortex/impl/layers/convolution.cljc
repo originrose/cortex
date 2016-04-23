@@ -49,8 +49,8 @@
   "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
 of the output of a conv-net ignoring channels."
   ^long [^long input-dim ^long pad ^long kernel-size ^long stride]
-  (long (+ (quot (- (+ input-dim (* 2 pad))  kernel-size)
-                 stride)
+  (long (+ (Math/ceil (/ (- (+ input-dim (* 2 pad))  kernel-size)
+                         stride))
            1)))
 
 
@@ -110,7 +110,11 @@ of the output of a conv-net ignoring channels."
          ~'stride-h (.stride-h config#)
          ~'stride-w (.stride-w config#)
          ~'padx (.padx config#)
-         ~'pady (.pady config#)]
+         ~'pady (.pady config#)
+         ~'min-x (- 0 ~'padx)
+         ~'min-y (- 0 ~'pady)
+         ~'max-x (+ ~'width ~'padx)
+         ~'max-y (+ ~'height ~'pady)]
      (c-for
       [~'chan 0 (< ~'chan ~'num-in-channels) (inc ~'chan)]
       (let [~'chan-input-offset (* ~'chan ~'input-planar-stride)
@@ -122,6 +126,12 @@ of the output of a conv-net ignoring channels."
            [~'out-x 0 (< ~'out-x ~'output-width) (inc ~'out-x)]
            (let [~'input-rel-x (- (* ~'out-x ~'stride-w) ~'padx)]
              ~@body))))))))
+
+(defmacro in-bounds?
+  "is value within the range of [min-val, max-val)"
+  [value min-val max-val]
+  `(and (>= ~value ~min-val)
+        (< ~value ~max-val)))
 
 
 (defmacro convolution-roll-unroll-inner-kernel
@@ -143,11 +153,12 @@ of the output of a conv-net ignoring channels."
             ~'input-addr  (+ (* ~'input-y ~'width)
                              ~'input-x
                              ~'chan-input-offset)
-            ~'input-valid? (and (>= ~'input-x 0)
-                                (< ~'input-x ~'width)
-                                (>= ~'input-y 0)
-                                (< ~'input-y ~'height))]
-        ~@body)))))
+            ~'input-valid? (and (in-bounds? ~'input-x 0 ~'width)
+                                (in-bounds? ~'input-y 0 ~'height))
+            loop-valid?# (and (in-bounds? ~'input-x ~'min-x ~'max-x)
+                               (in-bounds? ~'input-y ~'min-y ~'max-y))]
+        (when loop-valid?#
+          ~@body))))))
 
 
 
