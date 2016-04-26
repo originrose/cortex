@@ -5,12 +5,21 @@
     [clojure.core.matrix :as mat]
     [clojure.core.matrix.random :as randm]
     #?(:cljs [thi.ng.ndarray.core :as nd])
-    [cortex.tree :as tree]))
+    [clojure.zip :as zip]
+    [cortex.tree :as tree]
+    [rhizome.viz :as viz]))
 
-(deftest iris-test
-  (let [irises (read-string (slurp "resources/iris.edn"))
-        X (map drop-last irises)
-        Y (map last irises)
-        tree (tree/decision-tree X Y {:split-fn tree/rand-splitter})]
-    ;(is (< mse 25))
+(def IRISES (read-string (slurp "resources/iris.edn")))
+(def X (map drop-last IRISES))
+(def Y (map last IRISES))
+
+(defn iris-tree-test
+  []
+  (let [tree (tree/decision-tree X Y {:split-fn tree/rand-splitter})]
     tree))
+
+(defn iris-forest-test
+  []
+  (let [forest (tree/random-forest X Y {:n-trees 100
+                                        :split-fn tree/best-splitter})]
+    forest))
