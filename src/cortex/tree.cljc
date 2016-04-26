@@ -216,8 +216,8 @@
   (mode (map #(tree-classify % sample) forest)))
 
 (defn forest-classify-dataset
-  [forest data]
-  (apply merge-with + (map #(tree-classify-dataset % data) forest)))
+  [forest data labels]
+  (apply merge-with + (map #(tree-classify-dataset % data labels) forest)))
 
 ;(defn predict
 ;  "Predict the regression target Y given a model and X by averaging
