@@ -10,8 +10,8 @@
     [rhizome.viz :as viz]))
 
 (def IRISES (read-string (slurp "resources/iris.edn")))
-(def X (map drop-last IRISES))
-(def Y (map last IRISES))
+(def X (mat/matrix (map drop-last IRISES)))
+(def Y (mat/matrix (map last IRISES)))
 
 (defn iris-tree-test
   []

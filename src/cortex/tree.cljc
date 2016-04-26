@@ -54,10 +54,13 @@
 
   [left-samples right-samples]
   "
-  [X feature-index split-val]
-  (let [indices (mat/le (mat/select X :all feature-index) split-val)]
-    [(remove nil? (map-indexed (fn [i v] (if (zero? v) nil i)) indices))
-     (remove nil? (map-indexed (fn [i v] (if (zero? v) i nil)) indices))]))
+  [X x-indices feature-index split-val]
+  (reduce (fn [[le gt] x-index]
+            (if (<= (mat/mget X x-index feature-index) split-val)
+              [(conj le x-index) gt]
+              [le (conj gt x-index)]))
+          [[] []]
+          x-indices))
 
 (defn rand-splitter
   "Returns a vector of [feature-indices split-value] where the feature-index for the
@@ -89,10 +92,9 @@
 (defn best-splitter
  [X Y feature-indices sample-indices {:keys [max-features] :as options}]
  (let [labels (set (indexed-array Y sample-indices))
-       samples (into [] (indexed-array X sample-indices))
        scores (for [feature-index (take-rand (or max-features (count feature-indices)) feature-indices)]
                 (for [split-val (map #(mat/mget X % feature-index) sample-indices)]
-                  (let [split-sample-indices (split-samples X feature-index split-val)
+                  (let [split-sample-indices (split-samples X sample-indices feature-index split-val)
                         score (if (some empty? split-sample-indices)
                                 1.0
                                 (/ (apply + (map #(gini-score labels (frequencies (indexed-array Y %)))
@@ -127,7 +129,7 @@
       :else
       (let [[feature-index split-val] (split-fn X Y feature-indices sample-indices options)
             feature-indices (filter #(not= feature-index %) feature-indices)
-            [left-indices right-indices] (split-samples X feature-index split-val)
+            [left-indices right-indices] (split-samples X sample-indices feature-index split-val)
             left-tree  (decision-tree* X Y (assoc options
                                                   :feature-indices feature-indices
                                                   :sample-indices left-indices))
@@ -192,12 +194,13 @@
   (:target (tree-search tree sample)))
 
 (defn tree-classify-dataset
-  [tree data options]
-  (frequencies (map
-                 (fn [row]
-                   (= (tree-classify tree (drop-last row))
-                      (last row)))
-                 data)))
+  [tree data labels]
+  (frequencies
+    (map-indexed
+      (fn [i row]
+        (= (tree-classify tree row)
+           (mat/mget labels i)))
+      data)))
 
 ; TODO:
 ; - support setting the n-features and n-samples for changing the boosting
@@ -213,13 +216,13 @@
   (mode (map #(tree-classify % sample) forest)))
 
 (defn forest-classify-dataset
-  [forest data & {:as options}]
+  [forest data]
   (apply merge-with + (map #(tree-classify-dataset % data) forest)))
 
-(defn predict
-  "Predict the regression target Y given a model and X by averaging
-  the predictions of the underlying trees."
-  [model X]
-  (let [estimates (pmap #(tree-predict % X) (:trees model))]
-    (/ (apply + estimates)
-       (count estimates))))
+;(defn predict
+;  "Predict the regression target Y given a model and X by averaging
+;  the predictions of the underlying trees."
+;  [model X]
+;  (let [estimates (pmap #(tree-predict % X) (:trees model))]
+;    (/ (apply + estimates)
+;       (count estimates))))
