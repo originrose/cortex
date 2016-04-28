@@ -22,7 +22,12 @@
   [{:type :linear :output-size num-output
     :weights weights :bias bias}])
 
-(defn softmax [] {:type :softmax})
+(defn softmax
+    "Define a softmax which may be multi-channelled.  The data is expected
+  to be planar such that channel one has n-outputs followed in memory by
+channel 2 with n-outputs"
+  ([] {:type :softmax :output-channels 1})
+  ([channels] {:type :softmax :output-channels channels}))
 
 (defn linear->softmax [num-classes] [{:type :linear :output-size num-classes}
                                      {:type :softmax}])
