@@ -36,6 +36,15 @@
       (util/empty-array shape)
       (util/empty-array shape))))
 
+(defn tanh
+  "Creates a tanh module of the given shape."
+  ([shape]
+    (when-not (coll? shape)
+      (error "tanh layer constructor requires a shape vector"))
+    (cortex.impl.layers.Tanh.
+      (util/empty-array shape)
+      (util/empty-array shape))))
+
 (defn dropout
   "Creates a dropout module of the given shape.
 
