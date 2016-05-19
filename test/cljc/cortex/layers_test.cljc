@@ -48,6 +48,17 @@
       (is (m/equals [0 0.5 0]
                     (input-gradient (backward (forward a input) input [1 2 -1])))))))
 
+(deftest test-tanh
+  (testing "standard results"
+    (let [a (layers/tanh [3])]
+      (is (m/equals [-1 0 1]
+                    (calc-output a [-1000 0 1000])))))
+  (testing "backprop"
+    (let [a (layers/tanh [3])
+          input [-1000 0 1000]]
+      (is (m/equals [0 2 0]
+                    (input-gradient (backward (forward a input) input [1 2 -1])))))))
+
 (deftest test-dropout
   (testing "basic dropout - calculation"
     (let [a (layers/dropout [2] 0.5)]

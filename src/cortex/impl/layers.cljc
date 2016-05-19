@@ -46,6 +46,37 @@
     (input-gradient [this]
       input-gradient))
 
+;; TANH
+;; Module implementing a Logistic activation function over a numerical array
+#?(:cljs (register-module cortex.impl.layers.Logistic))
+(defrecord Tanh [output input-gradient]
+  cp/PModule
+    (calc [this input]
+      (m/assign! output input)
+      (m/tanh! output)
+      this)
+
+    (output [this]
+      (:output this))
+
+  cp/PNeuralTraining
+    (forward [this input]
+      (cp/calc this input))
+
+    (backward [this input output-gradient]
+      (let []
+        ;; input gradient = (1 - output * output) * output-gradient
+        (m/assign! input-gradient 1.0)
+        (m/add-product! input-gradient output output -1.0)
+        (m/mul! input-gradient output output-gradient)
+
+        ;; finally return this, input-gradient has been updated in-place
+        this))
+
+    (input-gradient [this]
+      input-gradient))
+
+
 
 ;; DROPOUT
 ;; Module implementing "dropout" functionality when training
@@ -54,30 +85,30 @@
 #?(:cljs (register-module cortex.impl.layers.Dropout))
 (defrecord Dropout [output input-gradient probability dropout]
   cp/PModule
-    (calc [this input]
-      (m/assign! output input)
-      this)
+  (calc [this input]
+    (m/assign! output input)
+    this)
 
-    (output [this]
-      (:output this))
+  (output [this]
+    (:output this))
 
   cp/PNeuralTraining
-    (forward [this input]
-      (let [probability (double probability)
-            inv-prob (/ 1.0 probability)]
-        (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0)) dropout))
-      (m/assign! output input)
-      (m/mul! output dropout)
-      this)
+  (forward [this input]
+    (let [probability (double probability)
+          inv-prob (/ 1.0 probability)]
+      (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0)) dropout))
+    (m/assign! output input)
+    (m/mul! output dropout)
+    this)
 
-    (backward [this input output-gradient]
-      (let []
-        (m/assign! input-gradient output-gradient)
-        (m/mul! input-gradient dropout)
-        this))
+  (backward [this input output-gradient]
+    (let []
+      (m/assign! input-gradient output-gradient)
+      (m/mul! input-gradient dropout)
+      this))
 
-    (input-gradient [this]
-      input-gradient))
+  (input-gradient [this]
+    input-gradient))
 
 
 ;; SCALE
@@ -218,7 +249,7 @@
         weights (:weights this)
         this (if (:output this) this (assoc this :output (b/new-array (m/shape bias)))) ;; ensure in-place output array
         output (:output this)]
-    (if (and 
+    (if (and
           (blas/supports-blas? input)
           (blas/supports-blas? weights)
           (blas/supports-blas? bias)
@@ -254,7 +285,7 @@
        this))))
 
 ;; LINEAR
-;; function that implements a linear transformation (weights + bias)
+;; function that implements a linear transformation (matrix weights + vector bias)
 ;; has mutable parameters and accumlators for gradient
 #?(:cljs (register-module cortex.impl.layers.Linear))
 (defrecord Linear [weights bias]
@@ -282,15 +313,15 @@
   (update-parameters [this parameters]
     (let [param-view (m/join (m/as-vector weights) (m/as-vector bias))]
       (m/assign! param-view parameters)
-      
+
       ;; apply L2 weight constraint if needed
       (if-let [l2max (:l2-max-constraint this)]
-        (doseq [v (m/slice-views weights)] 
+        (doseq [v (m/slice-views weights)]
           (let [vmag (double (m/magnitude v))
                 l2max (double l2max)]
-            (when (> vmag l2max) 
+            (when (> vmag l2max)
               (m/mul! v (/ l2max vmag))))))
-      
+
       (m/fill! (:weight-gradient this) 0.0)
       (m/fill! (:bias-gradient this) 0.0))
     this)

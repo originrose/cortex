@@ -52,7 +52,7 @@
         y-data (into [] (map vector (mat/array (mat/transpose (mat/add (mat/mmul [0.1 0.2] (mat/transpose x-data)) 0.3)))))
         model (layers/linear-layer 2 1)
         loss (opt/mse-loss)
-        optimizer (opt/sgd-optimiser (core/parameter-count model) {:learn-rate 0.01 :momentum 0.9})
+        optimizer (opt/sgd-optimiser 0.01 0.9)
         model (net/train model optimizer loss x-data y-data 10 1)
         mse (net/evaluate-mse model x-data y-data)]
     (is (< mse 1))))

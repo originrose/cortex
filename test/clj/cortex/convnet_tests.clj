@@ -300,8 +300,7 @@
                         (create-basic-softmax-network)
                         training-data)
         gradient (m/div! (core/gradient network) (double (count training-data)))
-        [optimizer network] (core/optimise (opt/sgd-optimiser (core/parameter-count network)
-                                                              {:learn-rate 0.01 :momentum 0.1})
+        [optimizer network] (core/optimise (opt/sgd-optimiser 0.01 0.1)
                                            network)
         linear-1 (first (:modules network))
         test-layer1-weights (m/as-vector (m/array [[0.10243309065473581 0.06891632639618858]
@@ -315,8 +314,7 @@
 
 (deftest core-train-network
   (let [network (create-basic-softmax-network)
-        optimizer (opt/sgd-optimiser (core/parameter-count network)
-                                     {:learn-rate 0.01 :momentum 0.1})
+        optimizer (opt/sgd-optimiser 0.01 0.1)
         training-data (mapv #(m/array (:x %)) training-data)
         training-labels (into [] (repeat 10 (m/array [0 1])))
         loss-fn (opt/mse-loss)
@@ -333,8 +331,7 @@
 
 (deftest core-train-network-epoch
   (let [network (create-basic-softmax-network)
-        optimizer (opt/sgd-optimiser (core/parameter-count network)
-                                     {:learn-rate 0.01 :momentum 0.1})
+        optimizer (opt/sgd-optimiser 0.01 0.1)
         training-data (mapv #(m/array (:x %)) training-data)
         training-labels (into [] (repeat 10 (m/array [0 1])))
         loss-fn (opt/mse-loss)
