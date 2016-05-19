@@ -7,7 +7,7 @@
                  [thinktopic/cortex-datasets "0.1.0"]
                  [thinktopic/cortex-gpu "0.1.0-SNAPSHOT"]
                  [net.mikera/imagez "0.10.0"]
-                 [thinktopic/tsne-core "0.1.0-SNAPSHOT"]
+                 [thinktopic/tsne-core "0.1.0"]
                  [incanter/incanter-core "1.5.7"]
                  [incanter/incanter-charts "1.5.7"]]
 
