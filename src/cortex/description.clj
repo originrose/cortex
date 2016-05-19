@@ -82,6 +82,11 @@ channel 2 with n-outputs"
    (max-pooling kernel-dim kernel-dim pad pad stride stride)))
 
 
+(defn split
+  [branches]
+  [{:type :split :branches branches}])
+
+
 (def example-mnist-description
   [(input 28 28 1)
    (convolutional 5 0 1 20)
@@ -94,6 +99,14 @@ channel 2 with n-outputs"
 
 (defmulti build-desc (fn [result item]
                        (:type item)))
+
+(defn recurse-build-desc
+  [initial-item desc-seq]
+  (reduce (fn [accum item]
+            (let [previous (last accum)]
+              (conj accum (build-desc previous item))))
+          [initial-item]
+          desc-seq))
 
 (defmethod build-desc :input
   [previous item]
@@ -167,6 +180,12 @@ channel 2 with n-outputs"
   (let [io-size (:output-size previous)]
     (assoc item :input-size io-size :output-size io-size)))
 
+(defmethod build-desc :split
+  [previous item]
+  (let [retval (build-pass-through-desc previous item)
+        {:keys [branches] } retval
+        branches (mapv #(vec (rest (recurse-build-desc retval (flatten %)))) branches)]
+    (assoc retval :branches branches)))
 
 (defmethod build-desc :convolutional
   [previous item]
@@ -268,16 +287,14 @@ channel 2 with n-outputs"
   [desc]
   (layers/dropout [(:output-size desc)] (:probability desc)))
 
+
 (defn build-full-network-description
   "build step verifies the network and fills in the implicit entries calculating
   things like the convolutional layer's output size."
   [input-desc-seq]
   (let [input-desc-seq (flatten input-desc-seq)]
-    (reduce (fn [accum item]
-              (let [previous (last accum)]
-                (conj accum (build-desc previous item))))
-            [(first input-desc-seq)]
-            (rest input-desc-seq))))
+    (recurse-build-desc (first input-desc-seq) (rest input-desc-seq))))
+
 
 (defn create-network
   "Create the live network modules from the built description"
@@ -320,15 +337,17 @@ channel 2 with n-outputs"
   cortex.impl.layers.Softmax
   (layer->input [layer] (input (m/ecount (:output layer))))
   (layer->description [layer] (softmax))
-  cortex.impl.layers.Softmax
-  (layer->input [layer] (input (m/ecount (:output layer))))
-  (layer->description [layer] (dropout (:probability layer)))
   cortex.impl.layers.Linear
   (layer->input [layer] (input (m/column-count (:weights layer))))
-  (layer->description [layer] (linear (m/row-count (:weights layer)) :weights (m/clone (:weights layer)) :bias (m/clone (:bias layer))))
+  (layer->description [layer] (linear (m/row-count (:weights layer))
+                                      :weights (m/clone (:weights layer))
+                                      :bias (m/clone (:bias layer))))
   cortex.impl.layers.convolution.Convolutional
   (layer->input [layer] (conv-config->input (:conv-config layer)))
-  (layer->description [layer] (conv-config->description (:conv-config layer) :convolutional (:weights layer) (:bias layer)))
+  (layer->description [layer] (conv-config->description (:conv-config layer)
+                                                        :convolutional
+                                                        (:weights layer)
+                                                        (:bias layer)))
   cortex.impl.layers.convolution.Pooling
   (layer->input [layer] (conv-config->input (:conv-config layer)))
   (layer->description [layer] (conv-config->description (:conv-config layer) :max-pooling))
