@@ -1,21 +1,20 @@
-(ns cortex.test
+(ns cortex.nn.test
   (:require [doo.runner :refer-macros [doo-tests]]
-            [cortex.wiring-test]
-            [cortex.function-test]
-            [cortex.network-test]
-            [cortex.normaliser-test]
+            [cortex.nn.wiring-test]
+            [cortex.nn.function-test]
+            [cortex.nn.network-test]
+            [cortex.nn.normaliser-test]
+            [cortex.nn.scrabble-test]
             [cortex.optimise-test]
-            [cortex.util-test]
-            [cortex.scrabble-test]))
+            [cortex.util-test]))
 
 (enable-console-print!)
 
-(doo-tests 'cortex.wiring-test
-           'cortex.function-test
+(doo-tests 'cortex.nn.wiring-test
+           'cortex.nn.function-test
            'cortex.util-test
-           'cortex.scrabble-test
-           'cortex.network-test
-           'cortex.normaliser-test
-           'cortex.optimise-test
-           )
+           'cortex.nn.scrabble-test
+           'cortex.nn.network-test
+           'cortex.nn.normaliser-test
+           'cortex.optimise-test)
 

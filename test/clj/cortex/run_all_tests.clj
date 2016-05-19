@@ -1,25 +1,25 @@
 (ns cortex.run-all-tests
-  (:require [cortex.convnet-tests]
-            [cortex.convolutional-layer-tests]
-            [cortex.function-test]
-            [cortex.layers-test]
-            [cortex.module-test]
-            [cortex.network-test]
-            [clojure.test]
-            [cortex.performance-test]
-            [cortex.network-test]
-            [cortex.normaliser-test]
-            [cortex.optimise-test]
-            [cortex.performance-test]
-            [cortex.serialize-test]
-            [cortex.spiral-test]
-            [cortex.util-test]
-            [cortex.wiring-test]
-            [clojure.test])
+  (:require
+    [clojure.test]
+    [cortex.nn.convnet-tests]
+    [cortex.nn.convolutional-layer-tests]
+    [cortex.nn.function-test]
+    [cortex.nn.layers-test]
+    [cortex.nn.module-test]
+    [cortex.nn.network-test]
+    [cortex.nn.performance-test]
+    [cortex.nn.network-test]
+    [cortex.nn.normaliser-test]
+    [cortex.optimise-test]
+    [cortex.nn.performance-test]
+    [cortex.nn.serialize-test]
+    [cortex.nn.spiral-test]
+    [cortex.util-test]
+    [cortex.nn.wiring-test])
   (:gen-class))
 
 (defn -main [& args]
   (if (= 0 (count args))
     (clojure.test/run-all-tests)
     (do
-      (cortex.performance-test/MNIST-convolution-network-train))))
+      (cortex.nn.performance-test/MNIST-convolution-network-train))))

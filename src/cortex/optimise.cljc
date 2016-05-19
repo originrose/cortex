@@ -1,11 +1,12 @@
 (ns cortex.optimise
   "Namespace for optimisation algorithms, loss functions and optimiser objects"
-  (:require [cortex.protocols :as cp]
-            [clojure.core.matrix.protocols :as mp]
-            [cortex.util :as util :refer [error]]
-            [clojure.core.matrix.linear :as linear]
-            [clojure.core.matrix :as m])
-  #?(:clj (:import [cortex.impl AdamOptimizer OptOps])))
+  (:require
+    [clojure.core.matrix :as m]
+    [clojure.core.matrix.protocols :as mp]
+    [clojure.core.matrix.linear :as linear]
+    [cortex.nn.protocols :as cp]
+    [cortex.util :as util :refer [error]])
+  #?(:clj (:import [cortex.nn.impl AdamOptimizer OptOps])))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)

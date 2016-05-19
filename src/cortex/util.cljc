@@ -2,8 +2,8 @@
   (:require
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
-    [cortex.protocols :as cp]
-    [cortex.backends :as b]
+    [cortex.nn.protocols :as cp]
+    [cortex.nn.backends :as b]
     #?(:cljs [goog.string :refer [format]]))
 
   #?(:clj (:import [mikera.vectorz Vectorz]))

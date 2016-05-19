@@ -1,15 +1,14 @@
 (ns cortex.optimise-test
-  (:require #?(:cljs
-                [cljs.test :refer-macros [deftest is testing]]
-                :clj
-                [clojure.test :refer [deftest is testing]])
-            [clojure.core.matrix :as m]
-            [cortex.layers :as layers]
-            [cortex.optimise :refer [adadelta-optimiser sgd-optimiser]]
-            [cortex.core :refer [output forward backward parameter-count optimise stack-module calc-output]]))
+  (:require
+    #?(:cljs [cljs.test :refer-macros [deftest is testing]]
+             :clj [clojure.test :refer [deftest is testing]])
+    [clojure.core.matrix :as m]
+    [cortex.nn.layers :as layers]
+    [cortex.optimise :refer [adadelta-optimiser sgd-optimiser]]
+    [cortex.nn.core :refer [output forward backward parameter-count optimise stack-module calc-output]]))
 
 ;; simple optimiser testing function: try to optimse a transformation
-(defn optimiser-test 
+(defn optimiser-test
   ([m o]
     (optimiser-test m o nil))
   ([m o {:keys [iterations tolerance print-iterations]
@@ -26,7 +25,7 @@
               [o m] (optimise o m)
               result (calc-output m input)
               dist (m/length (m/sub result target))]
-          (when print-iterations (println (str i " : error = " dist " : output = " result))) 
+          (when print-iterations (println (str i " : error = " dist " : output = " result)))
           (if (< i iterations)
             (recur (inc i) m o)
             (is (< dist tolerance))))))))

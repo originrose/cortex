@@ -1,10 +1,9 @@
 (ns cortex.util-test
-  (:require #?(:cljs
-                [cljs.test :refer-macros [deftest is testing]]
-                :clj
-                [clojure.test :refer [deftest is testing]])
-            [cortex.util :as util]
-            [clojure.core.matrix :as m]))
+  (:require
+    #?(:cljs [cljs.test :refer-macros [deftest is testing]]
+        :clj [clojure.test :refer [deftest is testing]])
+    [clojure.core.matrix :as m]
+    [cortex.util :as util]))
 
 (deftest confusion-test
   (let [cf (util/confusion-matrix ["cat" "dog" "rabbit"])
@@ -22,12 +21,11 @@
     ;; (util/print-confusion-matrix cf)
     (is (= 2 (get-in cf ["cat" "dog"])))))
 
-
 (def DEFAULT-TOLERANCE 0.001)
 (def DEFAULT-MAX-TESTS 100)
 
 (defn converges?
-  "Tests if a sequence of array values converges to a target value, with a given tolerance. 
+  "Tests if a sequence of array values converges to a target value, with a given tolerance.
    Returns nil if convergence does not happen, the success value from the sequence if it does."
   ([sequence target]
     (converges? sequence target nil))
@@ -42,7 +40,7 @@
         (when (< i max-tests)
           (if-let [v (first sequence)]
              (if (m/equals target (test-fn v) tolerance) ;; equals with tolerance
-               (if (>= (inc hits) hits-needed) 
+               (if (>= (inc hits) hits-needed)
                  v
                  (recur (inc i) (inc hits) (next sequence)))
                (recur (inc i) 0 (next sequence)))))))))
