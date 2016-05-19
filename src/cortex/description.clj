@@ -18,9 +18,9 @@
                              :output-height height
                              :output-channels channels}]))
 
-(defn linear [num-output & {:keys [weights bias]}]
+(defn linear [num-output & {:keys [weights bias l2-max-constraint]}]
   [{:type :linear :output-size num-output
-    :weights weights :bias bias}])
+    :weights weights :bias bias :l2-max-constraint l2-max-constraint}])
 
 (defn softmax
     "Define a softmax which may be multi-channelled.  The data is expected
@@ -29,8 +29,10 @@ channel 2 with n-outputs"
   ([] {:type :softmax :output-channels 1})
   ([channels] {:type :softmax :output-channels channels}))
 
-(defn linear->softmax [num-classes] [{:type :linear :output-size num-classes}
-                                     {:type :softmax}])
+(defn linear->softmax [num-classes & {:keys [channels]
+                                      :or {channels 1}}]
+  [{:type :linear :output-size num-classes}
+   {:type :softmax :output-channels channels}])
 
 (defn relu [] [{:type :relu}])
 (defn linear->relu [num-output & opts]
@@ -217,8 +219,9 @@ channel 2 with n-outputs"
 
 (defmethod create-module :linear
   [desc]
-  (let [{:keys [input-size output-size weights bias]} desc]
-    (layers/linear-layer input-size output-size :weights weights :bias bias)))
+  (let [{:keys [input-size output-size weights bias l2-max-constraint]} desc]
+    (layers/linear-layer input-size output-size :weights weights :bias bias
+                         :l2-max-constraint l2-max-constraint)))
 
 (defmethod create-module :logistic
   [desc]
@@ -317,6 +320,9 @@ channel 2 with n-outputs"
   cortex.impl.layers.Softmax
   (layer->input [layer] (input (m/ecount (:output layer))))
   (layer->description [layer] (softmax))
+  cortex.impl.layers.Softmax
+  (layer->input [layer] (input (m/ecount (:output layer))))
+  (layer->description [layer] (dropout (:probability layer)))
   cortex.impl.layers.Linear
   (layer->input [layer] (input (m/column-count (:weights layer))))
   (layer->description [layer] (linear (m/row-count (:weights layer)) :weights (m/clone (:weights layer)) :bias (m/clone (:bias layer))))

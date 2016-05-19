@@ -190,24 +190,27 @@ Returns new parameters"
 (def ^:const SGD-DEFAULT-LEARN-RATE 0.01)
 (def ^:const SGD-DEFAULT-MOMENTUM 0.9)
 
-(defrecord SGDOptimiser [dx         ;; latest delta update
-                         ])
+(defrecord SGDOptimiser [learn-rate
+                         momentum])
 
 (defn sgd-optimiser
-  "Constructs a new Stochastic Gradient Descent optimiser of the given size (parameter length)"
-  ([size]
-    (sgd-optimiser size nil))
-  ([size {:keys [learn-rate momentum] :as options}]
-   (let [dx (new-mutable-vector size)]
-      (m/assign! dx 0.0)
-      (SGDOptimiser. dx nil options))))
+  "Constructs a new Stochastic Gradient Descent optimiser with optional
+  learn-rate and momentum"
+  ([learn-rate momentum]
+   (->SGDOptimiser learn-rate momentum))
+  ([parameter-count]
+   (println "Parameter count has be deprecated for sgd optimiser")
+   (sgd-optimiser SGD-DEFAULT-LEARN-RATE SGD-DEFAULT-MOMENTUM))
+  ([]
+   (sgd-optimiser SGD-DEFAULT-LEARN-RATE SGD-DEFAULT-MOMENTUM)))
+
 
 (extend-protocol cp/PGradientOptimiser
   SGDOptimiser
     (compute-parameters [this gradient parameters]
       (let [learn-rate (double (or (:learn-rate this) SGD-DEFAULT-LEARN-RATE))
             momentum (double (or (:momentum this) SGD-DEFAULT-MOMENTUM))
-            dx (:dx this)]
+            dx (util/get-or-new-array this :dx [(m/ecount parameters)])]
 
         ;; apply momentum factor to previous delta
         (m/scale! dx momentum)
@@ -216,7 +219,9 @@ Returns new parameters"
         (m/add-scaled! dx gradient (* -1.0 learn-rate))
 
         ;; return the updated adadelta record. Mutable gradients have been updated
-        (assoc this :parameters (m/add parameters dx)))))
+        (assoc this
+               :parameters (m/add parameters dx)
+               :dx dx))))
 
 (extend-protocol cp/PParameters
   SGDOptimiser
@@ -282,6 +287,7 @@ Returns new parameters"
   (loss-gradient [this v target]
     (m/sub v target)))
 
+(defn cross-entropy-loss [] (->CrossEntropyLoss))
 
 ;;Mutually exclusive ce loss
 (defrecord SoftmaxCrossEntropyLoss []
@@ -292,3 +298,5 @@ Returns new parameters"
 
   (loss-gradient [this v target]
     (m/sub v target)))
+
+(defn softmax-loss [] (->SoftmaxCrossEntropyLoss))

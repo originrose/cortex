@@ -14,7 +14,7 @@
 (defn run
   [network test-data]
   (mapv (fn [input]
-          (let [network (core/forward network input)]
+          (let [network (core/calc network input)]
             (m/clone (core/output network))))
         test-data))
 
@@ -74,8 +74,8 @@
 
 
 (defn train-step
-  "Trains a network for a single training example. 
-   
+  "Trains a network for a single training example.
+
    Returns network with updated gradient."
   [input answer network loss-fn]
   (let [network (core/forward network input)
