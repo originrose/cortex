@@ -26,12 +26,19 @@
   (gpu-desc/build-and-create-network description))
 
 
+(defn single-target-network
+  [network-desc]
+  {:network-desc network-desc
+   :loss-fn (opt/mse-loss)
+   :labels {:training @training-data :test @test-data}})
+
+
 (defn create-linear
   []
   (let [network-desc [(desc/input 28 28 1)
                       (desc/linear->relu 144)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
 
 
 (defn create-logistic
@@ -39,7 +46,7 @@
   (let [network-desc [(desc/input 28 28 1)
                       (desc/linear->logistic 144)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
 
 
 
@@ -50,7 +57,7 @@
                       (desc/linear->relu 144 :l2-max-constraint 2.0)
                       (desc/dropout 0.5)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
 
 
 (defn create-dropout-logistic-full
@@ -60,35 +67,50 @@
                       (desc/linear->logistic 144 :l2-max-constraint 2.0)
                       (desc/dropout 0.5)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
+
+(defn create-multi-target-dropout
+  []
+  (let [network-desc [(desc/input 28 28 1)
+                      (desc/dropout 0.8)
+                      (desc/linear->logistic 144 :l2-max-constraint 2.0)
+                      (desc/dropout 0.5)
+                      ;;Note carefully the order of the leaves of the network.  There
+                      ;;is currently an implicit dependency here on that order, the order
+                      ;;of the loss functions and the order of the training and test
+                      ;;labels which is probably an argument to specify all of that
+                      ;;in the network description
+                      (desc/split [[(desc/linear 784)] [(desc/linear->softmax 10)]])]
+        labels {:training [@training-data @training-labels]
+                :test [@test-data @test-labels]}
+        loss-fn [(opt/mse-loss) (opt/softmax-loss)]]
+    {:network-desc network-desc
+     :labels labels
+     :loss-fn loss-fn}))
 
 
 (defn train-and-evaluate
-  [network optimiser {:keys [dataset cv-dataset] :as train-config}]
-  (let [n-epochs 20
-        batch-size 10
-        loss-fn (opt/mse-loss)
-        full-train-config
-        (merge train-config (gpu-train/make-training-config network optimiser loss-fn
-                                                            batch-size n-epochs
-                                                            dataset cv-dataset))
-
-        train-config (dissoc full-train-config :gpu-cv-dataset)
-        train-config (gpu-train/train-uploaded-train-config train-config)
-        train-config (assoc train-config :gpu-cv-dataset (:gpu-cv-dataset full-train-config))
-        loss (gpu-train/evaluate-training-network train-config)]
-    {:network (vec (flatten (desc/network->description network)))
-     :score loss}))
+  [network-params optimiser]
+  (resource/with-resource-context
+   (let [n-epochs 20
+         batch-size 10
+         {:keys [network-desc loss-fn labels]} network-params
+         network (build-and-create-network network-desc)
+         training-labels (get labels :training)
+         network (gpu-train/train network optimiser loss-fn @training-data training-labels
+                                  batch-size n-epochs)]
+     {:network (vec (flatten (desc/network->description network)))})))
 
 
 (defonce networks (atom nil))
 
 
 (defn train-network
-  [[network-entry opt-entry] train-config]
+  [[network-entry opt-entry]]
   (let [[net-name network-fn] network-entry
         [opt-name opt-fn] opt-entry
-        network-and-score (train-and-evaluate (network-fn) (opt-fn) train-config)]
+        _ (println "training" net-name)
+        network-and-score (train-and-evaluate (network-fn) (opt-fn))]
     (swap! networks assoc [net-name opt-name]
            network-and-score)))
 
@@ -96,25 +118,20 @@
 (defn train-networks
   []
   (let [opt-fns {:adam opt/adam}
-        network-fns {:linear create-linear
-                     :logistic create-logistic
-                     :linear-dropout-full create-dropout-full
-                     :logistic-dropout-full create-dropout-logistic-full
+        network-fns {
+                     ;; :logistic create-logistic
+                     ;; :logistic-dropout-full create-dropout-logistic-full
+                     :multiple-target-dropout create-multi-target-dropout
                      }
         network-opts (for [opt-fn opt-fns network network-fns]
                        [network opt-fn])]
-    (resource/with-resource-context
-      (try
-       (with-bindings {#'cudnn/*cudnn-datatype* (float 0.0)}
-         (let [train-config (gpu-train/upload-datasets
-                             {:dataset [@training-data @training-data]
-                              :cv-dataset [@test-data @test-data]})]
-           ;;Until we start to make sense of cuda streams, there is no benefit
-           ;;of a pmap here and I was getting crashes.
-           (doall (map #(train-network % train-config) network-opts))))
-       (catch Exception e (do (println "caught error: ") (println  e) (throw e)))))
-    (map (fn [[key val]]
-           [key (:score val)]) @networks)))
+    (try
+      (with-bindings {#'cudnn/*cudnn-datatype* (float 0.0)}
+        ;;Until we start to make sense of cuda streams, there is no benefit
+        ;;of a pmap here and I was getting crashes.
+        (doall (map #(train-network %) network-opts)))
+      (catch Exception e (do (println "caught error: ") (println  e) (throw e))))
+    (keys @networks)))
 
 
 (defn check-l2-constraint
@@ -238,7 +255,7 @@
 
 (defn plot-network-tsne
   [net-key & {:keys [sample-count iterations]
-              :or {sample-count 2500
+              :or {sample-count 10000
                    iterations 1000}}]
   (let [_ (println "running network" net-key)
         samples (run-network net-key)
