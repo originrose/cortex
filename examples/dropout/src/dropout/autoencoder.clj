@@ -15,10 +15,13 @@
             [incanter.charts :as inc-charts]))
 
 
-(def training-data (future (mnist/training-data)))
+
 (def training-labels (future (mnist/training-labels)))
-(def test-data  (future (mnist/test-data)))
+
 (def test-labels (future (mnist/test-labels)))
+(defonce normalized-data (future (mnist/normalized-data)))
+(def training-data (future (:training-data @normalized-data)))
+(def test-data  (future (:test-data @normalized-data)))
 (def autoencoder-size 529)
 
 (defn build-and-create-network
@@ -103,7 +106,11 @@
                       ;;of the loss functions and the order of the training and test
                       ;;labels which is probably an argument to specify all of that
                       ;;in the network description
+
+                      ;;It takes a powerful network to reverse a convolution...
                       (desc/split [[(desc/linear->logistic autoencoder-size
+                                                           :l2-max-constraint 2.0)
+                                    (desc/linear->logistic autoencoder-size
                                                            :l2-max-constraint 2.0)
                                     (desc/linear 784)]
                                    [(desc/linear->softmax 10)]])]
@@ -276,9 +283,11 @@
               :or {sample-count 2500}}]
   (let [network (get-trained-network net-key)
         network-and-next (map vector network (concat (list  {}) network))
-        encoder (remove #(= :dropout (:type %))
+        encoder (remove #(or (= :dropout (:type %))
+                             (= :input (:type %)))
                         (mapv first (take-while #(not= (get (second %) :type) :logistic)
                                                 network-and-next)))
+        _ (println (mapv :type encoder))
         encoder (vec (flatten [(desc/input 28 28 1)
                                encoder]))
         encoder-net (desc/build-and-create-network encoder)
