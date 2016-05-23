@@ -92,9 +92,9 @@
   []
   (let [network-desc [(desc/input 28 28 1)
                       (desc/dropout 0.8)
-                      (desc/convolutional 5 0 1 20)
+                      (desc/convolutional 5 0 1 20 :l2-max-constraint 2.0)
                       (desc/max-pooling 2 0 2)
-                      (desc/convolutional 5 0 1 50)
+                      (desc/convolutional 5 0 1 50 :l2-max-constraint 2.0)
                       (desc/max-pooling 2 0 2)
                       (desc/linear->logistic autoencoder-size :l2-max-constraint 2.0)
                       (desc/dropout 0.5)
