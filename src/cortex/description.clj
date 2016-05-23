@@ -271,7 +271,7 @@ channel 2 with n-outputs"
   (layers/convolutional input-width input-height input-channels
                         kernel-width kernel-height pad-x pad-y
                         stride-x stride-y num-kernels
-                        :weights weights :bias bias))
+                        :weights weights :bias (m/reshape bias [1 (m/ecount bias)])))
 
 
 (defmethod create-module :max-pooling
@@ -319,7 +319,8 @@ channel 2 with n-outputs"
          :pad-x (:padx conv-config) :pad-y (:pady conv-config)
          :stride-x (:stride-w conv-config) :stride-y (:stride-h conv-config)}]
     (if (= layer-type :convolutional)
-      (assoc retval :num-kernels (:num-out-channels conv-config) :weights (m/clone weights) :bias (m/clone bias))
+      (assoc retval :num-kernels (:num-out-channels conv-config) :weights (m/clone weights)
+             :bias (m/reshape bias [(m/ecount bias)]))
       retval)))
 
 (defn conv-config->input
@@ -354,7 +355,7 @@ channel 2 with n-outputs"
   cortex.impl.wiring.StackModule
   (layer->input [layer] (layer->input (first (:modules layer))))
   (layer->description [layer]
-    (map layer->description (:modules layer))))
+    (mapv layer->description (:modules layer))))
 
 
 (defn network->description
