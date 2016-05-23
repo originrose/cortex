@@ -7,7 +7,7 @@
           (set! *unchecked-math* :warn-on-boxed)))
 
 (defprotocol PModule
-  "Protocol for a generic module. All cortex modules must implement this."
+  "Protocol for a generic module. All cortex.nn modules must implement this."
   (calc [m input]
     "Performs module calculation, returning an updated module that includes the output and
      any intermediate states computed.")
@@ -80,7 +80,6 @@
         "Computes the loss for a value v against a target")
   (loss-gradient [this v target]
         "Computes the gradient of the loss with respect to v"))
-
 
 (defprotocol PSerialize
   "Default implementation simply calls into {} and adds type.  An override
