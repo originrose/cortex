@@ -15,31 +15,41 @@
             [incanter.charts :as inc-charts]))
 
 
-(def image-count 1000000)
-(def training-data (future (vec (take image-count (mnist/training-data)))))
-(def training-labels (future (vec (take image-count (mnist/training-labels)))))
-(def test-data  (future (vec (take image-count (mnist/test-data)))))
-(def test-labels (future (vec (take image-count (mnist/test-labels)))))
+
+(def training-labels (future (mnist/training-labels)))
+
+(def test-labels (future (mnist/test-labels)))
+(defonce normalized-data (future (mnist/normalized-data)))
+(def training-data (future (:training-data @normalized-data)))
+(def test-data  (future (:test-data @normalized-data)))
+(def autoencoder-size 529)
 
 (defn build-and-create-network
   [description]
   (gpu-desc/build-and-create-network description))
 
 
+(defn single-target-network
+  [network-desc]
+  {:network-desc network-desc
+   :loss-fn (opt/mse-loss)
+   :labels {:training @training-data :test @test-data}})
+
+
 (defn create-linear
   []
   (let [network-desc [(desc/input 28 28 1)
-                      (desc/linear->relu 144)
+                      (desc/linear->relu autoencoder-size)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
 
 
 (defn create-logistic
   []
   (let [network-desc [(desc/input 28 28 1)
-                      (desc/linear->logistic 144)
+                      (desc/linear->logistic autoencoder-size)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
 
 
 
@@ -47,79 +57,122 @@
   []
   (let [network-desc [(desc/input 28 28 1)
                       (desc/dropout 0.8)
-                      (desc/linear->relu 144 :l2-max-constraint 2.0)
+                      (desc/linear->relu autoencoder-size :l2-max-constraint 2.0)
                       (desc/dropout 0.5)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
 
 
 (defn create-dropout-logistic-full
   []
   (let [network-desc [(desc/input 28 28 1)
                       (desc/dropout 0.8)
-                      (desc/linear->logistic 144 :l2-max-constraint 2.0)
+                      (desc/linear->logistic autoencoder-size :l2-max-constraint 2.0)
                       (desc/dropout 0.5)
                       (desc/linear 784)]]
-    (build-and-create-network network-desc)))
+    (single-target-network network-desc)))
+
+(defn create-multi-target-dropout
+  []
+  (let [network-desc [(desc/input 28 28 1)
+                      (desc/dropout 0.8)
+                      (desc/linear->logistic autoencoder-size :l2-max-constraint 2.0)
+                      (desc/dropout 0.5)
+                      ;;Note carefully the order of the leaves of the network.  There
+                      ;;is currently an implicit dependency here on that order, the order
+                      ;;of the loss functions and the order of the training and test
+                      ;;labels which is probably an argument to specify all of that
+                      ;;in the network description
+                      (desc/split [[(desc/linear 784)] [(desc/linear->softmax 10)]])]
+        labels {:training [@training-data @training-labels]
+                :test [@test-data @test-labels]}
+        loss-fn [(opt/mse-loss) (opt/softmax-loss)]]
+    {:network-desc network-desc
+     :labels labels
+     :loss-fn loss-fn}))
+
+(defn create-mnist-multi-target
+  []
+  (let [network-desc [(desc/input 28 28 1)
+                      (desc/dropout 0.8)
+                      (desc/convolutional 5 0 1 20 :l2-max-constraint 2.0)
+                      (desc/max-pooling 2 0 2)
+                      (desc/convolutional 5 0 1 50 :l2-max-constraint 2.0)
+                      (desc/max-pooling 2 0 2)
+                      (desc/linear->logistic autoencoder-size :l2-max-constraint 2.0)
+                      (desc/dropout 0.5)
+                      ;;Note carefully the order of the leaves of the network.  There
+                      ;;is currently an implicit dependency here on that order, the order
+                      ;;of the loss functions and the order of the training and test
+                      ;;labels which is probably an argument to specify all of that
+                      ;;in the network description
+
+                      ;;It takes a powerful network to reverse a convolution...
+                      (desc/split [[(desc/linear->logistic autoencoder-size
+                                                           :l2-max-constraint 2.0)
+                                    (desc/linear->logistic autoencoder-size
+                                                           :l2-max-constraint 2.0)
+                                    (desc/linear 784)]
+                                   [(desc/linear->softmax 10)]])]
+        labels {:training [@training-data @training-labels]
+                :test [@test-data @test-labels]}
+        loss-fn [(opt/mse-loss) (opt/softmax-loss)]]
+    {:network-desc network-desc
+     :labels labels
+     :loss-fn loss-fn}))
+
+(def network-fns
+  {:linear create-linear
+   :logistic create-logistic
+   :logistic-dropout-full create-dropout-logistic-full
+   :multiple-target-dropout create-multi-target-dropout
+   :mnist-multiple-target-dropout create-mnist-multi-target})
 
 
 (defn train-and-evaluate
-  [network optimiser {:keys [dataset cv-dataset] :as train-config}]
-  (let [n-epochs 20
-        batch-size 10
-        loss-fn (opt/mse-loss)
-        full-train-config
-        (merge train-config (gpu-train/make-training-config network optimiser loss-fn
-                                                            batch-size n-epochs
-                                                            dataset cv-dataset))
-
-        train-config (dissoc full-train-config :gpu-cv-dataset)
-        train-config (gpu-train/train-uploaded-train-config train-config)
-        train-config (assoc train-config :gpu-cv-dataset (:gpu-cv-dataset full-train-config))
-        loss (gpu-train/evaluate-training-network train-config)]
-    {:network (vec (flatten (desc/network->description network)))
-     :score loss}))
+  [network-params optimiser]
+  (resource/with-resource-context
+   (let [n-epochs 8
+         batch-size 10
+         {:keys [network-desc loss-fn labels]} network-params
+         network (build-and-create-network network-desc)
+         training-labels (get labels :training)
+         test-labels (get labels :test)
+         network (gpu-train/train network optimiser loss-fn @training-data training-labels
+                                  batch-size n-epochs
+                                  @test-data test-labels)]
+     {:network (vec (flatten (desc/network->description network)))})))
 
 
 (defonce networks (atom nil))
 
 
 (defn train-network
-  [[network-entry opt-entry] train-config]
-  (let [[net-name network-fn] network-entry
-        [opt-name opt-fn] opt-entry
-        network-and-score (train-and-evaluate (network-fn) (opt-fn) train-config)]
-    (swap! networks assoc [net-name opt-name]
-           network-and-score)))
+  [net-name]
+  (with-bindings {#'cudnn/*cudnn-datatype* (float 0.0)}
+    (let [network-fn (get network-fns net-name)
+          _ (println "training" net-name)
+          network-and-score (train-and-evaluate (network-fn) (opt/adam))]
+      (swap! networks assoc net-name
+             network-and-score))))
 
 
 (defn train-networks
   []
-  (let [opt-fns {:adam opt/adam}
-        network-fns {:linear create-linear
-                     :logistic create-logistic
-                     :linear-dropout-full create-dropout-full
-                     :logistic-dropout-full create-dropout-logistic-full
-                     }
-        network-opts (for [opt-fn opt-fns network network-fns]
-                       [network opt-fn])]
-    (resource/with-resource-context
-      (try
-       (with-bindings {#'cudnn/*cudnn-datatype* (float 0.0)}
-         (let [train-config (gpu-train/upload-datasets
-                             {:dataset [@training-data @training-data]
-                              :cv-dataset [@test-data @test-data]})]
-           ;;Until we start to make sense of cuda streams, there is no benefit
-           ;;of a pmap here and I was getting crashes.
-           (doall (map #(train-network % train-config) network-opts))))
-       (catch Exception e (do (println "caught error: ") (println  e) (throw e)))))
-    (map (fn [[key val]]
-           [key (:score val)]) @networks)))
+  (try
+    ;;Until we start to make sense of cuda streams, there is no benefit
+    ;;of a pmap here and I was getting crashes.
+    (doall (map #(train-network %) (keys network-fns)))
+    (catch Exception e (do (println "caught error: ") (println  e) (throw e))))
+  (keys @networks))
 
+(defn get-trained-network
+  [net-name]
+  (:network (get @networks net-name)))
 
 (defn check-l2-constraint
   [net-key size]
-  (let [network (:network (get @networks [net-key :adam]))
+  (let [network (get-trained-network net-key)
         first-linear-layer (first (filter #(= :linear (get % :type))
                                           network))
         weights (:weights first-linear-layer)
@@ -162,13 +215,14 @@
 
 (defn view-weights
   [net-key]
-  (let [network (:network (get @networks [net-key :adam]))
+  (let [network (get-trained-network net-key)
         first-linear-layer (first (filter #(= :linear (get % :type))
                                           network))
 
         weights (:weights first-linear-layer)
         filter-count (long (m/row-count weights))
-        image-row-width (Math/sqrt filter-count)
+        image-row-width (long (Math/sqrt filter-count))
+        image-num-rows (quot filter-count image-row-width)
         filter-dim (Math/sqrt (m/column-count weights))
         ;;separate each filter with a black bar
         filter-bar-offset (+ filter-dim 1)
@@ -227,18 +281,22 @@
 (defn run-network
   [net-key & {:keys [sample-count]
               :or {sample-count 2500}}]
-  (let [network (:network (get @networks [net-key :adam]))
-        first-linear-layer (first (filter #(= :linear (get % :type))
-                                          network))
-        encoder [(desc/input 28 28 1)
-                 first-linear-layer]
+  (let [network (get-trained-network net-key)
+        network-and-next (map vector network (concat (list  {}) network))
+        encoder (remove #(or (= :dropout (:type %))
+                             (= :input (:type %)))
+                        (mapv first (take-while #(not= (get (second %) :type) :logistic)
+                                                network-and-next)))
+        _ (println (mapv :type encoder))
+        encoder (vec (flatten [(desc/input 28 28 1)
+                               encoder]))
         encoder-net (desc/build-and-create-network encoder)
         results (net/run encoder-net (vec (take sample-count @test-data)))]
     results))
 
 (defn plot-network-tsne
   [net-key & {:keys [sample-count iterations]
-              :or {sample-count 2500
+              :or {sample-count 10000
                    iterations 1000}}]
   (let [_ (println "running network" net-key)
         samples (run-network net-key)

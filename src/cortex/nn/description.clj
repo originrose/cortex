@@ -50,9 +50,9 @@ channel 2 with n-outputs"
 
 (defn dropout [probability] {:type :dropout :probability probability})
 
-(defn convolutional
+(defn convolutional-expanded
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
-    & {:keys [weights bias]} ]
+    & {:keys [weights bias l2-max-constraint]} ]
    (when (or (= 0 stride-x)
              (= 0 stride-y))
      (throw (Exception. "Convolutional layers must of stride >= 1")))
@@ -63,10 +63,13 @@ channel 2 with n-outputs"
      (throw (Exception. "Convolutional layers must of num-kernels >= 1")))
    [{:type :convolutional :kernel-width kernel-width :kernel-height kernel-height
      :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
-     :num-kernels num-kernels :weights weights :bias bias}])
-  ([kernel-dim pad stride num-kernels]
-   (convolutional kernel-dim kernel-dim pad pad stride stride num-kernels)))
+     :num-kernels num-kernels :weights weights :bias bias
+     :l2-max-constraint l2-max-constraint}]))
 
+(defn convolutional
+ ([kernel-dim pad stride num-kernels & {:keys [weights bias l2-max-constraint]}]
+  (convolutional-expanded kernel-dim kernel-dim pad pad stride stride num-kernels
+                          :weights weights :bias bias :l2-max-constraint l2-max-constraint)))
 
 (defn max-pooling
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y]
@@ -267,11 +270,12 @@ channel 2 with n-outputs"
   [{:keys [input-width input-height input-channels
            kernel-width kernel-height pad-x pad-y
            stride-x stride-y num-kernels
-           weights bias] :as desc}]
+           weights bias l2-max-constraint] :as desc}]
   (layers/convolutional input-width input-height input-channels
                         kernel-width kernel-height pad-x pad-y
                         stride-x stride-y num-kernels
-                        :weights weights :bias bias))
+                        :weights weights :bias (m/reshape bias [1 (m/ecount bias)])
+                        :l2-max-constraint l2-max-constraint))
 
 
 (defmethod create-module :max-pooling
@@ -313,13 +317,17 @@ channel 2 with n-outputs"
   (layer->description [layer]))
 
 (defn conv-config->description
-  [conv-config layer-type & [weights bias]]
+  [conv-config layer-type & [weights bias l2-max-constraint]]
   (let [retval
-        {:type layer-type :kernel-width (:k-width conv-config) :kernel-height (:k-height conv-config)
+        {:type layer-type :kernel-width (:k-width conv-config)
+         :kernel-height (:k-height conv-config)
          :pad-x (:padx conv-config) :pad-y (:pady conv-config)
          :stride-x (:stride-w conv-config) :stride-y (:stride-h conv-config)}]
     (if (= layer-type :convolutional)
-      (assoc retval :num-kernels (:num-out-channels conv-config) :weights (m/clone weights) :bias (m/clone bias))
+      (assoc retval :num-kernels (:num-out-channels conv-config)
+             :weights (m/clone weights)
+             :bias (m/reshape bias [(m/ecount bias)])
+             :l2-max-constraint l2-max-constraint)
       retval)))
 
 (defn conv-config->input
@@ -347,18 +355,20 @@ channel 2 with n-outputs"
   (layer->description [layer] (conv-config->description (:conv-config layer)
                                                         :convolutional
                                                         (:weights layer)
-                                                        (:bias layer)))
+                                                        (:bias layer)
+                                                        (:l2-max-constraint layer)))
   cortex.nn.impl.layers.convolution.Pooling
   (layer->input [layer] (conv-config->input (:conv-config layer)))
   (layer->description [layer] (conv-config->description (:conv-config layer) :max-pooling))
   cortex.nn.impl.wiring.StackModule
   (layer->input [layer] (layer->input (first (:modules layer))))
   (layer->description [layer]
-    (map layer->description (:modules layer))))
+    (mapv layer->description (:modules layer))))
 
 
 (defn network->description
   [network]
   (vec
-   (conj (layer->description network)
-         (layer->input network))))
+   (flatten
+    (concat (layer->input network)
+            (layer->description network)))))
