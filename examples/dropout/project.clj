@@ -11,4 +11,4 @@
                  [incanter/incanter-core "1.5.7"]
                  [incanter/incanter-charts "1.5.7"]]
 
-  :main dropout.core)
+  :main dropout.autoencoder)
