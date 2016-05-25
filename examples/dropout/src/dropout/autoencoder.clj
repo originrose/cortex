@@ -16,7 +16,7 @@
 (def training-labels (future (mnist/training-labels)))
 
 (def test-labels (future (mnist/test-labels)))
-(defonce normalized-data (future (mnist/normalized-data)))
+(def normalized-data (future (mnist/normalized-data)))
 (def training-data (future (:training-data @normalized-data)))
 (def test-data  (future (:test-data @normalized-data)))
 (def autoencoder-size 529)

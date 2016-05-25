@@ -86,7 +86,15 @@
   ([data]
    (matrix-col-stddevs data nil)))
 
-
+(defn stddevs-to-safe-divisor!
+  "replace any zeros with 1 so we don't get NAN"
+  [stddevs]
+  (m/emap! (fn [^double dval]
+             (if (very-near? dval 0.0)
+               1.0
+               dval))
+           stddevs)
+  stddevs)
 
 (defn normalize-data!
   "In-place normalize the data by column.  This means that all parameters have mean of 0 and
@@ -103,11 +111,7 @@ This functions does not always work if data is not a vectorz matrix"
         stddevs (matrix-col-stddevs data)
         ;;make sure zero entries are set to 1 (no change in data)
         ;;else leave the value.
-        _ (m/emap! (fn [^double dval]
-                     (if (very-near? dval 0.0)
-                       1.0
-                       dval))
-                   stddevs)
+        _ (stddevs-to-safe-divisor stddevs)
         _ (m/div! data stddevs)]
     {:data data
      :means means
@@ -192,6 +196,7 @@ This functions does not always work if data is not a vectorz matrix"
             means (parallel-mat-means submatrixes row-count)
             _ (doall (pmap #(m/sub! % means) submatrixes))
             stddevs (parallel-mat-stddevs submatrixes row-count)
+            _ (stddevs-to-safe-divisor stddevs)
             _ (doall (pmap #(m/div! % stddevs) submatrixes))]
         {:data data
          :means means

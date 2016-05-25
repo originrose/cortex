@@ -8,4 +8,8 @@
                  [thinktopic/cortex-gpu "0.1.0-SNAPSHOT"]
                  [thinktopic/cortex-visualization "0.1.0-SNAPSHOT"]]
 
+  :jvm-opts  ["-Xmx2g"
+              "-XX:+UseConcMarkSweepGC"
+              "-XX:-OmitStackTraceInFastThrow"]
+
   :main dropout.autoencoder)
