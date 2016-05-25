@@ -6,9 +6,6 @@
                  [thinktopic/cortex "0.1.1-SNAPSHOT"]
                  [thinktopic/cortex-datasets "0.3.0-SNAPSHOT"]
                  [thinktopic/cortex-gpu "0.1.0-SNAPSHOT"]
-                 [net.mikera/imagez "0.10.0"]
-                 [thinktopic/tsne-core "0.1.0"]
-                 [incanter/incanter-core "1.5.7"]
-                 [incanter/incanter-charts "1.5.7"]]
+                 [thinktopic/cortex-visualization "0.1.0-SNAPSHOT"]]
 
   :main dropout.autoencoder)
