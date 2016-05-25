@@ -91,7 +91,7 @@
   (let [train-d (training-data)
         test-d (test-data)
         all-rows (mat/array :vectorz (vec (concat train-d test-d)))
-        normalized (math/normalize-data! all-rows)
+        normalized (math/parallel-normalize-data! all-rows)
         norm-mat (get normalized :data)
         num-train-d (count train-d)
         return-train-d (vec (take num-train-d (mat/rows norm-mat)))
