@@ -90,8 +90,8 @@ the row and column counts of the weights are perfect squares."
   "Labels are expected to be an array of integers"
   [data integer-labels title]
   (let [data-transposed (m/transpose data)
-        x-vals (m/eseq (m/get-row data 0))
-        y-vals (m/eseq (m/get-row data 1))]
+        x-vals (m/eseq (m/get-row data-transposed 0))
+        y-vals (m/eseq (m/get-row data-transposed 1))]
     (doto (inc-charts/scatter-plot x-vals y-vals :group-by integer-labels :title title)
       inc-core/view)))
 
@@ -109,4 +109,4 @@ the row and column counts of the weights are perfect squares."
         labels (mapv index-of-label softmax-labels)
         _ (println (format "tsne-ifying %d samples" (m/row-count data)))
         tsne-data (tsne/tsne samples 2 :iters tsne-iterations)]
-    (scatter-plot-data tsne-data labels title)))
+    (scatter-plot-data (m/array :vectorz tsne-data) labels title)))
