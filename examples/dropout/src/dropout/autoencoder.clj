@@ -9,7 +9,8 @@
             [cortex-gpu.nn.train :as gpu-train]
             [cortex-gpu.resource :as resource]
             [cortex-gpu.nn.cudnn :as cudnn]
-            [cortex-visualization.nn.core :as nn-vis]))
+            [cortex-visualization.nn.core :as nn-vis]
+            [tsne.core :as tsne]))
 
 
 
@@ -18,7 +19,7 @@
 (defonce normalized-data (future (mnist/normalized-data)))
 (def training-data (future (:training-data @normalized-data)))
 (def test-data  (future (:test-data @normalized-data)))
-(def autoencoder-size 529)
+(def autoencoder-size 1000)
 
 (defn build-and-create-network
   [description]
@@ -117,12 +118,46 @@
      :labels labels
      :loss-fn loss-fn}))
 
+
+(defn create-mnist-tsne-target
+  []
+  (let [network-desc [(desc/input 28 28 1)
+                      (desc/dropout 0.8)
+                      (desc/convolutional 5 0 1 20 :l2-max-constraint 2.0)
+                      (desc/max-pooling 2 0 2)
+                      (desc/convolutional 5 0 1 50 :l2-max-constraint 2.0)
+                      (desc/max-pooling 2 0 2)
+                      (desc/linear->logistic autoencoder-size :l2-max-constraint 2.0)
+                      (desc/dropout 0.5)
+                      ;;Note carefully the order of the leaves of the network.  There
+                      ;;is currently an implicit dependency here on that order, the order
+                      ;;of the loss functions and the order of the training and test
+                      ;;labels which is probably an argument to specify all of that
+                      ;;in the network description
+
+                      ;;It takes a powerful network to reverse a convolution...
+                      (desc/split [[(desc/linear->logistic 2
+                                                           :l2-max-constraint 2.0)
+                                    (desc/linear->logistic autoencoder-size
+                                                           :l2-max-constraint 2.0)
+                                    (desc/linear->logistic autoencoder-size
+                                                           :l2-max-constraint 2.0)
+                                    (desc/linear 784)]
+                                   [(desc/linear->softmax 10)]])]
+        labels {:training [@training-data @training-labels]
+                :test [@test-data @test-labels]}
+        loss-fn [(opt/mse-loss) (opt/softmax-loss)]]
+    {:network-desc network-desc
+     :labels labels
+     :loss-fn loss-fn}))
+
 (def network-fns
   {:linear create-linear
    :logistic create-logistic
    :logistic-dropout-full create-dropout-logistic-full
    :multiple-target-dropout create-multi-target-dropout
-   :mnist-multiple-target-dropout create-mnist-multi-target})
+   :mnist-multiple-target-dropout create-mnist-multi-target
+   :mnist-tsne-multi-target create-mnist-tsne-target})
 
 
 (defn train-and-evaluate
@@ -191,9 +226,34 @@
                                encoder]))]
     (desc/build-and-create-network encoder)))
 
+
+(defn plot-raw-mnist-tsne
+  []
+  (let [data (vec (take 1000 @test-data))
+        labels (vec (take 1000 @test-labels))
+        label-idx (mapv nn-vis/index-of-label labels)
+        tsne-samples (tsne/tsne data 2)]
+    (nn-vis/scatter-plot-data tsne-samples label-idx "raw mnist")))
+
 (defn plot-network-tsne
   [net-key]
   (let [network (build-encoder-net net-key)]
     (nn-vis/plot-network-tsne network
                               (vec (take 1000 @test-data))
                               (vec (take 1000 @test-labels)) (name net-key))))
+
+
+(defn plot-tsne-encoder
+  []
+  (let [description (remove #(or (= :dropout (:type %))
+                                 (= :input (:type %)))
+                            (:network (get @networks :mnist-tsne-multi-target)))
+        split-item (last description)
+        first-linear (take 2 (first (:branches split-item)))
+        tsne-desc (vec (flatten (concat (drop-last description) [first-linear])))
+        data (vec (take 1000 @test-data))
+        labels (vec (take 1000 @test-labels))
+        label-idx (mapv nn-vis/index-of-label labels)
+        network (desc/build-and-create-network (concat (desc/input 28 28 1) tsne-desc))
+        samples (net/run network data)]
+    (nn-vis/scatter-plot-data samples label-idx "tsne autoencoder")))
