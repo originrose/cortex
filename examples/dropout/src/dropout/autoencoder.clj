@@ -14,9 +14,8 @@
 
 
 (def training-labels (future (mnist/training-labels)))
-
 (def test-labels (future (mnist/test-labels)))
-(def normalized-data (future (mnist/normalized-data)))
+(defonce normalized-data (future (mnist/normalized-data)))
 (def training-data (future (:training-data @normalized-data)))
 (def test-data  (future (:test-data @normalized-data)))
 (def autoencoder-size 529)
@@ -195,4 +194,6 @@
 (defn plot-network-tsne
   [net-key]
   (let [network (build-encoder-net net-key)]
-    (nn-vis/plot-network-tsne network @test-data @test-labels (name net-key))))
+    (nn-vis/plot-network-tsne network
+                              (vec (take 1000 @test-data))
+                              (vec (take 1000 @test-labels)) (name net-key))))

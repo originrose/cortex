@@ -94,13 +94,13 @@
 (defn average-loss
   "cpu only function to evaluate a network.  Should be moved to cortex."
   [loss-fn guesses answers]
-  (let[num-guesses (count guesses)
-       num-labels (count answers)
+  (let[num-guesses (first (m/shape guesses))
+       num-labels (first (m/shape answers))
        _ (when-not (= num-guesses num-labels)
            (throw (Exception. (format "Number of guesses %d and number of labels %d mismatch"
                                       num-guesses num-labels))))
        loss-items (map #(cp/loss loss-fn %1 %2)
-                       guesses answers)
+                       (m/rows guesses) (m/rows answers))
        aggregate-loss (double (reduce + loss-items))]
     (/ aggregate-loss num-guesses)))
 

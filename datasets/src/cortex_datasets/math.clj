@@ -111,7 +111,7 @@ This functions does not always work if data is not a vectorz matrix"
         stddevs (matrix-col-stddevs data)
         ;;make sure zero entries are set to 1 (no change in data)
         ;;else leave the value.
-        _ (stddevs-to-safe-divisor stddevs)
+        _ (stddevs-to-safe-divisor! stddevs)
         _ (m/div! data stddevs)]
     {:data data
      :means means
@@ -196,8 +196,23 @@ This functions does not always work if data is not a vectorz matrix"
             means (parallel-mat-means submatrixes row-count)
             _ (doall (pmap #(m/sub! % means) submatrixes))
             stddevs (parallel-mat-stddevs submatrixes row-count)
-            _ (stddevs-to-safe-divisor stddevs)
-            _ (doall (pmap #(m/div! % stddevs) submatrixes))]
+            _ (stddevs-to-safe-divisor! stddevs)
+            _ (doall (pmap #(m/div! % stddevs) submatrixes))
+
+            ]
         {:data data
          :means means
          :stddevs stddevs}))))
+
+(defn global-whiten!
+  [data]
+  (let [global-mean (/ (m/esum data) (m/ecount data))
+        _ (m/div! data global-mean)
+        global-variance (m/ereduce (fn [^double accum ^double val]
+                                     (+ accum (* val val)))
+                                   0.0
+                                   data)
+        global-stddev (Math/sqrt (/ global-variance (m/ecount data)))]
+    {:data (m/div! data global-stddev)
+     :mean global-mean
+     :stddev global-stddev}))

@@ -91,10 +91,14 @@
   (let [train-d (training-data)
         test-d (test-data)
         all-rows (mat/array :vectorz (vec (concat train-d test-d)))
-        normalized (math/parallel-normalize-data! all-rows)
+        data-shape (mat/shape all-rows)
+        num-cols (long (second data-shape))
+        num-rows (long (first data-shape))
+        _ (println "normalizing mnist data")
+        normalized (math/global-whiten! all-rows)
         norm-mat (get normalized :data)
         num-train-d (count train-d)
-        return-train-d (vec (take num-train-d (mat/rows norm-mat)))
-        return-test-d (vec (drop num-train-d (mat/rows norm-mat)))]
+        return-train-d (mat/submatrix norm-mat 0 num-train-d 0 num-cols)
+        return-test-d (mat/submatrix norm-mat num-train-d (- num-rows num-train-d) 0 num-cols)]
     {:training-data return-train-d
      :test-data return-test-d}))

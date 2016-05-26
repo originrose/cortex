@@ -107,6 +107,6 @@ the row and column counts of the weights are perfect squares."
   (let [_ (println "running network:" title)
         samples (net/run network data)
         labels (mapv index-of-label softmax-labels)
-        _ (println (format "tsne-ifying %d samples" (count data)))
+        _ (println (format "tsne-ifying %d samples" (m/row-count data)))
         tsne-data (tsne/tsne samples 2 :iters tsne-iterations)]
     (scatter-plot-data tsne-data labels title)))
