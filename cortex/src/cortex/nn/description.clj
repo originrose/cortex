@@ -274,7 +274,8 @@ channel 2 with n-outputs"
   (layers/convolutional input-width input-height input-channels
                         kernel-width kernel-height pad-x pad-y
                         stride-x stride-y num-kernels
-                        :weights weights :bias (m/reshape bias [1 (m/ecount bias)])
+                        :weights weights :bias (when bias
+                                                 (m/reshape bias [1 (m/ecount bias)]))
                         :l2-max-constraint l2-max-constraint))
 
 

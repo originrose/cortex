@@ -1,15 +1,15 @@
 (ns mnist.core
-  (:require [cortex.protocols :as cp]
+  (:require [cortex.nn.protocols :as cp]
             [cortex.util :as util]
-            [cortex.layers :as layers]
+            [cortex.nn.layers :as layers]
             [clojure.core.matrix :as m]
             [cortex-datasets.mnist :as mnist]
             [cortex.optimise :as opt]
-            [cortex.core :as core]
+            [cortex.nn.core :as core]
             [clojure.core.matrix.random :as rand]
-            [cortex.network :as net]
-            [cortex.description :as desc]
-            [cortex.caffe :as caffe]
+            [cortex.nn.network :as net]
+            [cortex.nn.description :as desc]
+            [cortex.nn.caffe :as caffe]
             [clojure.java.io :as io])
   (:gen-class))
 
