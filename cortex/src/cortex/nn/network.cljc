@@ -5,7 +5,8 @@
             [clojure.core.matrix.linear :as linear]
             [cortex.optimise :as opt]
             [cortex.nn.core :as core]
-            [cortex.util :as util]))
+            [cortex.util :as util]
+            [cortex.serialization :as cs]))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)
@@ -141,6 +142,44 @@
                     epoch-data)
             epoch-error (evaluate-mse network cv-data cv-labels)
             _ (println "epoch error:" epoch-error)
+            ;;While this error is smaller than last error, continue
+            epoch-derivative (if (= 0.0 last-error)
+                               (- epoch-error)
+                               (- epoch-error last-error))
+            mean-error-derivative (+ (* 0.8 mean-error-derivative) (* 0.2 epoch-derivative))
+            last-error epoch-error]
+        (recur network optimizer mean-error-derivative last-error))
+      network)))
+
+(defn simplified-train-until-error-stabilizes
+  [network training-data training-labels
+   & {:keys [optimizer loss-fn cv-data cv-labels batch-size noise-fn]
+      :or {optimizer (opt/adam)
+           loss-fn (opt/mse-loss)
+           cv-data training-data
+           cv-labels training-labels
+           batch-size 10}}]
+  (loop [network network
+         optimizer optimizer
+         mean-error-derivative -1.0
+         last-error 0.0]
+    (if (< mean-error-derivative 0.0)
+      (let [epoch-data (vec (partition batch-size batch-size [] (shuffle (range (count training-data)))))
+            [optimizer network]
+            (reduce (fn [[optimizer network] batch-indexes]
+                      (let [input-seq (mapv training-data batch-indexes)
+                            training-input (if noise-fn (mapv noise-fn input-seq) input-seq)
+                            answer-seq (mapv training-labels batch-indexes)
+                            [optimizer network] (train-batch input-seq
+                                                             answer-seq
+                                                             network optimizer loss-fn)]
+                        [optimizer network]))
+                    [optimizer network]
+                    epoch-data)
+            epoch-error (evaluate-mse network cv-data cv-labels)
+            _ (println "epoch error:" epoch-error)
+            _ (cs/write-network! network
+                                 (clojure.java.io/output-stream "last-network.bin"))
             ;;While this error is smaller than last error, continue
             epoch-derivative (if (= 0.0 last-error)
                                (- epoch-error)
