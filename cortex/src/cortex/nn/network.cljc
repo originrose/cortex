@@ -128,7 +128,7 @@
          mean-error-derivative -1.0
          last-error 0.0]
     (if (< mean-error-derivative 0.0)
-      (let [epoch-data (vec (partition batch-size (shuffle (range (count training-data)))))
+      (let [epoch-data (vec (partition batch-size batch-size [] (shuffle (range (count training-data)))))
             [optimizer network]
             (reduce (fn [[optimizer network] batch-indexes]
                       (let [input-seq (mapv training-data batch-indexes)
