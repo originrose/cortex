@@ -1,10 +1,10 @@
 (ns scrabble.core
   (:require
     [clojure.core.matrix :as m]
-    [cortex.layers :as layers]
+    [cortex.nn.layers :as layers]
     [cortex.optimise :as opt]
-    [cortex.core :as core]
-    [cortex.network :as net]
+    [cortex.nn.core :as core]
+    [cortex.nn.network :as net]
     [clojure.pprint])
   (:gen-class))
 
@@ -76,7 +76,7 @@
 (defn create-optimizer
   [network]
   ;(opt/adadelta-optimiser (core/parameter-count network))
-  (opt/sgd-optimiser (core/parameter-count network) {:learn-rate learning-rate :momentum momentum})
+  (opt/sgd-optimiser learning-rate momentum)
   )
 
 
