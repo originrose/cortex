@@ -6,7 +6,7 @@
             [cortex.optimise :as opt]
             [cortex.nn.core :as core]
             [cortex.util :as util]
-            [cortex.serialization :as cs]))
+            [cortex.nn.serialization :as cs]))
 
 #?(:clj (do
           (set! *warn-on-reflection* true)
