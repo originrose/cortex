@@ -201,3 +201,8 @@ you could pipe any of this data flow description into a DAG:
 * An execution model that can cache or otherwise take advantage of previously executed work.
   * Kagglers manually hack this in by ensembling CSVs, [example](https://github.com/MLWave/Kaggle-Ensemble-Guide/blob/master/kaggle_avg.py)
 * An execution model that can evaluate model components for search in parallel as appropriate.
+
+### Existing Framework Comparisons
+
+* Stanford CS 231 [Lecture 12](http://cs231n.stanford.edu/slides/winter1516_lecture12.pdf) contains a detailed
+  breakdown of Caffe, Torch, Theano, and TensorFlow.
