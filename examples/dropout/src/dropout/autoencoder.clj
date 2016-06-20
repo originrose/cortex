@@ -257,3 +257,7 @@
         network (desc/build-and-create-network (concat (desc/input 28 28 1) tsne-desc))
         samples (net/run network data)]
     (nn-vis/scatter-plot-data samples label-idx "tsne autoencoder")))
+
+(defn -main
+  [& args]
+  (train-networks))
