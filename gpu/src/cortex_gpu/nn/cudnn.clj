@@ -8,6 +8,7 @@
             [cortex.nn.backends :as b]
             [clojure.java.io :as io])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
+            cudnn$cudnnActivationStruct
             BytePointer IntPointer LongPointer DoublePointer Pointer PointerPointer
             SizeTPointer FloatPointer cublas cublas$cublasContext
             cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct cudnn$cudnnPoolingStruct
@@ -216,6 +217,11 @@
   cudnn$cudnnTensorStruct
   (release-resource [tensor]
     (cudnn-call (cudnn/cudnnDestroyTensorDescriptor tensor))))
+
+(extend-protocol resource/PResource
+  cudnn$cudnnActivationStruct
+  (release-resource [act-struct]
+    (cudnn-call (cudnn/cudnnDestroyActivationDescriptor act-struct))))
 
 (defn channel-last
   []
@@ -462,6 +468,19 @@
 (defmacro general->type [item] `(double ~item))
 
 
+(defn create-activation-desc
+  "example args: cudnn/CUDNN_ACTIVATION_RELU, cudnn/CUDNN_PROPAGATE_NAN, 0.0"
+  (^cudnn$cudnnActivationStruct [mode relu-nan-opt relu-ceiling]
+    (let [retval (cudnn$cudnnActivationStruct.)]
+      (do (cudnn-call (cudnn/cudnnCreateActivationDescriptor retval))
+          (cudnn-call (cudnn/cudnnSetActivationDescriptor retval mode relu-nan-opt relu-ceiling)))
+      (resource/track retval))))
+
+(def activation-relu    (create-activation-desc cudnn/CUDNN_ACTIVATION_RELU cudnn/CUDNN_PROPAGATE_NAN 0.0))
+(def activation-sigmoid (create-activation-desc cudnn/CUDNN_ACTIVATION_SIGMOID cudnn/CUDNN_PROPAGATE_NAN 0.0))
+(def activation-tanh    (create-activation-desc cudnn/CUDNN_ACTIVATION_TANH cudnn/CUDNN_PROPAGATE_NAN 0.0))
+
+
 (defn create-tensor
   (^cudnn$cudnnTensorStruct [tensor-format dtype n c h w]
    (let [retval (cudnn$cudnnTensorStruct.)]
@@ -680,32 +699,19 @@ these results."
         item-data (to-double-array item)]
     (m/reshape (b/array item-data) item-shape)))
 
-(def activation-relu    :relu)
-(def activation-sigmoid :sigmoid)
-(def activation-tanh    :tanh)
-
-(def activation-types {activation-relu    cudnn/CUDNN_ACTIVATION_RELU
-                       activation-sigmoid cudnn/CUDNN_ACTIVATION_SIGMOID
-                       activation-tanh    cudnn/CUDNN_ACTIVATION_TANH})
-
-(defn activation->cudnn
-  [act-type]
-  (get activation-types act-type))
-
 (defn activation-forward
   [act-type input output]
   (let [alpha (ptr-1)
         beta (ptr-0)]
-    (cudnn-call (cudnn/cudnnActivationForward (:cudnn (get-ctx)) (activation->cudnn act-type)
+    (cudnn-call (cudnn/cudnnActivationForward (:cudnn (get-ctx)) act-type
                                               alpha (:tensor input) (inner-ptr input)
                                               beta (:tensor output) (inner-ptr output)))))
-
 
 (defn activation-backward
   [act-type input output output-gradient input-gradient]
   (let [alpha (ptr-1)
         beta (ptr-0)]
-    (cudnn-call (cudnn/cudnnActivationBackward (:cudnn (get-ctx)) (activation->cudnn act-type)
+    (cudnn-call (cudnn/cudnnActivationBackward (:cudnn (get-ctx)) act-type
                                                alpha
                                                (:tensor output)
                                                (inner-ptr output)
@@ -954,6 +960,7 @@ TODO - write a cuda kernel that does this *quicker*."
     (cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
     (cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
                                                   (tensor-datatype)
+                                                  cudnn/CUDNN_TENSOR_NCHW
                                                   (.num-out-channels config)
                                                   (.num-in-channels config)
                                                   (.k-height config)
@@ -1167,6 +1174,7 @@ Backward Data: %s %d"
     (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
                  pooling-desc
                  cudnn/CUDNN_POOLING_MAX
+                 cudnn/CUDNN_PROPAGATE_NAN
                  (.k-height config) (.k-width config)
                  (.pady config) (.padx config)
                  (.stride-h config) (.stride-w config)))

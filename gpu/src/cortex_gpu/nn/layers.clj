@@ -27,18 +27,19 @@
   (post-update [layer] ))
 
 
-(defrecord Activation [n-input activation-type]
+(defrecord Activation [n-input activation-desc]
   PLayerSetup
   (setup [layer items-per-batch]
     (assoc layer
            :output (cudnn/new-array [n-input] items-per-batch)
-           :input-gradient (cudnn/new-array [n-input] items-per-batch)))
+           :input-gradient (cudnn/new-array [n-input] items-per-batch)
+           :activation-type activation-desc))
   (input-size [layer] n-input)
   (output-size [layer] n-input)
 
   cp/PModule
   (calc [layer input]
-    (cudnn/activation-forward activation-type input (:output layer))
+    (cudnn/activation-forward activation-desc input (:output layer))
     layer)
 
   (output [layer] (:output layer))
@@ -48,7 +49,7 @@
     (cp/calc layer input))
 
   (backward [layer input output-gradient]
-    (cudnn/activation-backward activation-type
+    (cudnn/activation-backward activation-desc
                                input (:output layer)
                                output-gradient (:input-gradient layer))
     layer)
