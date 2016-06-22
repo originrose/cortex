@@ -26,20 +26,20 @@
                              (cudnn/array [0.0 0.0])
                              nil)
                             (layers/softmax 2)])]
-    (layers/setup network 1)))
+    (cp/setup network 1)))
 
 
 
 (deftest basic-softmax
   (let [network (create-basic-softmax-network)
         input (cudnn/array [-0.0037519929582033617 0.08154521439680502])
-        network (cp/forward network input)
-        activation (cp/output network)
+        network (cp/multi-forward network [input])
+        activation (first (cp/multi-output network))
         gradient (cudnn/array [0 0])
         _ (cudnn/loss-gradient 1.0 activation (cudnn/array [0.0 1.0]) gradient)
         test-activation (m/array [0.48981010964882044 0.5101898903511796])
         test-gradient (m/array [0.48981010964882044 -0.48981010964882044])
-        network (cp/backward network input gradient)
+        network (cp/multi-backward network [input] [gradient])
         gpu-gradients (layers/gradients network)
         gradients (vec (mapcat #(seq (cudnn/to-double-array %)) gpu-gradients))
         test-layer1-weight-gradients (m/array [[0.000723573687069651 -0.015726034697100124]

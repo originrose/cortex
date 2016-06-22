@@ -2,6 +2,7 @@
   (:require [cortex.nn.description :as desc]
             [cortex.nn.caffe :as caffe]
             [cortex.nn.backends :as b]
+            [cortex.nn.protocols :as cp]
             [cortex-gpu.nn.layers :as layers]
             [cortex-gpu.nn.cudnn :as cudnn]
             [clojure.core.matrix :as m]))
@@ -92,14 +93,14 @@
         (= layer-type cudnn/activation-relu) (desc/relu)
         (= layer-type cudnn/activation-sigmoid) (desc/logistic))))
   cortex_gpu.nn.layers.Linear
-  (layer->input [layer] (desc/input (layers/input-size layer)))
-  (layer->description [layer] (desc/linear (layers/output-size layer)
+  (layer->input [layer] (desc/input (cp/input-size layer)))
+  (layer->description [layer] (desc/linear (cp/output-size layer)
                                            :weights (cudnn/to-core-matrix (:weights layer))
                                            :bias (cudnn/to-core-matrix (:bias layer))
                                            :l2-max-constraint (:l2-max-constraint layer)))
 
   cortex_gpu.nn.layers.Softmax
-  (layer->input [layer] (desc/input (layers/input-size layer)))
+  (layer->input [layer] (desc/input (cp/input-size layer)))
   (layer->description [layer] (desc/softmax))
 
   cortex_gpu.nn.layers.Convolutional
@@ -115,7 +116,7 @@
     (desc/conv-config->description (:conv-config layer) :max-pooling))
 
   cortex_gpu.nn.layers.Dropout
-  (layer->input [layer] (desc/input (layers/input-size layer)))
+  (layer->input [layer] (desc/input (cp/input-size layer)))
   (layer->description [layer] (desc/dropout (:probability layer)))
 
   ;;Be extremely careful about laziness in here because the underlying gpu resources
@@ -126,7 +127,7 @@
     (mapv desc/layer->description (:layers layer)))
 
   cortex_gpu.nn.layers.Split
-  (layer->input [layer] (desc/input (layers/input-size layer)))
+  (layer->input [layer] (desc/input (cp/input-size layer)))
   (layer->description [layer] (desc/split (mapv desc/layer->description (:layers layer)))))
 
 

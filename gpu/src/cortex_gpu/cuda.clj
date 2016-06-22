@@ -171,10 +171,7 @@
           ^doubles item item
           item-len (alength item)
           ^doubles dest dest]
-      (loop [idx 0]
-        (when (< idx item-len)
-          (aset dest (+ dest-offset idx) (aget item idx))
-          (recur (inc idx))))
+      (System/arraycopy item 0 dest dest-offset item-len)
       [dest (+ dest-offset item-len)]))
 
   clojure.lang.PersistentVector

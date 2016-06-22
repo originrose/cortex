@@ -20,7 +20,7 @@
         ;;sums to zero
         input (cudnn/array (flatten (repeat (/ item-count 2) [-1 1])))
         layer (layers/->Activation item-count cudnn/activation-relu)
-        layer (layers/setup layer 1)
+        layer (cp/setup layer 1)
         layer (cp/calc layer input)
         _ (cuda/check-errors)
         output (cp/output layer)
@@ -44,7 +44,7 @@
                                                (/ item-count 2)) [-1 1]))
                            items-per-batch)
         layer (layers/->Activation item-count cudnn/activation-relu)
-        layer (layers/setup layer items-per-batch)
+        layer (cp/setup layer items-per-batch)
         layer (cp/calc layer input)
         _ (cuda/check-errors)
         output (cp/output layer)
@@ -71,7 +71,7 @@
         bias (cudnn/array [0 10])
         input (cudnn/array [1 2])
         layer (layers/->Linear weights bias nil)
-        layer (layers/setup layer 1)
+        layer (cp/setup layer 1)
         layer (cp/calc layer input)
         output (cp/output layer)
         output-data (cudnn/to-double-array output)]
@@ -93,7 +93,7 @@
         bias (cudnn/array [0 10])
         input (cudnn/array (flatten (repeat num-batch-items [1 2])) num-batch-items)
         layer (layers/->Linear weights bias nil)
-        layer (layers/setup layer num-batch-items)
+        layer (cp/setup layer num-batch-items)
         layer (cp/calc layer input)
         output (cp/output layer)
         output-data (cudnn/to-double-array output)]
@@ -129,7 +129,7 @@
 (def-double-float-test softmax
   (let [input (cudnn/array (vec (take 10 (flatten (repeat [1 2 3 4])))))
         layer (layers/softmax 10)
-        layer (layers/setup layer 1)
+        layer (cp/setup layer 1)
         layer (cp/calc layer input)
         output (cp/output layer)
         output-data (cudnn/to-double-array output)]
@@ -150,7 +150,7 @@
                                                  (take 10 (flatten (repeat [1 2 3 4]))))))
                            batch-count)
         layer (layers/softmax 10)
-        layer (layers/setup layer batch-count)
+        layer (cp/setup layer batch-count)
         layer (cp/calc layer input)
         output (cp/output layer)
         output-data (cudnn/to-double-array output)]
@@ -175,7 +175,7 @@
                                                                        (take item-count (flatten (repeat [1 2 3 4])))))))
                            batch-count)
         layer (layers/softmax item-count channel-count)
-        layer (layers/setup layer batch-count)
+        layer (cp/setup layer batch-count)
         layer (cp/calc layer input)
         output (cp/output layer)
         output-data (cudnn/to-double-array output)]
@@ -231,7 +231,7 @@
         input (cudnn/array (repeat (* 9 batch-size) 1) batch-size)
         output-gradient (cudnn/array (flatten
                                       (repeat (* 4 batch-size) [1 1 1 1])) batch-size)
-        conv-layer (layers/setup conv-layer batch-size)
+        conv-layer (cp/setup conv-layer batch-size)
         conv-layer (cp/forward conv-layer input)
         conv-layer (cp/backward conv-layer input output-gradient)
         input-gradient (cp/input-gradient conv-layer)]
@@ -252,7 +252,7 @@
 (def-double-float-test pool-layer-basic
   (let [batch-size 2
         pool-layer (layers/->Pooling pool-layer-config)
-        pool-layer (layers/setup pool-layer batch-size)
+        pool-layer (cp/setup pool-layer batch-size)
         input (cudnn/array (flatten (repeat batch-size (range 1 17))) batch-size)
         output-gradient (cudnn/array (flatten (repeat batch-size [1 2 3 4])) batch-size)
         pool-layer (cp/forward pool-layer input)
@@ -284,7 +284,7 @@
         input (cudnn/array (repeat (* batch-size item-count) 1.0) batch-size)
         output-gradient (cudnn/array (repeat (* batch-size item-count) 2.0) batch-size)
         dropout-layer (layers/dropout item-count 0.8)
-        dropout-layer (layers/setup dropout-layer batch-size)
+        dropout-layer (cp/setup dropout-layer batch-size)
         repeat-count 30
         answer-seq
         (doall
@@ -311,7 +311,7 @@
         input (cudnn/array (repeat (* batch-size item-count) 1.0) batch-size)
         output-gradient (cudnn/array (repeat (* batch-size item-count) 2.0) batch-size)
         dropout-layer (layers/dropout item-count 1.0 cudnn/dropout-type-multiplicative)
-        dropout-layer (layers/setup dropout-layer batch-size)
+        dropout-layer (cp/setup dropout-layer batch-size)
         repeat-count 30
         answer-seq
         (doall
@@ -328,7 +328,7 @@
     (is (framework/about-there? (final-answer 1) (* 2.0 total-elem-count) 20))))
 
 
-(def-double-float-test split-basic
+(deftest split-basic
   (let [item-count 1000
         items-per-batch 5
         ;;sums to zero
@@ -338,9 +338,9 @@
         desc [(desc/input item-count)
               (desc/split [[(desc/relu)] [(desc/relu)]])]
         layer (gpu-desc/build-and-create-network desc)
-        layer (layers/setup layer items-per-batch)
-        layer (cp/forward layer input)
-        output (cp/output layer)
+        layer (cp/setup layer items-per-batch)
+        layer (cp/multi-forward layer [input])
+        output (cp/multi-output layer)
         _ (is (= 2 (count output)))
         output-data (mapv cudnn/to-double-array output)]
 
@@ -352,9 +352,9 @@
     (let [output-gradient (cudnn/array (repeat (* items-per-batch item-count) 1)
                                        items-per-batch)
           output-gradient [output-gradient output-gradient]
-          layer (cp/backward layer input output-gradient)
+          layer (cp/multi-backward layer [input] output-gradient)
           _ (cuda/check-errors)
-          input-gradient (cp/input-gradient layer)
+          input-gradient (first (cp/multi-input-gradient layer))
           input-grad-data (cudnn/to-double-array input-gradient)]
       (is (= (double (* items-per-batch item-count))
              (m/esum input-grad-data))))))

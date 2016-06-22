@@ -238,6 +238,7 @@
   (traits-ptr [dtype] [dtype elem-count])
   (traits-double-array->ptr [dtype data])
   (traits-ptr->double-array [dtype ptr])
+  (traits-copy-double-array->ptr [dtype data ptr])
   (traits-ptr-0 [dtype])
   (traits-ptr-1 [dtype])
   (traits-ptr--1 [dtype])
@@ -281,6 +282,8 @@
           retval (double-array elem-count)]
       (.get ptr retval)
       retval))
+  (traits-copy-double-array->ptr [dtype ^doubles data ^DoublePointer ptr]
+    (.put ptr data))
   (traits-ptr-0 [dtype] double-ptr-0)
   (traits-ptr-1 [dtype] double-ptr-1)
   (traits-ptr--1 [dtype] double-ptr--1)
@@ -355,6 +358,12 @@
       (c-for [idx 0 (< idx item-count) (inc idx)]
              (aset single-array idx (aget data idx)))
       (FloatPointer. single-array)))
+  (traits-copy-double-array->ptr [dtype ^doubles data ^FloatPointer ptr]
+    (let [item-count (alength data)
+          ^"[F" single-array (make-array Float/TYPE item-count)]
+      (c-for [idx 0 (< idx item-count) (inc idx)]
+             (aset single-array idx (aget data idx)))
+      (.put ptr single-array)))
   (traits-ptr->double-array [dtype ^FloatPointer ptr]
     (let [elem-count (.capacity ptr)
           retval (double-array elem-count)
@@ -363,6 +372,7 @@
       (c-for [idx 0 (< idx elem-count) (inc idx)]
              (aset retval idx (aget intermediate idx)))
       retval))
+
   (traits-ptr-0 [dtype] float-ptr-0)
   (traits-ptr-1 [dtype] float-ptr-1)
   (traits-ptr--1 [dtype] float-ptr--1)
@@ -441,6 +451,8 @@
   ([elem-count] (traits-ptr *cudnn-datatype* elem-count)))
 (defn double-array->ptr ^Pointer [^doubles data]
   (traits-double-array->ptr *cudnn-datatype* data))
+(defn copy-double-array->ptr [^doubles data ^Pointer ptr]
+  (traits-copy-double-array->ptr *cudnn-datatype* data ptr))
 (defn ptr->double-array ^doubles [^Pointer data]
   (traits-ptr->double-array *cudnn-datatype* data))
 (defn ptr-0 ^Pointer [] (traits-ptr-0 *cudnn-datatype*))
@@ -550,6 +562,7 @@ Else if data is a vector of matrixes, return a vector of gpu arrays."
     [(array data)]))
 
 
+
 (defn new-array
   ([shape ^long items-per-batch]
    (let [[^long n-rows ^long n-cols] (core-mat-shape-to-rows-cols shape 1)
@@ -559,7 +572,16 @@ Else if data is a vector of matrixes, return a vector of gpu arrays."
      (assoc retval
             :shape shape
             :batch-count items-per-batch)))
-  ([shape] (new-array shape 1)))
+  ([shape] (new-array shape 1))
+  ([^long batch-size ^long channel-count ^long height ^long width]
+   (let [core-mat-shape [channel-count width height]
+         n-elems (* channel-count width height batch-size)
+         retval (alloc-data-and-tensor n-elems batch-size channel-count height width)
+         shape [batch-size height width]]
+     (cuda/mem-set (:ptr retval) 0 (* n-elems (byte-size)))
+     (assoc retval
+            :shape shape
+            :batch-count batch-size))))
 
 
 (defn zero-array

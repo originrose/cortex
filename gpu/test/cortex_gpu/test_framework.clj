@@ -72,8 +72,8 @@ so even correctly written layers will differ somewhat w/r/t cpu vs. gpu."
                              cpu-network
                              (map vector training-data training-labels))
          gpu-network (batch/setup gpu-network total-count batch-count
-                                  (layers/input-size gpu-network)
-                                  (layers/output-size gpu-network))
+                                  (cp/input-size gpu-network)
+                                  (cp/output-size gpu-network))
          gpu-dataset (batch/load-dataset-to-gpu [training-data training-labels])
          network (batch/upload-randomized-indexes gpu-network total-count)
          input-buffer (get gpu-network batch/data-keyword)

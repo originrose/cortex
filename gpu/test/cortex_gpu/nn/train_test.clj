@@ -20,7 +20,8 @@
             [cortex.nn.description :as desc]
             [cortex-gpu.nn.description :as gpu-desc]
             [cortex-gpu.util :as util]
-            [cortex.optimise :as opt]))
+            [cortex.optimise :as opt]
+            [cortex.dataset :as ds]))
 
 
 (use-fixtures :once framework/with-contexts)
@@ -61,12 +62,12 @@
         bias (cudnn/array [0 10])
         input (cudnn/array (flatten (repeat num-batch-items [1 2])) num-batch-items)
         layer (layers/->Linear weights bias nil)
-        layer (layers/setup layer num-batch-items)
-        train-config {:network layer :loss-fn (opt/mse-loss)}
+        layer (cp/setup layer num-batch-items)
+        train-config {:network layer :loss-fn [(opt/mse-loss)]}
         layer (:network
-               (train/train-step train-config input [(cudnn/array
-                                                       (flatten
-                                                        (repeat num-batch-items [4 19])))]))
+               (train/train-step train-config [input] [(cudnn/array
+                                                         (flatten
+                                                          (repeat num-batch-items [4 19])))]))
         output (cp/output layer)
         output-data (cudnn/to-double-array output)
         weight-gradient (vec (cudnn/to-double-array (:weight-gradient layer)))
@@ -79,19 +80,19 @@
     (is (m/equals (flatten (repeat num-batch-items [7 10])) input-gradient))))
 
 
-(deftest optimise
+(def-double-float-test optimise
   (let [num-batch-items 10
         weights (cudnn/array [[1 2] [3 4]])
         bias (cudnn/array [0 10])
         input (cudnn/array (flatten (repeat num-batch-items [1 2])) num-batch-items)
         layer (layers/->Linear weights bias nil)
-        layer (layers/setup layer num-batch-items)
+        layer (cp/setup layer num-batch-items)
         train-config (-> {:network layer
-                          :loss-fn (opt/mse-loss)
+                          :loss-fn [(opt/mse-loss)]
                           :optimiser (opt/adadelta-optimiser)
                           :batch-size num-batch-items}
-                         (train/train-step input [(cudnn/array
-                                                    (flatten (repeat num-batch-items [4 19])))])
+                         (train/train-step [input] [(cudnn/array
+                                                      (flatten (repeat num-batch-items [4 19])))])
                          train/optimise)
         layer (:network train-config)
         optimiser (:optimiser train-config)]
@@ -136,7 +137,7 @@
 (def CORN-LABELS
   [[40] [44] [46] [48] [52] [58] [60] [68] [74] [80]])
 
-(def-double-float-test corn
+(deftest corn
   (with-bindings {#'train/*train-epoch-reporter* nil}
     (let [net (layers/linear 2 1)
           n-epochs 5000
@@ -382,3 +383,39 @@ All labels are expected to be futures."
                             :network-description network-description
                             :loss-fn loss-fn
                             :label-fns labels}))))
+
+(defn create-mnist-dataset
+  [max-sample-count]
+  (let [tr-data (maybe-takev max-sample-count @training-data)
+        tr-labels (maybe-takev max-sample-count @training-labels)
+        te-data (maybe-takev max-sample-count @test-data)
+        te-labels (maybe-takev max-sample-count @test-labels)]
+    (ds/create-dataset-from-raw-data tr-data tr-labels te-data te-labels
+                                     {:dataset-name :mnist
+                                      :label-function (fn [item-vec]
+                                                        (str (first (filter identity
+                                                                            (map-indexed (fn [idx val]
+                                                                                           (when (= val 1)
+                                                                                             idx))
+                                                                                         item-vec)))))})))
+
+
+(deftest mnist-next
+  (train/train-next basic-network-description (opt/adam) (opt/softmax-loss)
+                    (create-mnist-dataset 100) 10 4 [:data] [:labels]))
+
+
+(deftest mnist-split-next
+  (let [network-description [(desc/input 28 28 1)
+                             (desc/dropout 0.8)
+                             (desc/linear->logistic 144 :l2-max-constraint 2.0)
+                             (desc/dropout 0.5)
+                             ;;Note carefully the order of the leaves of the network.  There
+                             ;;is currently an implicit dependency here on that order, the order
+                             ;;of the loss functions and the order of the training and test
+                             ;;labels which is probably an argument to specify all of that
+                             ;;in the network description
+                             (desc/split [[(desc/linear 784)] [(desc/linear->softmax 10)]])]
+        loss-fn [(opt/->MSELoss) (opt/->SoftmaxCrossEntropyLoss)]]
+    (train/train-next network-description (opt/adam) loss-fn
+                      (create-mnist-dataset 100) 10 4 [:data] [:data :labels])))

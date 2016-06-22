@@ -8,11 +8,6 @@
            [org.bytedeco.javacpp FloatPointer]))
 
 ;;Setup a layer to produce a new layer with gpu bindings
-(defprotocol PLayerSetup
-  (setup [layer items-per-batch])
-  (input-size [layer])
-  (output-size [layer]))
-
 
 (defprotocol PGPUParameters
   (parameters [layer])
@@ -28,12 +23,14 @@
 
 
 (defrecord Activation [n-input activation-desc]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
     (assoc layer
            :output (cudnn/new-array [n-input] items-per-batch)
            :input-gradient (cudnn/new-array [n-input] items-per-batch)
            :activation-type activation-desc))
+
+  cp/PLayerSize
   (input-size [layer] n-input)
   (output-size [layer] n-input)
 
@@ -79,7 +76,7 @@
                                     l2-max-constraint))))
 
 (defrecord Linear [weights bias l2-max-constraint]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
     (let [weights-shape (cudnn/shape weights)
           n-output (first weights-shape)
@@ -90,6 +87,7 @@
                  :weight-gradient (cudnn/new-array (cudnn/shape weights))
                  :bias-gradient (cudnn/new-array [n-output])
                  :input-gradient (cudnn/new-array [n-input] items-per-batch)))))
+  cp/PLayerSize
   (input-size [layer] (second (cudnn/shape weights)))
   (output-size [layer] (first (cudnn/shape weights)))
 
@@ -130,7 +128,7 @@
 
 
 (defrecord Softmax [^long n-input ^long n-channels]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
     (let [total-input (* n-input n-channels)
           softmax-tensor (cudnn/create-tensor (cudnn/channel-last) items-per-batch n-input 1 n-channels)]
@@ -138,6 +136,8 @@
              :output (cudnn/new-array [total-input] items-per-batch)
              :input-gradient (cudnn/new-array [total-input] items-per-batch)
              :softmax-tensor softmax-tensor)))
+
+  cp/PLayerSize
   (input-size [layer] (* n-input n-channels))
   (output-size [layer] (* n-input n-channels))
 
@@ -169,49 +169,45 @@ channel 2 with n-outputs"
 
 (defn- layer-list-forward
   "Combining forward and calc into same general implementation"
-  [this-layer input forward-fn]
+  [this-layer input-vec forward-fn]
     (assoc this-layer :layers
-           (first (reduce (fn [[layers input] layer]
-                            (let [new-layer (forward-fn layer input)
-                                  new-input (cp/output new-layer)]
+           (first (reduce (fn [[layers input-vec] layer]
+                            (let [new-layer (forward-fn layer input-vec)
+                                  new-input (cp/multi-output new-layer)]
                               [(conj layers new-layer) new-input]))
-                          [[] input]
+                          [[] input-vec]
                           (:layers this-layer)))))
 
 
 ;;Aggregation - linear list of layers
 (defrecord LayerList [layers]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
-    (assoc layer :layers (mapv #(setup % items-per-batch) layers)))
-  (input-size [layer] (input-size (first layers)))
-  (output-size [layer] (output-size (last layers)))
+    (assoc layer :layers (mapv #(cp/setup % items-per-batch) layers)))
 
-  cp/PModule
-  (calc [this-layer input]
-    (layer-list-forward this-layer input (fn [layer input] (cp/calc layer input))))
 
-  (output [layer] (cp/output (last layers)))
-
-  cp/PNeuralTraining
-  (forward [this-layer input]
-    (layer-list-forward this-layer input (fn [layer input] (cp/forward layer input))))
-
-  (backward [this-layer input output-gradient]
+  cp/PMultiLayer
+  (multi-input-size [layer] (cp/multi-input-size (first layers)))
+  (multi-output-size [layer] (cp/multi-output-size (last layers)))
+  (multi-calc [this-layer input-vec]
+    (layer-list-forward this-layer input-vec (fn [layer input-vec] (cp/multi-calc layer input-vec))))
+  (multi-forward [this-layer input-vec]
+    (layer-list-forward this-layer input-vec (fn [layer input-vec] (cp/multi-forward layer input-vec))))
+  (multi-backward [this-layer input-vec output-gradient-vec]
     (let [layer-and-prev (reverse (map vector layers (cons nil layers)))]
       (assoc this-layer :layers
-             (vec (first (reduce (fn [[layers output-gradient] [layer prev-layer]]
-                                   (let [local-input (if prev-layer
-                                                       (cp/output prev-layer)
-                                                       input)
-                                         new-layer (cp/backward layer local-input
-                                                                output-gradient)
-                                         new-output-gradient (cp/input-gradient new-layer)]
-                                     [(conj layers new-layer) new-output-gradient]))
-                                 [(list) output-gradient]
+             (vec (first (reduce (fn [[layers output-gradient-vec] [layer prev-layer]]
+                                   (let [local-input-vec (if prev-layer
+                                                           (cp/multi-output prev-layer)
+                                                           input-vec)
+                                         new-layer (cp/multi-backward layer local-input-vec
+                                                                      output-gradient-vec)
+                                         new-output-gradient-vec (cp/multi-input-gradient new-layer)]
+                                     [(conj layers new-layer) new-output-gradient-vec]))
+                                 [(list) output-gradient-vec]
                                  layer-and-prev))))))
-
-  (input-gradient [layer] (:input-gradient (first layers)))
+  (multi-output [layer] (cp/multi-output (last layers)))
+  (multi-input-gradient [layer] (cp/multi-input-gradient (first layers)))
 
 
   PGPUParameters
@@ -223,12 +219,12 @@ channel 2 with n-outputs"
 (defn layer-list [layers] (->LayerList layers))
 
 (defrecord Convolutional [weights bias ^ConvLayerConfig conv-config l2-max-constraint]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
     (let [weight-gradient (cudnn/new-array (cudnn/shape weights))
           bias-gradient (cudnn/new-array (cudnn/shape bias))
-          output (cudnn/new-array [(output-size layer)] items-per-batch)
-          input-gradient (cudnn/new-array [(input-size layer)] items-per-batch)
+          output (cudnn/new-array [(cp/output-size layer)] items-per-batch)
+          input-gradient (cudnn/new-array [(cp/input-size layer)] items-per-batch)
           convolution-data (cudnn/convolution-setup conv-config items-per-batch)]
       (-> layer
           (allocate-l2-temp-data weights l2-max-constraint)
@@ -238,6 +234,7 @@ channel 2 with n-outputs"
                  :output output
                  :input-gradient input-gradient))))
 
+  cp/PLayerSize
   (input-size [layer] (* (.width conv-config) (.height conv-config)
                          (.num-in-channels conv-config)))
   (output-size [layer] (* (conv/get-output-width conv-config)
@@ -291,16 +288,17 @@ channel 2 with n-outputs"
 
 
 (defrecord Pooling [^ConvLayerConfig conv-config]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
-    (let [output (cudnn/new-array [(output-size layer)] items-per-batch)
-          input-gradient (cudnn/new-array [(input-size layer)] items-per-batch)
+    (let [output (cudnn/new-array [(cp/output-size layer)] items-per-batch)
+          input-gradient (cudnn/new-array [(cp/input-size layer)] items-per-batch)
           pooling-data (cudnn/max-pooling-setup conv-config items-per-batch)]
       (assoc layer
              :pooling-data pooling-data
              :output output
              :input-gradient input-gradient)))
 
+  cp/PLayerSize
   (input-size [layer] (* (.width conv-config) (.height conv-config)
                          (.num-in-channels conv-config)))
   (output-size [layer] (* (conv/get-output-width conv-config)
@@ -336,16 +334,18 @@ channel 2 with n-outputs"
 
 
 (defrecord Dropout [^long n-items ^double probability dropout-type]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
-    (let [output (cudnn/new-array [(output-size layer)] items-per-batch)
-          input-gradient (cudnn/new-array [(input-size layer)] items-per-batch)
+    (let [output (cudnn/new-array [(cp/output-size layer)] items-per-batch)
+          input-gradient (cudnn/new-array [(cp/input-size layer)] items-per-batch)
           rand-buffer-elems (cudnn/ensure-factor-of-2 (* n-items items-per-batch))
           rand-buffer (cuda/mem-alloc (* rand-buffer-elems Float/BYTES)
                                       (FloatPointer.))]
       (assoc layer :output output
              :input-gradient input-gradient
              :rand-buffer rand-buffer)))
+
+  cp/PLayerSize
   (input-size [layer] n-items)
   (output-size [layer] n-items)
 
@@ -384,42 +384,47 @@ which doesn't require scaling)."
          (mapv #(forward-fn % input)
                (:layers this-layer))))
 
+(defn partition-by-counts
+  [item-seq counts]
+  (first (reduce (fn [[grouped-items rest-item-seq] item-count]
+                   [(conj grouped-items (vec (take item-count rest-item-seq)))
+                    (drop item-count rest-item-seq)])
+                 [[] item-seq]
+                 counts)))
+
 
 (defrecord Split [layers n-input]
-  PLayerSetup
+  cp/PLayerSetup
   (setup [layer items-per-batch]
     (let [input-gradient (cudnn/new-array [n-input] items-per-batch)]
       (assoc layer
-             :layers (mapv #(setup % items-per-batch) layers)
+             :layers (mapv #(cp/setup % items-per-batch) layers)
              :input-gradient input-gradient)))
-  (input-size [layer] n-input)
-  (output-size [layer] (mapv output-size layers))
 
-
-  cp/PModule
-  (calc [this-layer input]
-    (split-forward this-layer input (fn [layer input] (cp/calc layer input))))
-
-  (output [layer] (mapv cp/output layers))
-
-  cp/PNeuralTraining
-  (forward [this-layer input]
-    (split-forward this-layer input (fn [layer input] (cp/forward layer input))))
-
-  (backward [this-layer input output-gradient-vec]
+  cp/PMultiLayer
+  (multi-input-size [layer] [n-input])
+  (multi-output-size [layer] (vec (mapcat cp/multi-output-size layers)))
+  (multi-calc [this-layer input]
+    (split-forward this-layer input (fn [layer input] (cp/multi-calc layer input))))
+  (multi-forward [this-layer input]
+    (split-forward this-layer input (fn [layer input] (cp/multi-forward layer input))))
+  (multi-backward [this-layer input-vec output-gradient-vec]
     ;;In this case we expect a vector of output gradients
-    (let [layers (mapv (fn [layer output-gradient]
-                         (cp/backward layer input output-gradient))
+    (let [output-counts (mapv (comp count cp/multi-output-size) layers)
+          grouped-output-gradients (partition-by-counts output-gradient-vec output-counts)
+          layers (mapv (fn [layer output-gradient]
+                         (cp/multi-backward layer input-vec output-gradient))
                        layers
-                       output-gradient-vec)
-          input-gradients (mapv cp/input-gradient layers)
+                       grouped-output-gradients)
+          input-gradients (vec (mapcat cp/multi-input-gradient layers))
           input-gradient (:input-gradient this-layer)]
       (cudnn/zero! input-gradient)
       (doseq [layer-in-g input-gradients]
         (cudnn/add! input-gradient layer-in-g))
       (assoc this-layer :layers layers :input-gradient input-gradient)))
+  (multi-output [layer] (vec (mapcat cp/multi-output layers)))
+  (multi-input-gradient [layer] [(:input-gradient layer)])
 
-  (input-gradient [layer] (:input-gradient layer))
 
   PGPUParameters
   (parameters [layer] (mapcat parameters layers))
