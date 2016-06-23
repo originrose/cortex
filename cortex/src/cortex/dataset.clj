@@ -30,6 +30,7 @@
   ;;the label vector.  The returned data is in the same order
   ;;as the shapes array.
   (get-element [ds index])
+  (get-elements [ds index-seq])
 
   ;;Index management.
   (has-indexes? [ds index-type])
@@ -54,6 +55,10 @@
   (shapes [this] shapes)
   (get-element [this index]
     (mapv #(% index) data-seq))
+  (get-elements [this index-seq]
+    (mapv (fn [index]
+            (mapv #(% index) data-seq))
+          index-seq))
   (has-indexes? [this index-type]
     (if (or (= index-type :training)
             (= index-type :running))

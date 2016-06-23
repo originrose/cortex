@@ -309,7 +309,7 @@ to a single matrix"
   (bs-get-buffers [this train-config batch-idx batch-type]
     (let [{:keys [input-buffers output-buffers dataset indexes]} train-config
           batch-indexes (indexes batch-idx)
-          ds-elements (mapv #(ds/get-element dataset %) batch-indexes)]
+          ds-elements (ds/get-elements dataset batch-indexes)]
       {:train-config train-config
        :input-buffers (upload-batch-data-to-buffers! ds-elements input-dataset-indexes input-buffers)
        :output-buffers (when (= batch-type :training)
