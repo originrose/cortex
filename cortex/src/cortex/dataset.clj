@@ -79,6 +79,23 @@
    :shape (reduce + (m/shape (first item)))})
 
 
+(defn create-random-index-sets
+  "Create a training/testing split of indexes.  Returns a map
+with three keys, :training, :testing, :running where the testing
+indexes are withheld from the training set.  The running indexes
+are the same as the testing indexes at this time."
+  [item-count & {:keys [training-split]
+                 :or {training-split 0.8}}]
+  (let [training-count (long (* item-count training-split))
+        all-indexes (shuffle (range item-count))
+        training-indexes (vec (take training-count all-indexes))
+        testing-indexes (vec (drop training-count all-indexes))
+        running-indexes testing-indexes]
+    {:training training-indexes
+     :testing testing-indexes
+     :running running-indexes}))
+
+
 (defn create-dataset-from-raw-data
   ([data labels {:keys [label-function dataset-name fraction-test-indexes]
                  :or {dataset-name :dataset fraction-test-indexes 0.7}}]

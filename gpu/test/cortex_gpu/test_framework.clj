@@ -14,7 +14,7 @@
             [cortex.nn.network :as net]
             [cortex.nn.backends :as b]
             [cortex.nn.description :as desc]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [cortex-gpu.nn.description :as gpu-desc]
             [clojure.test :refer :all]))
 

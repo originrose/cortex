@@ -3,7 +3,7 @@
             [cortex-gpu.nn.train :as train]
             [cortex-gpu.nn.cudnn :as cudnn]
             [cortex-gpu.nn.layers :as layers]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [cortex-gpu.nn.description :as gpu-desc]
             [cortex.nn.description :as desc]
             [cortex.nn.protocols :as cp]

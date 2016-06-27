@@ -9,7 +9,7 @@
             [cortex-gpu.nn.description :as gpu-desc]
             [cortex.nn.description :as desc]
             [cortex-gpu.cuda :as cuda]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [cortex-gpu.util :refer [get-or-allocate] :as util]
             [cortex-gpu.optimise :as opt]
             [cortex.optimise :as cortex-opt]))

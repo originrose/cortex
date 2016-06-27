@@ -3,7 +3,7 @@
             [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [cortex.nn.impl.layers.convolution :as conv]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.nn.backends :as b]
             [clojure.java.io :as io])
