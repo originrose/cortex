@@ -7,4 +7,5 @@
                  [net.mikera/vectorz-clj "0.43.1"]
                  [net.mikera/core.matrix "0.50.0"]
                  [thinktopic/resource "1.0.0"]
-                 [com.indeed/util-mmap "1.0.20"]])
+                 [com.indeed/util-mmap "1.0.20"]
+                 [com.github.ben-manes.caffeine/caffeine "2.3.1"]])
