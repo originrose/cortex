@@ -58,7 +58,7 @@ convertable to double arrays."
    (let [r-file (MMapBuffer. (File. fname) map-mode byte-order)]
      (resource/track r-file)
      (.memory r-file)))
-  (^Memory [String fname]
+  (^Memory [^String fname]
    (mem-map-file fname FileChannel$MapMode/READ_ONLY ByteOrder/BIG_ENDIAN)))
 
 
