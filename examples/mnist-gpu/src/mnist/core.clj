@@ -43,8 +43,7 @@
   (get-indexes [ds index-type]
     (cond
       (= :training index-type) (range 0 (count (m/rows @training-data)))
-      :else (range (count (m/rows @training-data)) (+ (count (m/rows @training-data)) (count (m/rows @test-data))))))
-  (label-functions [this] [nil nil]))
+      :else (range (count (m/rows @training-data)) (+ (count (m/rows @training-data)) (count (m/rows @test-data)))))))
 
 
 (defn create-mnist-dataset [] (->MNISTDataset))

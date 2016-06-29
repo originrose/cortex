@@ -214,3 +214,23 @@
           (run-train-optimise-loop)
           (get :network)
           (desc/network->description)))))
+
+
+(defn run-next
+  [network-desc dataset input-labels & {:keys [batch-size]
+                                        :or {batch-size 10}}]
+  (resource/with-resource-context
+    (let [network (gpu-desc/build-and-create-network network-desc)
+          dataset-names (map :name (ds/shapes dataset))
+          index-names (map-indexed vector dataset-names)
+          find-label-fn (fn [label]
+                              (ffirst (filter (fn [[idx name]]
+                                                (= label name))
+                                              index-names)))
+          input-indexes (mapv find-label-fn input-labels)
+          batching-system (batch/->DatasetBatchingSystem input-indexes [] batch-size)]
+      (as-> {:network network :batch-size batch-size :dataset dataset
+             :batching-system batching-system} train-config
+        (batch/setup-batching-system train-config :running)
+        (update-in train-config [:network] #(cp/setup % batch-size))
+        (run-setup-network train-config :running)))))

@@ -34,8 +34,10 @@
 
   ;;Index management.
   (has-indexes? [ds index-type])
-  (get-indexes [ds index-type])
+  (get-indexes [ds index-type]))
 
+
+(defprotocol PDatasetDescription
   ;;An array functions where a function can take a
   ;;corresponding item from get-element and return a sequence of text labels.
   ;;Useful for creating things like confusion matrixes and such.  Optional,
@@ -70,6 +72,8 @@
             (= index-type :running))
       train-indexes
       test-indexes))
+
+  PDatasetDescription
   (label-functions [this] label-function-seq))
 
 
