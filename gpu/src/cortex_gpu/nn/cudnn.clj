@@ -901,10 +901,31 @@ TODO - write a cuda kernel that does this *quicker*."
                                          (inner-ptr output))))
 
 
+(defn cpu-softmax-backward
+  "From torch's c code"
+  [output output-gradient input-gradient]
+  (let [sum (m/dot output-gradient output)]
+    (println sum)
+    (m/assign! input-gradient output-gradient)
+    (m/sub! input-gradient sum)
+    (m/mul! input-gradient output)))
+
+
 (defn softmax-backward
-  [output-gradient input-gradient]
+  [output output-gradient input-gradient]
   (let [n-input (batch-shape output-gradient)
         n-elems (* ^long (first n-input) ^long (second n-input))]
+    (comment (cudnn-call (cudnn/cudnnSoftmaxBackward (:cudnn (get-ctx))
+                                                     cudnn/CUDNN_SOFTMAX_ACCURATE
+                                                     cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
+                                                     (ptr-1)
+                                                     (:tensor output)
+                                                     (inner-ptr output)
+                                                     (:tensor output-gradient)
+                                                     (inner-ptr output-gradient)
+                                                     (ptr-0)
+                                                     (:tensor input-gradient)
+                                                     (inner-ptr input-gradient))))
     (cuda/mem-copy-device->device (:ptr output-gradient)
                                   (:ptr input-gradient)
                                   (* n-elems (byte-size)))))

@@ -155,7 +155,7 @@
     (cp/calc layer input))
 
   (backward [layer input output-gradient]
-    (cudnn/softmax-backward output-gradient (:input-gradient layer))
+    (cudnn/softmax-backward (:output layer) output-gradient (:input-gradient layer))
     layer)
 
   (input-gradient [layer] (:input-gradient layer)))

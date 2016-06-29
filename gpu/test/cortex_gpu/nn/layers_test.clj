@@ -126,7 +126,7 @@
       (is (framework/about-there? mag-sum output-size 0.0001)))))
 
 
-(def-double-float-test softmax
+(deftest softmax
   (let [input (cudnn/array (vec (take 10 (flatten (repeat [1 2 3 4])))))
         layer (layers/softmax 10)
         layer (cp/setup layer 1)
