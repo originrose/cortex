@@ -99,3 +99,24 @@
                        (nth numeric-gradients 2)))
     (is (close-enough? (nth calculated-gradients 3)
                        (nth numeric-gradients 3)))))
+
+
+(deftest dropout-gaussian-gradient
+  (let [net (gpu-desc/build-and-create-network [(desc/input 5)
+                                                (desc/linear->logistic 10)
+                                                (desc/dropout 0.5 :distribution :gaussian)
+                                                (desc/linear->softmax 2)])
+        loss [(opt/softmax-loss)]
+        input [(cudnn/array (vec (repeat 5 1)) 1)]
+        output [(cudnn/array [0 1] 1)]
+        net (cp/setup net 1)
+        {:keys [calculated-gradients numeric-gradients]} (grad-check/get-gradients {:network net :loss-fn loss}
+                                                                                   input output)]
+    (is (close-enough? (nth calculated-gradients 0)
+                       (nth numeric-gradients 0)))
+    (is (close-enough? (nth calculated-gradients 1)
+                       (nth numeric-gradients 1)))
+    (is (close-enough? (nth calculated-gradients 2)
+                       (nth numeric-gradients 2)))
+    (is (close-enough? (nth calculated-gradients 3)
+                       (nth numeric-gradients 3)))))
