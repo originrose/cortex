@@ -28,7 +28,8 @@
 
 (defn train-step
   [{:keys [network loss-fn] :as train-config} input answer]
-  (let [network (cp/multi-forward network input)
+  (let [network (cp/prepare-forward network)
+        network (cp/multi-forward network input)
         output (cp/multi-output network)
         loss-fn (mapv #(opt/calculate-loss-gradient %1 %2 %3)
                       loss-fn output answer)

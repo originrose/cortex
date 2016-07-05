@@ -14,7 +14,8 @@
             cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct cudnn$cudnnPoolingStruct
             curand curand$curandGenerator_st]
            [cortex.nn.impl.layers.convolution ConvLayerConfig]
-           [cortex_gpu.cuda DevicePointer]))
+           [cortex_gpu.cuda DevicePointer]
+           [java.nio DoubleBuffer FloatBuffer Buffer]))
 
 
 (set! *warn-on-reflection* true)
@@ -372,7 +373,6 @@
       (c-for [idx 0 (< idx elem-count) (inc idx)]
              (aset retval idx (aget intermediate idx)))
       retval))
-
   (traits-ptr-0 [dtype] float-ptr-0)
   (traits-ptr-1 [dtype] float-ptr-1)
   (traits-ptr--1 [dtype] float-ptr--1)
@@ -487,6 +487,23 @@
       (do (cudnn-call (cudnn/cudnnCreateActivationDescriptor retval))
           (cudnn-call (cudnn/cudnnSetActivationDescriptor retval mode relu-nan-opt relu-ceiling)))
       (resource/track retval))))
+
+
+(defprotocol BufferAccess
+  (put-value [buffer idx value])
+  (get-value [buffer idx]))
+
+(extend-protocol BufferAccess
+  DoubleBuffer
+  (put-value [^DoubleBuffer buffer ^long idx value]
+    (.put buffer idx (double value)))
+  (get-value [^DoubleBuffer buffer ^long idx]
+    (.get buffer idx))
+  FloatBuffer
+  (put-value [^FloatBuffer buffer ^long idx value]
+    (.put buffer idx (float value)))
+  (get-value [^FloatBuffer buffer ^long idx]
+    (.get buffer idx)))
 
 (def activation-relu    (create-activation-desc cudnn/CUDNN_ACTIVATION_RELU cudnn/CUDNN_PROPAGATE_NAN 0.0))
 (def activation-sigmoid (create-activation-desc cudnn/CUDNN_ACTIVATION_SIGMOID cudnn/CUDNN_PROPAGATE_NAN 0.0))
@@ -900,35 +917,9 @@ TODO - write a cuda kernel that does this *quicker*."
                                          (:tensor output)
                                          (inner-ptr output))))
 
-
-(defn cpu-softmax-backward
-  "From torch's c code"
-  [output output-gradient input-gradient]
-  (let [sum (m/dot output-gradient output)]
-    (println sum)
-    (m/assign! input-gradient output-gradient)
-    (m/sub! input-gradient sum)
-    (m/mul! input-gradient output)))
-
-
 (defn softmax-backward
   [output output-gradient input-gradient]
-  (let [n-input (batch-shape output-gradient)
-        n-elems (* ^long (first n-input) ^long (second n-input))]
-    (comment (cudnn-call (cudnn/cudnnSoftmaxBackward (:cudnn (get-ctx))
-                                                     cudnn/CUDNN_SOFTMAX_ACCURATE
-                                                     cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
-                                                     (ptr-1)
-                                                     (:tensor output)
-                                                     (inner-ptr output)
-                                                     (:tensor output-gradient)
-                                                     (inner-ptr output-gradient)
-                                                     (ptr-0)
-                                                     (:tensor input-gradient)
-                                                     (inner-ptr input-gradient))))
-    (cuda/mem-copy-device->device (:ptr output-gradient)
-                                  (:ptr input-gradient)
-                                  (* n-elems (byte-size)))))
+  (assign! input-gradient output-gradient))
 
 
 (defn loss-gradient
@@ -947,7 +938,6 @@ TODO - write a cuda kernel that does this *quicker*."
                           (:ptr answer)
                           (:ptr output-gradient)
                           n-elems)))
-
 
 (defn adadelta-step
   [decay epsilon grad-accum dx-accum gradient-beta gradients parameters]
@@ -1321,15 +1311,17 @@ Backward Data: %s %d"
   (+ number (rem number 2)))
 
 
+(defn dropout-prepare-forward
+  [rand-buffer probability dropout-type elem-count]
+  (if (= dropout-type :multiplicative)
+    (generate-normal-rands rand-buffer 1.0 (double probability)
+                           (ensure-factor-of-2 elem-count))
+    (generate-uniform-rands rand-buffer elem-count)))
+
+
 (defn dropout-forward
   [input output rand-buffer probability dropout-type]
-  (let [elem-count (ecount output)]
-    ;;generate new random data for this batch
-    (if (= dropout-type :multiplicative)
-      (generate-normal-rands rand-buffer 1.0 (double probability)
-                             (ensure-factor-of-2 elem-count))
-      (generate-uniform-rands rand-buffer elem-count))
-    (dropout-impl input output rand-buffer probability dropout-type)))
+  (dropout-impl input output rand-buffer probability dropout-type))
 
 
 (defn dropout-backward

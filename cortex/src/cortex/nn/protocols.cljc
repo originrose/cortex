@@ -60,6 +60,21 @@
   (input-gradient [this]
     "Gets the computed input gradients for a module. Assumes the backward pass has been run."))
 
+
+(defprotocol PNeuralTrainingOptional
+  "Some layers will want to do things before the forward pass like update random number buffers.
+This allows things like dropout to play well with gradient checking in that prepare-forward can
+be called once but forward can be called multiple times (normally 1 + 2 * n-params)."
+  (prepare-forward [this]))
+
+
+
+;;Default implementation because most things do no need this implemented
+(extend-protocol PNeuralTrainingOptional
+  Object
+  (prepare-forward [this] this))
+
+
 (defprotocol PTraining
   "Protocol for modules that can be trained input / output pairs."
   (train [this input output]

@@ -185,6 +185,9 @@ channel 2 with n-outputs"
   (setup [layer items-per-batch]
     (assoc layer :layers (mapv #(cp/setup % items-per-batch) layers)))
 
+  cp/PNeuralTrainingOptional
+  (prepare-forward [this]
+    (assoc this :layers (mapv #(cp/prepare-forward %) layers)))
 
   cp/PMultiLayer
   (multi-input-size [layer] (cp/multi-input-size (first layers)))
@@ -345,6 +348,12 @@ channel 2 with n-outputs"
              :input-gradient input-gradient
              :rand-buffer rand-buffer)))
 
+  cp/PNeuralTrainingOptional
+  (prepare-forward [this]
+    (let [elem-count (cudnn/ecount (:output this))]
+      (cudnn/dropout-prepare-forward (:rand-buffer this) probability dropout-type elem-count)
+      this))
+
   cp/PLayerSize
   (input-size [layer] n-items)
   (output-size [layer] n-items)
@@ -400,6 +409,11 @@ which doesn't require scaling)."
       (assoc layer
              :layers (mapv #(cp/setup % items-per-batch) layers)
              :input-gradient input-gradient)))
+
+
+  cp/PNeuralTrainingOptional
+  (prepare-forward [this]
+    (assoc this :layers (mapv #(cp/prepare-forward %) layers)))
 
   cp/PMultiLayer
   (multi-input-size [layer] [n-input])

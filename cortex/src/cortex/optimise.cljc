@@ -290,12 +290,16 @@ Returns new parameters"
 
 (defn cross-entropy-loss [] (->CrossEntropyLoss))
 
+(defn log-likelihood-softmax-loss
+  [softmax-output answer]
+  (let [answer-num (m/esum (m/mul softmax-output answer))]
+    (- (Math/log answer-num))))
+
 ;;Mutually exclusive ce loss
 (defrecord SoftmaxCrossEntropyLoss []
   cp/PLossFunction
   (loss [this v target]
-    (let [c (double (m/esum (m/mul target (m/log (m/add SMALL-NUM v)))))]
-      (/ (- c) (double (m/ecount v)))))
+    (log-likelihood-softmax-loss v target))
 
   (loss-gradient [this v target]
     (m/sub v target)))

@@ -289,7 +289,8 @@
         answer-seq
         (doall
          (for [iter (range repeat-count)]
-           (let [dropout-layer (cp/forward dropout-layer input)
+           (let [dropout-layer (cp/prepare-forward dropout-layer)
+                 dropout-layer (cp/forward dropout-layer input)
                  dropout-layer (cp/backward dropout-layer input output-gradient)
                  output (seq (cudnn/to-double-array (cp/output dropout-layer)))
                  input-gradient (seq (cudnn/to-double-array (cp/input-gradient dropout-layer)))]
@@ -312,11 +313,13 @@
         output-gradient (cudnn/array (repeat (* batch-size item-count) 2.0) batch-size)
         dropout-layer (layers/dropout item-count 1.0 cudnn/dropout-type-multiplicative)
         dropout-layer (cp/setup dropout-layer batch-size)
+        dropout-layer (cp/prepare-forward dropout-layer)
         repeat-count 30
         answer-seq
         (doall
          (for [iter (range repeat-count)]
-           (let [dropout-layer (cp/forward dropout-layer input)
+           (let [dropout-layer (cp/prepare-forward dropout-layer)
+                 dropout-layer (cp/forward dropout-layer input)
                  dropout-layer (cp/backward dropout-layer input output-gradient)
                  output (seq (cudnn/to-double-array (cp/output dropout-layer)))
                  input-gradient (seq (cudnn/to-double-array (cp/input-gradient dropout-layer)))]
