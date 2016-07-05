@@ -1282,28 +1282,30 @@ Backward Data: %s %d"
   )
 
 
-(defonce dropout-type-constant :constant)
-(defonce dropout-type-multiplicative :multiplicative)
+(defonce dropout-distribution-bernoulli :bernoulli)
+(defonce dropout-distribution-gaussian :gaussian)
 
 
-(defn dropout-impl [input output rand-buffer probability dropout-type]
+(defn dropout-impl [input output rand-buffer probability distribution]
   (let [elem-count (ecount input)]
-   (if (= dropout-type :multiplicative)
-     (launch-linear-kernel :dropout-multiplicative
-                           elem-count
-                           0
-                           (:ptr input)
-                           (:ptr output)
-                           (:ptr rand-buffer)
-                           elem-count)
-     (launch-linear-kernel :dropout-constant
-                           elem-count
-                           0
-                           (:ptr input)
-                           (:ptr output)
-                           (:ptr rand-buffer)
-                           (general->type probability)
-                           elem-count))))
+    (cond
+      (= distribution :gaussian) (launch-linear-kernel :dropout-multiplicative
+                                                       elem-count
+                                                       0
+                                                       (:ptr input)
+                                                       (:ptr output)
+                                                       (:ptr rand-buffer)
+                                                       elem-count)
+      (= distribution :bernoulli) (launch-linear-kernel :dropout-constant
+                                                        elem-count
+                                                        0
+                                                        (:ptr input)
+                                                        (:ptr output)
+                                                        (:ptr rand-buffer)
+                                                        (general->type probability)
+                                                        elem-count)
+      :else
+      (throw (Exception. (format "Unrecognized dropout distribution: %s" distribution))))))
 
 
 (defn ensure-factor-of-2
@@ -1312,21 +1314,21 @@ Backward Data: %s %d"
 
 
 (defn dropout-prepare-forward
-  [rand-buffer probability dropout-type elem-count]
-  (if (= dropout-type :multiplicative)
-    (generate-normal-rands rand-buffer 1.0 (double probability)
+  [rand-buffer probability distribution elem-count]
+  (if (= distribution :gaussian)
+    (generate-normal-rands rand-buffer 1.0 (- 1.0 (double probability))
                            (ensure-factor-of-2 elem-count))
     (generate-uniform-rands rand-buffer elem-count)))
 
 
 (defn dropout-forward
-  [input output rand-buffer probability dropout-type]
-  (dropout-impl input output rand-buffer probability dropout-type))
+  [input output rand-buffer probability distribution]
+  (dropout-impl input output rand-buffer probability distribution))
 
 
 (defn dropout-backward
-  [output-gradient input-gradient rand-buffer probability dropout-type]
-  (dropout-impl output-gradient input-gradient rand-buffer probability dropout-type))
+  [output-gradient input-gradient rand-buffer probability distribution]
+  (dropout-impl output-gradient input-gradient rand-buffer probability distribution))
 
 
 (defn adam-step

@@ -336,7 +336,7 @@ channel 2 with n-outputs"
                                             num-input-channels)))
 
 
-(defrecord Dropout [^long n-items ^double probability dropout-type]
+(defrecord Dropout [^long n-items ^double probability distribution]
   cp/PLayerSetup
   (setup [layer items-per-batch]
     (let [output (cudnn/new-array [(cp/output-size layer)] items-per-batch)
@@ -351,7 +351,7 @@ channel 2 with n-outputs"
   cp/PNeuralTrainingOptional
   (prepare-forward [this]
     (let [elem-count (cudnn/ecount (:output this))]
-      (cudnn/dropout-prepare-forward (:rand-buffer this) probability dropout-type elem-count)
+      (cudnn/dropout-prepare-forward (:rand-buffer this) probability distribution elem-count)
       this))
 
   cp/PLayerSize
@@ -367,12 +367,12 @@ channel 2 with n-outputs"
   cp/PNeuralTraining
   (forward [layer input]
     (cudnn/dropout-forward input (:output layer) (:rand-buffer layer) probability
-                           dropout-type)
+                           distribution)
     layer)
 
   (backward [layer input output-gradient]
     (cudnn/dropout-backward output-gradient (:input-gradient layer) (:rand-buffer layer)
-                            probability dropout-type)
+                            probability distribution)
     layer)
 
   (input-gradient [layer] (:input-gradient layer)))
@@ -383,9 +383,9 @@ channel 2 with n-outputs"
 you have the option of using :constant dropout (meaning bernoulli distribution with scaling)
 or :multiplicative (normal distribution of 1,probability)
 which doesn't require scaling)."
-  ([n-input probability dropout-type]
-   (->Dropout n-input probability dropout-type))
-  ([n-input probability] (dropout n-input probability cudnn/dropout-type-constant)))
+  ([n-input probability distribution]
+   (->Dropout n-input probability distribution))
+  ([n-input probability] (dropout n-input probability :bernoulli)))
 
 (defn split-forward
   [this-layer input forward-fn]

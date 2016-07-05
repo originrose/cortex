@@ -48,7 +48,11 @@ channel 2 with n-outputs"
 
 (defn k-sparse [k] {:type :k-sparse :k k})
 
-(defn dropout [probability] {:type :dropout :probability probability})
+(defn dropout
+  "Dropout supports both bernoulli and gaussian distributed data.  Bernoulli is typical dropout
+while guassian is (1,1) centered noise that is multiplied by the inputs."
+  [probability & {:keys [distribution]
+                  :or {distribution :bernoulli}}] {:type :dropout :probability probability :distribution distribution})
 
 (defn convolutional-expanded
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
@@ -290,6 +294,9 @@ channel 2 with n-outputs"
 
 (defmethod create-module :dropout
   [desc]
+  (when (= (:distribution desc)
+           :guassian)
+    (throw (Exception. "CPU dropout does not support guassian distribution")))
   (layers/dropout [(:output-size desc)] (:probability desc)))
 
 

@@ -278,7 +278,7 @@
   (count (filter #(= 0.0 (double %)) item-seq)))
 
 
-(def-double-float-test dropout-constant
+(deftest dropout-bernoulli
   (let [batch-size 5
         item-count 20
         input (cudnn/array (repeat (* batch-size item-count) 1.0) batch-size)
@@ -306,12 +306,12 @@
 
 
 
-(def-double-float-test dropout-multiplicative
+(deftest dropout-gaussian
   (let [batch-size 5
         item-count 100
         input (cudnn/array (repeat (* batch-size item-count) 1.0) batch-size)
         output-gradient (cudnn/array (repeat (* batch-size item-count) 2.0) batch-size)
-        dropout-layer (layers/dropout item-count 1.0 cudnn/dropout-type-multiplicative)
+        dropout-layer (layers/dropout item-count 0.5 cudnn/dropout-distribution-gaussian)
         dropout-layer (cp/setup dropout-layer batch-size)
         dropout-layer (cp/prepare-forward dropout-layer)
         repeat-count 30

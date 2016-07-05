@@ -35,7 +35,9 @@
 
 (defmethod create-module :dropout
   [desc]
-  (layers/dropout (:output-size desc) (:probability desc)))
+  (layers/dropout (:output-size desc)
+                  (:probability desc)
+                  (:distribution desc)))
 
 (defmethod create-module :softmax
   [desc]
