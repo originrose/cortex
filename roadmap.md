@@ -9,6 +9,10 @@ Move to a graph based construction as the default, on top of which we can easily
    
 One question is whether we want to change each layer, or instead have the graph abstraction wrap the layers and automatically do the split/join, allowing the layers to stay as is?
 
+### Batch Processing
+
+The CudNN layers operate on batches (which can be of size 1) by default, so in order to unify the multiple implementations it would probably be ideal if we can have everything either work on batches, or have a default protocol for batches that handles the iteration.
+
 ### Optimization
 
 We'd like to be able to reuse the optimization functionality in Cortex for other types of models besides neural nets.  In looking at the implementations we have in our recommendations library they are almost identical to Cortex with some slight differences, but we should be able to unify them.
