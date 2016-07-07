@@ -9,7 +9,7 @@
   (loop [optimizer (P/initialize optimizer (count initial-params))
          params initial-params
          step-count 0]
-    (println (P/value function params) params)
+    (println (P/value function params) params (P/get-state optimizer))
     (if (< step-count num-steps)
       (let [gradient (P/gradient function params)
             optimizer (P/compute-update optimizer gradient)

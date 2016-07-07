@@ -8,7 +8,6 @@
     "Get the value of the gradient of the function, as a core.matrix
     Vectorz vector, for the specified parameters."))
 
-;; TODO: should implement Associative or similar for internal state
 (defprotocol Optimizer
   "FIXME"
   (initialize [this param-count]
@@ -22,4 +21,7 @@
     mutable). This method should not be called before initialize.")
   (get-step [this]
     "Return the step from the last update. This method should not
-    be called before update."))
+    be called before update.")
+  (get-state [this]
+    "Return the internal state of the Optimizer, as a (possibly lazy)
+    map. This method should not be called before initialize."))

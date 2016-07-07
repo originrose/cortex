@@ -20,7 +20,8 @@
       (assoc :state ((:initialize this) param-count))
       (dissoc :initialize)))
   (compute-update [this gradient] (update this :state (:update this) gradient))
-  (get-step [this] (:step (:state this))))
+  (get-step [this] (:step (:state this)))
+  (get-state [this] (dissoc (:state this) :step)))
 
 (defn sgd
   [& {:keys [learning-rate]
