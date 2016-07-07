@@ -1,5 +1,7 @@
 (ns cortex.optimize.functions
+  (:refer-clojure :exclude [+ - * /])
   (:require [clojure.core.matrix :as m]
+            [clojure.core.matrix.operators :refer [+ - * /]]
             [cortex.optimize.protocols :as P]))
 
 (extend-protocol P/Function

@@ -1,6 +1,7 @@
 (ns cortex.optimize.managers
   (:refer-clojure :exclude [+ - * /])
-  (:require [clojure.core.matrix.operators :refer [+ - * /]]
+  (:require [clojure.core.matrix :as m]
+            [clojure.core.matrix.operators :refer [+ - * /]]
             [cortex.optimize.protocols :as P]))
 
 (defn do-steps

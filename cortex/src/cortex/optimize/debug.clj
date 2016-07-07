@@ -1,5 +1,8 @@
 (ns cortex.optimize.debug
-  (:require [cortex.optimize.functions :as functions]
+  (:refer-clojure :exclude [+ - * /])
+  (:require [clojure.core.matrix :as m]
+            [clojure.core.matrix.operators :refer [+ - * /]]
+            [cortex.optimize.functions :as functions]
             [cortex.optimize.managers :refer :all]
             [cortex.optimize.optimizers :as optimizers]
             [cortex.optimize.protocols :as P]))
