@@ -3,7 +3,8 @@
             [cortex-gpu.cuda :as cuda]
             [cortex-gpu.nn.cudnn :as cudnn]
             [cortex.nn.impl.layers.convolution :as conv]
-            [cortex.util :as util])
+            [cortex.util :as util]
+            [clojure.core.matrix :as m])
   (:import [cortex.nn.impl.layers.convolution ConvLayerConfig]
            [org.bytedeco.javacpp FloatPointer]))
 
@@ -63,17 +64,22 @@
     (assoc layer
            :weight-temp (cudnn/new-array (cudnn/shape weights))
            :weight-magnitude-temp (cudnn/new-array [(first (cudnn/shape weights))])
-           :ones-vec (cudnn/allocate-ones (first (cudnn/shape weights))))
+           :ones-vec (cudnn/allocate-ones (second (cudnn/shape weights))))
     layer))
+
+(defn print-weight-lengths
+  [cudnn-weights]
+  (let [core-mat-weights (cudnn/to-core-matrix cudnn-weights)]
+    (println (mapv m/length (m/rows core-mat-weights)))))
 
 (defn apply-l2-max-constraint
   [layer weights l2-max-constraint]
   (when l2-max-constraint
-   (let [{:keys [weight-temp weight-magnitude-temp ones-vec]} layer]
-     (cudnn/apply-l2-max-constraint weights weight-temp
-                                    weight-magnitude-temp
-                                    ones-vec
-                                    l2-max-constraint))))
+    (let [{:keys [weight-temp weight-magnitude-temp ones-vec]} layer]
+      (cudnn/apply-l2-max-constraint weights weight-temp
+                                     weight-magnitude-temp
+                                     ones-vec
+                                     l2-max-constraint))))
 
 (defrecord Linear [weights bias l2-max-constraint]
   cp/PLayerSetup

@@ -110,13 +110,13 @@
       (is (m/equals (flatten (repeat num-batch-items [7 10])) input-gradient)))))
 
 
-(def-double-float-test l2-max-constraint
+(deftest l2-max-constraint
   (let [input-size 100
-        output-size 100
-        weight-matrix (cudnn/array (partition output-size (range (* input-size output-size))))
+        output-size 10
+        weight-matrix (cudnn/array (partition input-size (range (* input-size output-size))))
         weight-clone-temp (cudnn/new-array (cudnn/shape weight-matrix))
         weight-magnitude-temp (cudnn/new-array [output-size])
-        ones-vec (cudnn/allocate-ones output-size)]
+        ones-vec (cudnn/allocate-ones input-size)]
     (cudnn/apply-l2-max-constraint weight-matrix weight-clone-temp weight-magnitude-temp
                                    ones-vec 1.0)
     (let [weights (cudnn/to-double-array weight-matrix)

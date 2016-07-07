@@ -88,10 +88,14 @@
 with three keys, :training, :testing, :running where the testing
 indexes are withheld from the training set.  The running indexes
 are the same as the testing indexes at this time."
-  [item-count & {:keys [training-split]
+  [item-count & {:keys [training-split max-items]
                  :or {training-split 0.8}}]
-  (let [training-count (long (* item-count training-split))
-        all-indexes (shuffle (range item-count))
+  ;;The code below uses both item count and max items so that we can a random subset
+  ;;of the total index count in the case where max-items < item-count
+  (let [max-items (or max-items item-count)
+        all-indexes (vec (take max-items (shuffle (range item-count))))
+        item-count (count all-indexes)
+        training-count (long (* item-count training-split))
         training-indexes (vec (take training-count all-indexes))
         testing-indexes (vec (drop training-count all-indexes))
         running-indexes testing-indexes]

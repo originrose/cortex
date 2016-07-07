@@ -88,12 +88,13 @@
                                     (range num-batches))
             result-processor (fn [results n-output]
                                (vec (mapcat #(map vec (partition n-output (seq %))) results)))]
-        ;;De-interleave the results
-        (mapv (fn [n-output idx]
-                (let [nth-results (map #(nth % idx) results)]
-                  (result-processor nth-results n-output)))
-              n-output
-              (range (count n-output)))))))
+        [;;De-interleave the results
+         (mapv (fn [n-output idx]
+                 (let [nth-results (map #(nth % idx) results)]
+                   (result-processor nth-results n-output)))
+               n-output
+               (range (count n-output)))
+         train-config]))))
 
 
 (defn average-loss
@@ -113,8 +114,8 @@
 (defn evaluate-training-network
   "Run the network and return the average loss across all cv-input"
   [{:keys [network loss-fn batch-size] :as train-config}]
-  (let [guesses (run-setup-network train-config :testing)
-        cpu-labels (batch/get-cpu-labels train-config :testing)]
+  (let [[guesses local-train-config] (run-setup-network train-config :testing)
+        cpu-labels (batch/get-cpu-labels local-train-config :testing)]
     (mapv average-loss loss-fn guesses cpu-labels)))
 
 
@@ -139,7 +140,6 @@
                train-config))
            (batch/setup-batching-system train-config :training)
            (range epoch-count)))
-
 
 (defn train
   [network optimiser loss-fn
@@ -170,7 +170,7 @@
            :batching-system (batch/->OnGPUBatchingSystem)} train-config
       (batch/setup-batching-system train-config :running)
       (update-in train-config [:network] #(cp/setup % (:batch-size train-config)))
-      (run-setup-network train-config :running))))
+      (first (run-setup-network train-config :running)))))
 
 (defn evaluate-softmax
   [network data labels]
@@ -234,4 +234,4 @@
              :batching-system batching-system} train-config
         (batch/setup-batching-system train-config :running)
         (update-in train-config [:network] #(cp/setup % batch-size))
-        (run-setup-network train-config :running)))))
+        (first (run-setup-network train-config :running))))))
