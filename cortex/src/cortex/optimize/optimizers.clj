@@ -11,6 +11,8 @@
                (assoc state :step
                       (this gradient)))
      :state {}})
+  ;; This turns the Optimizer into a map, so we don't need to
+  ;; implement any of the other methods.
 
   clojure.lang.IPersistentMap
   (initialize [this param-count]
