@@ -12,3 +12,6 @@ Neural networks, regression and feature learning in Clojure.
 * composite layer types
  - port additive and multiplicative layers CMulTable, CAddTable from Torch for recurrent nets and LSTM
  
+### See also:
+
+`ROADMAP.md`
