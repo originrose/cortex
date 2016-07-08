@@ -988,7 +988,8 @@ TODO - write a cuda kernel that does this *quicker*."
         backward-filter-algo (IntPointer. 1)
         backward-filter-workspace-size (SizeTPointer. 1)
         backward-data-algo (IntPointer. 1)
-        backward-data-workspace-size (SizeTPointer. 1)]
+        backward-data-workspace-size (SizeTPointer. 1)
+        output-size-check (int-array 4)]
     (cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
     (cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
     (cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
@@ -1004,6 +1005,20 @@ TODO - write a cuda kernel that does this *quicker*."
                                                        1 1 ;;stupid scale arguments...only 1
                                                        ;;is valid
                                                        cudnn/CUDNN_CROSS_CORRELATION))
+
+    (cudnn-call (cudnn/cudnnGetConvolutionNdForwardOutputDim conv-desc
+                                                             input-tensor
+                                                             filter-desc
+                                                             4
+                                                             output-size-check))
+
+    (let [[n c h w] (vec output-size-check)]
+      (when-not (and (= h output-height)
+                     (= w output-width))
+        (throw (Exception. (format "Calculated output dimensions %s and cudnn output dimensions %s are off"
+                                   [h w] [output-height output-width])))))
+
+
     (cudnn-call (cudnn/cudnnGetConvolutionForwardAlgorithm
                  cudnn-context
                  input-tensor
@@ -1055,16 +1070,16 @@ TODO - write a cuda kernel that does this *quicker*."
                  input-tensor
                  (.get backward-data-algo)
                  backward-data-workspace-size))
-    (comment (println (format "Convolution algorithm and workspace sizes:
+    (println (format "Convolution algorithm and workspace sizes:
 Forward: %s %d
 Backward Filter: %s %d
 Backward Data: %s %d"
-                              (get forward-algorithms (.get forward-algo))
-                              (.get forward-workspace-size)
-                              (get backward-filter-algorithms (.get backward-filter-algo))
-                              (.get backward-filter-workspace-size)
-                              (get backward-data-algorithms (.get backward-data-algo))
-                              (.get backward-data-workspace-size))))
+                     (get forward-algorithms (.get forward-algo))
+                     (.get forward-workspace-size)
+                     (get backward-filter-algorithms (.get backward-filter-algo))
+                     (.get backward-filter-workspace-size)
+                     (get backward-data-algorithms (.get backward-data-algo))
+                     (.get backward-data-workspace-size)))
     (let [total-workspace-size (max (.get forward-workspace-size)
                                     (.get backward-filter-workspace-size)
                                     (.get backward-data-workspace-size))
@@ -1211,6 +1226,8 @@ Backward Data: %s %d"
                  (.k-height config) (.k-width config)
                  (.pady config) (.padx config)
                  (.stride-h config) (.stride-w config)))
+
+    ;;(cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim))
     (map->PoolingData
      {:input-tensor input-tensor
       :output-tensor output-tensor

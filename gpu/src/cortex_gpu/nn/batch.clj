@@ -314,8 +314,7 @@ to a single matrix"
                           @next-elements
                           (ds/get-elements dataset (indexes batch-idx)))
           next-batch-idx (+ batch-idx 1)
-          next-elements (when (< next-batch-idx (count indexes))
-                         (future (ds/get-elements dataset (indexes next-batch-idx))))]
+          next-elements nil]
 
       {:train-config (assoc train-config :next-elements next-elements)
        :input-buffers (upload-batch-data-to-buffers! ds-elements input-dataset-indexes input-buffers)
