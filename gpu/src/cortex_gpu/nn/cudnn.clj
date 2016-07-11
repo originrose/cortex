@@ -1006,8 +1006,8 @@ TODO - write a cuda kernel that does this *quicker*."
   ^ConvolutionData [^ConvLayerConfig config ^long batch-size]
   (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
         ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
-        output-width (conv/get-output-width config)
-        output-height (conv/get-output-height config)
+        output-width (conv/get-output-width config :convolutional)
+        output-height (conv/get-output-height config :convolutional)
         input-tensor (create-tensor batch-size
                                     (.num-in-channels config)
                                     (.height config)
@@ -1049,7 +1049,7 @@ TODO - write a cuda kernel that does this *quicker*."
                                                              filter-desc
                                                              4
                                                              output-size-check))
-
+    ;;If these don't match we get memory overwrite or over-read errors
     (let [[n c h w] (vec output-size-check)]
       (when-not (and (= h output-height)
                      (= w output-width))
@@ -1270,8 +1270,8 @@ Backward Data: %s %d"
 (defn max-pooling-setup
   [^ConvLayerConfig config ^long batch-size]
   (let [pooling-desc (cudnn$cudnnPoolingStruct.)
-        output-width (conv/get-output-width config)
-        output-height (conv/get-output-height config)
+        output-width (conv/get-output-width config :pooling)
+        output-height (conv/get-output-height config :pooling)
         input-tensor (create-tensor batch-size
                                     (.num-in-channels config)
                                     (.height config)
@@ -1295,12 +1295,15 @@ Backward Data: %s %d"
                  input-tensor
                  4
                  output-dims))
-    (let [[n c h w] output-dims]
-      (when-not (and (= output-width w)
-                     (= output-height h))
-        (throw (Exception. (format "Pooling layer size mismatch: cudnn %s calculated %s"
-                                   [w h]
-                                   [output-width output-height])))))
+
+    ;;These do not have to match; cudnn can take care of it if they are off.
+    ;;https://devtalk.nvidia.com/default/topic/949999/cuda-programming-and-performance/cudnn-calculates-layer-sizes-different-than-caffe/
+    (comment (let [[n c h w] output-dims]
+               (when-not (and (= output-width w)
+                              (= output-height h))
+                 (throw (Exception. (format "Pooling layer size mismatch: cudnn %s calculated %s"
+                                            [w h]
+                                            [output-width output-height]))))))
     (resource/track (map->PoolingData
                      {:input-tensor input-tensor
                       :output-tensor output-tensor

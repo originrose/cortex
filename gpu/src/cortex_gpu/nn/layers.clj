@@ -246,8 +246,8 @@ channel 2 with n-outputs"
   cp/PLayerSize
   (input-size [layer] (* (.width conv-config) (.height conv-config)
                          (.num-in-channels conv-config)))
-  (output-size [layer] (* (conv/get-output-width conv-config)
-                          (conv/get-output-height conv-config)
+  (output-size [layer] (* (conv/get-output-width conv-config :convolutional)
+                          (conv/get-output-height conv-config :convolutional)
                           (.num-out-channels conv-config)))
 
   cp/PModule
@@ -310,8 +310,8 @@ channel 2 with n-outputs"
   cp/PLayerSize
   (input-size [layer] (* (.width conv-config) (.height conv-config)
                          (.num-in-channels conv-config)))
-  (output-size [layer] (* (conv/get-output-width conv-config)
-                          (conv/get-output-height conv-config)
+  (output-size [layer] (* (conv/get-output-width conv-config :pooling)
+                          (conv/get-output-height conv-config :pooling)
                           (.num-out-channels conv-config)))
 
   cp/PModule

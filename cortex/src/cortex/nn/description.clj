@@ -202,9 +202,11 @@ while guassian is (1,1) centered noise that is multiplied by the inputs."
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (conv/get-padded-strided-dimension input-width pad-x
+        output-width (conv/get-padded-strided-dimension :convolutional
+                                                        input-width pad-x
                                                         kernel-width stride-x)
-        output-height (conv/get-padded-strided-dimension input-height pad-y
+        output-height (conv/get-padded-strided-dimension :convolutional
+                                                         input-height pad-y
                                                          kernel-height stride-y)
         output-channels num-kernels
         output-size (* output-width output-height output-channels)
@@ -225,9 +227,11 @@ while guassian is (1,1) centered noise that is multiplied by the inputs."
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (conv/get-padded-strided-dimension input-width pad-x
+        output-width (conv/get-padded-strided-dimension :pooling
+                                                        input-width pad-x
                                                         kernel-width stride-x)
-        output-height (conv/get-padded-strided-dimension input-height pad-y
+        output-height (conv/get-padded-strided-dimension :pooling
+                                                         input-height pad-y
                                                          kernel-height stride-y)
         output-channels input-channels
         output-size (* output-width output-height output-channels)

@@ -378,15 +378,11 @@
             stride (range 1 4)
             kernel-size (range 2 10)]
       (let [layer-config (create-conv-layer-config pad stride kernel-size image-dim image-in-channels num-kernels)
-            [p-n p-c p-h p-w] (cudnn/get-cudnn-pooling-output-sizes layer-config batch-size)
             [c-n c-c c-h c-w] (cudnn/get-cudnn-convolution-output-sizes layer-config batch-size)
-            output-width (conv/get-output-width layer-config)
-            output-height (conv/get-output-height layer-config)
+            output-width (conv/get-output-width layer-config :convolutional)
+            output-height (conv/get-output-height layer-config :convolutional)
             error-string (format " checking: image-dim %s channels %s pad %s stride %s kernel-size %s "
                                  image-dim image-in-channels pad stride kernel-size)]
-        (is (and (= output-width p-w)
-                 (= output-height p-h))
-            (str :pooling error-string [output-width output-height] [p-w p-h]))
         (is (and (= output-width c-w)
                  (= output-height c-h))
             (str :convolution error-string [output-width output-height] [c-w c-h]))))))

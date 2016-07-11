@@ -69,8 +69,8 @@
 ;;with 4 channels.
 (def pool-layer-config (conv/create-conv-layer-config 2 2 2 2 0 0 1 1 4))
 
-(def pool-layer-width (conv/get-padded-strided-dimension 2 0 2 1))
-(def pool-layer-height (conv/get-padded-strided-dimension 2 0 2 1))
+(def pool-layer-width (conv/get-padded-strided-dimension :pooling 2 0 2 1))
+(def pool-layer-height (conv/get-padded-strided-dimension :pooling 2 0 2 1))
 ;;4 channels * output of pool layer
 (def pool-layer-output-size (* 4 pool-layer-width pool-layer-height))
 ;;4 channels * input sizes to pool layer
@@ -132,12 +132,12 @@ which causes a partial window at the boundry"
            (m/eseq (core/output forward-pool-layer))))
     (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 3 3 0 0 2 2 1 1))
           forward-pool-layer (core/forward pool-layer input)]
-      (is (= (map double (into [] (repeat 4 -11)))
+      (is (= (map double (into [] (repeat 9 -11)))
            (m/eseq (core/output forward-pool-layer)))))
     (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 3 3 0 0 2 2 1 1))
           input (b/array (repeat 36 11))
           forward-pool-layer (core/forward pool-layer input)]
-      (is (= (map double (into [] (repeat 4 11)))
+      (is (= (map double (into [] (repeat 9 11)))
            (m/eseq (core/output forward-pool-layer)))))))
 
 
@@ -157,7 +157,7 @@ for testing against other conv net implementations."
                                      (range 1 (+ (* input-dim input-dim) 1)))))
         weights (b/array (map #(repeat (* k-dim k-dim num-channels) %)
                               (range 1 (+ n-kernels 1))))
-        output-dim (conv/get-padded-strided-dimension input-dim pad k-dim stride)
+        output-dim (conv/get-padded-strided-dimension :convolutional input-dim pad k-dim stride)
         output-gradient (b/array (repeat (* output-dim output-dim n-kernels) 1))
         bias (b/zero-array [1 n-kernels])
         conv-layer (conv/->Convolutional weights bias

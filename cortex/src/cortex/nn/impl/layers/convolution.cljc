@@ -45,13 +45,28 @@
     output))
 
 
-(defn get-padded-strided-dimension
+(defn get-padded-strided-dimension-convolutional
   "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
 of the output of a conv-net ignoring channels."
   ^long [^long input-dim ^long pad ^long kernel-size ^long stride]
-  (long (+ (+ 0.0 (/ (- (+ input-dim (* 2 pad))  kernel-size)
-                     stride))
+  (long (+ (quot (- (+ input-dim (* 2 pad)) kernel-size)
+                 stride)
            1)))
+
+(defn get-padded-strided-dimension-pooling
+  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
+of the output of a conv-net ignoring channels."
+  ^long [^long input-dim ^long pad ^long kernel-size ^long stride]
+  (long (+ (Math/ceil (/ (- (+ input-dim (* 2 pad))  kernel-size)
+                         stride))
+           1)))
+
+(defn get-padded-strided-dimension
+  [layer-type input-dim pad kernel-size stride]
+  (cond
+    (= layer-type :convolutional) (get-padded-strided-dimension-convolutional input-dim pad kernel-size stride)
+    (= layer-type :pooling) (get-padded-strided-dimension-pooling input-dim pad kernel-size stride)
+    :else (throw (Exception. (format "Unrecognized layer type: %s" layer-type)))))
 
 
 (defrecord ConvLayerConfig
@@ -61,12 +76,12 @@ of the output of a conv-net ignoring channels."
 
 
 (defn get-output-width
-  ^long [^ConvLayerConfig conv]
-  (get-padded-strided-dimension (.width conv) (.padx conv) (.k-width conv) (.stride-w conv)))
+  ^long [^ConvLayerConfig conv layer-type]
+  (get-padded-strided-dimension layer-type (.width conv) (.padx conv) (.k-width conv) (.stride-w conv)))
 
 (defn get-output-height
-  ^long [^ConvLayerConfig conv]
-  (get-padded-strided-dimension (.height conv) (.pady conv) (.k-height conv) (.stride-h conv)))
+  ^long [^ConvLayerConfig conv layer-type]
+  (get-padded-strided-dimension layer-type (.height conv) (.pady conv) (.k-height conv) (.stride-h conv)))
 
 
 (defn create-conv-layer-config
@@ -84,8 +99,8 @@ of the output of a conv-net ignoring channels."
 
 (defn create-convolution-matrix
   [^ConvLayerConfig config]
-  (let [output-width (get-output-width config)
-        output-height (get-output-height config)
+  (let [output-width (get-output-width config :convolutional)
+        output-height (get-output-height config :convolutional)
         kernel-stride (* (.k-width config) (.k-height config))
         n-cols (* kernel-stride (.num-in-channels config))
         n-rows (* output-width output-height)]
@@ -93,10 +108,10 @@ of the output of a conv-net ignoring channels."
 
 
 (defmacro convolution-outer-kernel
-  [config & body]
+  [config layer-type & body]
   `(let [^ConvLayerConfig config# ~config
-         ~'output-width (get-output-width config#)
-         ~'output-height (get-output-height config#)
+         ~'output-width (get-output-width config# ~layer-type)
+         ~'output-height (get-output-height config# ~layer-type)
          ~'num-in-channels (.num-in-channels config#)
          ~'num-out-channels (.num-out-channels config#)
          ~'input-planar-stride (* (.width config#) (.height config#))
@@ -168,6 +183,7 @@ of the output of a conv-net ignoring channels."
         ^doubles output-ary (mp/as-double-array output)]
     (convolution-outer-kernel
      config
+     :convolutional
      (convolution-roll-unroll-inner-kernel
       (let [input-val (double (if input-valid?
                                 (aget input-ary input-addr)
@@ -191,7 +207,7 @@ of the output of a conv-net ignoring channels."
     ;;Zero accumulator
     (m/fill! input-gradient 0.0)
     (convolution-outer-kernel
-     config
+     config :convolutional
      (convolution-roll-unroll-inner-kernel
       (when input-valid?
         (let [input-val (aget input-ary input-addr)
@@ -208,8 +224,8 @@ of the output of a conv-net ignoring channels."
         ^ConvLayerConfig config (:conv-config layer)
         conv-matrix (or (:conv-matrix layer)
                         (create-convolution-matrix config))
-        output-width (get-output-width config)
-        output-height (get-output-height config)
+        output-width (get-output-width config :convolutional)
+        output-height (get-output-height config :convolutional)
         output-channel-stride (* output-width output-height)
         output (or (:output layer)
                    (b/new-array [(.num-out-channels config) output-channel-stride]))
@@ -242,8 +258,8 @@ of the output of a conv-net ignoring channels."
   (let [weights (:weights layer)
         bias (:bias layer)
         ^ConvLayerConfig config (:conv-config layer)
-        output-width (get-output-width config)
-        output-height (get-output-height config)
+        output-width (get-output-width config :convolutional)
+        output-height (get-output-height config :convolutional)
         n-output (* output-width output-height)
         n-kernels (.num-out-channels config)
         conv-matrix (:conv-matrix layer)
@@ -338,8 +354,8 @@ of the output of a conv-net ignoring channels."
 (defn planar-max-pooling-forward!
   [layer input]
   (let [^ConvLayerConfig config (:conv-config layer)
-        output-width (get-output-width config)
-        output-height (get-output-height config)
+        output-width (get-output-width config :pooling)
+        output-height (get-output-height config :pooling)
         n-output (* output-width output-height (.num-in-channels config))
         output (or (:output layer)
                    (b/new-array [n-output]))
@@ -348,7 +364,7 @@ of the output of a conv-net ignoring channels."
         ^doubles input-ary (mp/as-double-array input)
         ^doubles output-ary (mp/as-double-array output)]
     (convolution-outer-kernel
-     config
+     config :pooling
      (convolution-roll-unroll-inner-kernel
       (let [input-val (double (if input-valid?
                                 (aget input-ary input-addr)
@@ -381,7 +397,7 @@ of the output of a conv-net ignoring channels."
     ;;Zero accumulator
     (m/fill! input-gradient 0.0)
     (convolution-outer-kernel
-     config
+     config :pooling
      (let [output-addr (+ (* out-y output-width)
                           out-x
                           chan-output-offset)
