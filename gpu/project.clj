@@ -5,5 +5,5 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/cortex "0.1.1-SNAPSHOT"]
-                 [org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
+                 [org.bytedeco.javacpp-presets/cuda "7.5-1.2.2"]
                  [thinktopic/cortex-datasets "0.3.0-SNAPSHOT"]])

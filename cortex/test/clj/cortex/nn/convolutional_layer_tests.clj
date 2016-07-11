@@ -132,12 +132,12 @@ which causes a partial window at the boundry"
            (m/eseq (core/output forward-pool-layer))))
     (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 3 3 0 0 2 2 1 1))
           forward-pool-layer (core/forward pool-layer input)]
-      (is (= (map double (into [] (repeat 9 -11)))
+      (is (= (map double (into [] (repeat 4 -11)))
            (m/eseq (core/output forward-pool-layer)))))
     (let [pool-layer (conv/->Pooling (conv/create-conv-layer-config 6 6 3 3 0 0 2 2 1 1))
           input (b/array (repeat 36 11))
           forward-pool-layer (core/forward pool-layer input)]
-      (is (= (map double (into [] (repeat 9 11)))
+      (is (= (map double (into [] (repeat 4 11)))
            (m/eseq (core/output forward-pool-layer)))))))
 
 
@@ -179,6 +179,6 @@ for testing against other conv net implementations."
     (is (= (m/eseq weight-gradient)
            (map double (flatten (repeat 4 [2 4 4 8 5 10 10 20 8 16 16 32])))))
     (is (= (m/eseq bias-gradient)
-           (map double [9 9 9 9])))
+           (map double [4 4 4 4])))
     (is (= (m/eseq input-gradient)
            (map double (repeat (* 9 3) 10))))))

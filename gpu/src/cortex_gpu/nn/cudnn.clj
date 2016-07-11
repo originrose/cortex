@@ -963,6 +963,44 @@ TODO - write a cuda kernel that does this *quicker*."
                             ^ConvLayerConfig config
                             ^cudnn$cudnnTensorStruct bias-tensor])
 
+
+(defn get-cudnn-convolution-output-sizes
+  "Sizes are returned in a persistent vector of the form:
+[batch-size channel-count height width]"
+  [^ConvLayerConfig config ^long batch-size]
+  (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
+        ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
+        input-tensor (create-tensor batch-size
+                                    (.num-in-channels config)
+                                    (.height config)
+                                    (.width config))
+        ^cudnn$cudnnContext cudnn-context (:cudnn (get-ctx))
+        output-size-check (int-array 4)]
+    (cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
+    (cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
+    (cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
+                                                  (tensor-datatype)
+                                                  cudnn/CUDNN_TENSOR_NCHW
+                                                  (.num-out-channels config)
+                                                  (.num-in-channels config)
+                                                  (.k-height config)
+                                                  (.k-width config)))
+    (cudnn-call (cudnn/cudnnSetConvolution2dDescriptor conv-desc
+                                                       (.pady config) (.padx config)
+                                                       (.stride-h config) (.stride-w config)
+                                                       1 1 ;;stupid scale arguments...only 1
+                                                       ;;is valid
+                                                       cudnn/CUDNN_CROSS_CORRELATION))
+    (cudnn-call (cudnn/cudnnGetConvolutionNdForwardOutputDim conv-desc
+                                                             input-tensor
+                                                             filter-desc
+                                                             4
+                                                             output-size-check))
+    (cudnn-call (cudnn/cudnnDestroyConvolutionDescriptor conv-desc))
+    (cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-desc))
+    (vec output-size-check)))
+
+
 (defn convolution-setup
   "Returns a map of convolution layer parameters"
   ^ConvolutionData [^ConvLayerConfig config ^long batch-size]
@@ -1070,43 +1108,40 @@ TODO - write a cuda kernel that does this *quicker*."
                  input-tensor
                  (.get backward-data-algo)
                  backward-data-workspace-size))
-    (println (format "Convolution algorithm and workspace sizes:
+    (comment (println (format "Convolution algorithm and workspace sizes:
 Forward: %s %d
 Backward Filter: %s %d
 Backward Data: %s %d"
-                     (get forward-algorithms (.get forward-algo))
-                     (.get forward-workspace-size)
-                     (get backward-filter-algorithms (.get backward-filter-algo))
-                     (.get backward-filter-workspace-size)
-                     (get backward-data-algorithms (.get backward-data-algo))
-                     (.get backward-data-workspace-size)))
+                      (get forward-algorithms (.get forward-algo))
+                      (.get forward-workspace-size)
+                      (get backward-filter-algorithms (.get backward-filter-algo))
+                      (.get backward-filter-workspace-size)
+                      (get backward-data-algorithms (.get backward-data-algo))
+                      (.get backward-data-workspace-size))))
     (let [total-workspace-size (max (.get forward-workspace-size)
                                     (.get backward-filter-workspace-size)
                                     (.get backward-data-workspace-size))
           workspace-ptr (when-not (= 0 total-workspace-size)
                           (cuda/mem-alloc total-workspace-size))]
-      (map->ConvolutionData
-       {:workspace workspace-ptr
-        :workspace-size total-workspace-size
-        :forward-algorithm (.get forward-algo)
-        :backward-filter-algorithm (.get backward-filter-algo)
-        :backward-data-algorithm (.get backward-data-algo)
-        :convolution-descriptor conv-desc
-        :filter-descriptor filter-desc
-        :input-tensor input-tensor
-        :output-tensor output-tensor
-        :convolution-configuration config
-        :bias-tensor bias-tensor}))))
+      (resource/track
+       (map->ConvolutionData
+        {:workspace workspace-ptr
+         :workspace-size total-workspace-size
+         :forward-algorithm (.get forward-algo)
+         :backward-filter-algorithm (.get backward-filter-algo)
+         :backward-data-algorithm (.get backward-data-algo)
+         :convolution-descriptor conv-desc
+         :filter-descriptor filter-desc
+         :input-tensor input-tensor
+         :output-tensor output-tensor
+         :convolution-configuration config
+         :bias-tensor bias-tensor})))))
 
 (defn- convolution-teardown
   [{:keys [workspace convolution-descriptor filter-descriptor
            input-tensor output-tensor bias-tensor]}]
-  (cuda/mem-free workspace)
   (cudnn-call (cudnn/cudnnDestroyConvolutionDescriptor convolution-descriptor))
-  (cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-descriptor))
-  (destroy-tensor input-tensor)
-  (destroy-tensor output-tensor)
-  (destroy-tensor bias-tensor))
+  (cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-descriptor)))
 
 
 (extend-protocol resource/PResource
@@ -1205,6 +1240,33 @@ Backward Data: %s %d"
                         ^cudnn$cudnnPoolingStruct pooling-descriptor])
 
 
+(defn get-cudnn-pooling-output-sizes
+  [^ConvLayerConfig config ^long batch-size]
+  (let [pooling-desc (cudnn$cudnnPoolingStruct.)
+        input-tensor (create-tensor batch-size
+                                    (.num-in-channels config)
+                                    (.height config)
+                                    (.width config))
+        output-dims (int-array 4)]
+
+    (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
+    (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
+                 pooling-desc
+                 cudnn/CUDNN_POOLING_MAX
+                 cudnn/CUDNN_PROPAGATE_NAN
+                 (.k-height config) (.k-width config)
+                 (.pady config) (.padx config)
+                 (.stride-h config) (.stride-w config)))
+
+    (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
+                 pooling-desc
+                 input-tensor
+                 4
+                 output-dims))
+    (cudnn/cudnnDestroyPoolingDescriptor pooling-desc)
+    (vec output-dims)))
+
+
 (defn max-pooling-setup
   [^ConvLayerConfig config ^long batch-size]
   (let [pooling-desc (cudnn$cudnnPoolingStruct.)
@@ -1217,7 +1279,8 @@ Backward Data: %s %d"
         output-tensor (create-tensor batch-size
                                      (.num-out-channels config)
                                      output-height
-                                     output-width)]
+                                     output-width)
+        output-dims (int-array 4)]
     (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
     (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
                  pooling-desc
@@ -1227,17 +1290,25 @@ Backward Data: %s %d"
                  (.pady config) (.padx config)
                  (.stride-h config) (.stride-w config)))
 
-    ;;(cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim))
-    (map->PoolingData
-     {:input-tensor input-tensor
-      :output-tensor output-tensor
-      :pooling-descriptor pooling-desc})))
+    (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
+                 pooling-desc
+                 input-tensor
+                 4
+                 output-dims))
+    (let [[n c h w] output-dims]
+      (when-not (and (= output-width w)
+                     (= output-height h))
+        (throw (Exception. (format "Pooling layer size mismatch: cudnn %s calculated %s"
+                                   [w h]
+                                   [output-width output-height])))))
+    (resource/track (map->PoolingData
+                     {:input-tensor input-tensor
+                      :output-tensor output-tensor
+                      :pooling-descriptor pooling-desc}))))
 
 
 (defn- max-pooling-teardown
   [{:keys [input-tensor output-tensor pooling-descriptor]}]
-  (destroy-tensor input-tensor)
-  (destroy-tensor output-tensor)
   (cudnn/cudnnDestroyPoolingDescriptor pooling-descriptor))
 
 

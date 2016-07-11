@@ -361,3 +361,32 @@
           input-grad-data (cudnn/to-double-array input-gradient)]
       (is (= (double (* items-per-batch item-count))
              (m/esum input-grad-data))))))
+
+(defn create-conv-layer-config
+  [pad stride k-size image-dim image-in-channels num-kernels]
+  (conv/create-conv-layer-config
+   image-dim image-dim k-size k-size pad pad stride stride
+   image-in-channels num-kernels))
+
+
+(deftest convolution-pooling-size-calculations
+  (let [image-dim 128
+        image-in-channels 3
+        num-kernels 30
+        batch-size 100]
+    (doseq [pad (range 4)
+            stride (range 1 4)
+            kernel-size (range 2 10)]
+      (let [layer-config (create-conv-layer-config pad stride kernel-size image-dim image-in-channels num-kernels)
+            [p-n p-c p-h p-w] (cudnn/get-cudnn-pooling-output-sizes layer-config batch-size)
+            [c-n c-c c-h c-w] (cudnn/get-cudnn-convolution-output-sizes layer-config batch-size)
+            output-width (conv/get-output-width layer-config)
+            output-height (conv/get-output-height layer-config)
+            error-string (format " checking: image-dim %s channels %s pad %s stride %s kernel-size %s "
+                                 image-dim image-in-channels pad stride kernel-size)]
+        (is (and (= output-width p-w)
+                 (= output-height p-h))
+            (str :pooling error-string [output-width output-height] [p-w p-h]))
+        (is (and (= output-width c-w)
+                 (= output-height c-h))
+            (str :convolution error-string [output-width output-height] [c-w c-h]))))))
