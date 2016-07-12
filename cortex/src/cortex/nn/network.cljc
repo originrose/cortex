@@ -51,6 +51,11 @@
                   [nil nil]
                   (range (count coll)))))
 
+(defn softmax-result-to-unit-vector
+  [result]
+  (let [zeros (apply vector (repeat (first (m/shape result)) 0))]
+    (assoc zeros (max-index (into [] (seq result))) 1.0)))
+
 
 (defn softmax-results-to-unit-vectors
   [results]
