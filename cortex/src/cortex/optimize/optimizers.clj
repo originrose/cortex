@@ -4,31 +4,48 @@
             [clojure.core.matrix.operators :refer [+ - * /]]
             [cortex.optimize.protocols :as P]))
 
+;;; The Optimizer protocol is extended to the following two types:
+;;;
+;;; A map with keys :initialize and :update, the first of which
+;;; should correspond to a function that will take the initial-params
+;;; and return a state map, and the second of which should correspond
+;;; to a function that will take the state map, with the initial-params
+;;; assoc'd onto the :params key, and return a new state map with the
+;;; :params key and any other keys necessary updated.
+;;;
+;;; A function that will take the params and gradient and return a new
+;;; set of params. Note that this is appropriate only for stateless
+;;; optimizers like SGD.
+
 (extend-protocol P/Optimizer
   clojure.lang.IFn
-  (initialize [this param-count]
+  (initialize [this initial-params]
     {:update (fn [state gradient]
-               (assoc state :step
-                      (this gradient)))
-     :state {}})
-  ;; This turns the Optimizer into a map, so we don't need to
-  ;; implement any of the other methods.
+               (update state :params this gradient))
+     :state {:params initial-params}})
+  ;; This turns the Optimizer into a map, so it doesn't make
+  ;; sense to implement any of the other methods.
 
   clojure.lang.IPersistentMap
-  (initialize [this param-count]
+  (initialize [this initial-params]
     (-> this
-      (assoc :state ((:initialize this) param-count))
+      (assoc :state ((:initialize this) initial-params))
+      (assoc-in [:state :params] initial-params)
       (dissoc :initialize)))
-  (compute-update [this gradient] (update this :state (:update this) gradient))
-  (get-step [this] (:step (:state this)))
-  (get-state [this] (dissoc (:state this) :step)))
+  (get-params [this]
+    (get-in this [:state :params]))
+  (update-params [this gradient]
+    (update this :state (:update this) gradient))
+  (get-state [this]
+    (:state this)))
 
 (defn sgd
   [& {:keys [learning-rate]
       :or {learning-rate 0.1}}]
-  (fn [gradient]
-    (* (- learning-rate)
-       gradient)))
+  (fn [params gradient]
+    (+ params
+       (* (- learning-rate)
+          gradient))))
 
 (defn adadelta
   [& {:keys [rho epsilon]
@@ -41,10 +58,10 @@
             (m/sqrt
               (+ acc-x
                  epsilon)))]
-    {:initialize (fn [param-count]
-                   {:acc-gradient (m/new-vector :vectorz param-count)
-                    :acc-step (m/new-vector :vectorz param-count)})
-     :update (fn [{:keys [acc-gradient acc-step]} gradient]
+    {:initialize (fn [initial-params]
+                   {:acc-gradient (m/new-vector :vectorz (count initial-params))
+                    :acc-step (m/new-vector :vectorz (count initial-params))})
+     :update (fn [{:keys [params acc-gradient acc-step]} gradient]
                (let [acc-gradient (acc acc-gradient (m/square gradient))
                      step (-> gradient
                             (* (rms acc-step))
@@ -53,4 +70,4 @@
                      acc-step (acc acc-step (m/square step))]
                  {:acc-gradient acc-gradient
                   :acc-step acc-step
-                  :step step}))}))
+                  :params (+ params step)}))}))

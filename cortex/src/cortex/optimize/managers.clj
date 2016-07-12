@@ -6,14 +6,10 @@
 
 (defn do-steps
   [function optimizer initial-params num-steps]
-  (loop [optimizer (P/initialize optimizer (count initial-params))
-         params initial-params
+  (loop [optimizer (P/initialize optimizer initial-params)
          step-count 0]
-    (println (P/value function params) params (P/get-state optimizer))
+    (println (P/value function params) (P/get-state optimizer))
     (if (< step-count num-steps)
-      (let [gradient (P/gradient function params)
-            optimizer (P/compute-update optimizer gradient)
-            step (P/get-step optimizer)]
-        (recur optimizer
-               (+ params step)
-               (inc step-count))))))
+      (let [gradient (P/gradient function (P/get-params optimizer))
+            optimizer (P/update-params optimizer gradient)]
+        (recur optimizer (inc step-count))))))

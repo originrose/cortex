@@ -10,18 +10,20 @@
 
 (defprotocol Optimizer
   "FIXME"
-  (initialize [this param-count]
-    "Initialize any parts of the internal state of the optimizer
-    that depend on the number of parameters, if necessary, returning
-    a new Optimizer (or the same Optimizer, if it is mutable).")
-  (compute-update [this gradient]
+  (initialize [this initial-params]
+    "Initialize the Optimizer with an initial parameter vector,
+    returning a new Optimizer.")
+  (get-params [this]
+    "Return the parameter vector currently associated with the
+    Optimizer. This method should not be called before initialize.
+    If get-params is called directly after initialize, then it
+    should return the initial-params.")
+  (update-params [this gradient]
     "Update the internal state of the optimizer in reaction to the
-    specified gradient, including computing an appropriate step,
-    returning a new Optimizer (or the same Optimizer, if it is
-    mutable). This method should not be called before initialize.")
-  (get-step [this]
-    "Return the step from the last update. This method should not
-    be called before update.")
+    specified gradient vector, including computing an updated
+    parameter vector, returning a new Optimizer (or the same Optimizer,
+    if it is mutable). This method should not be called before initialize.")
   (get-state [this]
     "Return the internal state of the Optimizer, as a (possibly lazy)
-    map. This method should not be called before initialize."))
+    map which includes the parameter vector. This method should not be
+    called before initialize."))
