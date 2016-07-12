@@ -10,27 +10,27 @@
   (gradient [this params] ((:gradient this) params)))
 
 (def cross-paraboloid
-  "Depending on the number of args passed to it, generates
+  "Depending on the length of the parameter vector, generates
   functions of the form:
 
   f(x, y) = (x + y)² + (y + x)²
   f(x, y, z) = (x + y)² + (y + z)² + (z + x)²
   f(x, y, z, w) = (x + y)² + (y + z)² + (z + w)² + (w + x)²"
-  {:value (fn [args]
-            (->> args
+  {:value (fn [params]
+            (->> params
               vec
               cycle
-              (take (inc (m/ecount args)))
+              (take (inc (m/ecount params)))
               (partition 2 1)
               (map (partial apply +))
               (map m/square)
               (apply +)))
-   :gradient (fn [args]
-               (->> args
+   :gradient (fn [params]
+               (->> params
                  vec
                  cycle
-                 (drop (dec (m/ecount args)))
-                 (take (+ 3 (dec (m/ecount args))))
+                 (drop (dec (m/ecount params)))
+                 (take (+ 3 (dec (m/ecount params))))
                  (partition 3 1)
                  (map (partial map * [2 4 2]))
                  (map (partial apply +))
