@@ -30,6 +30,8 @@ There should be three components to the optimization system:
 
 This new architecture should support all the use cases we currently have (training neural networks versus performing gradient descent on actual objective functions; needing the efficiency of the GPU versus the instrumentation of `think.recommend`) without sacrificing any of the capabilities of the existing code. However, existing code will have to be rewritten to conform to the new architecture.
 
+See `cortex.optimize.protocols` for the preliminary versions of the protocols, and see `cortex.optimize.functions`, `cortex.optimize.optimizers`, and `cortex.optimize.managers` for basic implementations. See `cortex.optimize.debug` for example usage.
+
 ### Model Construction
 
 There is currently an autoencoder function in the layers.cljc, which doesn't really make sense as it isn't a type of layer.  Instead we should build up a model namespace which provides a few canned model types like autoencoders, stacked denoising autoencoder, dropout-autoencoder, etc., as well as some good classifier models for images (conv-net) and for regular data (simple MLP). 
