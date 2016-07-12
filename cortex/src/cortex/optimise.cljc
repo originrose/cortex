@@ -12,9 +12,6 @@
           (set! *warn-on-reflection* true)
           (set! *unchecked-math* true)))
 
-(defn new-mutable-vector
-  [size]
-  (m/mutable (m/array :vectorz (repeat size 0))))
 
 ;; ==============================================
 ;; Adam
@@ -151,6 +148,10 @@ Returns new parameters"
 ;; ==============================================
 ;; Mikera optimiser
 ;; TODO: complete conversion of algorithm
+
+(defn new-mutable-vector
+  [size]
+  (m/mutable (m/array :vectorz (repeat size 0))))
 
 ;;(def ^:const MIKERA-DEFAULT-LEARN-RATE 0.01)
 ;;(def ^:const MIKERA-DEFAULT-DECAY 0.95)
