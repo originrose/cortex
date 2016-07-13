@@ -2,7 +2,6 @@
 
 Neural networks, regression and feature learning in Clojure.
 
-
 ### TODO:
 
 * more activation functions (e.g. tanh)
@@ -15,3 +14,7 @@ Neural networks, regression and feature learning in Clojure.
 ### See also:
 
 `ROADMAP.md`
+
+## Gradient descent
+
+`cortex` contains a gradient descent sub-library, which is located in the `cortex.optimise.*` namespaces. Its interface is currently undergoing rapid change, but more documentation will be coming soon.
