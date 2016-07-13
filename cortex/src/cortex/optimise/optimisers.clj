@@ -81,15 +81,15 @@
      (* (- 1 decay-rate) value)))
 
 (defn adadelta-clojure
-  [& {:keys [rho epsilon]
-      :or {rho 0.95
-           epsilon 1e-6}}]
+  [& {:keys [decay conditioning]
+      :or {decay 0.95
+           conditioning 1e-6}}]
   (letfn [(acc [acc-x x]
-            (accumulate rho acc-x x))
+            (accumulate decay acc-x x))
           (rms [acc-x]
             (m/sqrt
               (+ acc-x
-                 epsilon)))]
+                 conditioning)))]
     {:initialize (fn [param-count]
                    {:acc-gradient (m/new-vector :vectorz param-count)
                     :acc-step (m/new-vector :vectorz param-count)})
