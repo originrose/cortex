@@ -97,9 +97,9 @@
                (let [acc-gradient (acc acc-gradient (m/square gradient))
                      step (-> gradient
                             (* (rms acc-step))
-                            (/ (rms acc-gradient))
-                            -)
-                     acc-step (acc acc-step (m/square step))]
+                            (/ (rms acc-gradient)))
+                     acc-step (acc acc-step (m/square step))
+                     params (- params step)]
                  {:acc-gradient acc-gradient
                   :acc-step acc-step
-                  :params (+ params step)}))}))
+                  :params params}))}))
