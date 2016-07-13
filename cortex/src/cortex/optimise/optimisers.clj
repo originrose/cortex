@@ -75,13 +75,17 @@
        (* (- learning-rate)
           gradient))))
 
+(defn accumulate
+  [decay-rate running-avg value]
+  (+ (* decay-rate running-avg)
+     (* (- 1 decay-rate) value)))
+
 (defn adadelta-clojure
   [& {:keys [rho epsilon]
       :or {rho 0.95
            epsilon 1e-6}}]
   (letfn [(acc [acc-x x]
-            (+ (* rho acc-x)
-               (* (- 1 rho) x)))
+            (accumulate rho acc-x x))
           (rms [acc-x]
             (m/sqrt
               (+ acc-x
