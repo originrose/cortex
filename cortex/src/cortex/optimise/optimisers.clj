@@ -103,3 +103,36 @@
                  {:acc-gradient acc-gradient
                   :acc-step acc-step
                   :params params}))}))
+
+(defn adam-clojure
+  [& {:keys [step-size first-moment-decay
+             second-moment-decay conditioning]
+      :or {step-size 0.001
+           first-moment-decay 0.9
+           second-moment-decay 0.999
+           conditioning 1e-8}}]
+  {:initialize (fn [param-count]
+                 {:first-moment (m/new-vector :vectorz param-count)
+                  :second-moment (m/new-vector :vectorz param-count)
+                  :num-steps 0})
+   :update (fn [{:keys [params first-moment second-moment num-steps]} gradient]
+             (let [num-steps (inc num-steps)
+                   first-moment (accumulate first-moment-decay
+                                            first-moment
+                                            gradient)
+                   second-moment (accumulate second-moment-decay
+                                             second-moment
+                                             (m/square gradient))
+                   first-moment* (/ first-moment
+                                    (- 1 (Math/pow first-moment-decay num-steps)))
+                   second-moment* (/ second-moment
+                                     (- 1 (Math/pow second-moment-decay num-steps)))
+                   step (* step-size
+                           (/ first-moment*
+                              (+ (m/sqrt second-moment*)
+                                 conditioning)))
+                   params (- params step)]
+               {:params params
+                :first-moment first-moment
+                :second-moment second-moment
+                :num-steps num-steps}))})
