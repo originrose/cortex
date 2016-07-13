@@ -87,7 +87,11 @@
         this)
       (-> this
         (assoc-in [:state :params] parameters)
-        (update :state (:update this) gradient)))))
+        (update :state (:update this) gradient))))
+
+  cp/PIntrospection
+  (get-state [this]
+    (dissoc (:state this) :params)))
 
 ;;;; Optimizers -- implementations -- Clojure
 
@@ -134,13 +138,16 @@
     (let [function (cp/update-parameters function params)
           value (cp/output function)
           gradient (cp/gradient function)]
-      (println (str "f" (vec params) " = " value))
+      (print (str "f" (vec params) " = " value "; state = " ))
       (if (< step-count num-steps)
         (let [optimiser (cp/compute-parameters optimiser gradient params)
-              params (cp/parameters optimiser)]
+              params (cp/parameters optimiser)
+              state (cp/get-state optimiser)]
+          (println state)
           (recur params
                  optimiser
-                 (inc step-count)))))))
+                 (inc step-count)))
+        (println "(done)")))))
 
 ;;;; Gradient descent examples (temporary, will be removed)
 

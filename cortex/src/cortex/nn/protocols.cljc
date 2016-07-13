@@ -89,6 +89,14 @@
     "Computes updated parameters using the given average gradient. Returns the updated gradient optimiser.
   Users can then call `parameters` on this object to get the updated parameters"))
 
+(defprotocol PIntrospection
+  "Protocol for objects that can return information about their internal
+  state."
+  (get-state [this]
+    "Return a (possibly lazy) map containing information about this
+  object's internal state. This map is not expected to contain
+  information about parameters, value, or gradient, if applicable."))
+
 (defprotocol PLossFunction
   "A function that calculates loss of a vector output vs. a target value"
   (loss [this v target]
