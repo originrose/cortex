@@ -3,7 +3,8 @@
             [cortex-gpu.cuda :as cuda]
             [cortex-gpu.nn.cudnn :as cudnn]
             [cortex.nn.impl.layers.convolution :as conv]
-            [cortex.util :as util])
+            [cortex.util :as util]
+            [clojure.core.matrix :as m])
   (:import [cortex.nn.impl.layers.convolution ConvLayerConfig]
            [org.bytedeco.javacpp FloatPointer]))
 
@@ -63,17 +64,22 @@
     (assoc layer
            :weight-temp (cudnn/new-array (cudnn/shape weights))
            :weight-magnitude-temp (cudnn/new-array [(first (cudnn/shape weights))])
-           :ones-vec (cudnn/allocate-ones (first (cudnn/shape weights))))
+           :ones-vec (cudnn/allocate-ones (second (cudnn/shape weights))))
     layer))
+
+(defn print-weight-lengths
+  [cudnn-weights]
+  (let [core-mat-weights (cudnn/to-core-matrix cudnn-weights)]
+    (println (mapv m/length (m/rows core-mat-weights)))))
 
 (defn apply-l2-max-constraint
   [layer weights l2-max-constraint]
   (when l2-max-constraint
-   (let [{:keys [weight-temp weight-magnitude-temp ones-vec]} layer]
-     (cudnn/apply-l2-max-constraint weights weight-temp
-                                    weight-magnitude-temp
-                                    ones-vec
-                                    l2-max-constraint))))
+    (let [{:keys [weight-temp weight-magnitude-temp ones-vec]} layer]
+      (cudnn/apply-l2-max-constraint weights weight-temp
+                                     weight-magnitude-temp
+                                     ones-vec
+                                     l2-max-constraint))))
 
 (defrecord Linear [weights bias l2-max-constraint]
   cp/PLayerSetup
@@ -155,7 +161,7 @@
     (cp/calc layer input))
 
   (backward [layer input output-gradient]
-    (cudnn/softmax-backward output-gradient (:input-gradient layer))
+    (cudnn/softmax-backward (:output layer) output-gradient (:input-gradient layer))
     layer)
 
   (input-gradient [layer] (:input-gradient layer)))
@@ -185,6 +191,9 @@ channel 2 with n-outputs"
   (setup [layer items-per-batch]
     (assoc layer :layers (mapv #(cp/setup % items-per-batch) layers)))
 
+  cp/PNeuralTrainingOptional
+  (prepare-forward [this]
+    (assoc this :layers (mapv #(cp/prepare-forward %) layers)))
 
   cp/PMultiLayer
   (multi-input-size [layer] (cp/multi-input-size (first layers)))
@@ -237,8 +246,8 @@ channel 2 with n-outputs"
   cp/PLayerSize
   (input-size [layer] (* (.width conv-config) (.height conv-config)
                          (.num-in-channels conv-config)))
-  (output-size [layer] (* (conv/get-output-width conv-config)
-                          (conv/get-output-height conv-config)
+  (output-size [layer] (* (conv/get-output-width conv-config :convolutional)
+                          (conv/get-output-height conv-config :convolutional)
                           (.num-out-channels conv-config)))
 
   cp/PModule
@@ -301,8 +310,8 @@ channel 2 with n-outputs"
   cp/PLayerSize
   (input-size [layer] (* (.width conv-config) (.height conv-config)
                          (.num-in-channels conv-config)))
-  (output-size [layer] (* (conv/get-output-width conv-config)
-                          (conv/get-output-height conv-config)
+  (output-size [layer] (* (conv/get-output-width conv-config :pooling)
+                          (conv/get-output-height conv-config :pooling)
                           (.num-out-channels conv-config)))
 
   cp/PModule
@@ -333,7 +342,7 @@ channel 2 with n-outputs"
                                             num-input-channels)))
 
 
-(defrecord Dropout [^long n-items ^double probability dropout-type]
+(defrecord Dropout [^long n-items ^double probability distribution]
   cp/PLayerSetup
   (setup [layer items-per-batch]
     (let [output (cudnn/new-array [(cp/output-size layer)] items-per-batch)
@@ -344,6 +353,12 @@ channel 2 with n-outputs"
       (assoc layer :output output
              :input-gradient input-gradient
              :rand-buffer rand-buffer)))
+
+  cp/PNeuralTrainingOptional
+  (prepare-forward [this]
+    (let [elem-count (cudnn/ecount (:output this))]
+      (cudnn/dropout-prepare-forward (:rand-buffer this) probability distribution elem-count)
+      this))
 
   cp/PLayerSize
   (input-size [layer] n-items)
@@ -358,12 +373,12 @@ channel 2 with n-outputs"
   cp/PNeuralTraining
   (forward [layer input]
     (cudnn/dropout-forward input (:output layer) (:rand-buffer layer) probability
-                           dropout-type)
+                           distribution)
     layer)
 
   (backward [layer input output-gradient]
     (cudnn/dropout-backward output-gradient (:input-gradient layer) (:rand-buffer layer)
-                            probability dropout-type)
+                            probability distribution)
     layer)
 
   (input-gradient [layer] (:input-gradient layer)))
@@ -374,9 +389,9 @@ channel 2 with n-outputs"
 you have the option of using :constant dropout (meaning bernoulli distribution with scaling)
 or :multiplicative (normal distribution of 1,probability)
 which doesn't require scaling)."
-  ([n-input probability dropout-type]
-   (->Dropout n-input probability dropout-type))
-  ([n-input probability] (dropout n-input probability cudnn/dropout-type-constant)))
+  ([n-input probability distribution]
+   (->Dropout n-input probability distribution))
+  ([n-input probability] (dropout n-input probability :bernoulli)))
 
 (defn split-forward
   [this-layer input forward-fn]
@@ -400,6 +415,11 @@ which doesn't require scaling)."
       (assoc layer
              :layers (mapv #(cp/setup % items-per-batch) layers)
              :input-gradient input-gradient)))
+
+
+  cp/PNeuralTrainingOptional
+  (prepare-forward [this]
+    (assoc this :layers (mapv #(cp/prepare-forward %) layers)))
 
   cp/PMultiLayer
   (multi-input-size [layer] [n-input])

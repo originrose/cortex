@@ -51,6 +51,11 @@
                   [nil nil]
                   (range (count coll)))))
 
+(defn softmax-result-to-unit-vector
+  [result]
+  (let [zeros (apply vector (repeat (first (m/shape result)) 0))]
+    (assoc zeros (max-index (into [] (seq result))) 1.0)))
+
 
 (defn softmax-results-to-unit-vectors
   [results]
@@ -76,10 +81,10 @@
 
 (defn train-step
   "Trains a network for a single training example.
-
    Returns network with updated gradient."
   [input answer network loss-fn]
-  (let [network (core/forward network input)
+  (let [network (cp/prepare-forward network)
+        network (core/forward network input)
         temp-answer (core/output network)
         loss (cp/loss loss-fn temp-answer answer)
         loss-gradient (cp/loss-gradient loss-fn temp-answer answer)]

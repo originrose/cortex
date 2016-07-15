@@ -307,10 +307,16 @@ to a single matrix"
       (assoc train-config :indexes indexes)))
 
   (bs-get-buffers [this train-config batch-idx batch-type]
-    (let [{:keys [input-buffers output-buffers dataset indexes]} train-config
-          batch-indexes (indexes batch-idx)
-          ds-elements (ds/get-elements dataset batch-indexes)]
-      {:train-config train-config
+
+    (let [{:keys [input-buffers output-buffers dataset indexes next-elements]} train-config
+          batch-idx (long batch-idx)
+          ds-elements (if next-elements
+                          @next-elements
+                          (ds/get-elements dataset (indexes batch-idx)))
+          next-batch-idx (+ batch-idx 1)
+          next-elements nil]
+
+      {:train-config (assoc train-config :next-elements next-elements)
        :input-buffers (upload-batch-data-to-buffers! ds-elements input-dataset-indexes input-buffers)
        :output-buffers (when (= batch-type :training)
                          (upload-batch-data-to-buffers! ds-elements output-dataset-indexes output-buffers))}))
@@ -320,9 +326,9 @@ to a single matrix"
       (ds/has-indexes? dataset batch-type)))
 
   (bs-get-cpu-labels [this train-config batch-type]
-    (let [dataset (:dataset train-config)
-          indexes (ds/get-indexes dataset batch-type)
-          ds-elements (map #(ds/get-element dataset %) indexes)]
+    (let [{:keys [indexes dataset]} train-config
+          flattened-indexes (mapcat identity indexes)
+          ds-elements (map #(ds/get-element dataset %) flattened-indexes)]
       (mapv (fn [output-index]
               (mapv #(get % output-index) ds-elements))
             output-dataset-indexes))))

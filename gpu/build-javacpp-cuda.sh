@@ -16,7 +16,7 @@ sudo apt-get install maven
 
 mkdir cuda
 cd cuda
-git clone git@github.com:bytedeco/javacpp-presets.git
+git clone git@github.com:thinktopic/javacpp-presets.git
 git clone git@github.com:bytedeco/javacpp.git
 cd javacpp
 /usr/share/maven/bin/mvn install

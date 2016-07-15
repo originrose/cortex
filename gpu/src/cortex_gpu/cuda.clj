@@ -1,7 +1,7 @@
 (ns cortex-gpu.cuda
   (:require [clojure.java.io :as io]
             [clojure.core.matrix :as m]
-            [cortex-gpu.resource :as resource])
+            [resource.core :as resource])
   (:import [org.bytedeco.javacpp cuda cudnn cudnn$cudnnContext
             BytePointer IntPointer LongPointer DoublePointer
             Pointer PointerPointer FloatPointer

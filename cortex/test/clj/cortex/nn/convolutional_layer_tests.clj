@@ -69,8 +69,8 @@
 ;;with 4 channels.
 (def pool-layer-config (conv/create-conv-layer-config 2 2 2 2 0 0 1 1 4))
 
-(def pool-layer-width (conv/get-padded-strided-dimension 2 0 2 1))
-(def pool-layer-height (conv/get-padded-strided-dimension 2 0 2 1))
+(def pool-layer-width (conv/get-padded-strided-dimension :pooling 2 0 2 1))
+(def pool-layer-height (conv/get-padded-strided-dimension :pooling 2 0 2 1))
 ;;4 channels * output of pool layer
 (def pool-layer-output-size (* 4 pool-layer-width pool-layer-height))
 ;;4 channels * input sizes to pool layer
@@ -157,7 +157,7 @@ for testing against other conv net implementations."
                                      (range 1 (+ (* input-dim input-dim) 1)))))
         weights (b/array (map #(repeat (* k-dim k-dim num-channels) %)
                               (range 1 (+ n-kernels 1))))
-        output-dim (conv/get-padded-strided-dimension input-dim pad k-dim stride)
+        output-dim (conv/get-padded-strided-dimension :convolutional input-dim pad k-dim stride)
         output-gradient (b/array (repeat (* output-dim output-dim n-kernels) 1))
         bias (b/zero-array [1 n-kernels])
         conv-layer (conv/->Convolutional weights bias
@@ -179,6 +179,6 @@ for testing against other conv net implementations."
     (is (= (m/eseq weight-gradient)
            (map double (flatten (repeat 4 [2 4 4 8 5 10 10 20 8 16 16 32])))))
     (is (= (m/eseq bias-gradient)
-           (map double [9 9 9 9])))
+           (map double [4 4 4 4])))
     (is (= (m/eseq input-gradient)
            (map double (repeat (* 9 3) 10))))))

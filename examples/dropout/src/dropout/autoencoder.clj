@@ -7,7 +7,7 @@
             [mikera.image.core :as image]
             [cortex-gpu.nn.description :as gpu-desc]
             [cortex-gpu.nn.train :as gpu-train]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [cortex-gpu.nn.cudnn :as cudnn]
             [cortex-visualization.nn.core :as nn-vis]
             [tsne.core :as tsne]))

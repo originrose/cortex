@@ -9,7 +9,7 @@
             [cortex-gpu.nn.description :as gpu-desc]
             [cortex.nn.description :as desc]
             [cortex-gpu.cuda :as cuda]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [cortex-gpu.util :refer [get-or-allocate] :as util]
             [cortex-gpu.optimise :as opt]
             [cortex.optimise :as cortex-opt]))
@@ -28,7 +28,8 @@
 
 (defn train-step
   [{:keys [network loss-fn] :as train-config} input answer]
-  (let [network (cp/multi-forward network input)
+  (let [network (cp/prepare-forward network)
+        network (cp/multi-forward network input)
         output (cp/multi-output network)
         loss-fn (mapv #(opt/calculate-loss-gradient %1 %2 %3)
                       loss-fn output answer)
@@ -87,12 +88,13 @@
                                     (range num-batches))
             result-processor (fn [results n-output]
                                (vec (mapcat #(map vec (partition n-output (seq %))) results)))]
-        ;;De-interleave the results
-        (mapv (fn [n-output idx]
-                (let [nth-results (map #(nth % idx) results)]
-                  (result-processor nth-results n-output)))
-              n-output
-              (range (count n-output)))))))
+        [;;De-interleave the results
+         (mapv (fn [n-output idx]
+                 (let [nth-results (map #(nth % idx) results)]
+                   (result-processor nth-results n-output)))
+               n-output
+               (range (count n-output)))
+         train-config]))))
 
 
 (defn average-loss
@@ -112,8 +114,8 @@
 (defn evaluate-training-network
   "Run the network and return the average loss across all cv-input"
   [{:keys [network loss-fn batch-size] :as train-config}]
-  (let [guesses (run-setup-network train-config :testing)
-        cpu-labels (batch/get-cpu-labels train-config :testing)]
+  (let [[guesses local-train-config] (run-setup-network train-config :testing)
+        cpu-labels (batch/get-cpu-labels local-train-config :testing)]
     (mapv average-loss loss-fn guesses cpu-labels)))
 
 
@@ -138,7 +140,6 @@
                train-config))
            (batch/setup-batching-system train-config :training)
            (range epoch-count)))
-
 
 (defn train
   [network optimiser loss-fn
@@ -169,7 +170,7 @@
            :batching-system (batch/->OnGPUBatchingSystem)} train-config
       (batch/setup-batching-system train-config :running)
       (update-in train-config [:network] #(cp/setup % (:batch-size train-config)))
-      (run-setup-network train-config :running))))
+      (first (run-setup-network train-config :running)))))
 
 (defn evaluate-softmax
   [network data labels]
@@ -214,3 +215,23 @@
           (run-train-optimise-loop)
           (get :network)
           (desc/network->description)))))
+
+
+(defn run-next
+  [network-desc dataset input-labels & {:keys [batch-size]
+                                        :or {batch-size 10}}]
+  (resource/with-resource-context
+    (let [network (gpu-desc/build-and-create-network network-desc)
+          dataset-names (map :name (ds/shapes dataset))
+          index-names (map-indexed vector dataset-names)
+          find-label-fn (fn [label]
+                              (ffirst (filter (fn [[idx name]]
+                                                (= label name))
+                                              index-names)))
+          input-indexes (mapv find-label-fn input-labels)
+          batching-system (batch/->DatasetBatchingSystem input-indexes [] batch-size)]
+      (as-> {:network network :batch-size batch-size :dataset dataset
+             :batching-system batching-system} train-config
+        (batch/setup-batching-system train-config :running)
+        (update-in train-config [:network] #(cp/setup % batch-size))
+        (first (run-setup-network train-config :running))))))

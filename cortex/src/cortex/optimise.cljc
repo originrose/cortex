@@ -1,7 +1,12 @@
 (ns cortex.optimise
-  "Namespace for optimisation algorithms, loss functions and optimiser objects"
+  "Namespace for optimisation algorithms, loss functions and optimiser objects
+
+  This namespace is deprecated and its contents should be moved to the
+  cortex.optimise.* sub-namespaces."
+  (:refer-clojure :exclude [+ - * /])
   (:require
     [clojure.core.matrix :as m]
+    [clojure.core.matrix.operators :refer [+ - * /]]
     [clojure.core.matrix.protocols :as mp]
     [clojure.core.matrix.linear :as linear]
     [cortex.nn.protocols :as cp]
@@ -12,33 +17,29 @@
           (set! *warn-on-reflection* true)
           (set! *unchecked-math* true)))
 
-(defn new-mutable-vector
-  [size]
-  (m/mutable (m/array :vectorz (repeat size 0))))
-
 ;; ==============================================
 ;; Adam
 
 #?(:clj
-    (do
-      (defrecord Adam [^AdamOptimizer optimizer]
-        cp/PGradientOptimiser
-        (compute-parameters [this gradient parameter]
-          (.step optimizer (mp/as-double-array gradient) (mp/as-double-array parameter))
-          (assoc this :parameters parameter))
-        cp/PParameters
-        (parameters [this]
-          [(:parameters this)]))
+   (do
+     (defrecord Adam [^AdamOptimizer optimizer]
+       cp/PGradientOptimiser
+       (compute-parameters [this gradient parameter]
+         (.step optimizer (mp/as-double-array gradient) (mp/as-double-array parameter))
+         (assoc this :parameters parameter))
+       cp/PParameters
+       (parameters [this]
+         [(:parameters this)]))
 
-      (defn adam
-        "Returns a PGradientOptimiser that uses Adam to perform gradient
-        descent. For more information on the algorithm, see the paper at
-        http://arxiv.org/pdf/1412.6980v8.pdf
-        The implementation is in Java and is located at
-        cortex/java/cortex/impl/AdamOptimizer.java"
-        [& {:keys [a b1 b2 e]
-            :or { a 0.001 b1 0.9 b2 0.999 e 1e-8}}]
-        (->Adam (AdamOptimizer. a b1 b2 e)))))
+     (defn adam
+       "Returns a PGradientOptimiser that uses Adam to perform gradient
+  descent. For more information on the algorithm, see the paper at
+  http://arxiv.org/pdf/1412.6980v8.pdf
+  The implementation is in Java and is located at
+  cortex/java/cortex/impl/AdamOptimizer.java"
+       [& {:keys [a b1 b2 e]
+           :or { a 0.001 b1 0.9 b2 0.999 e 1e-8}}]
+       (->Adam (AdamOptimizer. a b1 b2 e)))))
 
 ;; ==============================================
 
@@ -152,38 +153,42 @@ Returns new parameters"
 ;; Mikera optimiser
 ;; TODO: complete conversion of algorithm
 
-;(def ^:const MIKERA-DEFAULT-LEARN-RATE 0.01)
-;(def ^:const MIKERA-DEFAULT-DECAY 0.95)
-;
-;(defn mikera-optimiser
-;  "Constructs a new mikera optimiser of the given size (parameter length)"
-;  ([size]
-;    (sgd-optimiser size nil))
-;  ([size {:keys [learn-rate decay] :as options}]
-;    (MikeraOptimiser. (new-mutable-vector size)
-;                      (new-mutable-vector size)
-;                      (new-mutable-vector size)
-;                      (new-mutable-vector size)
-;                      nil
-;                      options)))
-;
-;(defrecord MikeraOptimiser [parameters
-;                            mean-x
-;                            mean-g2
-;                            dx]
-;  cp/PGradientOptimiser
-;    (compute-parameters [this gradient parameters]
-;      (let [learn-rate (double (or (:learn-rate this) MIKERA-DEFAULT-LEARN-RATE))
-;            decay (double (or (:decay this) MIKERA-DEFAULT-DECAY))]
-;
-;        (m/assign! dx parameters)
-;        (m/sub! dx mean-x)
-;
-;        ;; accumulate the latest gradient
-;        (m/add-scaled! dx gradient (* -1.0 learn-rate))
-;
-;        ;; return the updated adadelta record. Mutable gradients have been updated
-;        (assoc this :parameters (m/add parameters dx)))))
+(defn new-mutable-vector
+  [size]
+  (m/mutable (m/array :vectorz (repeat size 0))))
+
+;;(def ^:const MIKERA-DEFAULT-LEARN-RATE 0.01)
+;;(def ^:const MIKERA-DEFAULT-DECAY 0.95)
+;;
+;;(defn mikera-optimiser
+;;  "Constructs a new mikera optimiser of the given size (parameter length)"
+;;  ([size]
+;;    (sgd-optimiser size nil))
+;;  ([size {:keys [learn-rate decay] :as options}]
+;;    (MikeraOptimiser. (new-mutable-vector size)
+;;                      (new-mutable-vector size)
+;;                      (new-mutable-vector size)
+;;                      (new-mutable-vector size)
+;;                      nil
+;;                      options)))
+;;
+;;(defrecord MikeraOptimiser [parameters
+;;                            mean-x
+;;                            mean-g2
+;;                            dx]
+;;  cp/PGradientOptimiser
+;;    (compute-parameters [this gradient parameters]
+;;      (let [learn-rate (double (or (:learn-rate this) MIKERA-DEFAULT-LEARN-RATE))
+;;            decay (double (or (:decay this) MIKERA-DEFAULT-DECAY))]
+;;
+;;        (m/assign! dx parameters)
+;;        (m/sub! dx mean-x)
+;;
+;;        ;; accumulate the latest gradient
+;;        (m/add-scaled! dx gradient (* -1.0 learn-rate))
+;;
+;;        ;; return the updated adadelta record. Mutable gradients have been updated
+;;        (assoc this :parameters (m/add parameters dx)))))
 
 ;; ==============================================
 ;; SGD optimiser with momentum
@@ -290,12 +295,16 @@ Returns new parameters"
 
 (defn cross-entropy-loss [] (->CrossEntropyLoss))
 
+(defn log-likelihood-softmax-loss
+  [softmax-output answer]
+  (let [answer-num (m/esum (m/mul softmax-output answer))]
+    (- (Math/log answer-num))))
+
 ;;Mutually exclusive ce loss
 (defrecord SoftmaxCrossEntropyLoss []
   cp/PLossFunction
   (loss [this v target]
-    (let [c (double (m/esum (m/mul target (m/log (m/add SMALL-NUM v)))))]
-      (/ (- c) (double (m/ecount v)))))
+    (log-likelihood-softmax-loss v target))
 
   (loss-gradient [this v target]
     (m/sub v target)))

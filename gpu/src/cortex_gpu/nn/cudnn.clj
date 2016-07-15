@@ -3,7 +3,7 @@
             [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [cortex.nn.impl.layers.convolution :as conv]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.nn.backends :as b]
             [clojure.java.io :as io])
@@ -14,7 +14,8 @@
             cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct cudnn$cudnnPoolingStruct
             curand curand$curandGenerator_st]
            [cortex.nn.impl.layers.convolution ConvLayerConfig]
-           [cortex_gpu.cuda DevicePointer]))
+           [cortex_gpu.cuda DevicePointer]
+           [java.nio DoubleBuffer FloatBuffer Buffer]))
 
 
 (set! *warn-on-reflection* true)
@@ -372,7 +373,6 @@
       (c-for [idx 0 (< idx elem-count) (inc idx)]
              (aset retval idx (aget intermediate idx)))
       retval))
-
   (traits-ptr-0 [dtype] float-ptr-0)
   (traits-ptr-1 [dtype] float-ptr-1)
   (traits-ptr--1 [dtype] float-ptr--1)
@@ -487,6 +487,23 @@
       (do (cudnn-call (cudnn/cudnnCreateActivationDescriptor retval))
           (cudnn-call (cudnn/cudnnSetActivationDescriptor retval mode relu-nan-opt relu-ceiling)))
       (resource/track retval))))
+
+
+(defprotocol BufferAccess
+  (put-value [buffer idx value])
+  (get-value [buffer idx]))
+
+(extend-protocol BufferAccess
+  DoubleBuffer
+  (put-value [^DoubleBuffer buffer ^long idx value]
+    (.put buffer idx (double value)))
+  (get-value [^DoubleBuffer buffer ^long idx]
+    (.get buffer idx))
+  FloatBuffer
+  (put-value [^FloatBuffer buffer ^long idx value]
+    (.put buffer idx (float value)))
+  (get-value [^FloatBuffer buffer ^long idx]
+    (.get buffer idx)))
 
 (def activation-relu    (create-activation-desc cudnn/CUDNN_ACTIVATION_RELU cudnn/CUDNN_PROPAGATE_NAN 0.0))
 (def activation-sigmoid (create-activation-desc cudnn/CUDNN_ACTIVATION_SIGMOID cudnn/CUDNN_PROPAGATE_NAN 0.0))
@@ -900,14 +917,9 @@ TODO - write a cuda kernel that does this *quicker*."
                                          (:tensor output)
                                          (inner-ptr output))))
 
-
 (defn softmax-backward
-  [output-gradient input-gradient]
-  (let [n-input (batch-shape output-gradient)
-        n-elems (* ^long (first n-input) ^long (second n-input))]
-    (cuda/mem-copy-device->device (:ptr output-gradient)
-                                  (:ptr input-gradient)
-                                  (* n-elems (byte-size)))))
+  [output output-gradient input-gradient]
+  (assign! input-gradient output-gradient))
 
 
 (defn loss-gradient
@@ -926,7 +938,6 @@ TODO - write a cuda kernel that does this *quicker*."
                           (:ptr answer)
                           (:ptr output-gradient)
                           n-elems)))
-
 
 (defn adadelta-step
   [decay epsilon grad-accum dx-accum gradient-beta gradients parameters]
@@ -952,13 +963,51 @@ TODO - write a cuda kernel that does this *quicker*."
                             ^ConvLayerConfig config
                             ^cudnn$cudnnTensorStruct bias-tensor])
 
+
+(defn get-cudnn-convolution-output-sizes
+  "Sizes are returned in a persistent vector of the form:
+[batch-size channel-count height width]"
+  [^ConvLayerConfig config ^long batch-size]
+  (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
+        ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
+        input-tensor (create-tensor batch-size
+                                    (.num-in-channels config)
+                                    (.height config)
+                                    (.width config))
+        ^cudnn$cudnnContext cudnn-context (:cudnn (get-ctx))
+        output-size-check (int-array 4)]
+    (cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
+    (cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
+    (cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
+                                                  (tensor-datatype)
+                                                  cudnn/CUDNN_TENSOR_NCHW
+                                                  (.num-out-channels config)
+                                                  (.num-in-channels config)
+                                                  (.k-height config)
+                                                  (.k-width config)))
+    (cudnn-call (cudnn/cudnnSetConvolution2dDescriptor conv-desc
+                                                       (.pady config) (.padx config)
+                                                       (.stride-h config) (.stride-w config)
+                                                       1 1 ;;stupid scale arguments...only 1
+                                                       ;;is valid
+                                                       cudnn/CUDNN_CROSS_CORRELATION))
+    (cudnn-call (cudnn/cudnnGetConvolutionNdForwardOutputDim conv-desc
+                                                             input-tensor
+                                                             filter-desc
+                                                             4
+                                                             output-size-check))
+    (cudnn-call (cudnn/cudnnDestroyConvolutionDescriptor conv-desc))
+    (cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-desc))
+    (vec output-size-check)))
+
+
 (defn convolution-setup
   "Returns a map of convolution layer parameters"
   ^ConvolutionData [^ConvLayerConfig config ^long batch-size]
   (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
         ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
-        output-width (conv/get-output-width config)
-        output-height (conv/get-output-height config)
+        output-width (conv/get-output-width config :convolutional)
+        output-height (conv/get-output-height config :convolutional)
         input-tensor (create-tensor batch-size
                                     (.num-in-channels config)
                                     (.height config)
@@ -977,7 +1026,8 @@ TODO - write a cuda kernel that does this *quicker*."
         backward-filter-algo (IntPointer. 1)
         backward-filter-workspace-size (SizeTPointer. 1)
         backward-data-algo (IntPointer. 1)
-        backward-data-workspace-size (SizeTPointer. 1)]
+        backward-data-workspace-size (SizeTPointer. 1)
+        output-size-check (int-array 4)]
     (cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
     (cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
     (cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
@@ -993,6 +1043,20 @@ TODO - write a cuda kernel that does this *quicker*."
                                                        1 1 ;;stupid scale arguments...only 1
                                                        ;;is valid
                                                        cudnn/CUDNN_CROSS_CORRELATION))
+
+    (cudnn-call (cudnn/cudnnGetConvolutionNdForwardOutputDim conv-desc
+                                                             input-tensor
+                                                             filter-desc
+                                                             4
+                                                             output-size-check))
+    ;;If these don't match we get memory overwrite or over-read errors
+    (let [[n c h w] (vec output-size-check)]
+      (when-not (and (= h output-height)
+                     (= w output-width))
+        (throw (Exception. (format "Calculated output dimensions %s and cudnn output dimensions %s are off"
+                                   [h w] [output-height output-width])))))
+
+
     (cudnn-call (cudnn/cudnnGetConvolutionForwardAlgorithm
                  cudnn-context
                  input-tensor
@@ -1048,39 +1112,36 @@ TODO - write a cuda kernel that does this *quicker*."
 Forward: %s %d
 Backward Filter: %s %d
 Backward Data: %s %d"
-                              (get forward-algorithms (.get forward-algo))
-                              (.get forward-workspace-size)
-                              (get backward-filter-algorithms (.get backward-filter-algo))
-                              (.get backward-filter-workspace-size)
-                              (get backward-data-algorithms (.get backward-data-algo))
-                              (.get backward-data-workspace-size))))
+                      (get forward-algorithms (.get forward-algo))
+                      (.get forward-workspace-size)
+                      (get backward-filter-algorithms (.get backward-filter-algo))
+                      (.get backward-filter-workspace-size)
+                      (get backward-data-algorithms (.get backward-data-algo))
+                      (.get backward-data-workspace-size))))
     (let [total-workspace-size (max (.get forward-workspace-size)
                                     (.get backward-filter-workspace-size)
                                     (.get backward-data-workspace-size))
           workspace-ptr (when-not (= 0 total-workspace-size)
                           (cuda/mem-alloc total-workspace-size))]
-      (map->ConvolutionData
-       {:workspace workspace-ptr
-        :workspace-size total-workspace-size
-        :forward-algorithm (.get forward-algo)
-        :backward-filter-algorithm (.get backward-filter-algo)
-        :backward-data-algorithm (.get backward-data-algo)
-        :convolution-descriptor conv-desc
-        :filter-descriptor filter-desc
-        :input-tensor input-tensor
-        :output-tensor output-tensor
-        :convolution-configuration config
-        :bias-tensor bias-tensor}))))
+      (resource/track
+       (map->ConvolutionData
+        {:workspace workspace-ptr
+         :workspace-size total-workspace-size
+         :forward-algorithm (.get forward-algo)
+         :backward-filter-algorithm (.get backward-filter-algo)
+         :backward-data-algorithm (.get backward-data-algo)
+         :convolution-descriptor conv-desc
+         :filter-descriptor filter-desc
+         :input-tensor input-tensor
+         :output-tensor output-tensor
+         :convolution-configuration config
+         :bias-tensor bias-tensor})))))
 
 (defn- convolution-teardown
   [{:keys [workspace convolution-descriptor filter-descriptor
            input-tensor output-tensor bias-tensor]}]
-  (cuda/mem-free workspace)
   (cudnn-call (cudnn/cudnnDestroyConvolutionDescriptor convolution-descriptor))
-  (cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-descriptor))
-  (destroy-tensor input-tensor)
-  (destroy-tensor output-tensor)
-  (destroy-tensor bias-tensor))
+  (cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-descriptor)))
 
 
 (extend-protocol resource/PResource
@@ -1179,19 +1240,15 @@ Backward Data: %s %d"
                         ^cudnn$cudnnPoolingStruct pooling-descriptor])
 
 
-(defn max-pooling-setup
+(defn get-cudnn-pooling-output-sizes
   [^ConvLayerConfig config ^long batch-size]
   (let [pooling-desc (cudnn$cudnnPoolingStruct.)
-        output-width (conv/get-output-width config)
-        output-height (conv/get-output-height config)
         input-tensor (create-tensor batch-size
                                     (.num-in-channels config)
                                     (.height config)
                                     (.width config))
-        output-tensor (create-tensor batch-size
-                                     (.num-out-channels config)
-                                     output-height
-                                     output-width)]
+        output-dims (int-array 4)]
+
     (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
     (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
                  pooling-desc
@@ -1200,16 +1257,61 @@ Backward Data: %s %d"
                  (.k-height config) (.k-width config)
                  (.pady config) (.padx config)
                  (.stride-h config) (.stride-w config)))
-    (map->PoolingData
-     {:input-tensor input-tensor
-      :output-tensor output-tensor
-      :pooling-descriptor pooling-desc})))
+
+    (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
+                 pooling-desc
+                 input-tensor
+                 4
+                 output-dims))
+    (cudnn/cudnnDestroyPoolingDescriptor pooling-desc)
+    (vec output-dims)))
+
+
+(defn max-pooling-setup
+  [^ConvLayerConfig config ^long batch-size]
+  (let [pooling-desc (cudnn$cudnnPoolingStruct.)
+        output-width (conv/get-output-width config :pooling)
+        output-height (conv/get-output-height config :pooling)
+        input-tensor (create-tensor batch-size
+                                    (.num-in-channels config)
+                                    (.height config)
+                                    (.width config))
+        output-tensor (create-tensor batch-size
+                                     (.num-out-channels config)
+                                     output-height
+                                     output-width)
+        output-dims (int-array 4)]
+    (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
+    (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
+                 pooling-desc
+                 cudnn/CUDNN_POOLING_MAX
+                 cudnn/CUDNN_PROPAGATE_NAN
+                 (.k-height config) (.k-width config)
+                 (.pady config) (.padx config)
+                 (.stride-h config) (.stride-w config)))
+
+    (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
+                 pooling-desc
+                 input-tensor
+                 4
+                 output-dims))
+
+    ;;These do not have to match; cudnn can take care of it if they are off.
+    ;;https://devtalk.nvidia.com/default/topic/949999/cuda-programming-and-performance/cudnn-calculates-layer-sizes-different-than-caffe/
+    (comment (let [[n c h w] output-dims]
+               (when-not (and (= output-width w)
+                              (= output-height h))
+                 (throw (Exception. (format "Pooling layer size mismatch: cudnn %s calculated %s"
+                                            [w h]
+                                            [output-width output-height]))))))
+    (resource/track (map->PoolingData
+                     {:input-tensor input-tensor
+                      :output-tensor output-tensor
+                      :pooling-descriptor pooling-desc}))))
 
 
 (defn- max-pooling-teardown
   [{:keys [input-tensor output-tensor pooling-descriptor]}]
-  (destroy-tensor input-tensor)
-  (destroy-tensor output-tensor)
   (cudnn/cudnnDestroyPoolingDescriptor pooling-descriptor))
 
 
@@ -1271,28 +1373,30 @@ Backward Data: %s %d"
   )
 
 
-(defonce dropout-type-constant :constant)
-(defonce dropout-type-multiplicative :multiplicative)
+(defonce dropout-distribution-bernoulli :bernoulli)
+(defonce dropout-distribution-gaussian :gaussian)
 
 
-(defn dropout-impl [input output rand-buffer probability dropout-type]
+(defn dropout-impl [input output rand-buffer probability distribution]
   (let [elem-count (ecount input)]
-   (if (= dropout-type :multiplicative)
-     (launch-linear-kernel :dropout-multiplicative
-                           elem-count
-                           0
-                           (:ptr input)
-                           (:ptr output)
-                           (:ptr rand-buffer)
-                           elem-count)
-     (launch-linear-kernel :dropout-constant
-                           elem-count
-                           0
-                           (:ptr input)
-                           (:ptr output)
-                           (:ptr rand-buffer)
-                           (general->type probability)
-                           elem-count))))
+    (cond
+      (= distribution :gaussian) (launch-linear-kernel :dropout-multiplicative
+                                                       elem-count
+                                                       0
+                                                       (:ptr input)
+                                                       (:ptr output)
+                                                       (:ptr rand-buffer)
+                                                       elem-count)
+      (= distribution :bernoulli) (launch-linear-kernel :dropout-constant
+                                                        elem-count
+                                                        0
+                                                        (:ptr input)
+                                                        (:ptr output)
+                                                        (:ptr rand-buffer)
+                                                        (general->type probability)
+                                                        elem-count)
+      :else
+      (throw (Exception. (format "Unrecognized dropout distribution: %s" distribution))))))
 
 
 (defn ensure-factor-of-2
@@ -1300,20 +1404,22 @@ Backward Data: %s %d"
   (+ number (rem number 2)))
 
 
+(defn dropout-prepare-forward
+  [rand-buffer probability distribution elem-count]
+  (if (= distribution :gaussian)
+    (generate-normal-rands rand-buffer 1.0 (- 1.0 (double probability))
+                           (ensure-factor-of-2 elem-count))
+    (generate-uniform-rands rand-buffer elem-count)))
+
+
 (defn dropout-forward
-  [input output rand-buffer probability dropout-type]
-  (let [elem-count (ecount output)]
-    ;;generate new random data for this batch
-    (if (= dropout-type :multiplicative)
-      (generate-normal-rands rand-buffer 1.0 (double probability)
-                             (ensure-factor-of-2 elem-count))
-      (generate-uniform-rands rand-buffer elem-count))
-    (dropout-impl input output rand-buffer probability dropout-type)))
+  [input output rand-buffer probability distribution]
+  (dropout-impl input output rand-buffer probability distribution))
 
 
 (defn dropout-backward
-  [output-gradient input-gradient rand-buffer probability dropout-type]
-  (dropout-impl output-gradient input-gradient rand-buffer probability dropout-type))
+  [output-gradient input-gradient rand-buffer probability distribution]
+  (dropout-impl output-gradient input-gradient rand-buffer probability distribution))
 
 
 (defn adam-step

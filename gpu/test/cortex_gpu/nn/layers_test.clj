@@ -110,13 +110,13 @@
       (is (m/equals (flatten (repeat num-batch-items [7 10])) input-gradient)))))
 
 
-(def-double-float-test l2-max-constraint
+(deftest l2-max-constraint
   (let [input-size 100
-        output-size 100
-        weight-matrix (cudnn/array (partition output-size (range (* input-size output-size))))
+        output-size 10
+        weight-matrix (cudnn/array (partition input-size (range (* input-size output-size))))
         weight-clone-temp (cudnn/new-array (cudnn/shape weight-matrix))
         weight-magnitude-temp (cudnn/new-array [output-size])
-        ones-vec (cudnn/allocate-ones output-size)]
+        ones-vec (cudnn/allocate-ones input-size)]
     (cudnn/apply-l2-max-constraint weight-matrix weight-clone-temp weight-magnitude-temp
                                    ones-vec 1.0)
     (let [weights (cudnn/to-double-array weight-matrix)
@@ -126,7 +126,7 @@
       (is (framework/about-there? mag-sum output-size 0.0001)))))
 
 
-(def-double-float-test softmax
+(deftest softmax
   (let [input (cudnn/array (vec (take 10 (flatten (repeat [1 2 3 4])))))
         layer (layers/softmax 10)
         layer (cp/setup layer 1)
@@ -278,7 +278,7 @@
   (count (filter #(= 0.0 (double %)) item-seq)))
 
 
-(def-double-float-test dropout-constant
+(deftest dropout-bernoulli
   (let [batch-size 5
         item-count 20
         input (cudnn/array (repeat (* batch-size item-count) 1.0) batch-size)
@@ -289,7 +289,8 @@
         answer-seq
         (doall
          (for [iter (range repeat-count)]
-           (let [dropout-layer (cp/forward dropout-layer input)
+           (let [dropout-layer (cp/prepare-forward dropout-layer)
+                 dropout-layer (cp/forward dropout-layer input)
                  dropout-layer (cp/backward dropout-layer input output-gradient)
                  output (seq (cudnn/to-double-array (cp/output dropout-layer)))
                  input-gradient (seq (cudnn/to-double-array (cp/input-gradient dropout-layer)))]
@@ -305,18 +306,20 @@
 
 
 
-(def-double-float-test dropout-multiplicative
+(deftest dropout-gaussian
   (let [batch-size 5
         item-count 100
         input (cudnn/array (repeat (* batch-size item-count) 1.0) batch-size)
         output-gradient (cudnn/array (repeat (* batch-size item-count) 2.0) batch-size)
-        dropout-layer (layers/dropout item-count 1.0 cudnn/dropout-type-multiplicative)
+        dropout-layer (layers/dropout item-count 0.5 cudnn/dropout-distribution-gaussian)
         dropout-layer (cp/setup dropout-layer batch-size)
+        dropout-layer (cp/prepare-forward dropout-layer)
         repeat-count 30
         answer-seq
         (doall
          (for [iter (range repeat-count)]
-           (let [dropout-layer (cp/forward dropout-layer input)
+           (let [dropout-layer (cp/prepare-forward dropout-layer)
+                 dropout-layer (cp/forward dropout-layer input)
                  dropout-layer (cp/backward dropout-layer input output-gradient)
                  output (seq (cudnn/to-double-array (cp/output dropout-layer)))
                  input-gradient (seq (cudnn/to-double-array (cp/input-gradient dropout-layer)))]
@@ -358,3 +361,28 @@
           input-grad-data (cudnn/to-double-array input-gradient)]
       (is (= (double (* items-per-batch item-count))
              (m/esum input-grad-data))))))
+
+(defn create-conv-layer-config
+  [pad stride k-size image-dim image-in-channels num-kernels]
+  (conv/create-conv-layer-config
+   image-dim image-dim k-size k-size pad pad stride stride
+   image-in-channels num-kernels))
+
+
+(deftest convolution-pooling-size-calculations
+  (let [image-dim 128
+        image-in-channels 3
+        num-kernels 30
+        batch-size 100]
+    (doseq [pad (range 4)
+            stride (range 1 4)
+            kernel-size (range 2 10)]
+      (let [layer-config (create-conv-layer-config pad stride kernel-size image-dim image-in-channels num-kernels)
+            [c-n c-c c-h c-w] (cudnn/get-cudnn-convolution-output-sizes layer-config batch-size)
+            output-width (conv/get-output-width layer-config :convolutional)
+            output-height (conv/get-output-height layer-config :convolutional)
+            error-string (format " checking: image-dim %s channels %s pad %s stride %s kernel-size %s "
+                                 image-dim image-in-channels pad stride kernel-size)]
+        (is (and (= output-width c-w)
+                 (= output-height c-h))
+            (str :convolution error-string [output-width output-height] [c-w c-h]))))))

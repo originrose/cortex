@@ -48,7 +48,11 @@ channel 2 with n-outputs"
 
 (defn k-sparse [k] {:type :k-sparse :k k})
 
-(defn dropout [probability] {:type :dropout :probability probability})
+(defn dropout
+  "Dropout supports both bernoulli and gaussian distributed data.  Bernoulli is typical dropout
+while guassian is (1,1) centered noise that is multiplied by the inputs."
+  [probability & {:keys [distribution]
+                  :or {distribution :bernoulli}}] {:type :dropout :probability probability :distribution distribution})
 
 (defn convolutional-expanded
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
@@ -198,9 +202,11 @@ channel 2 with n-outputs"
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (conv/get-padded-strided-dimension input-width pad-x
+        output-width (conv/get-padded-strided-dimension :convolutional
+                                                        input-width pad-x
                                                         kernel-width stride-x)
-        output-height (conv/get-padded-strided-dimension input-height pad-y
+        output-height (conv/get-padded-strided-dimension :convolutional
+                                                         input-height pad-y
                                                          kernel-height stride-y)
         output-channels num-kernels
         output-size (* output-width output-height output-channels)
@@ -221,9 +227,11 @@ channel 2 with n-outputs"
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (conv/get-padded-strided-dimension input-width pad-x
+        output-width (conv/get-padded-strided-dimension :pooling
+                                                        input-width pad-x
                                                         kernel-width stride-x)
-        output-height (conv/get-padded-strided-dimension input-height pad-y
+        output-height (conv/get-padded-strided-dimension :pooling
+                                                         input-height pad-y
                                                          kernel-height stride-y)
         output-channels input-channels
         output-size (* output-width output-height output-channels)
@@ -290,6 +298,9 @@ channel 2 with n-outputs"
 
 (defmethod create-module :dropout
   [desc]
+  (when (= (:distribution desc)
+           :guassian)
+    (throw (Exception. "CPU dropout does not support guassian distribution")))
   (layers/dropout [(:output-size desc)] (:probability desc)))
 
 

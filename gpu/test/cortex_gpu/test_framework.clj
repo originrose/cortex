@@ -14,9 +14,10 @@
             [cortex.nn.network :as net]
             [cortex.nn.backends :as b]
             [cortex.nn.description :as desc]
-            [cortex-gpu.resource :as resource]
+            [resource.core :as resource]
             [cortex-gpu.nn.description :as gpu-desc]
-            [clojure.test :refer :all]))
+            [clojure.test :refer :all])
+  (:import [java.math BigDecimal MathContext]))
 
 
 (defn with-contexts
@@ -119,3 +120,18 @@ so even correctly written layers will differ somewhat w/r/t cpu vs. gpu."
        (deftest ~(symbol float-name)
          (with-bindings {#'cudnn/*cudnn-datatype* (float 0.0)}
            ~@body)))))
+
+
+(defn round-to-sig-figs
+  ^double [^double lhs ^long num-sig-figs]
+  (-> (BigDecimal. lhs)
+      (.round (MathContext. num-sig-figs))
+      (.doubleValue)))
+
+
+(defn sig-fig-equal?
+  ([^double lhs ^double rhs ^long num-sig-figs]
+   (= (round-to-sig-figs lhs num-sig-figs)
+      (round-to-sig-figs rhs num-sig-figs)))
+  ([^double lhs ^double rhs]
+   (sig-fig-equal? lhs rhs 4)))
