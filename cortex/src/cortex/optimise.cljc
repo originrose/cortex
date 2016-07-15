@@ -200,7 +200,7 @@ Returns new parameters"
   ([learn-rate momentum]
    (->SGDOptimiser learn-rate momentum))
   ([parameter-count]
-   (println "Parameter count has be deprecated for sgd optimiser")
+   (println "Parameter count has been deprecated for sgd optimiser")
    (sgd-optimiser SGD-DEFAULT-LEARN-RATE SGD-DEFAULT-MOMENTUM))
   ([]
    (sgd-optimiser SGD-DEFAULT-LEARN-RATE SGD-DEFAULT-MOMENTUM)))
@@ -219,7 +219,7 @@ Returns new parameters"
         ;; accumulate the latest gradient
         (m/add-scaled! dx gradient (* -1.0 learn-rate))
 
-        ;; return the updated adadelta record. Mutable gradients have been updated
+        ;; return the updated SGD record. Mutable gradients have been updated
         (assoc this
                :parameters (m/add parameters dx)
                :dx dx))))
