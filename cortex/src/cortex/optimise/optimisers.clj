@@ -44,7 +44,12 @@
   (compute-parameters [this gradient parameters]
     (cp/compute-parameters
       {:update (fn [state gradient]
-                 (update state :params this gradient))}
+                 (let [state (update state :params this gradient)]
+                   ;; This makes it much easier to debug a common mistake:
+                   (when (map? (:params state))
+                     (throw (IllegalStateException.
+                              "fn acting as optimiser must return vector: did you need to call the fn to produce an optimiser map or fn?")))
+                   state))}
       gradient
       parameters)))
 
