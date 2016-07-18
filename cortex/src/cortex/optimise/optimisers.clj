@@ -54,7 +54,7 @@
     (as-> this this
       (if (:initialize this)
         (-> this
-          (assoc :state ((:initialize this) (count parameters)))
+          (assoc :state ((:initialize this) (m/ecount parameters)))
           (dissoc :initialize))
         this)
       (-> this
