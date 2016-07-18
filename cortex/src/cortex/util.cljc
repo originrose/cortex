@@ -2,6 +2,7 @@
   (:require
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
+    [clojure.string :as str]
     [cortex.nn.protocols :as cp]
     [cortex.nn.backends :as b]
     #?(:cljs [goog.string :refer [format]]))
@@ -32,6 +33,20 @@
      sigma'(y) = y * (1 - y) "
   [y]
   (m/emul y (m/sub 1.0 y)))
+
+(defn clamp
+  "Constrains x to be between floor and ceil."
+  [^double floor ^double x ^double ceil]
+  (max floor
+       (min x ceil)))
+
+(defn relative-error
+  "Calculates the relative error between two values."
+  [^double a ^double b]
+  (if-not (and (zero? a) (zero? b))
+    (/ (Math/abs (- a b))
+       (max (Math/abs a) (Math/abs b)))
+    0))
 
 ;;;; Random number generation
 
@@ -66,6 +81,52 @@
 
      (defn rand-gaussian []
        (rand-gaussian* 0 1.0))))
+
+;;;; Sequences and collections
+
+(defn seq-like?
+  "Returns true if x ought to be viewed as a sequence. This is a
+  subjective function, and is used in sformat to determine whether
+  to format arguments as sequences. It accounts for built-in Clojure
+  types as well as core.matrix vectors."
+  [x]
+  (and
+    (not (nil? x))
+    (not (string? x))
+    (or
+      (instance? clojure.lang.Seqable x)
+      (try
+        (do
+          (seq x)
+          true)
+        (catch IllegalArgumentException _
+          false)))))
+
+(defn interleave-all
+  "Like interleave, but does not stop until all sequences are
+  exhausted."
+  [& colls]
+  (lazy-seq
+    (if-let [ss (seq (filter identity (map seq colls)))]
+      (concat (map first ss) (apply interleave-all (map rest ss))))))
+
+(defn map-keys
+  "Applies f to each of the keys of a map, returning a new map."
+  [f map]
+  (->> map
+    (reduce-kv (fn [m k v]
+                 (assoc m (f k) v))
+               {}
+               map)))
+
+(defn map-vals
+  "Applies f to each of the values of a map, returning a new map."
+  [f map]
+  (->> map
+    (reduce-kv (fn [m k v]
+                 (assoc m k (f v)))
+               {}
+               map)))
 
 ;;;; Arrays and matrices
 
@@ -203,6 +264,73 @@
       false
       (catch Throwable t#
         true))))
+
+;;;; Formatting
+
+(defn parse-long
+  "(parse-long x) => (Long/parseLong x)"
+  [x]
+  (Long/parseLong x))
+
+(defn parse-double
+  "(parse-double x) => (Double/parseDouble x)"
+  [x]
+  (Double/parseDouble x))
+
+(def fmt-string-regex
+  "Matches a Java format specifier, see
+  https://docs.oracle.com/javase/8/docs/api/java/util/Formatter.html
+  for details. Groups match the argument number (if given) and the
+  remainder of the format specifier, respectively."
+  #"%(?:([1-9][0-9]*)\$)?([-#+ 0,(]*(?:[1-9][0-9]*)?(?:\.[0-9]+)?(?:[bBhHsScCdoxXeEfgGaA]|[tT][HIklMSLNpzZsQBbhAaCYyjmdeRTrDFc]))")
+
+(defn sformat
+  "Like format, but smarter. If one of the args is a collection,
+  the format specifier is mapped over each element of the collection,
+  and the results are placed in the formatted string as a vector.
+  Also works on nested collections. If the conversion is 'f', will
+  try to cast the argument to a double before passing it to format."
+  [fmt & args]
+  (let [fmt-strings
+        (for [[fmt-string ^long arg-index fmt-specifier]
+              (loop [unprocessed (re-seq fmt-string-regex fmt)
+                     processed []
+                     arg-index 1]
+                (if (seq unprocessed)
+                  (let [match (first unprocessed)
+                        positional? (nth match 1)]
+                    (recur (rest unprocessed)
+                           (conj processed (update match 1 (if positional?
+                                                             parse-long
+                                                             (constantly arg-index))))
+                           (if positional?
+                             arg-index
+                             (inc arg-index))))
+                  processed))]
+          (let [arg-index (dec arg-index)
+                arg (nth args arg-index)]
+            (str/replace
+              (if (seq-like? arg)
+                (str "["
+                     (str/join " "
+                               (map (fn [item]
+                                      (sformat (str "%" fmt-specifier)
+                                               item))
+                                    arg))
+                     "]")
+                (format (str "%" fmt-specifier)
+                        (case (last fmt-specifier)
+                          (\e \E \f \g \G \a \A) (double arg)
+                          (\d \o \x \X) (long arg)
+                          arg)))
+              "%" "%%")))
+        splits (str/split fmt fmt-string-regex)]
+    (format (apply str (interleave-all splits fmt-strings)))))
+
+(defn sprintf
+  "Like printf, but uses sformat instead of format."
+  [fmt & args]
+  (print (apply sformat fmt args)))
 
 ;;;; Neural networks
 
