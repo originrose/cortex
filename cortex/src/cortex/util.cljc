@@ -12,52 +12,7 @@
 #?(:clj (do (set! *warn-on-reflection* true)
             (set! *unchecked-math* :warn-on-boxed)))
 
-
-#?(:clj (defn timestamp [] (System/nanoTime))
-   :cljs (defn timestamp [] (.getTime (js/Date.))))
-
-(def EMPTY-VECTOR (m/new-array [0]))
-
-#?(:clj
-    (do
-      (def ^Random RAND-GENERATOR (Random.))
-
-      (defn rand-normal ^double []
-        (.nextDouble RAND-GENERATOR))
-
-      (defn rand-gaussian ^double []
-        (.nextGaussian RAND-GENERATOR)))
-    :cljs
-    (do
-      (defn rand-gaussian* [mu sigma]
-        ; This function implements the Kinderman-Monahan ratio method:
-        ;  A.J. Kinderman & J.F. Monahan
-        ;  Computer Generation of Random Variables Using the Ratio of Uniform Deviates
-        ;  ACM Transactions on Mathematical Software 3(3) 257-260, 1977
-        (let [u1  (rand)
-              u2* (rand)
-              u2 (- 1. u2*)
-              s (* 4 (/ (Math/exp (- 0.5)) (Math/sqrt 2.)))
-              z (* s (/ (- u1 0.5) u2))
-              zz (+ (* 0.25 z z) (Math/log u2))]
-          (if (> zz 0)
-            (recur mu sigma)
-            (+ mu (* sigma z)))))
-
-      (defn rand-normal []
-        (rand))
-
-      (defn rand-gaussian []
-        (rand-gaussian* 0 1.0))))
-
-(defn ms-elapsed
-  ([start]
-    (ms-elapsed start (timestamp)))
-  ([start end]
-    (let [start (double start)
-          end (double end)]
-      #?(:clj  (/ (- end start) 1000000.0))
-         :cljs (- end start))))
+;;;; Mathematics
 
 (defn tanh'
   "Compute the derivative of the tanh function for a given output.  Works on any array shape.
@@ -78,6 +33,49 @@
   [y]
   (m/emul y (m/sub 1.0 y)))
 
+;;;; Random number generation
+
+#?(:clj
+   (do
+     (def ^Random RAND-GENERATOR (Random.))
+
+     (defn rand-normal ^double []
+       (.nextDouble RAND-GENERATOR))
+
+     (defn rand-gaussian ^double []
+       (.nextGaussian RAND-GENERATOR)))
+   :cljs
+   (do
+     (defn rand-gaussian* [mu sigma]
+       ;; This function implements the Kinderman-Monahan ratio method:
+       ;;  A.J. Kinderman & J.F. Monahan
+       ;;  Computer Generation of Random Variables Using the Ratio of Uniform Deviates
+       ;;  ACM Transactions on Mathematical Software 3(3) 257-260, 1977
+       (let [u1  (rand)
+             u2* (rand)
+             u2 (- 1. u2*)
+             s (* 4 (/ (Math/exp (- 0.5)) (Math/sqrt 2.)))
+             z (* s (/ (- u1 0.5) u2))
+             zz (+ (* 0.25 z z) (Math/log u2))]
+         (if (> zz 0)
+           (recur mu sigma)
+           (+ mu (* sigma z)))))
+
+     (defn rand-normal []
+       (rand))
+
+     (defn rand-gaussian []
+       (rand-gaussian* 0 1.0))))
+
+;;;; Arrays and matrices
+
+(def EMPTY-VECTOR (m/new-array [0]))
+
+(defn empty-array
+  "Constructs a new empty (zero-filled) array of the given shape"
+  ([shape]
+   (m/new-array :vectorz shape)))
+
 (defn weight-matrix
   "Creates a randomised weight matrix.
 
@@ -86,49 +84,59 @@
   [rows cols]
   (let [weight-scale (Math/sqrt (/ 1.0 (double cols)))]
     (b/array
-     (mapv (fn [_]
-             (vec (repeatedly cols
-                              #(* weight-scale
-                                  (rand-gaussian)))))
-           (range rows)))))
+      (mapv (fn [_]
+              (vec (repeatedly cols
+                               #(* weight-scale
+                                   (rand-gaussian)))))
+            (range rows)))))
 
 (defn random-matrix
   "Constructs an array of the given shape with random normally distributed element values"
   ([shape-vector]
-    (rand-matrix/sample-normal shape-vector)))
+   (rand-matrix/sample-normal shape-vector)))
 
-(defn empty-array
-  "Constructs a new empty (zero-filled) array of the given shape"
-  ([shape]
-    (m/new-array :vectorz shape)))
+(defn assign-sparse-to-packed!
+  [packed-data sparse-data]
+  (let [packed-data (if packed-data
+                      packed-data
+                      (let [elem-count (reduce + (map m/ecount sparse-data))]
+                        (b/new-array [elem-count])))]
+    (reduce (fn [^long offset next-item]
+              (let [item-vec (m/as-vector next-item)
+                    item-len (long (m/ecount item-vec))]
+                (m/assign! (m/subvector packed-data offset item-len) item-vec)
+                (+ offset item-len)))
+            0
+            sparse-data)
+    packed-data))
 
-(defn mse-gradient-fn
-  "Returns the MSE error gradient for a given output and target value"
-  ([output target]
-    (let [result (m/mutable output)]
-      (m/sub! result target)
-      (m/scale! result 2.0)
-      result)))
+(defn assign-packed-to-sparse!
+  [sparse packed]
+  (reduce (fn [^long offset next-item]
+            (let [elem-count (long (m/ecount next-item))]
+              (m/assign! (m/as-vector next-item)
+                         (m/subvector packed offset elem-count))
+              (+ offset elem-count)))
+          0
+          sparse))
+
+(defn zero-sparse!
+  [sparse]
+  (doseq [item sparse]
+    (m/fill! item 0.0)))
 
 
-#?(:clj
-   (defmacro error
-     "Throws an error with the provided message(s). This is a macro in order to try and ensure the
-     stack trace reports the error at the correct source line number."
-     ([& messages]
-      `(throw (mikera.cljutils.Error. (str ~@messages)))))
-   :cljs
-   (defn error [& messages]
-     (throw (mikera.cljutils.Error. (apply str messages)))))
+(defn get-or-new-array
+  [item kywd shape]
+  (or (get item kywd)
+      (b/new-array shape)))
 
-(defmacro error?
-  "Returns true if executing body throws an error, false otherwise."
-  ([& body]
-    `(try
-       ~@body
-       false
-       (catch Throwable t#
-         true))))
+(defn get-or-array
+  [item kywd data]
+  (or (get item kywd)
+      (b/array data)))
+
+;;;; Confusion matrices
 
 (defn confusion-matrix
   "A confusion matrix shows the predicted classes for each of the actual
@@ -161,12 +169,57 @@
     (doseq [k ks]
       (apply println (format s-fmt k) (map #(get-in conf-mat [k %]) ks)))))
 
+;;;; Time
+
+#?(:clj (defn timestamp [] (System/nanoTime))
+   :cljs (defn timestamp [] (.getTime (js/Date.))))
+
+(defn ms-elapsed
+  ([start]
+   (ms-elapsed start (timestamp)))
+  ([start end]
+   (let [start (double start)
+         end (double end)]
+     #?(:clj  (/ (- end start) 1000000.0))
+     :cljs (- end start))))
+
+;;;; Exceptions
+
+#?(:clj
+   (defmacro error
+     "Throws an error with the provided message(s). This is a macro in order to try and ensure the
+     stack trace reports the error at the correct source line number."
+     ([& messages]
+      `(throw (mikera.cljutils.Error. (str ~@messages)))))
+   :cljs
+   (defn error [& messages]
+     (throw (mikera.cljutils.Error. (apply str messages)))))
+
+(defmacro error?
+  "Returns true if executing body throws an error, false otherwise."
+  ([& body]
+   `(try
+      ~@body
+      false
+      (catch Throwable t#
+        true))))
+
+;;;; Neural networks
+
+(defn mse-gradient-fn
+  "Returns the MSE error gradient for a given output and target value"
+  ([output target]
+   (let [result (m/mutable output)]
+     (m/sub! result target)
+     (m/scale! result 2.0)
+     result)))
+
 (def DIFFERENCE-DELTA 1e-5)
 
-; TODO: This will return the relative differences between the components of the
-; analytic gradient computed by the network and the numerical gradient, but it
-; would be nice if it just said, yes!  Need to figure out how close they should
-; be.  Maybe just check that each difference is < 0.01 ???
+;; TODO: This will return the relative differences between the components of the
+;; analytic gradient computed by the network and the numerical gradient, but it
+;; would be nice if it just said, yes!  Need to figure out how close they should
+;; be.  Maybe just check that each difference is < 0.01 ???
 (defn gradient-check
   "Use a finite difference approximation of the derivative to verify
   that backpropagation and the derivatives of layers and activation functions are correct.
@@ -202,50 +255,7 @@
           relative-error))
       (range (m/column-count input)))))
 
-
 (defn estimate-gradient
   "Computes a numerical approximation of the derivative of the function f at with respectr to input x"
   ([f x]
    (let [x+dx (m/add )])))
-
-
-(defn assign-sparse-to-packed!
-  [packed-data sparse-data]
-  (let [packed-data (if packed-data
-                      packed-data
-                      (let [elem-count (reduce + (map m/ecount sparse-data))]
-                        (b/new-array [elem-count])))]
-    (reduce (fn [^long offset next-item]
-              (let [item-vec (m/as-vector next-item)
-                    item-len (long (m/ecount item-vec))]
-                (m/assign! (m/subvector packed-data offset item-len) item-vec)
-                (+ offset item-len)))
-            0
-            sparse-data)
-    packed-data))
-
-(defn assign-packed-to-sparse!
-  [sparse packed]
-  (reduce (fn [^long offset next-item]
-            (let [elem-count (long (m/ecount next-item))]
-             (m/assign! (m/as-vector next-item)
-                        (m/subvector packed offset elem-count))
-             (+ offset elem-count)))
-          0
-          sparse))
-
-(defn zero-sparse!
-  [sparse]
-  (doseq [item sparse]
-    (m/fill! item 0.0)))
-
-
-(defn get-or-new-array
-  [item kywd shape]
-  (or (get item kywd)
-      (b/new-array shape)))
-
-(defn get-or-array
-  [item kywd data]
-  (or (get item kywd)
-      (b/array data)))
