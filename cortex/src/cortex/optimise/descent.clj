@@ -1,10 +1,6 @@
 (ns cortex.optimise.descent
   "Contains API functions for performing gradient descent on pure
-  functions using gradient optimisers.
-
-  TODO: make the forcing of delays happen automagically.
-
-  TODO: write documentation for this namespace"
+  functions using gradient optimisers."
   (:refer-clojure :exclude [+ - * /])
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.operators :refer [+ - * /]]
