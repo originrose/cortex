@@ -226,7 +226,20 @@
   (fn [state]
     (apply util/sprintf fmt
            (for [arg args]
-             (arg state)))
+             (let [transforms (if (vector? arg)
+                                arg
+                                [arg])]
+               (loop [state state
+                      transforms transforms]
+                 (if (seq transforms)
+                   (let [transform (first transforms)]
+                     (recur (cond
+                              (fn? transform)
+                              (transform state)
+                              (associative? state)
+                              (get state transform))
+                            (rest transforms)))
+                   state)))))
     (flush)
     (terminate? state)))
 
