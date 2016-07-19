@@ -8,7 +8,8 @@
     #?(:cljs [goog.string :refer [format]]))
 
   #?(:clj (:import [mikera.vectorz Vectorz]))
-  #?(:clj (:import [java.util Random])))
+  #?(:clj (:import [java.io Writer]
+                   [java.util Random])))
 
 #?(:clj (do (set! *warn-on-reflection* true)
             (set! *unchecked-math* :warn-on-boxed)))
@@ -127,6 +128,128 @@
                (assoc m k (f v)))
              {}
              map))
+
+(defn map-entry
+  [k v]
+  (clojure.lang.MapEntry/create k v))
+
+;;;; Lazy maps
+
+;;; Inspired by https://github.com/Malabarba/lazy-map-clojure
+;;; but makes a few improvements, like having the seq not return
+;;; map entries with Delays still in them, supporting reduce-kv,
+;;; and having a prettier str representation.
+(deftype LazyMap [^clojure.lang.IPersistentMap contents]
+  clojure.lang.Associative
+  (containsKey [this k]
+    (.containsKey contents k))
+  (entryAt [this k]
+    (map-entry k (.valAt this k)))
+
+  clojure.lang.IFn
+  (invoke [this k]
+    (.valAt this k))
+  (invoke [this k not-found]
+    (.valAt this k not-found))
+
+  clojure.lang.IKVReduce
+  (kvreduce [this f init]
+    (reduce-kv (map-vals force contents) f init))
+
+  clojure.lang.ILookup
+  (valAt [this k]
+    (force (.valAt contents k)))
+  (valAt [this k not-found]
+    ;; This will not behave properly if not-found is a Delay,
+    ;; but that's a pretty obscure edge case.
+    (force (.valAt contents k not-found)))
+
+  clojure.lang.IMapIterable
+  (keyIterator [this]
+    (.iterator
+      ^java.lang.Iterable
+      (keys contents)))
+  (valIterator [this]
+    (.iterator
+      ;; Using the higher-arity form of map prevents chunking.
+      ^java.lang.Iterable
+      (map (fn [[k v] _]
+             (force v))
+           contents
+           (repeat nil))))
+
+  clojure.lang.IPersistentCollection
+  (count [this]
+    (.count contents))
+  (empty [this]
+    (.empty contents))
+  (cons [this o]
+    (LazyMap. (.cons contents o)))
+
+  clojure.lang.IPersistentMap
+  (assoc [this key val]
+    (LazyMap. (.assoc contents key val)))
+  (without [this key]
+    (LazyMap. (.without contents key)))
+
+  clojure.lang.Seqable
+  (seq [this]
+    ;; Using the higher-arity form of map prevents chunking.
+    (map (fn [[k v] _]
+           (map-entry k (force v)))
+         contents
+         (repeat nil)))
+
+  java.lang.Iterable
+  (iterator [this]
+    (.iterator
+      ^java.lang.Iterable
+      (.seq this))))
+
+(defrecord PlaceholderText [text])
+
+(defmethod print-dup PlaceholderText
+  [placeholder ^Writer writer]
+  (.write writer ^String (:text placeholder)))
+
+(defmethod print-method PlaceholderText
+  [placeholder ^Writer writer]
+  (.write writer ^String (:text placeholder)))
+
+(defn lazy-map->str
+  ^String [^LazyMap m]
+  (str (map-vals #(if (and (delay? %)
+                           (not (realized? %)))
+                    (->PlaceholderText "<unrealized>")
+                    (force %))
+                 (.contents m))))
+
+(defmethod print-dup LazyMap
+  [m ^Writer writer]
+  (.write writer (lazy-map->str m)))
+
+(defmethod print-method LazyMap
+  [m ^Writer writer]
+  (.write writer (lazy-map->str m)))
+
+(defn ->lazy-map
+  [map]
+  (if (instance? LazyMap map)
+    map
+    (LazyMap. map)))
+
+(defmacro lazy-map
+  [& forms]
+  `(->lazy-map
+     ~(->> forms
+        (partition 2)
+        (map (fn [[k v]] [k `(delay ~v)]))
+        (into {}))))
+
+(defn force-map
+  "Realizes all the values in a lazy map, returning a regular map."
+  [m]
+  (into {} m))
 
 ;;;; Arrays and matrices
 
