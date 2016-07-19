@@ -82,7 +82,7 @@
      (defn rand-gaussian []
        (rand-gaussian* 0 1.0))))
 
-;;;; Sequences and collections
+;;;; Sequences
 
 (defn seq-like?
   "Returns true if x ought to be viewed as a sequence. This is a
@@ -109,6 +109,8 @@
   (lazy-seq
     (if-let [ss (seq (filter identity (map seq colls)))]
       (concat (map first ss) (apply interleave-all (map rest ss))))))
+
+;;;; Collections
 
 (defn map-keys
   "Applies f to each of the keys of a map, returning a new map."
