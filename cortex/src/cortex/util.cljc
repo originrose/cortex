@@ -113,20 +113,18 @@
 (defn map-keys
   "Applies f to each of the keys of a map, returning a new map."
   [f map]
-  (->> map
-    (reduce-kv (fn [m k v]
-                 (assoc m (f k) v))
-               {}
-               map)))
+  (reduce-kv (fn [m k v]
+               (assoc m (f k) v))
+             {}
+             map))
 
 (defn map-vals
   "Applies f to each of the values of a map, returning a new map."
   [f map]
-  (->> map
-    (reduce-kv (fn [m k v]
-                 (assoc m k (f v)))
-               {}
-               map)))
+  (reduce-kv (fn [m k v]
+               (assoc m k (f v)))
+             {}
+             map))
 
 ;;;; Arrays and matrices
 
