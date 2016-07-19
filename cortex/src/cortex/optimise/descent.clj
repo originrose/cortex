@@ -104,16 +104,20 @@
          initial-step true]
     (let [function (cp/update-parameters function params)
           gradient (cp/gradient function)
-          state (merge
-                  {:params params
-                   :value (delay (cp/output function))
-                   :gradient gradient
-                   :optimiser optimiser
-                   :initial-step initial-step}
-                  (if-not initial-step
-                    (merge
-                      (cp/get-state optimiser)
-                      {:last-step (delay (- params last-params))})))]
+          state (util/->lazy-map
+                  (merge
+                    (if-not initial-step
+                      (merge
+                        ;; This *needs* to be first, because lazy maps will be coerced
+                        ;; to regular maps if they appear in the tail of a merge, and
+                        ;; the map returned by get-state might be lazy.
+                        (cp/get-state optimiser)
+                        {:last-step (delay (- params last-params))}))
+                    {:params params
+                     :value (delay (cp/output function))
+                     :gradient gradient
+                     :optimiser optimiser
+                     :initial-step initial-step}))]
       (if-not (terminate? state)
         (let [optimiser (cp/compute-parameters optimiser gradient params)
               new-params (cp/parameters optimiser)]
@@ -135,7 +139,7 @@
       optimiser
       initial-params
       (fn [state]
-        (swap! log* conj (util/map-vals force state))
+        (swap! log* conj (util/force-map state))
         (terminate? state)))
     @log*))
 
@@ -191,7 +195,7 @@
   [terminate? cutoff params]
   (fn [state]
     (or (terminate? state)
-        (<= (m/distance (- (force (:params state))
+        (<= (m/distance (- (:params state)
                            params))
             cutoff))))
 
@@ -199,14 +203,14 @@
   [terminate? cutoff]
   (fn [state]
     (or (terminate? state)
-        (<= (force (:value state))
+        (<= (:value state)
             cutoff))))
 
 (defn limit-gradient
   [terminate? cutoff]
   (fn [state]
     (or (terminate? state)
-        (<= (m/magnitude (force (:gradient state)))
+        (<= (m/magnitude (:gradient state))
             cutoff))))
 
 ;;;; I/O
@@ -222,8 +226,7 @@
   (fn [state]
     (apply util/sprintf fmt
            (for [arg args]
-             (force
-               (arg state))))
+             (arg state)))
     (flush)
     (terminate? state)))
 
@@ -240,10 +243,10 @@
   (outputf terminate?
            "f = % .8e, |grad| = % .8e, |dx| = % .8e%n"
            :value
-           (comp m/magnitude force :gradient)
+           (comp m/magnitude :gradient)
            (fn [state]
              (if-not (:initial-step state)
-               (m/magnitude (force (:last-step state)))
+               (m/magnitude (:last-step state))
                Double/NaN))))
 
 (defn pause
