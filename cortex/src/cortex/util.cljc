@@ -320,6 +320,30 @@
   (or (get item kywd)
       (b/array data)))
 
+(def DEFAULT-TOLERANCE 0.001)
+(def DEFAULT-MAX-TESTS 100)
+
+(defn converges?
+  "Tests if a sequence of array values converges to a target value, with a given tolerance.
+   Returns nil if convergence does not happen, the success value from the sequence if it does."
+  ([sequence target]
+   (converges? sequence target nil))
+  ([sequence target {:keys [tolerance max-tests test-fn hits-needed] :as options}]
+   (let [tolerance (or tolerance DEFAULT-TOLERANCE)
+         max-tests (long (or max-tests DEFAULT-MAX-TESTS))
+         test-fn (or test-fn identity)
+         hits-needed (long (or hits-needed 1))]
+     (loop [i 0
+            hits 0
+            sequence (seq sequence)]
+       (when (< i max-tests)
+         (if-let [v (first sequence)]
+           (if (m/equals target (test-fn v) tolerance) ;; equals with tolerance
+             (if (>= (inc hits) hits-needed)
+               v
+               (recur (inc i) (inc hits) (next sequence)))
+             (recur (inc i) 0 (next sequence)))))))))
+
 ;;;; Confusion matrices
 
 (defn confusion-matrix
