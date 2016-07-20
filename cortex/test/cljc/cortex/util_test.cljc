@@ -29,5 +29,5 @@
   (is (not (converges? (range 10) 15)))
   (is (converges? (range 10) 15 {:tolerance 10})))
 
-(deftest test-mse-gardient
+(deftest test-mse-gradient
   (is (m/equals [-2 0 2] (mse-gradient-fn [10 11 12] [11 11 11]))))
