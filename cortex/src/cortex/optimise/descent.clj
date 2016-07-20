@@ -52,7 +52,7 @@
            params-history [initial-params]
            value-history [(cp/output function)]
            gradient-history [(cp/gradient function)]]
-      (if-let [{:keys [lrate force?]}
+      (if-let [{:keys [lrate force? back]}
                (loop []
                  (print (util/sformat prompt
                                       (peek value-history)
@@ -60,38 +60,58 @@
                  (flush)
                  (let [input (read-line)
                        _ (when *emacs* (println input))
-                       input (str/trim input)
-                       force? (.startsWith input "force")
-                       input (-> input
-                               (str/replace-first #"^force" "")
-                               (str/trim))]
-                   (if (seq input)
-                     (try
-                       {:lrate (util/parse-double input)
-                        :force? force?}
-                       (catch NumberFormatException _))
-                     (if-let [last-lrate (peek lrate-history)]
-                       {:lrate last-lrate
-                        :force? force?}
-                       (recur)))))]
-        (let [step (* (if normalize?
-                        (m/normalise (peek gradient-history))
-                        (peek gradient-history))
-                      (- lrate))
-              params (+ (peek params-history)
-                        step)
-              function (cp/update-parameters function params)
-              value (cp/output function)]
-          (if (or (< value (peek value-history))
-                  force?)
-            (recur (conj lrate-history lrate)
-                   (conj params-history params)
-                   (conj value-history value)
-                   (conj gradient-history (cp/gradient function)))
-            (recur (conj lrate-history lrate)
-                   (conj params-history (peek params-history))
-                   (conj value-history (peek value-history))
-                   (conj gradient-history (peek gradient-history)))))
+                       input (str/trim input)]
+                   (if (.startsWith input "back")
+                     (let [input (-> input
+                                   (str/replace-first #"^back" "")
+                                   (str/trim))]
+                       (or (try
+                             {:back (if (seq input)
+                                      (let [back (util/parse-long input)]
+                                        (if (neg? back)
+                                          (throw (NumberFormatException.))
+                                          back))
+                                      1)}
+                             (catch NumberFormatException _))
+                           (recur)))
+                     (let [force? (.startsWith input "force")
+                           input (-> input
+                                   (str/replace-first #"^force" "")
+                                   (str/trim))]
+                       (if (seq input)
+                         (or (try
+                               {:lrate (util/parse-double input)
+                                :force? force?}
+                               (catch NumberFormatException _))
+                             (when force? (recur)))
+                         (if-let [last-lrate (peek lrate-history)]
+                           {:lrate last-lrate
+                            :force? force?}
+                           (recur)))))))]
+        (if back
+          (let [length (max 1 (- (count params-history) back))]
+            (recur (m/subvector lrate-history 0 (dec length))
+                   (m/subvector params-history 0 length)
+                   (m/subvector value-history 0 length)
+                   (m/subvector gradient-history 0 length)))
+          (let [step (* (if normalize?
+                          (m/normalise (peek gradient-history))
+                          (peek gradient-history))
+                        (- lrate))
+                params (+ (peek params-history)
+                          step)
+                function (cp/update-parameters function params)
+                value (cp/output function)]
+            (if (or (< value (peek value-history))
+                    force?)
+              (recur (conj lrate-history lrate)
+                     (conj params-history params)
+                     (conj value-history value)
+                     (conj gradient-history (cp/gradient function)))
+              (recur (conj lrate-history lrate)
+                     (conj params-history (peek params-history))
+                     (conj value-history (peek value-history))
+                     (conj gradient-history (peek gradient-history))))))
         (peek params-history)))))
 
 ;;;; Instrumented gradient descent
