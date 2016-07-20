@@ -139,12 +139,147 @@
 ;;; but makes a few improvements, like having the seq not return
 ;;; map entries with Delays still in them, supporting reduce-kv,
 ;;; and having a prettier str representation.
+
+;;;; Lazy maps -- convenience macro for customizing pr-str
+
+(defmacro extend-print
+  [class str-fn]
+  `(do
+     (defmethod print-dup ~class
+       [obj# ^Writer writer#]
+       (.write writer# ^String (~str-fn obj#)))
+     (defmethod print-method ~class
+       [obj# ^Writer writer#]
+       (.write writer# ^String (~str-fn obj#)))))
+
+;;;; Lazy maps -- placeholder text for unrealized values
+
+(defrecord PlaceholderText [text])
+
+(extend-print PlaceholderText :text)
+
+;;;; Lazy maps -- map entry type
+
+(deftype LazyMapEntry [key_ val_]
+
+  clojure.lang.Associative
+  (containsKey [this k]
+    (boolean (#{0 1} k)))
+  (entryAt [this k]
+    (cond
+      (= k 0) (map-entry 0 key_)
+      (= k 1) (LazyMapEntry. 1 val_)
+      :else nil))
+
+  clojure.lang.IFn
+  (invoke [this k]
+    (.valAt this k))
+
+  clojure.lang.IHashEq
+  (hasheq [this]
+    (.hasheq
+      ^clojure.lang.IHashEq
+      (vector key_ (force val_))))
+
+  clojure.lang.ILookup
+  (valAt [this k]
+    (cond
+      (= k 0) key_
+      (= k 1) (force val_)
+      :else nil))
+  (valAt [this k not-found]
+    (cond
+      (= k 0) key_
+      (= k 1) (force val_)
+      :else not-found))
+
+  clojure.lang.IMapEntry
+  (key [this] key_)
+  (val [this] (force val_))
+
+  clojure.lang.Indexed
+  (nth [this i]
+    (cond
+      (= i 0) key_
+      (= i 1) (force val_)
+      (integer? i) (throw (IndexOutOfBoundsException.))
+      :else (throw (IllegalArgumentException. "Key must be integer")))
+    (.valAt this i))
+  (nth [this i not-found]
+    (try
+      (.nth this i)
+      (catch Exception _ not-found)))
+
+  clojure.lang.IPersistentCollection
+  (count [this] 2)
+  (empty [this] false)
+  (equiv [this o]
+    (.equiv
+      [key_ (force val_)]
+      o))
+
+  clojure.lang.IPersistentStack
+  (peek [this] (force val_))
+  (pop [this] [key_])
+
+  clojure.lang.IPersistentVector
+  (assocN [this i v]
+    (.assocN [key_ (force val_)] i v))
+  (cons [this o]
+    (.cons [key_ (force val_)] o))
+
+  clojure.lang.Reversible
+  (rseq [this] (lazy-seq (list (force val_) key_)))
+
+  clojure.lang.Seqable
+  (seq [this]
+    (cons key_ (lazy-seq (list (force val_)))))
+
+  clojure.lang.Sequential
+
+  java.io.Serializable
+
+  java.lang.Comparable
+  (compareTo [this o]
+    (.compareTo
+      ^java.lang.Comparable
+      (vector key_ (force val_))
+      o))
+
+  java.lang.Iterable
+  (iterator [this]
+    (.iterator
+      ^java.lang.Iterable
+      (.seq this)))
+
+  java.lang.Object
+  (toString [this]
+    (str [key_ (if (and (delay? val_)
+                        (not (realized? val_)))
+                 (->PlaceholderText "<unrealized>")
+                 (force val_))]))
+
+  java.util.Map$Entry
+  (getKey [this] key_)
+  (getValue [this] (force val_))
+
+  java.util.RandomAccess)
+
+(defn lazy-map-entry
+  [k v]
+  (LazyMapEntry. k v))
+
+(extend-print LazyMapEntry #(.toString ^LazyMapEntry %))
+
+;;;; Lazy maps -- map type
+
 (deftype LazyMap [^clojure.lang.IPersistentMap contents]
+
   clojure.lang.Associative
   (containsKey [this k]
     (.containsKey contents k))
   (entryAt [this k]
-    (map-entry k (.valAt this k)))
+    (lazy-map-entry k (.valAt contents k)))
 
   clojure.lang.IFn
   (invoke [this k]
@@ -185,6 +320,10 @@
     (.empty contents))
   (cons [this o]
     (LazyMap. (.cons contents o)))
+  (equiv [this o]
+    (.equiv
+      ^clojure.lang.IPersistentCollection
+      (into {} this) o))
 
   clojure.lang.IPersistentMap
   (assoc [this key val]
@@ -196,7 +335,7 @@
   (seq [this]
     ;; Using the higher-arity form of map prevents chunking.
     (map (fn [[k v] _]
-           (map-entry k (force v)))
+           (lazy-map-entry k v))
          contents
          (repeat nil)))
 
@@ -204,33 +343,17 @@
   (iterator [this]
     (.iterator
       ^java.lang.Iterable
-      (.seq this))))
+      (.seq this)))
 
-(defrecord PlaceholderText [text])
+  java.lang.Object
+  (toString [this]
+    (str (map-vals #(if (and (delay? %)
+                             (not (realized? %)))
+                      (->PlaceholderText "<unrealized>")
+                      (force %))
+                   contents))))
 
-(defmethod print-dup PlaceholderText
-  [placeholder ^Writer writer]
-  (.write writer ^String (:text placeholder)))
-
-(defmethod print-method PlaceholderText
-  [placeholder ^Writer writer]
-  (.write writer ^String (:text placeholder)))
-
-(defn lazy-map->str
-  ^String [^LazyMap m]
-  (str (map-vals #(if (and (delay? %)
-                           (not (realized? %)))
-                    (->PlaceholderText "<unrealized>")
-                    (force %))
-                 (.contents m))))
-
-(defmethod print-dup LazyMap
-  [m ^Writer writer]
-  (.write writer (lazy-map->str m)))
-
-(defmethod print-method LazyMap
-  [m ^Writer writer]
-  (.write writer (lazy-map->str m)))
+(extend-print LazyMap #(.toString ^LazyMap %))
 
 (defn ->lazy-map
   [map]
