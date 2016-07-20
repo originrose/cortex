@@ -239,11 +239,12 @@
     (LazyMap. map)))
 
 (defmacro lazy-map
-  [& forms]
+  [map]
   `(->lazy-map
-     ~(->> forms
+     ~(->> map
+        (apply concat)
         (partition 2)
-        (map (fn [[k v]] [k `(delay ~v)]))
+        (clojure.core/map (fn [[k v]] [k `(delay ~v)]))
         (into {}))))
 
 (defn force-map
