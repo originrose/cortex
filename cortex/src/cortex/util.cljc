@@ -355,15 +355,9 @@
 
 (extend-print LazyMap #(.toString ^LazyMap %))
 
-(defn ->lazy-map
-  [map]
-  (if (instance? LazyMap map)
-    map
-    (LazyMap. map)))
-
 (defmacro lazy-map
   [map]
-  `(->lazy-map
+  `(->LazyMap
      ~(->> map
         (apply concat)
         (partition 2)

@@ -124,7 +124,7 @@
          initial-step true]
     (let [function (cp/update-parameters function params)
           gradient (cp/gradient function)
-          state (util/->lazy-map
+          state (util/->LazyMap
                   (merge
                     (if-not initial-step
                       (merge

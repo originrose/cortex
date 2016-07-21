@@ -61,7 +61,7 @@
 
 (defn make-lazy-map
   []
-  (->lazy-map
+  (->LazyMap
     {:a (delay (error "value :a should not be realized"))
      :b 50
      :c (delay (error "value :c should not be realized"))}))
@@ -71,13 +71,13 @@
     (is (= (:b (make-lazy-map))
            50))
     (is (= (with-out-str
-             (:c (->lazy-map
+             (:c (->LazyMap
                    {:a (delay (error "value :a should not be realized"))
                     :b 50
                     :c (delay (print "value :c was realized"))})))
            "value :c was realized")))
   (testing "lazy maps can be called as fns"
-    (is (= (let [m (->lazy-map
+    (is (= (let [m (->LazyMap
                      {:a 1
                       :b 2})]
              (m :b))
@@ -86,7 +86,7 @@
     (is (= (set
              (keys (make-lazy-map)))
            #{:a :b :c}))
-    (is (= (->> (->lazy-map
+    (is (= (->> (->LazyMap
                   {:a (delay (println "value :a was realized"))
                    :b (delay (println "value :b was realized"))
                    :c (delay (println "value :c was realized"))})
@@ -114,12 +114,12 @@
     (is (= (get (make-lazy-map) :d :default)
            :default)))
   (testing "seqs for lazy maps do not contain delays"
-    (is (= (set (->lazy-map
+    (is (= (set (->LazyMap
                   {:a 1
                    :b (delay 2)}))
            #{[:a 1] [:b 2]})))
   (testing "equality for lazy maps"
-    (is (= (->lazy-map
+    (is (= (->LazyMap
              {:a 1
               :b (delay 2)})
            {:a 1
@@ -128,21 +128,21 @@
     (is (= (reduce (fn [m [k v]]
                      (assoc m k v))
                    {}
-                   (->lazy-map
+                   (->LazyMap
                      {:a 1
                       :b (delay 2)}))
            {:a 1 :b 2}))
     (is (= (reduce-kv (fn [m k v]
                         (assoc m k v))
                       {}
-                      (->lazy-map
+                      (->LazyMap
                         {:a 1
                          :b (delay 2)}))
            {:a 1 :b 2})))
   (testing "string representation of lazy maps"
-    (is (= (pr-str (->lazy-map {:a 1}))
+    (is (= (pr-str (->LazyMap {:a 1}))
            "{:a 1}"))
-    (is (= (pr-str (->lazy-map {:a (delay 1)}))
+    (is (= (pr-str (->LazyMap {:a (delay 1)}))
            "{:a <unrealized>}")))
   (testing "string representation of lazy map entries"
     (is (= (pr-str (lazy-map-entry :a 1))
