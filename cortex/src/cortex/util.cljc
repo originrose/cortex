@@ -49,6 +49,11 @@
        (max (Math/abs a) (Math/abs b)))
     0))
 
+(defn avg
+  "Calculates the arithmetic mean of a sequence of numbers."
+  [& xs]
+  (/ ^double (apply + xs) (count xs)))
+
 ;;;; Random number generation
 
 #?(:clj

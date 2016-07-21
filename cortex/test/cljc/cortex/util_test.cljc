@@ -18,6 +18,12 @@
   (is (= (relative-error 9 10) 0.1))
   (is (= (relative-error 10 9) 0.1)))
 
+(deftest avg-test
+  (is (< (Math/abs (- (avg 1 3 7) (double 11/3)))
+         1e-6))
+  (is (= (apply avg (range 10)) 4.5))
+  (is (= (avg 2 -3) -0.5)))
+
 ;;;; Sequences
 
 (deftest seq-like?-test
