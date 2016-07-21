@@ -289,7 +289,7 @@
 
   clojure.lang.IKVReduce
   (kvreduce [this f init]
-    (reduce-kv (map-vals force contents) f init))
+    (reduce-kv f init (into {} this)))
 
   clojure.lang.ILookup
   (valAt [this k]
