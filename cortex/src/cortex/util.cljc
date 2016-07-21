@@ -553,14 +553,19 @@
   https://docs.oracle.com/javase/8/docs/api/java/util/Formatter.html
   for details. Groups match the argument number (if given) and the
   remainder of the format specifier, respectively."
-  #"%(?:([1-9][0-9]*)\$)?([-#+ 0,(]*(?:[1-9][0-9]*)?(?:\.[0-9]+)?(?:[bBhHsScCdoxXeEfgGaA]|[tT][HIklMSLNpzZsQBbhAaCYyjmdeRTrDFc]))")
+  #"%(?:([1-9][0-9]*)\$)?([-#+ 0,(]*(?:[1-9][0-9]*)?(?:\.[0-9]+)?(?:[bBhHsScCdoxXeEfgGaA%n]|[tT][HIklMSLNpzZsQBbhAaCYyjmdeRTrDFc]))")
 
 (defn sformat
   "Like format, but smarter. If one of the args is a collection,
   the format specifier is mapped over each element of the collection,
   and the results are placed in the formatted string as a vector.
-  Also works on nested collections. If the conversion is 'f', will
-  try to cast the argument to a double before passing it to format."
+  Also works on nested collections. For some format types, will
+  attempt to cast the object before formatting. That is,
+  (sformat \"%.1f\" 42) will return \"42.0\" rather than throwing an
+  IllegalFormatConversionException.
+
+  Will not necessarily handle malformed format specifiers gracefully,
+  but anything legal according to the Javadoc is fair game."
   [fmt & args]
   (let [fmt-strings
         (for [[fmt-string ^long arg-index fmt-specifier]
@@ -569,34 +574,33 @@
                      arg-index 1]
                 (if (seq unprocessed)
                   (let [match (first unprocessed)
-                        positional? (nth match 1)]
+                        positional? (nth match 1)
+                        argless? (#{\% \n} (last (nth match 2)))]
                     (recur (rest unprocessed)
                            (conj processed (update match 1 (if positional?
                                                              parse-long
                                                              (constantly arg-index))))
-                           (if positional?
+                           (if (or positional? argless?)
                              arg-index
                              (inc arg-index))))
                   processed))]
           (let [arg-index (dec arg-index)
-                arg (nth args arg-index)]
-            (str/replace
-              (if (seq-like? arg)
-                (str "["
-                     (str/join " "
-                               (map (fn [item]
-                                      (sformat (str "%" fmt-specifier)
-                                               item))
-                                    arg))
-                     "]")
-                (format (str "%" fmt-specifier)
-                        (case (last fmt-specifier)
-                          (\e \E \f \g \G \a \A) (double arg)
-                          (\d \o \x \X) (long arg)
-                          arg)))
-              "%" "%%")))
+                arg (nth args arg-index nil)]
+            (if (seq-like? arg)
+              (str "["
+                   (str/join " "
+                             (map (fn [item]
+                                    (sformat (str "%" fmt-specifier)
+                                             item))
+                                  arg))
+                   "]")
+              (format (str "%" fmt-specifier)
+                      (case (last fmt-specifier)
+                        (\e \E \f \g \G \a \A) (double arg)
+                        (\d \o \x \X) (long arg)
+                        arg)))))
         splits (str/split fmt fmt-string-regex)]
-    (format (apply str (interleave-all splits fmt-strings)))))
+    (apply str (interleave-all splits fmt-strings))))
 
 (defn sprintf
   "Like printf, but uses sformat instead of format."
