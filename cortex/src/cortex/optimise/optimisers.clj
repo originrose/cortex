@@ -15,9 +15,9 @@
   the reason that APersistentMap rather than IPersistentMap is
   used.
 
-  (Note that the PParameters protocol is also implemented by
-  pure functions, so it is not done here, but rather in the
-  shared namespace cortex.optimise.parameters.)
+  (Note that, for maps, the PParameters protocol is also implemented
+  by pure functions, so it is not done here, but rather in the shared
+  namespace cortex.optimise.parameters.)
 
   A Clojure function representing a gradient optimiser must
   take parameter and gradient vectors and return an updated
@@ -39,19 +39,28 @@
 
 ;;;; Protocol extensions
 
+(defn fn->map
+  [function]
+  {:update (fn [state gradient]
+             (let [state (update state :params function gradient)]
+               ;; This makes it much easier to debug a common mistake:
+               (when (map? (:params state))
+                 (throw (IllegalStateException.
+                          "fn acting as optimiser must return vector: did you need to call the fn to produce an optimiser map or fn?")))
+               state))})
+
 (extend-type clojure.lang.IFn
+  cp/PParameters
+  (parameters [this])
+  (update-parameters [this params]
+    (cp/update-parameters (fn->map this) params))
+
   cp/PGradientOptimiser
-  (compute-parameters [this gradient parameters]
-    (cp/compute-parameters
-      {:update (fn [state gradient]
-                 (let [state (update state :params this gradient)]
-                   ;; This makes it much easier to debug a common mistake:
-                   (when (map? (:params state))
-                     (throw (IllegalStateException.
-                              "fn acting as optimiser must return vector: did you need to call the fn to produce an optimiser map or fn?")))
-                   state))}
-      gradient
-      parameters)))
+  (compute-parameters [this gradient params]
+    (cp/compute-parameters (fn->map this) gradient params))
+
+  cp/PIntrospection
+  (get-state [this]))
 
 (extend-type clojure.lang.APersistentMap
   cp/PGradientOptimiser
