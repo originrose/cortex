@@ -404,9 +404,7 @@
                          (Math/sqrt (inc i)))))))})
 
 (def sum-of-different-powers
-  "-1 ≤ x ≤ 1
-  performs poorly on gradient check, but appears to
-  be implemented correctly"
+  "-1 ≤ x ≤ 1"
   {:value (fn [args]
             (m/esum
               (m/emap-indexed (fn [[i] xi]
@@ -461,9 +459,7 @@
 
 (defn michalewicz
   "0 ≤ x ≤ π
-  requires parameter m
-  performs poorly on gradient check, but appears to
-  be implemented correctly"
+  requires parameter m"
   [m]
   {:value (fn [args]
             (- (m/esum
