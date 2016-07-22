@@ -252,8 +252,8 @@
                  (map (partial apply +))
                  (m/array :vectorz)))})
 
-;; The following functions are described at
-;; http://www.geatbx.com/download/GEATbx_ObjFunExpl_v38.pdf
+;;; The following functions are described at
+;;; http://www.geatbx.com/download/GEATbx_ObjFunExpl_v38.pdf
 
 (def de-jong
   "-5.12 ≤ x ≤ 5.12"
