@@ -31,7 +31,7 @@
             [clojure.string :as str]
             [cortex.nn.protocols :as cp]
             [cortex.optimise.parameters]
-            [cortex.util :as util]))
+            [cortex.util :as util :refer [def-]]))
 
 ;;;; Protocol extensions
 
@@ -60,72 +60,168 @@
 
 ;;;; Gradient checker
 
+(defn random-point
+  "Generates a random point within dist of center."
+  [center dist]
+  ;; If we just naively generated a uniform random number for each dimension,
+  ;; most of our vectors would have at least one near-zero coordinate. This would
+  ;; cause pathological behavior with some (pathological) objective functions.
+  ;; To avoid this, we first generate a random unit vector on the
+  ;; param-count-dimensional hypersphere, and then rescale it randomly.
+  ;; See http://math.stackexchange.com/a/44701/160658 for information on generating
+  ;; random unit vectors.
+  (->> (repeatedly (m/ecount center) util/rand-gaussian)
+    (m/array :vectorz)
+    (m/normalise)
+    ;; Not using (rand dist) allows for dist to be a vector.
+    (* dist (rand))
+    (+ (m/array :vectorz center))))
+
+(defn numerical-gradient
+  "Calculates the approximate value of the ith component of the gradient of a function
+  at the parameter vector x, using the symmetric different quotient formula. See
+  https://en.wikipedia.org/wiki/Numerical_differentiation for information on this
+  technique."
+  [function x i h]
+  (/ (- (value function (m/mset x i (+ (m/mget x i) h)))
+        (value function (m/mset x i (- (m/mget x i) h))))
+     2 h))
+
+(defn- error->rating
+  "Converts a relative error to an integer rating, as described in check-gradient."
+  [error]
+  (long (util/clamp 0
+                    (- (Math/floor (Math/log10 error)))
+                    20)))
+
+(defn- rating->class
+  "Converts a rating to a rating class, as described in check-gradient."
+  [rating]
+  (condp > rating
+    2 :very-bad
+    4 :bad
+    7 :maybe-okay
+    :all-good))
+
+(defn- rating->class-str
+  "Like rating->class, but returns a printable string."
+  [rating]
+  (condp > rating
+    2 "very bad"
+    4 "bad"
+    7 "maybe okay"
+    "all good"))
+
+(defn- print-ratings
+  "Prints a frequency map for the ratings of the errors, in a readable format."
+  [errors]
+  (println "  Count  Rating")
+  (println "-------  ------")
+  (doseq [[rating cnt] (->> errors
+                         (map error->rating)
+                         frequencies
+                         sort)]
+    (util/sprintf "%7d %s%-6d (%s)%n"
+                  cnt
+                  (case rating
+                    0
+                    "≤"
+                    20
+                    "≥"
+                    " ")
+                  rating
+                  (rating->class-str rating))))
+
+(def- class-values
+  "Used for sorting the classes from least desirable to most desirable in print-classes."
+  ;; This is extremely inelegant, but easy to understand. Feel free to improve the
+  ;; implementation of print-classes so that this map is unnecessary.
+  {"very bad" 0
+   "bad" 1
+   "maybe okay" 2
+   "all good" 3})
+
+(defn- print-classes
+  "Prints a frequency map for the rating classes of the errors, in a readable format."
+  [errors]
+  (println "  Count  Class     ")
+  (println "-------  ----------")
+  (doseq [[cls cnt] (->> errors
+                      (map error->rating)
+                      (map rating->class-str)
+                      frequencies
+                      (sort-by #(get class-values (key %))))]
+    (util/sprintf "%7d  %-10s%n" cnt cls)))
+
 (defn check-gradient
-  "Runs a gradient check. The first argument is the function, and param-count is the number
-  of entries in the parameter vector. Since functions can be variable-arity, passing param-count
-  is required. The gradient is computed at a number of points (given by points, which
-  defaults to 100) centered at center (defaults to [0, 0, ..., 0]) and with a maximum
-  spread of dist (defaults to 1). At each point, the numerical gradient is computed
-  using the difference quotient (f(x + h) - f(x - h)) / (2h) for each dimension. The
-  relative error is computed for each dimension at each point (or, if :dims is provided,
-  that many dimensions, chosen randomly), and each error is
-  transformed by #(- (Math/floor (Math/log10 %))). Typically, this scale will place
-  errors on a scale from 0-20; errors outside this range are clamped to it. If :print
-  is falsy, then the list of relative errors is returned; otherwise (default), a
-  user-friendly frequency listing is printed and nil is returned. The groupings used to
-  categorize relative errors are as follows:
-    error > 1e-2          (very bad)
-    1e-2 ≥ error > 1e-4   (bad)
-    1e-4 ≥ error > 1e-7   (maybe okay)
-    1e-7 ≥ error          (all good)
-  The techniques used in this function are described at:
-  http://cs231n.github.io/neural-networks-3/"
-  [function param-count & {:keys [center dist points h print dims]
-                           :or {dist 1 points 100 h 1e-5 print true dims param-count}}]
-  (let [center (m/array :vectorz (or center (repeat param-count 0)))
+  "Checks if the analytic gradient of a function agrees with its numeric gradient, i.e. the
+  :gradient is implemented correctly. The first argument is the function, and param-count is
+  the number of entries in the parameter vector. Since functions can be variable-arity, passing
+  param-count is always required.
+
+  The analytic gradient is computed at a number of points (given by points, which defaults to
+  100) centered at center (defaults to [0, 0, ..., 0]) and with a maximum spread of dist
+  (defaults to 1). At each point, the numerical gradient is computed for each dimension (or, if
+  dims is provided, that many dimensions, chosen randomly) using the symmetric difference
+  quotient, and the relative errors per dimension are determined.
+
+  Relative errors can be automatically rated and classified to make them more human-readable.
+  The rating for a relative error is given by rating = clamp(0, -floor(log10(relative error)), 20),
+  and classes are defined by the following table:
+
+           error > 1e-2   (very bad)     rating < 2
+    1e-2 ≥ error > 1e-4   (bad)          2 ≤ rating < 4
+    1e-4 ≥ error > 1e-7   (maybe okay)   4 ≤ rating < 7
+    1e-7 ≥ error          (all good)     7 ≤ rating
+
+  The format of the results is determined by the return parameter (defaults to :print), according
+  to the following listing:
+
+  :errors - return list of relative errors
+  :rating-list - return list of ratings
+  :average-rating - return the average rating
+  :ratings - return frequency map of ratings
+  :print - print frequency table of ratings
+  :class-list - return list of classes
+  :classes - return freqency map of classes
+  :print-classes - print frequency table of classes
+
+  See http://cs231n.github.io/neural-networks-3/ for more information about the techniques used in
+  this function."
+  [function param-count & {:keys [center dist points h return dims]
+                           :or {dist 1 points 100 h 1e-5 return :print dims param-count}}]
+  (let [;; This vector is converted to a Vectorz vector by the random-point function,
+        ;; so no need to do it twice.
+        center (or center (repeat param-count 0))
         errors (mapcat (fn [x]
                          (->> (gradient function x)
                            (map-indexed vector)
                            shuffle
                            (take dims)
-                           (map (fn [[i grad-component :as pair]]
+                           (map (fn [[i grad-component]]
                                   (util/relative-error
-                                    (/ (- (value function (m/mset x i (+ (m/mget x i) h)))
-                                          (value function (m/mset x i (- (m/mget x i) h))))
-                                       2 h)
+                                    (numerical-gradient function x i h)
                                     grad-component)))))
-                       (repeatedly points
-                                   (fn []
-                                     (* dist
-                                        (m/array
-                                          :vectorz
-                                          (repeatedly param-count rand))))))]
-    (if print
-      (do
-        (println "  Count  Rating")
-        (println "-------  ------")
-        (doseq [[rating cnt] (->> errors
-                               (map (fn [error]
-                                      (long (util/clamp 0
-                                                        (- (Math/floor (Math/log10 error)))
-                                                        20))))
-                               frequencies
-                               sort)]
-          (util/sprintf "%7d %s%-6d (%s)%n"
-                        cnt
-                        (case rating
-                          0
-                          "≤"
-                          20
-                          "≥"
-                          " ")
-                        rating
-                        (condp > rating
-                          2 "very bad"
-                          4 "bad"
-                          7 "maybe okay"
-                          "all good"))))
-      errors)))
+                       (repeatedly points #(random-point center dist)))]
+    (case return
+      :errors errors
+      :rating-list (map error->rating errors)
+      :average-rating (->> errors
+                        (map error->rating)
+                        (apply util/avg))
+      :ratings (->> errors
+                 (map error->rating)
+                 frequencies)
+      :print (print-ratings errors)
+      :class-list (->> errors
+                    (map error->rating)
+                    (map rating->class))
+      :classes (->> errors
+                 (map error->rating)
+                 (map rating->class)
+                 frequencies)
+      :print-classes (print-classes errors)
+      (throw (IllegalArgumentException. (str "invalid value for :return (" return ")"))))))
 
 ;;;; Sample functions
 
