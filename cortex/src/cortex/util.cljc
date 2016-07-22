@@ -629,6 +629,8 @@
 ;; analytic gradient computed by the network and the numerical gradient, but it
 ;; would be nice if it just said, yes!  Need to figure out how close they should
 ;; be.  Maybe just check that each difference is < 0.01 ???
+;;
+;; You may want to check cortex.optimise.functions/check-gradient. -- Radon 07/16
 (defn gradient-check
   "Use a finite difference approximation of the derivative to verify
   that backpropagation and the derivatives of layers and activation functions are correct.
