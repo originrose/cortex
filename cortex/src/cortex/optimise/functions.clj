@@ -574,6 +574,8 @@
                            (Math/cos yx)
                            (Math/sin xy)))))))})
 
+;;; TODO: it looks like this function is broken. After it's fixed,
+;;; a test should be added to cortex.optimise.functions-test.
 (def six-hump-camel-back
   "-3 ≤ x ≤ 3
   -2 ≤ y ≤ 2
