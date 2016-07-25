@@ -19,10 +19,15 @@
   (is (= (relative-error 10 9) 0.1)))
 
 (deftest avg-test
-  (is (< (Math/abs (- (avg 1 3 7) (double 11/3)))
-         1e-6))
-  (is (= (apply avg (range 10)) 4.5))
-  (is (= (avg 2 -3) -0.5)))
+  (is (approx= 1e-12
+               (avg 1 3 7)
+               (double 11/3)))
+  (is (approx= 1e-12
+               (apply avg (range 10))
+               4.5))
+  (is (approx= 1e-12
+               (avg 2 -3)
+               -0.5)))
 
 ;;;; Sequences
 
