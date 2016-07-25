@@ -50,7 +50,7 @@
 
 (defn relative-error
   "Calculates the relative error between two values."
-  [^double a ^double b]
+  ^double [^double a ^double b]
   (if-not (and (zero? a) (zero? b))
     (/ (Math/abs (- a b))
        (max (Math/abs a) (Math/abs b)))
@@ -144,6 +144,36 @@
 (defn map-entry
   [k v]
   (clojure.lang.MapEntry/create k v))
+
+(defn approx=
+  "Determines if the collections are all equal, but allows floating-point
+  numbers to differ by a specified relative error. Works with arbitrarily
+  deeply nested collections. For collections with no floating-point numbers,
+  behaves the same as regular =. Also works if you provide plain
+  floating-point numbers instead of collections. Notice that integers will
+  be compared exactly, because presumably you will not have rounding errors
+  with integers. Thus:
+
+  (approx= 0.1 10 11) => false
+  (approx= 0.1 10.0 11.0) => true
+
+  Does not require collections to be of compatible types, i.e. sets can be
+  equal to vectors. As a result, works seamlessly with core.matrix vectors
+  of different implementations."
+  [error & colls]
+  (->> colls
+    (map (partial tree-seq seq-like? seq))
+    (apply map (fn [& items]
+                 (cond
+                   (every? float? items)
+                   (<= (relative-error (apply min items)
+                                       (apply max items))
+                       ^double error)
+                   (every? seq-like? items)
+                   true
+                   :else
+                   (apply = items))))
+    (every? identity)))
 
 ;;;; Lazy maps
 

@@ -63,6 +63,33 @@
   (is (= (val (map-entry :a :b)) :b))
   (is (= (vec (map-entry nil nil)) [nil nil])))
 
+(deftest approx=-test
+  (testing "comparing floats"
+    (is (false? (approx= 0.1 10 11)))
+    (is (false? (approx= 0.1 10 11.0)))
+    (is (true? (approx= 0.1 10.0 11.0)))
+    (is (false? (approx= 0.09 10.0 11.0))))
+  (testing "comparing more than two floats"
+    (is (false? (approx= 0.1 10.0 10.75 11.5)))
+    (is (true? (approx= 0.1 10.0 10.5 11.0))))
+  (testing "comparing vectors"
+    (is (false? (approx= 0.1
+                         (m/array :vectorz [10.0 11.0])
+                         [11.5 10.0])))
+    (is (true? (approx= 0.1
+                        (m/array :vectorz [10.0 11.0])
+                        [11.0 10.0]))))
+  (testing "comparing nested data structures"
+    (is (false? (approx= 0.1
+                         {:a [10.0 11.0] :b 10.0}
+                         {:a [11.0 10.0] :c 10.0})))
+    (is (false? (approx= 0.1
+                         {:a [10.0 11.0] :b 10.0}
+                         {:a [12.0 10.0] :b 10.0})))
+    (is (true? (approx= 0.1
+                        {:a [10.0 11.0] :b 10.0}
+                        {:a [11.0 10.0] :b 10.0})))))
+
 ;;;; Lazy maps
 
 (defn make-lazy-map
