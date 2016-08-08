@@ -272,11 +272,11 @@
           (> (swap! num-steps* inc) n)))))
 
 (defn limit-params
-  [terminate? cutoff params]
+  [terminate? cutoff target]
   (fn [state]
     (or (terminate? state)
         (<= (m/distance (- (:params state)
-                           params))
+                           target))
             cutoff))))
 
 (defn limit-value
