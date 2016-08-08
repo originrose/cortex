@@ -144,8 +144,8 @@
     (is (= (-> (make-lazy-map)
              (dissoc :a :b)
              (keys)
-             (set)
-             #{:c}))))
+             (set))
+           #{:c})))
   (testing "lazy maps support default value for lookup"
     (is (= (:d (make-lazy-map) :default)
            :default))
