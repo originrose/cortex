@@ -123,6 +123,13 @@
     (if-let [ss (seq (filter identity (map seq colls)))]
       (concat (map first ss) (apply interleave-all (map rest ss))))))
 
+(defn pad
+  "If coll is of length less than n, pads it to length n using pad-seq."
+  [n pad-seq coll]
+  (if (seq (drop n coll))
+    coll
+    (take n (concat coll pad-seq))))
+
 ;;;; Collections
 
 (defn map-keys
@@ -161,19 +168,21 @@
   equal to vectors. As a result, works seamlessly with core.matrix vectors
   of different implementations."
   [error & colls]
-  (->> colls
-    (map (partial tree-seq seq-like? seq))
-    (apply map (fn [& items]
-                 (cond
-                   (every? float? items)
-                   (<= (relative-error (apply min items)
-                                       (apply max items))
-                       ^double error)
-                   (every? seq-like? items)
-                   true
-                   :else
-                   (apply = items))))
-    (every? identity)))
+  (let [seqs (map (partial tree-seq seq-like? seq)
+                  colls)]
+    (and (apply = (map count seqs))
+         (->> seqs
+           (apply map (fn [& items]
+                        (cond
+                          (every? float? items)
+                          (<= (relative-error (apply min items)
+                                              (apply max items))
+                              ^double error)
+                          (every? seq-like? items)
+                          true
+                          :else
+                          (apply = items))))
+           (every? identity)))))
 
 ;;;; Lazy maps
 

@@ -47,6 +47,14 @@
   (is (= (interleave-all [:a :b :c] [:d :e] [:f :g :h :i])
          [:a :d :f :b :e :g :c :h :i])))
 
+(deftest pad-test
+  (is (= (pad 5 (range 5) [:a :b :c])
+         [:a :b :c 0 1]))
+  (is (= (pad 3 (range 5) [:a :b :c])
+         [:a :b :c]))
+  (is (= (pad 2 (range 5) [:a :b :c])
+         [:a :b :c])))
+
 ;;;; Collections
 
 (deftest map-keys-test
@@ -93,7 +101,11 @@
                          {:a [12.0 10.0] :b 10.0})))
     (is (true? (approx= 0.1
                         {:a [10.0 11.0] :b 10.0}
-                        {:a [11.0 10.0] :b 10.0})))))
+                        {:a [11.0 10.0] :b 10.0}))))
+  (testing "lists of different lengths"
+    (is (false? (approx= 0.1
+                         [1.0 2.0 3.0]
+                         [1.0 2.0])))))
 
 ;;;; Lazy maps
 
