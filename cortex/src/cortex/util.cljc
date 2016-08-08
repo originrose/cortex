@@ -21,6 +21,25 @@
   [name & decls]
   (list* `def (with-meta name (assoc (meta name) :private true)) decls))
 
+;;;; Timing
+
+(defmacro ctime*
+  "Returns a map where :return is the value of expr and :time is
+  the CPU time needed to evaluate it, in milliseconds."
+  [expr]
+  `(let [thread# (java.lang.management.ManagementFactory/getThreadMXBean)
+         start# (.getCurrentThreadCpuTime thread#)
+         return# ~expr
+         end# (.getCurrentThreadCpuTime thread#)]
+     {:return return#
+      :time (/ (- end# start#) 1000000.0)}))
+
+(defmacro ctime
+  "Returns the CPU time needed to evaluate expr in a user-friendly
+  string, in the same format as clojure.core/time."
+  [expr]
+  `(format "Elapsed time: %f msecs" (:time (ctime* ~expr))))
+
 ;;;; Mathematics
 
 (defn tanh'
@@ -183,6 +202,27 @@
                           :else
                           (apply = items))))
            (every? identity)))))
+
+(defn vectorize
+  "Recursively turns a data structure into nested vectors. All sequence-like
+  types except maps and strings are transformed into vectors, but the structure
+  of the data is maintained. Transforms core.matrix vectors into normal Clojure
+  vectors.
+
+  (vectorize (list 1 2 {\"key\" #{3 4} (list) (new-vector 3 5)} [6 7]))
+  => [1 2 {\"key\" [4 3], [] [5 5 5]} [6 7]]"
+  [data]
+  (cond
+    (map? data)
+    (into {}
+          (map (fn [[k v]]
+                 [(vectorize k)
+                  (vectorize v)])
+               data))
+    (seq-like? data)
+    (mapv vectorize data)
+    :else
+    data))
 
 ;;;; Lazy maps
 

@@ -4,10 +4,11 @@
   (:refer-clojure :exclude [+ - * /])
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.operators :refer [+ - * /]]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [cortex.nn.protocols :as cp]
-            [cortex.optimise.functions]
-            [cortex.optimise.optimisers]
+            [cortex.optimise.functions :as function]
+            [cortex.optimise.optimisers :as opts]
             [cortex.util :as util]))
 
 ;;;; Config
@@ -169,6 +170,65 @@
     (when-not (or (empty? entry-vectors)
                   (terminate? (first entry-vectors)))
       (recur (rest entry-vectors)))))
+
+(defn run-test
+  [mode {:keys [function optimiser initial-params terminate?]}]
+  (case mode
+    :profile
+    (let [value* (atom 0)
+          gradient* (atom 0)]
+      (-> (util/ctime*
+            (study
+              {:value (fn [params]
+                        (swap! value* inc)
+                        (function/value function params))
+               :gradient (fn [params]
+                           (swap! gradient* inc)
+                           (function/gradient function params))}
+              optimiser
+              initial-params
+              terminate?))
+        (dissoc :return)
+        (assoc :value @value*)
+        (assoc :gradient @gradient*)))
+    (nil :do-run :log)
+    (apply (case mode
+             :study study
+             :do-study do-study
+             :log log)
+           function
+           optimiser
+           initial-params
+           terminate?)
+    (throw (IllegalArgumentException. (str "Unknown mode (" mode ")")))))
+
+(defn run-tests
+  [mode & tests]
+  (map (partial run-test mode) tests))
+
+(defn export-for-mathematica
+  [log desc]
+  (let [log (util/vectorize log)
+        [parameter-fname gradient-fname]
+        (loop [index 1]
+          (let [parameter-fname (str "resources/mathematica/opt" index "-param.txt")
+                gradient-fname (str "resources/mathematica/opt" index "-grad.txt")]
+            (if-not (and (.exists (io/as-file parameter-fname))
+                         (.exists (io/as-file gradient-fname)))
+              [parameter-fname gradient-fname]
+              (recur (inc index)))))]
+    (->> log
+      (map :params)
+      (map (partial str/join ","))
+      (cons desc)
+      (str/join \newline)
+      (spit parameter-fname))
+    (->> log
+      (map :gradient)
+      (map (partial str/join ","))
+      (cons desc)
+      (str/join \newline)
+      (spit gradient-fname))))
 
 ;;;; Termination function builders
 
