@@ -1,4 +1,5 @@
 (ns cortex.util-test
+  (:refer-clojure :exclude [defonce])
   (:require
     #?(:cljs [cljs.test :refer-macros [deftest is testing]]
        :clj [clojure.test :refer [deftest is testing]])

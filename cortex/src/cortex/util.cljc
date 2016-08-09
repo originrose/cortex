@@ -1,4 +1,5 @@
 (ns cortex.util
+  (:refer-clojure :exclude [defonce])
   (:require
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
@@ -16,8 +17,18 @@
 
 ;;;; Vars
 
+(defmacro defonce
+  "Like clojure.core/defonce, but allows docstring."
+  {:added "1.0"
+   :arglists '([symbol doc-string? init?])}
+  [name & args]
+  `(let [^clojure.lang.Var v# (ns-resolve '~(ns-name *ns*) '~name)]
+     (when (or (nil? v#)
+               (not (.hasRoot v#)))
+       (def ~name ~@args))))
+
 (defmacro def-
-  "same as def, yielding non-public def"
+  "Analogue to defn- for def."
   [name & decls]
   (list* `def (with-meta name (assoc (meta name) :private true)) decls))
 
@@ -459,6 +470,16 @@
   "Realizes all the values in a lazy map, returning a regular map."
   [m]
   (into {} m))
+
+(defn ->lazy-map
+  "Behaves the same as ->LazyMap, except that if m is already a lazy
+  map, returns it directly. This prevents the creation of a lazy map
+  wrapping another lazy map, which (while not terribly wrong) is not
+  the best."
+  [m]
+  (if (instance? LazyMap m)
+    m
+    (->LazyMap m)))
 
 ;;;; Arrays and matrices
 
