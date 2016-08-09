@@ -17,4 +17,4 @@ Neural networks, regression and feature learning in Clojure.
 
 ## Gradient descent
 
-`cortex` contains a gradient descent sub-library, which is located in the `cortex.optimise.*` namespaces. Its interface is currently undergoing rapid change, but more documentation will be coming soon.
+`cortex` contains a sub-library for performing instrumented gradient descent, which is located in the `cortex.optimise.*` namespaces. See the namespace docstring for `cortex.optimise.descent` for example usage.
