@@ -6,6 +6,7 @@
     [clojure.string :as str]
     [cortex.nn.protocols :as cp]
     [cortex.nn.backends :as b]
+    [clojure.pprint :as pp]
     #?(:cljs [goog.string :refer [format]]))
 
   #?(:clj (:import [mikera.vectorz Vectorz]))
@@ -375,13 +376,17 @@
 
 ;;;; Lazy maps -- map type
 
+(declare LazyMap->printable)
+
 (deftype LazyMap [^clojure.lang.IPersistentMap contents]
 
   clojure.lang.Associative
   (containsKey [this k]
-    (.containsKey contents k))
+    (and contents
+         (.containsKey contents k)))
   (entryAt [this k]
-    (lazy-map-entry k (.valAt contents k)))
+    (and contents
+         (lazy-map-entry k (.valAt contents k))))
 
   clojure.lang.IFn
   (invoke [this k]
@@ -395,11 +400,13 @@
 
   clojure.lang.ILookup
   (valAt [this k]
-    (force (.valAt contents k)))
+    (and contents
+         (force (.valAt contents k))))
   (valAt [this k not-found]
     ;; This will not behave properly if not-found is a Delay,
     ;; but that's a pretty obscure edge case.
-    (force (.valAt contents k not-found)))
+    (and contents
+         (force (.valAt contents k not-found))))
 
   clojure.lang.IMapIterable
   (keyIterator [this]
@@ -417,11 +424,14 @@
 
   clojure.lang.IPersistentCollection
   (count [this]
-    (.count contents))
+    (if contents
+      (.count contents)
+      0))
   (empty [this]
-    (.empty contents))
+    (or (not contents)
+        (.empty contents)))
   (cons [this o]
-    (LazyMap. (.cons contents o)))
+    (LazyMap. (.cons (or contents {}) o)))
   (equiv [this o]
     (.equiv
       ^clojure.lang.IPersistentCollection
@@ -429,9 +439,9 @@
 
   clojure.lang.IPersistentMap
   (assoc [this key val]
-    (LazyMap. (.assoc contents key val)))
+    (LazyMap. (.assoc (or contents {}) key val)))
   (without [this key]
-    (LazyMap. (.without contents key)))
+    (LazyMap. (.without (or contents {}) key)))
 
   clojure.lang.Seqable
   (seq [this]
@@ -449,13 +459,32 @@
 
   java.lang.Object
   (toString [this]
-    (str (map-vals #(if (and (delay? %)
-                             (not (realized? %)))
-                      (->PlaceholderText "<unrealized>")
-                      (force %))
-                   contents))))
+    (str (LazyMap->printable this))))
 
 (extend-print LazyMap #(.toString ^LazyMap %))
+
+(defn LazyMap->printable
+  "Converts a lazy map to a regular map that has placeholder text
+  for the unrealized values. No matter what is done to the returned
+  map, the original map will not be forced."
+  [m]
+  (map-vals #(if (and (delay? %)
+                      (not (realized? %)))
+               (->PlaceholderText "<unrealized>")
+               (force %))
+            (.contents ^LazyMap m)))
+
+(defn lazy-map-dispatch
+  "This is a dispatch function for clojure.pprint that prints
+  lazy maps without forcing them."
+  [obj]
+  (cond
+    (instance? LazyMap obj)
+    (pp/simple-dispatch (LazyMap->printable obj))
+    (instance? PlaceholderText obj)
+    (pr obj)
+    :else
+    (pp/simple-dispatch obj)))
 
 (defmacro lazy-map
   [map]
@@ -471,7 +500,7 @@
   [m]
   (into {} m))
 
-(defn ->lazy-map
+(defn ->?LazyMap
   "Behaves the same as ->LazyMap, except that if m is already a lazy
   map, returns it directly. This prevents the creation of a lazy map
   wrapping another lazy map, which (while not terribly wrong) is not
