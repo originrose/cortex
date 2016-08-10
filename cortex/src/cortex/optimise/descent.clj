@@ -191,7 +191,7 @@
         (dissoc :return)
         (assoc :value @value*)
         (assoc :gradient @gradient*)))
-    (nil :do-run :log)
+    (:study :do-study :log)
     (apply (case mode
              :study study
              :do-study do-study
