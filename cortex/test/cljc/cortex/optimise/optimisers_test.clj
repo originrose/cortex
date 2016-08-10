@@ -51,5 +51,5 @@
 (deftest sgd-clojure-test
   (is (= (-> (sgd-clojure :learning-rate 5)
            (cp/compute-parameters [2 4 8] [1 2 3])
-           (->> ((juxt cp/parameters cp/get-state))))
+           ((juxt cp/parameters cp/get-state)))
          [[-9 -18 -37] {}])))
