@@ -197,7 +197,9 @@
 
   Does not require collections to be of compatible types, i.e. sets can be
   equal to vectors. As a result, works seamlessly with core.matrix vectors
-  of different implementations."
+  of different implementations.
+
+  See also approx-diff."
   [error & colls]
   (let [seqs (map (partial tree-seq seq-like? seq)
                   colls)]
@@ -214,6 +216,39 @@
                           :else
                           (apply = items))))
            (every? identity)))))
+
+(defn approx-diff
+  "Recursively traverses the given data structures, which should be
+  identical except for corresponding floating-point numbers and the
+  concrete types of sequence-like objects.
+
+  Returns a data structure of the same form as the provided ones,
+  with floating-point numbers replaced with the relative errors of
+  the corresponding sets of numbers.
+
+  See also approx=."
+  [& colls]
+  (cond
+    (every? float? colls)
+    (relative-error (apply min colls)
+                    (apply max colls))
+    (every? list? colls)
+    (->> colls
+      (apply map (partial apply approx-diff))
+      (apply list))
+    (every? map-entry? colls)
+    (map-entry (apply approx-diff (map key colls))
+               (apply approx-diff (map val colls)))
+    (every? seq-like? colls)
+    (->> colls
+      (apply map approx-diff)
+      (into (empty (first colls))))
+    (apply = colls)
+    (first colls)
+    :else
+    (throw
+      (IllegalArgumentException.
+        (str "Divergent nodes: " colls)))))
 
 (defn vectorize
   "Recursively turns a data structure into nested vectors. All sequence-like
