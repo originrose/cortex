@@ -4,7 +4,7 @@
             [clojure.test :refer :all]
             [cortex.optimise.optimisers :refer :all]
             [cortex.nn.protocols :as cp]
-            [cortex.util :refer [def-]]))
+            [cortex.util :refer [approx= def-]]))
 
 ;;;; Protocol extensions
 
@@ -53,3 +53,35 @@
            (cp/compute-parameters [2 4 8] [1 2 3])
            ((juxt cp/parameters cp/get-state)))
          [[-9 -18 -37] {}])))
+
+(deftest adadelta-clojure-test
+  (is (approx= 1e-8
+               (-> (adadelta-clojure :decay-rate 0.5
+                                     :conditioning 1)
+                 (assoc-in [:state :acc-gradient] [6 3 9])
+                 (assoc-in [:state :acc-step] [7 8 7])
+                 (dissoc :initialize)
+                 (cp/compute-parameters [2 4 8] [1 2 3])
+                 ((juxt cp/parameters cp/get-state)))
+               ;; The following was computed manually using a calculator.
+               [[-1.309401077 -1.703280399 -0.6950417228]
+                {:acc-gradient [5.0 9.5 36.5]
+                 :acc-step [6.166666667 10.85714286 10.32666667]}])))
+
+(deftest adam-clojure-test
+  (is (approx= 1e-8
+               (-> (adam-clojure :step-size 5
+                                 :first-moment-decay 0.75
+                                 :second-moment-decay 0.3
+                                 :conditioning 0.2)
+                 (assoc-in [:state :first-moment] [5 2 -3])
+                 (assoc-in [:state :second-moment] [-1 -3 -8])
+                 (assoc-in [:state :num-steps] 2)
+                 (dissoc :initialize)
+                 (cp/compute-parameters [5 3 7] [1 2 -5])
+                 ((juxt cp/parameters cp/get-state)))
+               ;; The following was computed manually using a calculator.
+               [[-8.81811015 -5.613809809 -4.270259223]
+                {:first-moment [5.0 2.25 -0.5]
+                 :second-moment [17.2 5.4 31.9]
+                 :num-steps 3}])))
