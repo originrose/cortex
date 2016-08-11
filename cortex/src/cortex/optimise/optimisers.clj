@@ -207,7 +207,7 @@
   Adam appears to perform better than ADADELTA, with both faster convergence and more
   resistance to oscillations, in general.
 
-  [1]: http://arxiv.org/pdf/1412.6980v8.pdf."
+  [2]: http://arxiv.org/pdf/1412.6980v8.pdf."
   [& {:keys [step-size first-moment-decay
              second-moment-decay conditioning]
       :or {step-size 0.001
