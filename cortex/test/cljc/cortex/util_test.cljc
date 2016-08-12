@@ -203,12 +203,12 @@
   (testing "lazy-map macro"
     (is (= (with-out-str
              (let [m (lazy-map
-                       {:a (print "value :a was realized")
-                        :b (print "value :b was realized")
-                        :c (print "value :c was realized")})]
+                       {:a (println "value :a was realized")
+                        :b (println "value :b was realized")
+                        :c (println "value :c was realized")})]
                (doseq [k [:b :c]]
                  (k m))))
-           "value :b was realizedvalue :c was realized")))
+           (format "value :b was realized%nvalue :c was realized%n"))))
   (testing "forcing a lazy map"
     (is (= (->> (lazy-map
                   {:a (println "value :a was realized")
@@ -294,5 +294,5 @@
            "[[1.0 0.0] [0.0 1.0]]"))))
 
 (deftest sprintf-test
-  (is (= (.trim (with-out-str (sprintf "%(d%n" [[1 -3 5] [-7 3]])))
-         "[[1 (3) 5] [(7) 3]]")))
+  (is (= (with-out-str (sprintf "%(d%n" [[1 -3 5] [-7 3]]))
+         (format "[[1 (3) 5] [(7) 3]]%n"))))
