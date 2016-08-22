@@ -167,7 +167,6 @@
     (cp/calc this input)
     this)
 
-
   (backward [this input output-gradient]
     (m/assign! input-gradient output-gradient)
     (m/mul! input-gradient dotvec)
