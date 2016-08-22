@@ -23,7 +23,7 @@
              :test {:dependencies [[net.mikera/cljunit "0.4.0"]
                                    [criterium/criterium "0.4.4"]
                                    [clatrix "0.5.0" :exclusions [net.mikera/core.matrix]]]
-                    :source-paths ["src" "test/cljc" "test/cljs"]
+                    :source-paths ["src" "test/cljc" "test/cljs" "test/clj"]
                     :java-source-paths ["test/clj"]
                     :main cortex.run-all-tests}
 

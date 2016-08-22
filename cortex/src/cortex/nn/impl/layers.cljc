@@ -100,6 +100,7 @@
 
   cp/PNeuralTraining
   (forward [this input]
+    (cp/prepare-forward this)
     (m/assign! output input)
     (m/mul! output dropout)
     this)

@@ -83,6 +83,18 @@
         (is (equals-one-of #{[0 0] [0 -2] [2 0] [2 -2]}
                           (input-gradient (backward (forward a input) input [1 -1]))))))))
 
+(deftest test-dropout-forward
+  (let [dm (layers/dropout [20] 0.5)
+        input (util/random-matrix [20])]
+    (testing "Correct dropout proportion"
+             (is (== 0.5 (:probability dm))))
+    (testing "Dropout should make no changes to regular output" 
+             (let [out1 (calc-output dm input)] 
+               (is (m/equals out1 input))))
+    (testing "Dropout should make changes during forward pass"
+             (let [out2 (output (forward dm input))]
+               (is (not (m/equals out2 input)))))))
+
 (deftest test-linear
   (testing "basic calculation"
     (let [a (layers/linear [[1 2] [-3 -4]] [10 100])
