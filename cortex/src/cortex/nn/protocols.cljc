@@ -50,7 +50,7 @@
   (forward [this input]
     "Run a forward computation pass and return the updated module. output will be
   available for later retrieval. Input and intermediate states will be stored for
-  futuere backward pass usage.")
+  future backward pass usage.")
 
   (backward [this input output-gradient]
     "Back propagate errors through the module with respect to the input.  Returns the
