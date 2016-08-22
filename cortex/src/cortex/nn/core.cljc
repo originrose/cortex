@@ -58,6 +58,16 @@
   ([m input]
     (cp/forward m input)))
 
+(defn input-size
+  "Returns the size of the module input array."
+  ([m]
+    (cp/input-size m)))
+
+(defn output-size
+  "Returns the size of the module output array."
+  ([m]
+    (cp/output-size m)))
+
 (defn backward
   "Runs the backward training pass on a neural network module. Input must be the same as used
    in the previous forward pass."
