@@ -49,8 +49,11 @@
   "Protocol for modules that can be trained with forward / back propagation."
   (forward [this input]
     "Run a forward computation pass and return the updated module. output will be
-  available for later retrieval. Input and intermediate states will be stored for
-  future backward pass usage.")
+    available for later retrieval. Input and intermediate states will be stored for
+    future backward pass usage.
+
+   During training prepare-forward must be called first to ensure that any necessary 
+   pre-training calculations are performed.")
 
   (backward [this input output-gradient]
     "Back propagate errors through the module with respect to the input.  Returns the

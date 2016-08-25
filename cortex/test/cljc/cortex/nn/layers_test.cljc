@@ -4,6 +4,8 @@
   (:use [cortex.nn.core])
   (:require [clojure.core.matrix :as m]
             [cortex.nn.layers :as layers]
+            [cortex.nn.network :as network]
+            [cortex.optimise :as opt]
             [cortex.nn.protocols :as cp]
             [cortex.util :as util]
             [clojure.test.check :as sc]
@@ -94,6 +96,17 @@
     (testing "Dropout should make changes during forward pass"
              (let [out2 (output (forward dm input))]
                (is (not (m/equals out2 input)))))))
+
+(deftest test-dropout-train
+  (let [dm (layers/dropout [20] 0.5)
+        input (util/random-matrix [20])
+        target (util/random-matrix [20])
+        optimiser (cortex.optimise/sgd-optimiser 0.1 0.99)
+        loss-fn (cortex.optimise/mse-loss)]
+    (testing "Train step succeeds"
+             (is (m/zero-matrix? (input-gradient dm)))
+             (let [dm (network/train-step input target dm loss-fn)]
+               (is (not (m/zero-matrix? (input-gradient dm))))))))
 
 (deftest test-linear
   (testing "basic calculation"
