@@ -4,17 +4,17 @@
                  [com.taoensso/timbre "4.3.1"]
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.3.1"]
-                 [net.mikera/vectorz-clj "0.44.0"]
-                 [net.mikera/core.matrix "0.51.0"]
+                 [net.mikera/vectorz-clj "0.45.0"]
+                 [net.mikera/core.matrix "0.54.0"]
                  [thinktopic/caffe-protobuf "0.1.0"]
-                 [net.mikera/clojure-utils "0.6.2"]
+                 [net.mikera/clojure-utils "0.7.0"]
                  [core.blas "1.0.2"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
                  [rhizome "0.2.5"]]
 
   :java-source-paths ["java"]
 
-  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.0"]  ;; allows JUnit testing
+  :profiles {:dev {:dependencies [[net.mikera/cljunit "0.4.1"]  ;; allows JUnit testing
                                   [criterium/criterium "0.4.4"] ;; benchmarking tool
                                   ] ;; alternate core.matrix implementation
                    :source-paths ["src" "test/cljc" "test/clj"]
