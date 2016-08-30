@@ -79,7 +79,6 @@
   ([m]
    (or (cp/input-gradient m) (error "No input gradient available - maybe run backward pass first?"))))
 
-
 (defn optimise
   "Optimises a module using the given optimiser. Returns an [optimiser module] pair"
   ([optimiser module ^long batch-count]
