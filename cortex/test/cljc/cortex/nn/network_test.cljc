@@ -94,11 +94,11 @@
         net (net/train net optimizer loss data labels batch-size n-epochs)
         mse (net/evaluate-mse net data results)]
 ;; uncomment as needed for debug output
-    (println (str (class o) " :: "
-                  " mse = " mse 
-                  " predicted = " (mapv (fn [v] (m/coerce [] (calc-output net v))) CORN-DATA))) 
-    (when-not (< mse 25) 
-      (println net)) 
+;    (println (str (class o) " :: "
+;                  " mse = " mse 
+;                  " predicted = " (mapv (fn [v] (m/coerce [] (calc-output net v))) CORN-DATA))) 
+;    (when-not (< mse 25) 
+;      (println net)) 
     (is (< mse 25))))
 
 (deftest corn-test
