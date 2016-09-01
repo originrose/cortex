@@ -47,8 +47,8 @@
       input-gradient))
 
 ;; TANH
-;; Module implementing a Logistic activation function over a numerical array
-#?(:cljs (register-module cortex.nn.impl.layers.Logistic))
+;; Module implementing a Tanh activation function over a numerical array
+#?(:cljs (register-module cortex.nn.impl.layers.Tanh))
 (defrecord Tanh [output input-gradient]
   cp/PModule
     (calc [this input]
@@ -69,6 +69,37 @@
         (m/assign! input-gradient 1.0)
         (m/add-product! input-gradient output output -1.0)
         (m/mul! input-gradient output output-gradient)
+
+        ;; finally return this, input-gradient has been updated in-place
+        this))
+
+    (input-gradient [this]
+      input-gradient))
+
+
+;; SOFTPLUS
+;; Module implementing a Logistic activation function over a numerical array
+#?(:cljs (register-module cortex.nn.impl.layers.Softplus))
+(defrecord Softplus [output input-gradient]
+  cp/PModule
+    (calc [this input]
+      (m/assign! output input)
+      (m/softplus! output)
+      this)
+
+    (output [this]
+      (:output this))
+
+  cp/PNeuralTraining
+    (forward [this input]
+      (cp/calc this input))
+
+    (backward [this input output-gradient]
+      (let []
+        ;; input gradient = logistic(input) * output-gradient
+        (m/assign! input-gradient input)
+        (m/logistic! input-gradient)
+        (m/mul! input-gradient output-gradient)
 
         ;; finally return this, input-gradient has been updated in-place
         this))

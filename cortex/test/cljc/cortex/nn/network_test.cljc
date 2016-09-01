@@ -94,10 +94,10 @@
         net (net/train net optimizer loss data labels batch-size n-epochs)
         mse (net/evaluate-mse net data results)]
 ;; uncomment as needed for debug output
-;    (println (str (class o) " :: "
-;                  " mse = " mse 
-;                  " predicted = " (mapv (fn [v] (m/coerce [] (calc-output net v))) CORN-DATA))) 
-    (when (> mse 25) 
+    (println (str (class o) " :: "
+                  " mse = " mse 
+                  " predicted = " (mapv (fn [v] (m/coerce [] (calc-output net v))) CORN-DATA))) 
+    (when-not (< mse 25) 
       (println net)) 
     (is (< mse 25))))
 
@@ -107,9 +107,13 @@
     (testing "Newton"  (corn-test-fn (layers/linear-layer 2 1) (opt/newton-optimiser)))
     ;; (testing "SGD" (corn-test-fn (opt/sgd-optimiser))) ;; seems to fail?
 )
-  (testing "Small neural network with tanh and relu"
+  (testing "Small neural network"
     (let [net (stack-module [(layers/linear-layer 2 2) (layers/tanh [2]) (layers/linear-layer 2 2)])]
-      (testing "ADADELTA"  (corn-test-fn net (opt/adadelta-optimiser))))
+      (testing "ADADELTA tanh"  (corn-test-fn net (opt/adadelta-optimiser))))
+    (let [net (stack-module [(layers/linear-layer 2 2) (layers/softplus [2]) (layers/linear-layer 2 2)])]
+      (testing "ADADELTA softplus"  (corn-test-fn net (opt/adadelta-optimiser))))
     (let [net (stack-module [(layers/linear-layer 2 2 :weight-scale 0.001) (layers/relu [2] :negval 0.01) (layers/linear-layer 2 2)])]
-      (testing "Newton" (corn-test-fn net (opt/newton-optimiser))))
+      (testing "Newton relu" (corn-test-fn net (opt/newton-optimiser))))
+;    (let [net (stack-module [(layers/linear-layer 2 2 :weight-scale 0.001) (layers/softplus [2]) (layers/linear-layer 2 2)])]
+;      (testing "Newton softplus" (corn-test-fn net (opt/newton-optimiser))))
 ))

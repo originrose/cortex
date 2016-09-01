@@ -82,6 +82,15 @@
         (util/empty-array shape)
         (util/empty-array shape))))
 
+(defn softplus
+  "Creates a softplus module of the given shape."
+  ([shape]
+    (when-not (coll? shape)
+      (error "softplus layer constructor requires a shape vector"))
+    (cortex.nn.impl.layers.Softplus.
+        (util/empty-array shape)
+        (util/empty-array shape))))
+
 (defn relu
   "Creates a rectified linear (ReLU) module of the given shape.
 
