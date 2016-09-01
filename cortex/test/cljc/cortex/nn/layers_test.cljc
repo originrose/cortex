@@ -135,7 +135,11 @@
       (is (m/equals [5 11]
                     (calc-output a [1 2])))
       (is (m/equals [0 0 0 0 0 0]
-                    (gradient a))))))
+                    (gradient a)))))
+  (testing "weight initialisation"
+    (is (not (m/zero-matrix? (:weights (layers/linear-layer 2 2)))))
+    (is (m/zero-matrix? (:weights (layers/linear-layer 2 2 :weight-scale 0.0))))))
+
 
 (deftest test-l2-constraint
   (testing "unconstrained update"
