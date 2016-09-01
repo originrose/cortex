@@ -1,12 +1,12 @@
 (ns cortex.nn.network-test
   (:require
-    [cortex.nn.core :refer [calc output forward backward input-gradient parameters gradient parameter-count]]
+    [cortex.nn.core :refer [calc output calc-output forward backward input-gradient parameters gradient parameter-count]]
     #?(:cljs
         [cljs.test :refer-macros [deftest is are testing]]
         :clj
         [clojure.test :refer [deftest is are testing]])
     [cortex.optimise :as opt]
-    [clojure.core.matrix :as mat]
+    [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as randm]
     #?(:cljs [thi.ng.ndarray.core :as nd])
     [cortex.util :as util]
@@ -14,7 +14,7 @@
     [cortex.nn.core :as core]
     [cortex.nn.layers :as layers]))
 
-(mat/set-current-implementation #?(:clj :vectorz :cljs :thing-ndarray))
+(m/set-current-implementation #?(:clj :vectorz :cljs :thing-ndarray))
 
 ; a	b	| a XOR b
 ; 1	1	     0
@@ -48,8 +48,8 @@
   "Define a random dataset and create the labels from some fixed parameters so we know exactly
   what the linear model should learn."
   []
-  (let [x-data (into [] (mat/rows (randm/sample-uniform [100 2])))
-        y-data (into [] (map vector (mat/array (mat/transpose (mat/add (mat/mmul [0.1 0.2] (mat/transpose x-data)) 0.3)))))
+  (let [x-data (into [] (m/rows (randm/sample-uniform [100 2])))
+        y-data (into [] (map vector (m/array (m/transpose (m/add (m/mmul [0.1 0.2] (m/transpose x-data)) 0.3)))))
         model (layers/linear-layer 2 1)
         loss (opt/mse-loss)
         optimizer (opt/sgd-optimiser 0.01 0.9)
@@ -82,15 +82,23 @@
 (def CORN-RESULTS
   [40.32, 42.92, 45.33, 48.85, 52.37, 57.0, 61.82, 69.78, 72.19, 79.42])
 
-(deftest core-test
+
+(defn corn-test-fn [o] 
   (let [net (layers/linear-layer 2 1)
-        n-epochs 5000
+        n-epochs 1500
         batch-size 1
         loss (opt/mse-loss)
-        optimizer (opt/adadelta-optimiser)
+        optimizer o
         data CORN-DATA
         labels CORN-LABELS
         results CORN-RESULTS
         net (net/train net optimizer loss data labels batch-size n-epochs)
-        mse (net/evaluate-mse net data labels)]
+        mse (net/evaluate-mse net data results)]
+    ;; (println (str (class o) ": mse = " mse " predicted = " (mapv (fn [v] (m/coerce [] (calc-output net v))) CORN-DATA))) 
     (is (< mse 25))))
+
+(deftest corn-test
+  (testing "ADADELTA" (corn-test-fn (opt/adadelta-optimiser)))
+  (testing "Newton" (corn-test-fn (opt/newton-optimiser)))
+  ;; (testing "SGD" (corn-test-fn (opt/sgd-optimiser))) ;; seems to fail?
+  )
