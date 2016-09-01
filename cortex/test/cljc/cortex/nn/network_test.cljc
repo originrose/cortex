@@ -107,13 +107,16 @@
     (testing "Newton"  (corn-test-fn (layers/linear-layer 2 1) (opt/newton-optimiser)))
     ;; (testing "SGD" (corn-test-fn (opt/sgd-optimiser))) ;; seems to fail?
 )
+  ;; this example is actually a bit pathological for NNs
+  ;; since the inputs and output are non-normalised
+  ;; however we should be able to handle it
   (testing "Small neural network"
-    (let [net (stack-module [(layers/linear-layer 2 2) (layers/tanh [2]) (layers/linear-layer 2 2)])]
+    (let [net (stack-module [(layers/linear-layer 2 2) (layers/tanh [2]) (layers/linear-layer 2 1)])]
       (testing "ADADELTA tanh"  (corn-test-fn net (opt/adadelta-optimiser))))
-    (let [net (stack-module [(layers/linear-layer 2 2) (layers/softplus [2]) (layers/linear-layer 2 2)])]
+    (let [net (stack-module [(layers/linear-layer 2 2) (layers/softplus [2]) (layers/linear-layer 2 1)])]
       (testing "ADADELTA softplus"  (corn-test-fn net (opt/adadelta-optimiser))))
-    (let [net (stack-module [(layers/linear-layer 2 2 :weight-scale 0.001) (layers/relu [2] :negval 0.01) (layers/linear-layer 2 2)])]
+    (let [net (stack-module [(layers/linear-layer 2 2 :weight-scale 0.001) (layers/relu [2] :negval 0.01) (layers/linear-layer 2 1)])]
       (testing "Newton relu" (corn-test-fn net (opt/newton-optimiser))))
-;    (let [net (stack-module [(layers/linear-layer 2 2 :weight-scale 0.001) (layers/softplus [2]) (layers/linear-layer 2 2)])]
+;    (let [net (stack-module [(layers/linear-layer 2 2 :weight-scale 0.001) (layers/softplus [2]) (layers/linear-layer 2 1)])]
 ;      (testing "Newton softplus" (corn-test-fn net (opt/newton-optimiser))))
 ))

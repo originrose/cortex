@@ -216,14 +216,19 @@ Returns new parameters"
           _ (m/assign! dx gdiff) ;; dx = gdiff
           _ (m/emap! (fn [^double dg ^double g] 
                        (let [dg (if (or (Double/isInfinite dg) (Double/isNaN dg)) 1.0 dg)
-                             res (if (== 0 dg) 
-                                   (if (< 0 g) Double/POSITIVE_INFINITY Double/NEGATIVE_INFINITY)
+                             res (if (== 0 dg) ;; zero gradient implies infinite step size! so we want to take maximum step in direction of -g
+                                   (if (< 0 g) Double/POSITIVE_INFINITY 
+                                     (if (> 0 g) 
+                                       Double/NEGATIVE_INFINITY
+                                       0.0))
                                    (- (/ (* g step-ratio) dg)))]
                          res))
                      dx gradient) ;; dx = proposed step size 
           _ (m/emap! (fn [^double dx ^double xsd] 
+                       ;; i.e. dx = limit step sizes to step-limit times s.d. of x 
+                       ;; this handles the case of zero gradient (which would otherwise result in infinite steps)
                        (clamp-double dx (* xsd (- step-limit)) (* xsd step-limit)))
-                     dx tmp) ;; i.e. dx = limit step sizes to step-limit times s.d. of x 
+                     dx tmp) 
           
           _ (m/add! params dx)
           ]
