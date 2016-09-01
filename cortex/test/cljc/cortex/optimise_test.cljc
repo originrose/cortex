@@ -5,10 +5,22 @@
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
     [cortex.nn.layers :as layers]
-    [cortex.optimise :refer [adadelta-optimiser sgd-optimiser newton-optimiser]]
+    [cortex.optimise :as opt :refer [adadelta-optimiser sgd-optimiser newton-optimiser]]
     [cortex.nn.core :refer [output forward backward parameter-count optimise stack-module calc-output]]))
 
 (defonce ^:dynamic *print-iterations* false)
+
+(deftest test-clamp
+  (testing "in-range values"
+    (is (== 0 (opt/clamp-double 0 -1 1)))
+    (is (== 0.1 (opt/clamp-double 0.1 -1 1)))
+    (is (== -1 (opt/clamp-double -1 -1 1))))
+  (testing "lower bound" 
+    (is (== -1 (opt/clamp-double -1.1 -1 1)))
+    (is (== -1 (opt/clamp-double Double/NEGATIVE_INFINITY -1 1))))
+  (testing "upper bound"
+    (is (== 1 (opt/clamp-double 2.0 -1 1)))
+    (is (== 1 (opt/clamp-double Double/POSITIVE_INFINITY -1 1)))))
 
 ;; simple optimiser testing function: try to optimse a transformation
 (defn optimiser-test
