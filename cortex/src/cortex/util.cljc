@@ -605,11 +605,15 @@
 
 
 (defn get-or-new-array
+  "Gets an array from the associative dtata structure item, or returns a new empty array 
+   of the specified shape"
   [item kywd shape]
   (or (get item kywd)
       (b/new-array shape)))
 
 (defn get-or-array
+  "Gets an array from the associative dtata structure item, or returns a new mutable array 
+   containing a clone of data"
   [item kywd data]
   (or (get item kywd)
       (b/array data)))

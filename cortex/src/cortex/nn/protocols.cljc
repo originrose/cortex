@@ -25,7 +25,9 @@
     "Gets the parameters for this module, as a vector.")
 
   (update-parameters [m parameters]
-    "Updates the parameters for this module to the given parameter values. Returns the updated module"))
+    "Updates the parameters for this module to the given parameter values. 
+
+     Clears the accumulated gradient and returns the updated module"))
 
 (defprotocol PParameterCount
   "Protocol for computing the parameter count. The default implementation just calls count on the parameter vector.."
