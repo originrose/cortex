@@ -22,12 +22,17 @@
     (cp/calc m input)))
 
 (defn output
-  "Gets the ouput for a module. Throws an exception if not available."
+  "Gets the ouptut for a module. Assumes that either `calc` or a `forward` pass has been run.
+
+   Throws an exception if not available."
   ([m]
     (or (cp/output m) (error "No output available for module: " #?(:clj (class m) :cljs (type m))))))
 
 (defn calc-output
-  "Runs the calculation for a module. Returns the module output."
+  "Performs the calculation for a module, as per `calc`. This is intended for use when you just want
+   to use the module for computation, and do not care about the resulting module stats.
+
+   Returns the module output as per `output`."
   ([m input]
    (cp/output (cp/calc m input))))
 
@@ -100,7 +105,7 @@
              :packed-grads grads)
       module]))
   ([optimiser module]
-   (optimise optimiser module 1)))
+    (optimise optimiser module 1)))
 
 ;; ===========================================================================
 ;; Module construction and combinator functions
