@@ -1,6 +1,6 @@
 (ns cortex.nn.network-test
   (:require
-    [cortex.nn.core :refer [calc output calc-output forward backward input-gradient parameters gradient parameter-count]]
+    [cortex.nn.core :refer [stack-module calc output calc-output forward backward input-gradient parameters gradient parameter-count]]
     #?(:cljs
         [cljs.test :refer-macros [deftest is are testing]]
         :clj
@@ -83,9 +83,8 @@
   [40.32, 42.92, 45.33, 48.85, 52.37, 57.0, 61.82, 69.78, 72.19, 79.42])
 
 
-(defn corn-test-fn [o] 
-  (let [net (layers/linear-layer 2 1)
-        n-epochs 1500
+(defn corn-test-fn [net o] 
+  (let [n-epochs 1500
         batch-size 1
         loss (opt/mse-loss)
         optimizer o
@@ -94,11 +93,23 @@
         results CORN-RESULTS
         net (net/train net optimizer loss data labels batch-size n-epochs)
         mse (net/evaluate-mse net data results)]
-    ;; (println (str (class o) ": mse = " mse " predicted = " (mapv (fn [v] (m/coerce [] (calc-output net v))) CORN-DATA))) 
+;; uncomment as needed for debug output
+;    (println (str (class o) " :: "
+;                  " mse = " mse 
+;                  " predicted = " (mapv (fn [v] (m/coerce [] (calc-output net v))) CORN-DATA))) 
+    (when (> mse 25) 
+      (println net)) 
     (is (< mse 25))))
 
 (deftest corn-test
-  (testing "ADADELTA" (corn-test-fn (opt/adadelta-optimiser)))
-  (testing "Newton" (corn-test-fn (opt/newton-optimiser)))
-  ;; (testing "SGD" (corn-test-fn (opt/sgd-optimiser))) ;; seems to fail?
-  )
+  (testing "Simple linear regression"
+    (testing "ADADELTA"  (corn-test-fn (layers/linear-layer 2 1) (opt/adadelta-optimiser)))
+    (testing "Newton"  (corn-test-fn (layers/linear-layer 2 1) (opt/newton-optimiser)))
+    ;; (testing "SGD" (corn-test-fn (opt/sgd-optimiser))) ;; seems to fail?
+)
+  (testing "Small neural network with tanh and relu"
+    (let [net (stack-module [(layers/linear-layer 2 2) (layers/tanh [2]) (layers/linear-layer 2 2)])]
+      (testing "ADADELTA"  (corn-test-fn net (opt/adadelta-optimiser))))
+    (let [net (stack-module [(layers/linear-layer 2 2 :weight-scale 0.001) (layers/relu [2] :negval 0.01) (layers/linear-layer 2 2)])]
+      (testing "Newton" (corn-test-fn net (opt/newton-optimiser))))
+))

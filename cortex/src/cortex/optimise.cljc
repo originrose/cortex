@@ -174,8 +174,8 @@ Returns new parameters"
 (defrecord Newton []
   cp/PGradientOptimiser
   (compute-parameters [this gradient parameters]
-    (let [decay (double (or (:decay-rate this) 0.2))
-          step-ratio (double (or (:step-ratio this) 0.3))
+    (let [decay (double (or (:decay-rate this) 0.1))
+          step-ratio (double (or (:step-ratio this) 0.1))
           step-limit (double (or (:step-limit this) 2.0))
           elem-count (long (m/ecount parameters))
           elem-shape [elem-count]
@@ -245,8 +245,8 @@ Returns new parameters"
   "Constructs a fast newton optimiser of the given size (parameter length)
 
    Options map may include:
-    :decay-rate   = rate of decay for statistics estimates (default 0.2)
-    :step-ratio   = Proportion of step size to take towards estimated optimum (default = 0.3)
+    :decay-rate   = rate of decay for statistics estimates (default 0.1)
+    :step-ratio   = Proportion of step size to take towards estimated optimum (default = 0.1)
     :step-limit   = Maximum step size as proportion of standard deviation of pearamter (default = 2.0)"
   ([]
    (->Newton))
