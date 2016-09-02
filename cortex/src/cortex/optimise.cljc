@@ -376,6 +376,10 @@ Returns new parameters"
       (m/emap (fn [a b] (if (number? a) a b)) target activation)
     :else target))
 
+
+;; ================================================================================
+;; mean squared error loss function
+
 (defn mean-squared-error
   "Computes the mean squared error of an activation array and a target array"
   ([activation target]
@@ -398,7 +402,36 @@ Returns new parameters"
   ([]
     (->MSELoss)))
 
+;; ================================================================================
+;; mean absolute error loss function
+
+(defn mean-absolute-error
+  "Computes the mean absolute error of an activation array and a target array"
+  ([activation target]
+   (let [target (process-nulls activation target)]
+      (/ (double (m/esum (m/abs (m/sub activation target))))
+         (double (m/ecount activation))))))
+
+(defrecord MAELoss []
+  cp/PLossFunction
+  (loss [this v target]
+    (mean-absolute-error v target))
+
+  (loss-gradient [this v target]
+    (let [target (process-nulls v target)
+          r (m/sub v target)]
+      (m/signum! r) 
+      (m/scale! r (/ 1.0 (double (m/ecount v)))))))
+
+(defn mae-loss
+  "Returns a Mean Absolute Error (MAE) loss function"
+  ([]
+    (->MAELoss)))
+
 (def SMALL-NUM 1e-30)
+
+;; ================================================================================
+;; Cross Entropy loss function
 
 ;;Non mutually exclusive ce loss
 (defrecord CrossEntropyLoss []

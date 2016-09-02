@@ -5,6 +5,7 @@
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
     [cortex.nn.layers :as layers]
+    [cortex.nn.protocols :as cp]
     [cortex.optimise :as opt :refer [adadelta-optimiser sgd-optimiser newton-optimiser]]
     [cortex.nn.core :refer [output forward backward parameter-count optimise stack-module calc-output]]))
 
@@ -98,6 +99,18 @@
 (deftest test-mse-nulls
   (is (m/equals [1 2 3] (cortex.optimise/process-nulls [10 2 0] [1 nil 3])))
   (is (m/equals [1 2 3] (cortex.optimise/process-nulls [10 2 0] [1 nil 3]))))
+
+(deftest test-mse
+  (let [pred (m/array :vectorz [1 2 3 4])
+        target (m/array :vectorz [2 2 2 2])]
+    (is (== 1.5 (opt/mean-squared-error pred target)))
+    (is (m/equals [-0.5 0.0 0.5 1.0] (cp/loss-gradient (opt/mse-loss) pred target)))))
+
+(deftest test-mae
+  (let [pred (m/array :vectorz [1 2 3 4])
+        target (m/array :vectorz [2 2 2 2])]
+    (is (== 1.0 (opt/mean-absolute-error pred target)))
+    (is (m/equals [-0.25 0.0 0.25 0.25] (cp/loss-gradient (opt/mae-loss) pred target)))))
 
 (deftest test-denoise
   (let [m (layers/autoencoder
