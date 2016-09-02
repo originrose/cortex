@@ -85,6 +85,20 @@
         (is (equals-one-of #{[0 0] [0 -2] [2 0] [2 -2]}
                           (input-gradient (backward (forward a input) input [1 -1]))))))))
 
+(deftest test-gaussian-multiplicative
+  (testing "noise - calculation has no effect"
+    (let [a (layers/gaussian-multiplicative-noise [3] 0.5 0.0)]
+      (is (m/equals [1 2 3] (calc-output a [1 2 3])))))
+  (testing "noise - forward causes changes"
+    (let [a (layers/gaussian-multiplicative-noise [3] 0.5 0.0)]
+      (is (not (m/equals [1 2 3] (output (forward a [1 2 3])))))))
+  (testing "backprop"
+    (let [a (layers/gaussian-multiplicative-noise [3] 0.5 0.0)
+          input [1.0 2.0 3.0]]
+      (dotimes [i 10] 
+        (is (m/equals (m/mul input (:dropout a)) 
+                      (input-gradient (backward (forward a input) input [1 1 1]))))))))
+
 (deftest test-dropout-forward
   (let [dm (layers/dropout [20] 0.5)
         input (util/random-matrix [20])]

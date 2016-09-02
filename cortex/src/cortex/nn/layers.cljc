@@ -55,8 +55,27 @@
     (cortex.nn.impl.layers.Dropout.
       (util/empty-array shape)
       (util/empty-array shape)
-      (double probability)
-      (util/empty-array shape))))
+      (util/empty-array shape)
+      (impl/create-dropout-noise-fn probability)
+      nil
+      {:probability (double probability)})))
+
+(defn gaussian-multiplicative-noise
+  "Creates a multiplicative gaussian noise module of the given shape.
+
+   During training, gauassian noise will be applied with the given probability, in which case:
+     x -> x * N(1.0,sd)"
+  ([shape noise-fn]
+    (when-not (coll? shape)
+      (error "Dropout layer constructor requires a shape vector"))
+    (cortex.nn.impl.layers.Dropout.
+      (util/empty-array shape)
+      (util/empty-array shape)
+      (util/empty-array shape)
+      noise-fn))
+  ([shape probability sd]
+    (let [noise-fn (impl/create-gaussian-multiplicative-noise-fn probability sd)]
+      (gaussian-multiplicative-noise shape noise-fn))))
 
 (defn scale
   "Creates a linear scaling layer with the specified shape and multiplication factor

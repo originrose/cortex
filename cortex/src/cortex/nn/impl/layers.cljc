@@ -113,8 +113,28 @@
 ;; Module implementing "dropout" functionality when training
 ;; dropout field stores 0.0 or 1.0/probability as multiplicative noise
 ;; Works as a identity function otherwise
+
+(defn create-dropout-noise-fn 
+  "Create a default dropout noise function, which keeps units with the given probability
+   and scales them by 1.0/probability" 
+  [probability]
+  (let [probability (double probability)
+        _ (when-not (<= 0.0 probability 1.0) (println "Warning: Dropout probability not valid: " probability)) 
+        inv-prob (double (/ 1.0 probability))]
+    (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0))))
+
+(defn create-gaussian-multiplicative-noise-fn 
+  "Create a gaussian multiplicative noise function, which keeps units with the given probability
+   and scales them by N(1.0,sd) otherwise" 
+  [probability sd]
+  (let [probability (double probability)
+        sd (double sd)
+        rng (java.util.Random.) 
+        _ (when-not (<= 0.0 probability 1.0) (println "Warning: Noise probability not valid: " probability))]
+    (fn ^double [^double _] (if (< (Math/random) probability) (+ 1.0 (* sd (.nextGaussian rng))) 1.0))))
+
 #?(:cljs (register-module cortex.nn.impl.layers.Dropout))
-(defrecord Dropout [output input-gradient probability dropout]
+(defrecord Dropout [output input-gradient dropout noise-fn]
   cp/PModule
   (calc [this input]
     (m/assign! output input)
@@ -125,10 +145,8 @@
 
   cp/PNeuralTrainingOptional
   (prepare-forward [this]
-    (let [probability (double probability)
-          inv-prob (/ 1.0 probability)]
-      (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0)) dropout)
-      this))
+    (m/emap! noise-fn dropout)
+    this)
 
   cp/PNeuralTraining 
   (forward [this input]
