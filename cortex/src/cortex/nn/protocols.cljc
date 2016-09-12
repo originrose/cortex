@@ -55,7 +55,8 @@
     future backward pass usage.
 
    During training prepare-forward must be called first to ensure that any necessary 
-   pre-training calculations are performed.")
+   pre-training calculations are performed. forward itself should be deterministic,
+   but prepare-forward may modify stochastic state (e.g. dropout).")
 
   (backward [this input output-gradient]
     "Back propagate errors through the module with respect to the input.  Returns the
