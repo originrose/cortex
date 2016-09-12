@@ -61,7 +61,7 @@
   (backward [this input output-gradient]
     "Back propagate errors through the module with respect to the input.  Returns the
   module with input-gradient set (gradient at the inputs). Input must be the same
-  as used in the forward pass.")
+  as used in the corresponding forward pass.")
 
   (input-gradient [this]
     "Gets the computed input gradients for a module. Assumes the backward pass has been run."))
@@ -70,7 +70,9 @@
 (defprotocol PNeuralTrainingOptional
   "Some layers will want to do things before the forward pass like update random number buffers.
   This allows things like dropout to play well with gradient checking in that prepare-forward can
-  be called once but forward can be called multiple times (normally 1 + 2 * n-params)."
+  be called once but forward can be called multiple times (normally 1 + 2 * n-params).
+
+  prepare-forward should return its parameter unmodified if no preparation is required."
   (prepare-forward [this]))
 
 
