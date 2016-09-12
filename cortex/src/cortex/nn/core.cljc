@@ -61,7 +61,8 @@
 (defn forward
   "Runs the forward training pass on a neural network module."
   ([m input]
-    (cp/forward m input)))
+    (let [m (cp/prepare-forward m)]
+      (cp/forward m input))))
 
 (defn input-size
   "Returns the size of the module input array."

@@ -175,6 +175,12 @@
 
   (output [this]
     (cp/output (last modules)))
+  
+  cp/PLayerSize
+    (input-size [this]
+      (cp/input-size (first modules)))
+    (output-size [this]
+      (cp/output-size (last modules)))
 
   cp/PNeuralTrainingOptional
   (prepare-forward [this]

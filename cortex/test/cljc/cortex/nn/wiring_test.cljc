@@ -24,7 +24,6 @@
   ;;(let [st (stack-module [])]
   ;;  (is (= 1 (output (calc st 1))))
   ;;  (is (= [0] (shape (parameters st)))))
-  
   )
 
 (deftest test-split
