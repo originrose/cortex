@@ -1,6 +1,6 @@
 (ns think.compute.verify.optimise
   (:require [clojure.test :refer :all]
-            [think.compute.nn.network :as network]
+            [think.compute.nn.backend :as nn-backend]
             [think.compute.datatype :as dtype]
             [think.compute.optimise :as opt]
             [think.compute.verify.utils :refer [def-double-float-test] :as utils]
@@ -30,15 +30,15 @@
 
 
 (defn test-adam
-  [net]
-  (let [parameters (network/array net [1 2 3 4])
-        optimizer (opt/setup-optimiser (opt/adam) net 4)]
+  [backend]
+  (let [parameters (nn-backend/array backend [1 2 3 4])
+        optimizer (opt/setup-optimiser (opt/adam) backend 4)]
     (reduce (fn [optimizer item]
-              (let [gradient (network/array net (map #(* 2.0 %) (network/to-double-array net parameters)))
+              (let [gradient (nn-backend/array backend (map #(* 2.0 %) (nn-backend/to-double-array backend parameters)))
                     optimizer (opt/batch-update optimizer)
                     _ (opt/compute-parameters! optimizer 1.0 0 gradient parameters)
                     item (m/eseq item)
-                    guess (m/eseq (network/to-double-array net parameters))]
+                    guess (m/eseq (nn-backend/to-double-array backend parameters))]
                 (is (utils/about-there? guess item))
                 optimizer))
             optimizer

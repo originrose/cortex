@@ -1,7 +1,7 @@
 (ns think.compute.math
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
-            [think.compute.device :as dev]
+            [think.compute.driver :as drv]
             [think.compute.datatype :as dtype]))
 
 (set! *warn-on-reflection* true)
@@ -168,7 +168,7 @@
    (let [batch-size (long batch-size)
          data-shape (m/shape data)
          data-ary (make-array-of-type datatype data)
-         data-ptr (dev/host-array->device-buffer device stream data-ary)
+         data-ptr (drv/host-array->device-buffer device stream data-ary)
          n-elems (m/ecount data-ary)
          tensor (core-mat-shape->tensor data-shape batch-size)]
      (->DeviceArray data-ptr tensor)))
@@ -180,27 +180,27 @@
          tensor (core-mat-shape->tensor shape)
          tensor (create-tensor batch-size 1 (.height tensor) (.width tensor))
          n-elems (long (mp/element-count tensor))
-         dev-buf (dev/allocate-device-buffer device n-elems datatype)]
-     (dev/memset stream dev-buf 0 0 n-elems)
+         dev-buf (drv/allocate-device-buffer device n-elems datatype)]
+     (drv/memset stream dev-buf 0 0 n-elems)
      (->DeviceArray dev-buf tensor)))
   ([device stream datatype shape] (new-array device stream datatype shape 1))
   ([device stream datatype batch-size channel-count height width]
    (let [tensor (create-tensor batch-size channel-count height width)
          n-elems (long (mp/element-count tensor))
-         device-buffer (dev/allocate-device-buffer device n-elems datatype)]
-     (dev/memset stream device-buffer 0 0 n-elems)
+         device-buffer (drv/allocate-device-buffer device n-elems datatype)]
+     (drv/memset stream device-buffer 0 0 n-elems)
      (->DeviceArray device-buffer tensor))))
 
 (defn allocate-ones
   "Allocate a buffer of ones, not an array of ones"
   [device stream datatype elem-count]
-  (let [retval (dev/allocate-device-buffer device elem-count datatype)]
-    (dev/memset stream retval 0 1 elem-count)
+  (let [retval (drv/allocate-device-buffer device elem-count datatype)]
+    (drv/memset stream retval 0 1 elem-count)
     (->DeviceArray retval (create-tensor elem-count))))
 
 (defn allocate-rand-buffer
   [device elem-count]
-  (let [retval (dev/allocate-rand-buffer device elem-count)]
+  (let [retval (drv/allocate-rand-buffer device elem-count)]
     (->DeviceArray retval (create-tensor elem-count))))
 
 (defn ecount
@@ -209,7 +209,7 @@
 
 (defn assign!
   [stream ^DeviceArray dest ^DeviceArray src]
-  (dev/copy-device->device stream (.device-buffer src)
+  (drv/copy-device->device stream (.device-buffer src)
                            0 (.device-buffer dest)
                            0 (ecount src)))
 
@@ -245,9 +245,9 @@
    (let [retval (m/new-array :vectorz shape)
          ^doubles ret-ary (mp/as-double-array retval)
          elem-count (alength ret-ary)
-         host-buf (dev/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
-     (dev/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
-     (dev/wait-for-event (dev/create-event stream))
+         host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
+     (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
+     (drv/wait-for-event (drv/create-event stream))
      (dtype/copy! host-buf 0 ret-ary 0 elem-count)
      retval))
   ;;Defaults to a 2d representation
@@ -261,9 +261,9 @@
   [device stream datatype ^DeviceArray ary]
   (let [elem-count (ecount ary)
         retval (dtype/make-array-of-type datatype elem-count)
-        host-buf (dev/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
-    (dev/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
-    (dev/wait-for-event (dev/create-event stream))
+        host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
+    (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
+    (drv/wait-for-event (drv/create-event stream))
     (dtype/copy! host-buf 0 retval 0 elem-count)
     retval))
 
@@ -346,7 +346,7 @@
 
 
 (defn split-array-into-batches
-  [device ^DeviceArray ary-data]
+  [driver ^DeviceArray ary-data]
   (let [^Tensor tensor (.tensor ary-data)
         [batch-size batch-stride] (batch-shape ary-data)
         batch-size (long batch-size)
@@ -355,14 +355,14 @@
                                   (.height tensor) (.width tensor))
         dev-buf (device-buffer ary-data)]
     (mapv (fn [^long batch-idx]
-            (->DeviceArray (dev/sub-buffer device dev-buf (* batch-idx batch-stride)
+            (->DeviceArray (drv/sub-buffer driver dev-buf (* batch-idx batch-stride)
                                            batch-stride) sub-tensor))
           (range batch-size))))
 
 
 (defn batched-data-to-per-input-data
-  [device data-array-seq]
+  [driver data-array-seq]
   (vec (partition (count data-array-seq)
                   (apply interleave
-                         (map #(split-array-into-batches device %)
+                         (map #(split-array-into-batches driver %)
                               data-array-seq)))))

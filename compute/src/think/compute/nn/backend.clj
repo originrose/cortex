@@ -1,59 +1,59 @@
-(ns think.compute.nn.network
+(ns think.compute.nn.backend
   (:require [think.compute.math :as math]
-            [think.compute.device :as dev]
+            [think.compute.driver :as drv]
             [think.compute.datatype :as dtype]
             [cortex.nn.impl.layers.convolution])
   (:import [cortex.nn.impl.layers.convolution ConvLayerConfig]))
 
-;;Math bindings to make using a network easier.
+;;Math bindings to make using a backend easier.
 (defn array
-  ([net data items-per-batch]
-   (math/array (dev/get-device net) (dev/get-stream net) (dtype/get-datatype net)
+  ([backend data items-per-batch]
+   (math/array (drv/get-driver backend) (drv/get-stream backend) (dtype/get-datatype backend)
                data items-per-batch))
-  ([net data]
-   (array net data 1)))
+  ([backend data]
+   (array backend data 1)))
 
 (defn new-array
-  ([net shape items-per-batch]
-   (math/new-array (dev/get-device net) (dev/get-stream net) (dtype/get-datatype net)
+  ([backend shape items-per-batch]
+   (math/new-array (drv/get-driver backend) (drv/get-stream backend) (dtype/get-datatype backend)
                    shape items-per-batch))
-  ([net shape]
-   (new-array net shape 1)))
+  ([backend shape]
+   (new-array backend shape 1)))
 
-(defn allocate-ones [net elem-count]
-  (math/allocate-ones (dev/get-device net) (dev/get-stream net)
-                      (dtype/get-datatype net) elem-count))
+(defn allocate-ones [backend elem-count]
+  (math/allocate-ones (drv/get-driver backend) (drv/get-stream backend)
+                      (dtype/get-datatype backend) elem-count))
 
 (defn allocate-rand-buffer
-  [net elem-count]
-  (math/allocate-rand-buffer (dev/get-device net) elem-count))
+  [backend elem-count]
+  (math/allocate-rand-buffer (drv/get-driver backend) elem-count))
 
 (defn assign!
-  [net dest src]
-  (math/assign! (dev/get-stream net) dest src))
+  [backend dest src]
+  (math/assign! (drv/get-stream backend) dest src))
 
 (defn to-core-matrix
-  [net ary]
-  (math/to-core-matrix (dev/get-device net) (dev/get-stream net) ary))
+  [backend ary]
+  (math/to-core-matrix (drv/get-driver backend) (drv/get-stream backend) ary))
 
 (defn device-array->array
-  [net datatype device-ary]
-  (math/device-array->array (dev/get-device net) (dev/get-stream net) datatype device-ary))
+  [backend datatype device-ary]
+  (math/device-array->array (drv/get-driver backend) (drv/get-stream backend) datatype device-ary))
 
 (defn to-double-array
-  [net ary]
-  (device-array->array net :double ary))
+  [backend ary]
+  (device-array->array backend :double ary))
 
 
 (defn zero-many!
   [backend dev-array-seq]
   (doseq [ary dev-array-seq]
-    (dev/memset (dev/get-stream backend) (math/device-buffer ary) 0 0 (math/ecount ary))))
+    (drv/memset (drv/get-stream backend) (math/device-buffer ary) 0 0 (math/ecount ary))))
 
 
 (defn biased-multiply!
   [backend input weights bias output]
-  (let [stream (dev/get-stream backend)]
+  (let [stream (drv/get-stream backend)]
     (math/sum stream 1.0 bias 0.0 output)
     (math/gemm stream false true
                1.0 (math/as-2d-batch-matrix input) weights
@@ -63,7 +63,7 @@
 (defn biased-multiply-backward!
   [backend input weights bias output
    input-gradient weight-gradient bias-gradient output-gradient]
-  (let [stream (dev/get-stream backend)]
+  (let [stream (drv/get-stream backend)]
     (math/sum stream 1.0 output-gradient 1.0 bias-gradient)
     (math/gemm stream false false
                1.0 (math/as-2d-batch-matrix output-gradient) weights
@@ -136,13 +136,13 @@
 (defprotocol PLayerCreation
   "For layers completely implemented in the backend we allow the backend to create
 some specific data from a description."
-  (create-layer [net layer-desc]))
+  (create-layer [backend layer-desc]))
 
-(defprotocol PNetLayer
+(defprotocol PBackendLayer
   (forward! [layer input output])
   (backward! [layer input output input-gradient output-gradient]))
 
-(defprotocol PNetWeightedLayer
+(defprotocol PBackendWeightedLayer
   (weighted-forward! [layer input output weights bias])
   (weighted-backward! [layer input output weights bias
                        weight-gradient bias-gradient input-gradient output-gradient]))

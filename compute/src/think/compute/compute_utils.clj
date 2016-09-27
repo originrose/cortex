@@ -1,6 +1,5 @@
 (ns think.compute.compute-utils
   (:require [clojure.core.async :as async]
-            [think.compute.cpu-device :as cpu-dev]
             [resource.core :as resource]))
 
 

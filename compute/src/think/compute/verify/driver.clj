@@ -1,6 +1,6 @@
-(ns think.compute.verify.backend-test
+(ns think.compute.verify.driver
   (:require [clojure.test :refer :all]
-            [think.compute.device :as dev]
+            [think.compute.driver :as drv]
             [think.compute.math :as math]
             [think.compute.datatype :as dtype]
             [clojure.core.matrix :as m]))
@@ -9,19 +9,19 @@
 
 (defn simple-stream
   [device datatype]
-  (let [stream (dev/create-stream device)
-        buf-a (dev/allocate-host-buffer device 10 datatype)
-        output-buf-a (dev/allocate-host-buffer device 10 datatype)
-        buf-b (dev/allocate-device-buffer device 10 datatype)
+  (let [stream (drv/create-stream device)
+        buf-a (drv/allocate-host-buffer device 10 datatype)
+        output-buf-a (drv/allocate-host-buffer device 10 datatype)
+        buf-b (drv/allocate-device-buffer device 10 datatype)
         input-data (dtype/make-array-of-type datatype (range 10))
         output-data (dtype/make-array-of-type datatype 10)]
     (dtype/copy! input-data 0 buf-a 0 10)
     (dtype/set-value! buf-a 0 100.0)
     (dtype/copy! buf-a 0 output-data 0 10)
-    (dev/copy-host->device stream buf-a 0 buf-b 0 10)
-    (dev/memset stream buf-b 5 20.0 5)
-    (dev/copy-device->host stream buf-b 0 output-buf-a 0 10)
-    (dev/wait-for-event (dev/create-event stream))
+    (drv/copy-host->device stream buf-a 0 buf-b 0 10)
+    (drv/memset stream buf-b 5 20.0 5)
+    (drv/copy-device->host stream buf-b 0 output-buf-a 0 10)
+    (drv/wait-for-event (drv/create-event stream))
     (dtype/copy! output-buf-a 0 output-data 0 10)
     (is (= [100.0 1.0 2.0 3.0 4.0 20.0 20.0 20.0 20.0 20.0]
            (mapv double output-data)))))
@@ -29,14 +29,14 @@
 (defn create-make-buffer
   [device stream datatype]
    (fn [elem-seq]
-     (dev/host-array->device-buffer device stream
+     (drv/host-array->device-buffer device stream
                                     (dtype/make-array-of-type datatype elem-seq))))
 
 (defmacro backend-test-pre
   [device datatype & body]
-  `(let [~'stream (dev/create-stream ~device)
+  `(let [~'stream (drv/create-stream ~device)
          ~'make-buffer (create-make-buffer ~device ~'stream ~datatype)
-         ~'->array (fn [buffer#] (dev/device-buffer->host-array ~device ~'stream buffer#))]
+         ~'->array (fn [buffer#] (drv/device-buffer->host-array ~device ~'stream buffer#))]
      ~@body
      ))
 

@@ -1,10 +1,10 @@
 (ns think.compute.nn.gradient-check
   (:require [cortex.nn.protocols :as cp]
-            [think.compute.nn.network :as network]
+            [think.compute.nn.backend :as nn-backend]
             [think.compute.math :as math]
             [think.compute.nn.layers :as layers]
             [think.compute.datatype :as dtype]
-            [think.compute.device :as dev]
+            [think.compute.driver :as drv]
             [think.compute.nn.train :as train]
             [clojure.core.matrix.macros :refer [c-for]]))
 
@@ -18,7 +18,7 @@
         output-seq (cp/multi-output network)
         [batch-size elem-count] (math/batch-shape (first output-seq))
         backend (layers/get-backend network)
-        output-doubles (mapv #(network/to-double-array backend %) output-seq)
+        output-doubles (mapv #(nn-backend/to-double-array backend %) output-seq)
         loss-seq (map (fn [loss-fn output answer]
                         (let [local-output (mapv vec (partition elem-count (seq output)))
                               local-answers (mapv vec (partition elem-count (seq answer)))]
@@ -34,28 +34,28 @@
   [network loss-fn-seq input-seq answer-seq param-idx-epsilon-map]
   (let [backend (layers/get-backend network)
         network-parameters (concat (layers/parameters network) input-seq)
-        answer-doubles (mapv #(network/to-double-array backend %) answer-seq)
+        answer-doubles (mapv #(nn-backend/to-double-array backend %) answer-seq)
         datatype (dtype/get-datatype backend)]
     (vec (map-indexed
           (fn [idx net-param-buf]
             (let [elem-count (math/ecount net-param-buf)
-                  upload-buffer (dev/allocate-host-buffer (dev/get-device backend)
+                  upload-buffer (drv/allocate-host-buffer (drv/get-driver backend)
                                                           elem-count datatype)
                   device-buffer (math/device-buffer net-param-buf)
                   run-network-fn (fn [param-val idx]
                                    (dtype/set-value! upload-buffer idx param-val)
-                                   (dev/copy-host->device (dev/get-stream backend)
+                                   (drv/copy-host->device (drv/get-stream backend)
                                                           upload-buffer 0 device-buffer 0
                                                           elem-count)
                                    (network-forward network loss-fn-seq input-seq answer-doubles))
                   ^doubles retval (double-array elem-count)
                   epsilon (double (get param-idx-epsilon-map idx 1e-4))]
-              (dev/copy-device->host (dev/get-stream backend) device-buffer 0
+              (drv/copy-device->host (drv/get-stream backend) device-buffer 0
                                      upload-buffer 0 elem-count)
               ;;Make sure before we start our loop below we have completed the copy
               ;;operation into the upload buffer.  This is a subtle bug and hard to
               ;;find but will cause the gradient's to diverge further and further.
-              (dev/wait-for-event (dev/create-event (dev/get-stream backend)))
+              (drv/wait-for-event (drv/create-event (drv/get-stream backend)))
               (c-for [idx 0 (< idx elem-count) (inc idx)]
                      (let [param-original (double (dtype/get-value upload-buffer idx))
                            forward-pos (run-network-fn (+ param-original epsilon) idx)
@@ -64,7 +64,7 @@
                                        (* 2.0 epsilon))]
                        ;;reset parameter
                        (dtype/set-value! upload-buffer idx param-original)
-                       (dev/copy-host->device (dev/get-stream backend) upload-buffer 0
+                       (drv/copy-host->device (drv/get-stream backend) upload-buffer 0
                                               device-buffer 0 elem-count)
                        ;;Set gradient in retval
                        (aset retval idx gradient)))
@@ -82,18 +82,18 @@
   1e-7 so you need enough epsilon to ensure a gradient in the range of 1e-3 or larger."
   [train-config input-seq answer-seq & {:keys [param-idx-epsilon-map]}]
   ;;first step clear gradients to ensure we don't get pollution
-  (network/zero-many! (layers/get-backend (:network train-config))
+  (nn-backend/zero-many! (layers/get-backend (:network train-config))
                       (layers/gradients (:network train-config)))
   (let [train-config (train/train-step train-config input-seq answer-seq)
         backend (layers/get-backend (:network train-config))
-        calculated-gradients (mapv (comp vec #(network/to-double-array backend %))
+        calculated-gradients (mapv (comp vec #(nn-backend/to-double-array backend %))
                                    (concat (layers/gradients (:network train-config))
                                            (cp/multi-input-gradient (:network train-config))))
         numeric-gradients (calculate-numeric-gradient (:network train-config)
                                                       (:loss-fn train-config)
                                                       input-seq answer-seq
                                                       param-idx-epsilon-map)]
-    (network/zero-many! (layers/get-backend (:network train-config))
-                        (layers/gradients (:network train-config)))
+    (nn-backend/zero-many! (layers/get-backend (:network train-config))
+                           (layers/gradients (:network train-config)))
     {:calculated-gradients calculated-gradients
      :numeric-gradients numeric-gradients }))

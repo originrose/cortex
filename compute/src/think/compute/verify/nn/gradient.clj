@@ -3,8 +3,8 @@
             [think.compute.verify.utils :as utils]
             [think.compute.nn.gradient-check :as grad-check]
             [think.compute.nn.layers :as layers]
-            [think.compute.nn.network :as network]
-            [think.compute.device :as dev]
+            [think.compute.nn.backend :as nn-backend]
+            [think.compute.driver :as drv]
             [think.compute.optimise :as opt]
             [think.compute.verify.nn.train :as train-test]
             [cortex.nn.protocols :as cp]
@@ -44,9 +44,9 @@
         net (layers/linear backend 2 1)
         loss [(opt/setup-loss (opt/mse-loss) backend batch-size
                               (first (cp/multi-output-size net)))]
-        input [(network/array backend (->> (take batch-size train-test/CORN-DATA)
+        input [(nn-backend/array backend (->> (take batch-size train-test/CORN-DATA)
                                            (mapv vec)) batch-size)]
-        output [(network/array backend (->> (take batch-size train-test/CORN-LABELS)
+        output [(nn-backend/array backend (->> (take batch-size train-test/CORN-LABELS)
                                             (mapv vec)) batch-size)]
         net (cp/setup net batch-size)
         train-config {:network net :loss-fn loss}]
@@ -60,8 +60,8 @@
         net (layers/layer-list [(layers/linear backend 2 2)
                                 (layers/softmax backend 2)])
         loss [(opt/setup-loss (opt/softmax-loss) backend batch-size 2)]
-        input [(network/array  backend [-0.0037519929582033617 0.08154521439680502] batch-size)]
-        output [(network/array backend [0 1] batch-size)]
+        input [(nn-backend/array  backend [-0.0037519929582033617 0.08154521439680502] batch-size)]
+        output [(nn-backend/array backend [0 1] batch-size)]
         net (cp/setup net 1)
         train-config {:network net :loss-fn loss}]
     ;;Softmax isn't sensitive to the input gradient changing by a small epsilon
@@ -81,8 +81,8 @@
                                  (layers/softmax backend 2)])
         loss [(opt/setup-loss (opt/softmax-loss) backend batch-size
                               (first (cp/multi-output-size net)))]
-        input [(network/array backend (vec (repeat 5 1)) batch-size)]
-        output [(network/array backend [0 1] batch-size)]
+        input [(nn-backend/array backend (vec (repeat 5 1)) batch-size)]
+        output [(nn-backend/array backend [0 1] batch-size)]
         net (cp/setup net 1)]
     (check-gradients (grad-check/get-gradients {:network net :loss-fn loss}
                                                input output)
@@ -100,8 +100,8 @@
         layer (cp/setup
                (layers/batch-normalization backend input-size 1.0)
                batch-size)
-        input [(network/array backend input-data-vector batch-size)]
-        output [(network/array backend input-data-vector batch-size)]
+        input [(nn-backend/array backend input-data-vector batch-size)]
+        output [(nn-backend/array backend input-data-vector batch-size)]
         loss [(opt/setup-loss (opt/mse-loss) backend batch-size
                               (first (cp/multi-output-size layer)))]]
     ;;Set the input epsilon to something pretty large because with MSE error each

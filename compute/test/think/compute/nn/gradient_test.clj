@@ -2,28 +2,28 @@
   (:require [clojure.test :refer :all]
             [think.compute.verify.nn.gradient :as gradient]
             [think.compute.verify.utils :refer [def-double-float-test] :as test-utils]
-            [think.compute.nn.cpu-network :as cpu-net]))
+            [think.compute.nn.cpu-backend :as cpu-net]))
 
 
 (use-fixtures :each test-utils/test-wrapper)
 
 
-(defn create-network
+(defn create-backend
   []
-  (cpu-net/create-cpu-network test-utils/*datatype*))
+  (cpu-net/create-cpu-backend test-utils/*datatype*))
 
 
 (deftest corn-gradient
-  (gradient/corn-gradient (create-network)))
+  (gradient/corn-gradient (create-backend)))
 
 
 (deftest softmax-gradient
-  (gradient/softmax-gradient (create-network)))
+  (gradient/softmax-gradient (create-backend)))
 
 
 (deftest dropout-gaussian
-  (gradient/dropout-gaussian-gradient (create-network)))
+  (gradient/dropout-gaussian-gradient (create-backend)))
 
 
 (deftest batch-normalization
-  (gradient/bn-gradient (create-network)))
+  (gradient/bn-gradient (create-backend)))

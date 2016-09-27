@@ -1,5 +1,5 @@
-(ns think.compute.cpu-device
-  (:require [think.compute.device :as dev]
+(ns think.compute.cpu-driver
+  (:require [think.compute.driver :as drv]
             [think.compute.math :as c-math]
             [think.compute.datatype :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
             [clojure.core.async :as async]
@@ -85,7 +85,7 @@ primitives will just hang with this stream."
 (defrecord CPUEvent [input-chan])
 
 (extend-type CPUStream
-  dev/PStream
+  drv/PStream
   (copy-host->device [stream host-buffer host-offset
                       device-buffer device-offset elem-count]
     (with-stream-dispatch stream
@@ -106,19 +106,19 @@ primitives will just hang with this stream."
       event))
   (sync-event [stream event]
     (with-stream-dispatch stream
-      (dev/wait-for-event event))))
+      (drv/wait-for-event event))))
 
 (extend-type CPUEvent
-  dev/PEvent
+  drv/PEvent
   (wait-for-event [event]
     (async/<!! (.input-chan event))))
 
-(defrecord CPUDevice [^long dev-count ^long current-device error-atom])
+(defrecord CPUDriver [^long dev-count ^long current-device error-atom])
 
-(defn create-device [] (->CPUDevice 1 1 (atom nil)))
+(defn create-driver [] (->CPUDriver 1 1 (atom nil)))
 
-(extend-type CPUDevice
-  dev/PDevice
+(extend-type CPUDriver
+  drv/PDriver
   (get-devices [impl] (mapv #(+ 1 %) (range (.dev-count impl))))
   (set-current-device [impl ^long device] (assoc impl :current-device device))
   (get-current-device [impl] (:current-device impl))

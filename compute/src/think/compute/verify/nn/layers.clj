@@ -1,8 +1,7 @@
 (ns think.compute.verify.nn.layers
   (:require [clojure.test :refer :all]
-            [think.compute.nn.network :as network]
+            [think.compute.nn.backend :as nn-backend]
             [think.compute.nn.layers :as layers]
-            [think.compute.nn.cpu-network :as cpu-net]
             [cortex.nn.protocols :as cp]
             [clojure.core.matrix :as m]
             [think.compute.verify.utils :as utils]
@@ -11,70 +10,70 @@
 
 
 (defn test-relu-activation
-  [net]
+  [backend]
   (let [item-count 10
         ;;sums to zero
-        input (network/array net (flatten (repeat (/ item-count 2) [-1 1])))
-        layer (layers/activation net item-count :relu)
+        input (nn-backend/array backend (flatten (repeat (/ item-count 2) [-1 1])))
+        layer (layers/activation backend item-count :relu)
         layer (cp/setup layer 1)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
     (is (= (double (/ item-count 2))
            (m/esum output-data)))
-    (let [output-gradient (network/array net (repeat item-count 1))
+    (let [output-gradient (nn-backend/array backend (repeat item-count 1))
           layer (cp/backward layer input output-gradient)
           input-gradient (cp/input-gradient layer)
-          input-grad-data (network/to-double-array net input-gradient)]
+          input-grad-data (nn-backend/to-double-array backend input-gradient)]
       (is (= (double (/ item-count 2))
              (m/esum input-grad-data))))))
 
 
 (defn test-relu-activation-batch
-  [net]
+  [backend]
   (let [item-count 10000
         items-per-batch 5
         ;;sums to zero
-        input (network/array net (flatten (repeat (* items-per-batch
+        input (nn-backend/array backend (flatten (repeat (* items-per-batch
                                                      (/ item-count 2)) [-1 1]))
                              items-per-batch)
-        layer (layers/activation net item-count :relu)
+        layer (layers/activation backend item-count :relu)
         layer (cp/setup layer items-per-batch)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
 
     (is (= (double (* items-per-batch
                       (/ item-count 2)))
            (m/esum output-data)))
 
-    (let [output-gradient (network/array net (repeat (* items-per-batch item-count) 1)
+    (let [output-gradient (nn-backend/array backend (repeat (* items-per-batch item-count) 1)
                                          items-per-batch)
           layer (cp/backward layer input output-gradient)
           input-gradient (cp/input-gradient layer)
-          input-grad-data (network/to-double-array net input-gradient)]
+          input-grad-data (nn-backend/to-double-array backend input-gradient)]
       (is (= (double (* items-per-batch
                         (/ item-count 2)))
              (m/esum input-grad-data))))))
 
 
 (defn test-linear
-  [net]
-  (let [weights (network/array net [[1 2] [3 4]])
-        bias (network/array net [0 10])
-        input (network/array net [1 2])
-        layer (layers/->Linear net weights bias nil)
+  [backend]
+  (let [weights (nn-backend/array backend [[1 2] [3 4]])
+        bias (nn-backend/array backend [0 10])
+        input (nn-backend/array backend [1 2])
+        layer (layers/->Linear backend weights bias nil)
         layer (cp/setup layer 1)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
     (is (= (map double [5 21])
            (m/eseq output-data)))
-    (let [output-gradient (network/array net [1 2])
+    (let [output-gradient (nn-backend/array backend [1 2])
           layer (cp/backward layer input output-gradient)
-          weight-gradient (vec (network/to-double-array net (:weight-gradient layer)))
-          bias-gradient (vec (network/to-double-array net (:bias-gradient layer)))
-          input-gradient (vec (network/to-double-array net (:input-gradient layer)))]
+          weight-gradient (vec (nn-backend/to-double-array backend (:weight-gradient layer)))
+          bias-gradient (vec (nn-backend/to-double-array backend (:bias-gradient layer)))
+          input-gradient (vec (nn-backend/to-double-array backend (:input-gradient layer)))]
       (is (m/equals [1 2 2 4] weight-gradient))
       (is (m/equals [1 2] bias-gradient))
       (is (m/equals [7 10] input-gradient)))))
@@ -82,17 +81,17 @@
 
 
 (defn test-l2-max-constraint
-  [net]
+  [backend]
   (let [input-size 100
         output-size 10
         l2-max-constraint 1.0
-        weight-matrix (network/array net
+        weight-matrix (nn-backend/array backend
                                      (partition input-size (range (* input-size output-size))))
-        bias (network/new-array net [output-size])
-        layer (layers/->Linear net weight-matrix bias l2-max-constraint)
+        bias (nn-backend/new-array backend [output-size])
+        layer (layers/->Linear backend weight-matrix bias l2-max-constraint)
         layer (cp/setup layer 10)]
     (layers/apply-l2-max-constraint layer)
-    (let [weights (network/to-double-array net weight-matrix)
+    (let [weights (nn-backend/to-double-array backend weight-matrix)
           double-mat (m/reshape weights [output-size input-size])
           magnitudes (map m/magnitude (m/rows double-mat))
           mag-sum (m/esum magnitudes)]
@@ -100,24 +99,24 @@
 
 
 (defn test-linear-batch
-  [net]
+  [backend]
   (let [num-batch-items 10
-        weights (network/array net [[1 2] [3 4]])
-        bias (network/array net [0 10])
-        input (network/array net (flatten (repeat num-batch-items [1 2])) num-batch-items)
-        layer (layers/->Linear net weights bias nil)
+        weights (nn-backend/array backend [[1 2] [3 4]])
+        bias (nn-backend/array backend [0 10])
+        input (nn-backend/array backend (flatten (repeat num-batch-items [1 2])) num-batch-items)
+        layer (layers/->Linear backend weights bias nil)
         layer (cp/setup layer num-batch-items)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
     (is (= (map double (flatten (repeat num-batch-items [5 21])))
            (m/eseq output-data)))
-    (let [output-gradient (network/array net (flatten (repeat num-batch-items [1 2]))
+    (let [output-gradient (nn-backend/array backend (flatten (repeat num-batch-items [1 2]))
                                          num-batch-items)
           layer (cp/backward layer input output-gradient)
-          weight-gradient (vec (network/to-double-array net (:weight-gradient layer)))
-          bias-gradient (vec (network/to-double-array net (:bias-gradient layer)))
-          input-gradient (vec (network/to-double-array net (:input-gradient layer)))]
+          weight-gradient (vec (nn-backend/to-double-array backend (:weight-gradient layer)))
+          bias-gradient (vec (nn-backend/to-double-array backend (:bias-gradient layer)))
+          input-gradient (vec (nn-backend/to-double-array backend (:input-gradient layer)))]
       (is (m/equals (mapv #(* % num-batch-items) [1 2 2 4]) weight-gradient))
       (is (m/equals (mapv #(* % num-batch-items) [1 2]) bias-gradient))
       (is (m/equals (flatten (repeat num-batch-items [7 10])) input-gradient)))))
@@ -139,20 +138,20 @@
 
 
 (defn test-activation
-  [net act-type]
+  [backend act-type]
   (let [item-count 10
         ;;sums to zero
-        input (network/array net (flatten (repeat (/ item-count 2) [-1 1])))
-        layer (layers/activation net item-count act-type)
+        input (nn-backend/array backend (flatten (repeat (/ item-count 2) [-1 1])))
+        layer (layers/activation backend item-count act-type)
         layer (cp/setup layer 1)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
     (is (utils/about-there? output-data (first (activation-answers act-type))))
-    (let [output-gradient (network/array net (flatten (repeat (/ item-count 2) [-1 1])))
+    (let [output-gradient (nn-backend/array backend (flatten (repeat (/ item-count 2) [-1 1])))
           layer (cp/backward layer input output-gradient)
           input-gradient (cp/input-gradient layer)
-          input-grad-data (network/to-double-array net input-gradient)]
+          input-grad-data (nn-backend/to-double-array backend input-gradient)]
       (is (utils/about-there? input-grad-data (second (activation-answers act-type)))))))
 
 
@@ -187,91 +186,91 @@
                      0.14130164970632886 0.0295981114963205 0.005363802732103666])))]})
 
 (defn test-activation-batch
-  [net act-type]
+  [backend act-type]
   (let [item-count 10
         batch-size activation-batch-size
         item-range (flatten (repeat batch-size (range (- (/ item-count 2)) (/ item-count 2))))
         ;;sums to zero
-        input (network/array net item-range batch-size)
-        layer (layers/activation net item-count act-type)
+        input (nn-backend/array backend item-range batch-size)
+        layer (layers/activation backend item-count act-type)
         layer (cp/setup layer batch-size)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
     (is (utils/about-there? output-data (first (activation-batch-answers act-type)) 1e-3))
-    (let [output-gradient (network/array net item-range
+    (let [output-gradient (nn-backend/array backend item-range
                                          batch-size)
           layer (cp/backward layer input output-gradient)
           input-gradient (cp/input-gradient layer)
-          input-grad-data (network/to-double-array net input-gradient)]
+          input-grad-data (nn-backend/to-double-array backend input-gradient)]
       (is (utils/about-there? input-grad-data
                               (second (activation-batch-answers act-type)) 1e-3)))))
 
 
 (defn softmax
-  [net]
-  (let [input (network/array net (vec (take 10 (flatten (repeat [1 2 3 4])))))
-        layer (layers/softmax net 10)
+  [backend]
+  (let [input (nn-backend/array backend (vec (take 10 (flatten (repeat [1 2 3 4])))))
+        layer (layers/softmax backend 10)
         layer (cp/setup layer 1)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
     (is (utils/about-there? [0.015127670383492609,0.041121271510366035,0.11177920510975863
                              ,0.30384738204945333,0.015127670383492609,0.041121271510366035
                              ,0.11177920510975863,0.30384738204945333,0.015127670383492609
                              ,0.041121271510366035] output-data))
-    (let [output-gradient (network/array net (repeat 10 1))
+    (let [output-gradient (nn-backend/array backend (repeat 10 1))
           layer (cp/backward layer input output-gradient)
-          input-gradient (network/to-double-array net (cp/input-gradient layer))]
+          input-gradient (nn-backend/to-double-array backend (cp/input-gradient layer))]
       (is (= (map double (repeat 10 1))
              (seq input-gradient))))))
 
 
 (defn softmax-batch
-  [net]
+  [backend]
   (let [batch-count 10
-        input (network/array net (vec (flatten (repeat batch-count
+        input (nn-backend/array backend (vec (flatten (repeat batch-count
                                                        (take 10 (flatten (repeat [1 2 3 4]))))))
                              batch-count)
-        layer (layers/softmax net 10)
+        layer (layers/softmax backend 10)
         layer (cp/setup layer batch-count)
         layer (cp/calc layer input)
         output (cp/output layer)
-        output-data (network/to-double-array net output)]
+        output-data (nn-backend/to-double-array backend output)]
     (is (utils/about-there?
          (flatten (repeat batch-count
                           [0.015127670383492609,0.041121271510366035,0.11177920510975863
                            ,0.30384738204945333,0.015127670383492609,0.041121271510366035
                            ,0.11177920510975863,0.30384738204945333,0.015127670383492609
                            ,0.041121271510366035])) output-data))
-    (let [output-gradient (network/array net (repeat (* batch-count 10) 1))
+    (let [output-gradient (nn-backend/array backend (repeat (* batch-count 10) 1))
           layer (cp/backward layer input output-gradient)
-          input-gradient (network/to-double-array net (cp/input-gradient layer))]
+          input-gradient (nn-backend/to-double-array backend (cp/input-gradient layer))]
       (is (= (map double (repeat (* 10 batch-count) 1))
              (seq input-gradient))))))
 
 
 (defn create-conv-layer
-  [net input-dim num-channels k-dim pad stride n-kernels]
+  [backend input-dim num-channels k-dim pad stride n-kernels]
   (let [conv-config (conv/create-conv-layer-config input-dim input-dim
                                                    k-dim k-dim
                                                    pad pad
                                                    stride stride
                                                    num-channels
                                                    n-kernels)
-        weights (network/array net (map #(repeat (* k-dim k-dim num-channels) %)
+        weights (nn-backend/array backend (map #(repeat (* k-dim k-dim num-channels) %)
                                         (range 1 (+ n-kernels 1))))
-        bias (network/array net (vec (repeat n-kernels 1)))]
-    (layers/->Convolutional net weights bias conv-config nil)))
+        bias (nn-backend/array backend (vec (repeat n-kernels 1)))]
+    (layers/->Convolutional backend weights bias conv-config nil)))
 
 
 (defn basic-conv-layer
-  [net]
+  [backend]
   (let [batch-size 10
         channel-count 4
-        conv-layer (create-conv-layer net 3 1 2 0 1 channel-count)
-        input (network/array net (repeat batch-size (range 1 10)) batch-size)
-        output-gradient (network/array net (flatten
+        conv-layer (create-conv-layer backend 3 1 2 0 1 channel-count)
+        input (nn-backend/array backend (repeat batch-size (range 1 10)) batch-size)
+        output-gradient (nn-backend/array backend (flatten
                                             (repeat (* 4 batch-size) [1 1 1 1])) batch-size)
         conv-layer (cp/setup conv-layer batch-size)
         conv-layer (cp/forward conv-layer input)
@@ -279,40 +278,40 @@
         input-gradient (cp/input-gradient conv-layer)]
     (is (= (flatten (repeat batch-size [13.0 17.0 25.0 29.0 25.0 33.0 49.0 57.0
                                         37.0 49.0 73.0 85.0 49.0 65.0 97.0 113.0]))
-           (seq (network/to-double-array net (cp/output conv-layer)))))
+           (seq (nn-backend/to-double-array backend (cp/output conv-layer)))))
     (is (= (map double (flatten (repeat 4 [120.0 160.0 240.0 280.0])))
-           (m/eseq (network/to-double-array net (:weight-gradient conv-layer)))))
+           (m/eseq (nn-backend/to-double-array backend (:weight-gradient conv-layer)))))
     (is (= (map double (repeat 4 (* 4 batch-size)))
-           (m/eseq (network/to-double-array net (:bias-gradient conv-layer)))))
+           (m/eseq (nn-backend/to-double-array backend (:bias-gradient conv-layer)))))
     (is (= (flatten (repeat batch-size (map #(double (* 10 %)) [1 2 1 2 4 2 1 2 1])))
-           (m/eseq (network/to-double-array net input-gradient))))))
+           (m/eseq (nn-backend/to-double-array backend input-gradient))))))
 
 
 (defn pool-layer-basic
-  [net]
+  [backend]
   (let [batch-size 10
         pool-layer-config (conv/create-conv-layer-config 2 2 2 2 0 0 1 1 4)
-        pool-layer (layers/->Pooling net pool-layer-config)
+        pool-layer (layers/->Pooling backend pool-layer-config)
         pool-layer (cp/setup pool-layer batch-size)
-        input (network/array net (flatten (repeat batch-size (range 1 17))) batch-size)
-        output-gradient (network/array net (flatten (repeat batch-size [1 2 3 4])) batch-size)
+        input (nn-backend/array backend (flatten (repeat batch-size (range 1 17))) batch-size)
+        output-gradient (nn-backend/array backend (flatten (repeat batch-size [1 2 3 4])) batch-size)
         pool-layer (cp/forward pool-layer input)
         pool-layer (cp/backward pool-layer input output-gradient)
         output (cp/output pool-layer)
         input-gradient (cp/input-gradient pool-layer)]
     (is (= (map double (flatten (repeat batch-size [4 8 12 16])))
-           (m/eseq (network/to-double-array net output))))
+           (m/eseq (nn-backend/to-double-array backend output))))
     (is (= (map double (flatten (repeat batch-size (map #(vector 0 0 0 %) (range 1 5)))))
-           (m/eseq (network/to-double-array net input-gradient))))
-    (let [input (network/array net (repeat batch-size (range 16 0 -1)) batch-size)
-          output-gradient (network/array net (flatten (repeat batch-size  [1 2 3 4])) batch-size)
+           (m/eseq (nn-backend/to-double-array backend input-gradient))))
+    (let [input (nn-backend/array backend (repeat batch-size (range 16 0 -1)) batch-size)
+          output-gradient (nn-backend/array backend (flatten (repeat batch-size  [1 2 3 4])) batch-size)
           pool-layer (cp/forward pool-layer input)
           pool-layer (cp/backward pool-layer input output-gradient)
           input-gradient (cp/input-gradient pool-layer)]
       (is (= (map double (flatten (repeat batch-size [16 12 8 4])))
-             (m/eseq (network/to-double-array net (cp/output pool-layer)))))
+             (m/eseq (nn-backend/to-double-array backend (cp/output pool-layer)))))
       (is (= (map double (flatten (repeat batch-size (map #(vector % 0 0 0) (range 1 5)))))
-             (m/eseq (network/to-double-array net input-gradient)))))))
+             (m/eseq (nn-backend/to-double-array backend input-gradient)))))))
 
 
 (defn count-zeros
@@ -321,12 +320,12 @@
 
 
 (defn dropout-bernoulli
-  [net]
+  [backend]
   (let [batch-size 5
         item-count 20
-        input (network/array net (repeat (* batch-size item-count) 1.0) batch-size)
-        output-gradient (network/array net (repeat (* batch-size item-count) 2.0) batch-size)
-        dropout-layer (layers/bernoulli-dropout net item-count 0.8)
+        input (nn-backend/array backend (repeat (* batch-size item-count) 1.0) batch-size)
+        output-gradient (nn-backend/array backend (repeat (* batch-size item-count) 2.0) batch-size)
+        dropout-layer (layers/bernoulli-dropout backend item-count 0.8)
         dropout-layer (cp/setup dropout-layer batch-size)
         repeat-count 30
         answer-seq
@@ -335,9 +334,9 @@
            (let [dropout-layer (cp/prepare-forward dropout-layer)
                  dropout-layer (cp/forward dropout-layer input)
                  dropout-layer (cp/backward dropout-layer input output-gradient)
-                 output (seq (network/to-double-array net (cp/output dropout-layer)))
+                 output (seq (nn-backend/to-double-array backend (cp/output dropout-layer)))
                  input-gradient (seq
-                                 (network/to-double-array net
+                                 (nn-backend/to-double-array backend
                                                           (cp/input-gradient dropout-layer)))]
              [(m/esum output) (count-zeros output)
               (m/esum input-gradient) (count-zeros input-gradient)])))
@@ -351,12 +350,12 @@
 
 
 (defn dropout-gaussian
-  [net]
+  [backend]
   (let [batch-size 5
         item-count 100
-        input (network/array net (repeat (* batch-size item-count) 1.0) batch-size)
-        output-gradient (network/array net (repeat (* batch-size item-count) 2.0) batch-size)
-        dropout-layer (layers/gaussian-dropout net item-count 0.5)
+        input (nn-backend/array backend (repeat (* batch-size item-count) 1.0) batch-size)
+        output-gradient (nn-backend/array backend (repeat (* batch-size item-count) 2.0) batch-size)
+        dropout-layer (layers/gaussian-dropout backend item-count 0.5)
         dropout-layer (cp/setup dropout-layer batch-size)
         dropout-layer (cp/prepare-forward dropout-layer)
         repeat-count 30
@@ -366,8 +365,8 @@
            (let [dropout-layer (cp/prepare-forward dropout-layer)
                  dropout-layer (cp/forward dropout-layer input)
                  dropout-layer (cp/backward dropout-layer input output-gradient)
-                 output (seq (network/to-double-array net (cp/output dropout-layer)))
-                 input-gradient (seq (network/to-double-array net (cp/input-gradient
+                 output (seq (nn-backend/to-double-array backend (cp/output dropout-layer)))
+                 input-gradient (seq (nn-backend/to-double-array backend (cp/input-gradient
                                                                    dropout-layer)))]
              [(m/esum output) (m/esum input-gradient)])))
         final-aggregate  (reduce m/add answer-seq)
@@ -382,7 +381,7 @@
   (let [item-count 1000
         items-per-batch 5
         ;;sums to zero
-        input (network/array backend (flatten (repeat (* items-per-batch
+        input (nn-backend/array backend (flatten (repeat (* items-per-batch
                                                          (/ item-count 2)) [-1 1]))
                              items-per-batch)
         layer (layers/split backend [(layers/activation backend item-count :relu)
@@ -392,19 +391,19 @@
         layer (cp/multi-forward layer [input])
         output (cp/multi-output layer)
         _ (is (= 2 (count output)))
-        output-data (mapv #(network/to-double-array backend %) output)]
+        output-data (mapv #(nn-backend/to-double-array backend %) output)]
 
     (is (every? #(= (double (* items-per-batch
                                (/ item-count 2)))
                     %)
                 (map m/esum output-data)))
 
-    (let [output-gradient (network/array backend (repeat (* items-per-batch item-count) 1)
+    (let [output-gradient (nn-backend/array backend (repeat (* items-per-batch item-count) 1)
                                          items-per-batch)
           output-gradient [output-gradient output-gradient]
           layer (cp/multi-backward layer [input] output-gradient)
           input-gradient (first (cp/multi-input-gradient layer))
-          input-grad-data (network/to-double-array backend input-gradient)]
+          input-grad-data (nn-backend/to-double-array backend input-gradient)]
       (is (= (double (* items-per-batch item-count))
              (m/esum input-grad-data))))))
 
@@ -423,15 +422,15 @@
         layer (cp/setup
                (layers/batch-normalization backend input-size 0.8)
                batch-size)
-        input (network/array backend input-data-vector batch-size)
+        input (nn-backend/array backend input-data-vector batch-size)
         layer (cp/forward layer input)
         output (cp/output layer)
-        double-output (network/to-double-array backend output)
+        double-output (nn-backend/to-double-array backend output)
         output-batches (mapv vec (partition input-size (seq double-output)))
         output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))
         input-stats (mapv cu/calc-mean-variance (m/transpose input-data-vector))
-        layer-means (vec (network/to-double-array backend (:batch-means layer)))
-        layer-variances (vec (network/to-double-array backend (:batch-variances layer)))
+        layer-means (vec (nn-backend/to-double-array backend (:batch-means layer)))
+        layer-variances (vec (nn-backend/to-double-array backend (:batch-variances layer)))
         layer-stats (vec (map (fn [mean variance]
                                 {:mean mean
                                  :variance variance})
@@ -444,10 +443,10 @@
             (format "Output variance incorrect at index %s" output-idx))))
     (dotimes [iter 5]
      (let [input-data-vector (input-data-vector-fn)
-           new-input (network/array backend input-data-vector batch-size)
+           new-input (nn-backend/array backend input-data-vector batch-size)
            layer (cp/forward layer new-input)
            output (cp/output layer)
-           double-output (network/to-double-array backend output)
+           double-output (nn-backend/to-double-array backend output)
            output-batches (mapv vec (partition input-size (seq double-output)))
            output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))]
        (doseq [output-idx (range (count output-stats))]
@@ -456,8 +455,8 @@
                (format "Output mean incorrect at index %s" output-idx))
            (is (utils/about-there? variance 1.0 1e-3)
                (format "Output variance incorrect at index %s" output-idx))))))
-    (let [running-means (network/to-double-array backend (:running-means layer))
-          running-inv-vars (network/to-double-array backend (:running-variances layer))]
+    (let [running-means (nn-backend/to-double-array backend (:running-means layer))
+          running-inv-vars (nn-backend/to-double-array backend (:running-variances layer))]
       (is (utils/about-there? 5.0 (/ (m/esum running-means)
                                      input-size)))
       ;;The running variances uses a population calculation for variances

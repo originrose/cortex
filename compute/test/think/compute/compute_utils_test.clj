@@ -1,7 +1,7 @@
 (ns think.compute.compute-utils-test
   (:require [clojure.test :refer :all]
-            [think.compute.cpu-device :as cpu-dev]
-            [think.compute.device :as dev]
+            [think.compute.cpu-driver :as cpu-drv]
+            [think.compute.driver :as drv]
             [think.compute.math :as math]
             [think.compute.compute-utils :as cu]
             [think.compute.datatype :as dtype]))
@@ -11,26 +11,26 @@
   (let [data-size 50
         result-seq
         (cu/compute-map (fn []
-                          (let [device (cpu-dev/create-device)
-                                stream (dev/create-stream device)
-                                upload-buffer (dev/allocate-host-buffer device data-size :double)
-                                process-buffer (dev/allocate-device-buffer device
+                          (let [driver (cpu-drv/create-driver)
+                                stream (drv/create-stream driver)
+                                upload-buffer (drv/allocate-host-buffer driver data-size :double)
+                                process-buffer (drv/allocate-device-buffer driver
                                                                            data-size :double)
-                                result-buffer (dev/allocate-device-buffer device data-size
+                                result-buffer (drv/allocate-device-buffer driver data-size
                                                                           :double)
 
                                 ]
-                            {:device device :stream stream :io-buf upload-buffer
+                            {:driver driver :stream stream :io-buf upload-buffer
                              :proc-buf process-buffer
                              :result-buf result-buffer}))
-                        (fn [{:keys [device stream io-buf proc-buf]} data]
+                        (fn [{:keys [driver stream io-buf proc-buf]} data]
                           (dtype/copy! data 0 io-buf 0 data-size)
-                          (dev/copy-host->device stream io-buf 0
+                          (drv/copy-host->device stream io-buf 0
                                                  proc-buf 0 data-size)
                           (math/sum stream 1.0 proc-buf 1.0 proc-buf)
-                          (dev/copy-device->host stream proc-buf 0
+                          (drv/copy-device->host stream proc-buf 0
                                                  io-buf 0 data-size)
-                          (dev/wait-for-event (dev/create-event stream))
+                          (drv/wait-for-event (drv/create-event stream))
                           (let [retval (dtype/make-array-of-type :double data-size)]
                             (dtype/copy! io-buf 0 retval 0 data-size)
                             retval))

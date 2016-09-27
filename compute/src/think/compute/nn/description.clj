@@ -1,7 +1,7 @@
 (ns think.compute.nn.description
   (:require [think.compute.nn.layers :as layers]
             [cortex.nn.description :as desc]
-            [think.compute.nn.network :as network]
+            [think.compute.nn.backend :as nn-backend]
             [cortex.nn.caffe :as caffe]
             [cortex.nn.protocols :as cp]))
 
@@ -13,7 +13,7 @@
 (defn to-network-array
   [backend item]
   (when item
-    (network/array backend item)))
+    (nn-backend/array backend item)))
 
 
 (defmethod create-module :linear
@@ -118,10 +118,10 @@
   think.compute.nn.layers.Linear
   (layer->input [layer] (desc/input (cp/input-size layer)))
   (layer->description [layer] (desc/linear (cp/output-size layer)
-                                           :weights (network/to-core-matrix
+                                           :weights (nn-backend/to-core-matrix
                                                      (layers/get-backend layer)
                                                      (:weights layer))
-                                           :bias (network/to-core-matrix
+                                           :bias (nn-backend/to-core-matrix
                                                   (layers/get-backend layer)
                                                   (:bias layer))
                                            :l2-max-constraint (:l2-max-constraint layer)))
@@ -130,9 +130,9 @@
   (layer->input [layer] (desc/conv-config->input (:conv-config layer)))
   (layer->description [layer]
     (desc/conv-config->description (:conv-config layer) :convolutional
-                                   (network/to-core-matrix (layers/get-backend layer)
+                                   (nn-backend/to-core-matrix (layers/get-backend layer)
                                                            (:weights layer))
-                                   (network/to-core-matrix (layers/get-backend layer)
+                                   (nn-backend/to-core-matrix (layers/get-backend layer)
                                                            (:bias layer))
                                    (:l2-max-constraint layer)))
   think.compute.nn.layers.Pooling
@@ -163,7 +163,7 @@
   think.compute.nn.layers.BatchNormalization
   (layer->input [layer] (desc/input (cp/input-size layer)))
   (layer->description [layer]
-    (let [core-mat (fn [data] (network/to-core-matrix (layers/get-backend layer) data))]
+    (let [core-mat (fn [data] (nn-backend/to-core-matrix (layers/get-backend layer) data))]
      (merge (desc/batch-normalization (:average-factor layer)
                                       :epsilon (:epsilon layer))
             {:scale (core-mat (:scale layer))

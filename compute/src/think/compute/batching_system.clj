@@ -1,5 +1,5 @@
 (ns think.compute.batching-system
-  (:require [think.compute.device :as device]
+  (:require [think.compute.driver :as drv]
             [think.compute.math :as math]
             [think.compute.datatype :as dtype]
             [cortex.dataset :as ds]))
@@ -42,10 +42,10 @@
 
 
 (defrecord DatasetBatchingSystem [input-dataset-indexes output-dataset-indexes ^long batch-size
-                                  dataset device stream datatype])
+                                  dataset driver stream datatype])
 
 (defn create-dataset-batching-system [input-labels output-labels batch-size
-                                      dataset device stream datatype]
+                                      dataset driver stream datatype]
   (let [shapes (ds/shapes dataset)
         label->index-map (into {} (map-indexed (fn [idx ds-shape]
                                                  [(:label ds-shape) idx])
@@ -56,46 +56,46 @@
     (when-not (= 0 (count invalid-labels))
       (throw (Exception. (format "Dataset is missing labels: %s" invalid-labels))))
     (->DatasetBatchingSystem input-dataset-indexes output-dataset-indexes batch-size
-                             dataset device stream datatype)))
+                             dataset driver stream datatype)))
 
 
 (defn dataset-shape->array
   [^DatasetBatchingSystem batching-system shape]
-  (let [device (.device batching-system)
+  (let [driver (.driver batching-system)
         stream (.stream batching-system)
         datatype (.datatype batching-system)
         batch-size (.batch-size batching-system)]
    (if (number? shape)
-     (math/new-array device stream datatype [shape] batch-size)
+     (math/new-array driver stream datatype [shape] batch-size)
      (let [{:keys [channel-count height width layout]} shape]
        (when-not (= layout ds/planar-image-layout)
          (throw (Exception. "Only planar image formats are supported at this time")))
-       (math/new-array device stream datatype batch-size channel-count height width)))))
+       (math/new-array driver stream datatype batch-size channel-count height width)))))
 
 
 (defn create-batch-buffer
   "Allocate a host buffer to load data to the array for things that are repeatedly loaded."
   [dev ary]
   {:device-array ary
-   :host-buffer (device/allocate-host-buffer dev (math/ecount ary) (dtype/get-datatype ary))})
+   :host-buffer (drv/allocate-host-buffer dev (math/ecount ary) (dtype/get-datatype ary))})
 
 
 (defn upload-data
-  [raw-data device stream batch-buffer]
+  [raw-data driver stream batch-buffer]
   (let [{:keys [device-array host-buffer]} batch-buffer
         data-len (long (dtype/ecount device-array))]
     (when-not (or (= (dtype/ecount raw-data) (dtype/ecount host-buffer))
                   (= (dtype/ecount host-buffer) (dtype/ecount device-array)))
       (throw (Exception. "Upload data batch buffer size mismatch")))
     (dtype/copy-raw->item! raw-data host-buffer 0)
-    (device/copy-host->device stream host-buffer 0 (math/device-buffer device-array) 0 data-len)))
+    (drv/copy-host->device stream host-buffer 0 (math/device-buffer device-array) 0 data-len)))
 
 
 (defn create-batch-buffers
   [^DatasetBatchingSystem batching-system indexes]
   (let [dataset (.dataset batching-system)
         shapes (mapv (ds/shapes dataset) indexes)
-        device (.device batching-system)
+        device (.driver batching-system)
         batch-buffers (mapv #(create-batch-buffer device  (dataset-shape->array batching-system (:shape %))) shapes)]
     batch-buffers))
 
@@ -135,7 +135,7 @@
   (get-batch-buffers [bs ^long batch-idx]
     (let [dataset (.dataset bs)
           indexes (:indexes bs)
-          device (.device bs)
+          device (.driver bs)
           stream (.stream bs)
           buffer-map (:buffer-map bs)
           batch-index-set (vec (keys buffer-map))

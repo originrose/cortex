@@ -1,8 +1,8 @@
 (ns think.compute.nn.layers
   (:require [cortex.nn.protocols :as cp]
-            [think.compute.nn.network :as network]
+            [think.compute.nn.backend :as nn-backend]
             [think.compute.math :as math]
-            [think.compute.device :as dev]
+            [think.compute.driver :as drv]
             [clojure.core.matrix :as m]
             [cortex.util :as util]
             [cortex.nn.impl.layers.convolution :as conv])
@@ -40,13 +40,13 @@
 
 
 ;;tanh relu logistic softmax
-(defrecord SimpleLayer [net n-input layer-type]
+(defrecord SimpleLayer [backend n-input layer-type]
   cp/PLayerSetup
   (setup [layer batch-size]
     (assoc layer
-           :output (network/new-array net [n-input] batch-size)
-           :input-gradient (network/new-array net [n-input] batch-size)
-           :layer-impl (network/create-layer net {:layer-type layer-type
+           :output (nn-backend/new-array backend [n-input] batch-size)
+           :input-gradient (nn-backend/new-array backend [n-input] batch-size)
+           :layer-impl (nn-backend/create-layer backend {:layer-type layer-type
                                                   :batch-size batch-size :output-size n-input})
            :batch-size batch-size))
 
@@ -54,7 +54,7 @@
   (batch-size [layer] (:batch-size layer))
 
   PBackend
-  (get-backend [layer] net)
+  (get-backend [layer] backend)
 
   cp/PLayerSize
   (input-size [layer] n-input)
@@ -62,7 +62,7 @@
 
   cp/PModule
   (calc [layer input]
-    (network/forward! (:layer-impl layer) input (:output layer))
+    (nn-backend/forward! (:layer-impl layer) input (:output layer))
     layer)
 
   (output [layer] (:output layer))
@@ -72,7 +72,7 @@
     (cp/calc layer input))
 
   (backward [layer input output-gradient]
-    (network/backward! (:layer-impl layer)
+    (nn-backend/backward! (:layer-impl layer)
                        input (:output layer)
                        (:input-gradient layer)
                        output-gradient)
@@ -107,63 +107,63 @@
   (->SimpleLayer backend n-input :softmax))
 
 (defn allocate-l2-temp-data
-  [{:keys [weights l2-max-constraint net] :as layer}]
-  (let [net (:net layer)]
+  [{:keys [weights l2-max-constraint backend] :as layer}]
+  (let [backend (:backend layer)]
    (if l2-max-constraint
      (assoc layer
-            :weight-temp (network/new-array net (math/shape-2d weights))
-            :weight-magnitude-temp (network/new-array net [(first (math/shape-2d weights))])
-            :ones-vec (network/allocate-ones net (second (math/shape-2d weights))))
+            :weight-temp (nn-backend/new-array backend (math/shape-2d weights))
+            :weight-magnitude-temp (nn-backend/new-array backend [(first (math/shape-2d weights))])
+            :ones-vec (nn-backend/allocate-ones backend (second (math/shape-2d weights))))
      layer)))
 
 
 (defn print-weight-lengths
-  [net device-weights]
-  (let [core-mat-weights (network/to-core-matrix net device-weights)]
+  [backend device-weights]
+  (let [core-mat-weights (nn-backend/to-core-matrix backend device-weights)]
     (println (mapv m/length (m/rows core-mat-weights)))))
 
 
 (defn apply-l2-max-constraint
-  [{:keys [net weight-temp weight-magnitude-temp ones-vec weights l2-max-constraint]}]
+  [{:keys [backend weight-temp weight-magnitude-temp ones-vec weights l2-max-constraint]}]
   (when l2-max-constraint
     (let [
           weight-ecount (long (math/ecount weights))
           [num-w-rows num-w-cols] (math/shape-2d weights)]
-      (network/assign! net weight-temp weights)
-      (math/elem-mul (dev/get-stream net)
+      (nn-backend/assign! backend weight-temp weights)
+      (math/elem-mul (drv/get-stream backend)
                      1.0 (math/device-buffer weights) 1
                      (math/device-buffer weight-temp) 1
                      (math/device-buffer weight-temp) 1)
-      (math/gemv (dev/get-stream net) false num-w-rows num-w-cols
+      (math/gemv (drv/get-stream backend) false num-w-rows num-w-cols
                  1.0 (math/device-buffer weight-temp) num-w-cols
                  (math/device-buffer ones-vec) 1
                  0.0 (math/device-buffer weight-magnitude-temp) 1)
-      (math/l2-constraint-scale (dev/get-stream net)
+      (math/l2-constraint-scale (drv/get-stream backend)
                                 (math/device-buffer weight-magnitude-temp) 1
                                 l2-max-constraint)
-      (math/mul-rows (dev/get-stream net) num-w-rows num-w-cols
+      (math/mul-rows (drv/get-stream backend) num-w-rows num-w-cols
                      (math/device-buffer weights) num-w-cols
                      (math/device-buffer weight-magnitude-temp) 1
                      (math/device-buffer weights) num-w-cols))))
 
 (defn allocate-weights-and-l2-temp-data
-  [net layer weights bias batch-size]
+  [backend layer weights bias batch-size]
   (-> layer
       (allocate-l2-temp-data)
-      (assoc :weight-gradient (network/new-array net (math/shape-2d weights))
-             :bias-gradient (network/new-array net (math/shape-2d bias))
+      (assoc :weight-gradient (nn-backend/new-array backend (math/shape-2d weights))
+             :bias-gradient (nn-backend/new-array backend (math/shape-2d bias))
              :batch-size batch-size)))
 
 
-(defrecord Linear [net weights bias l2-max-constraint]
+(defrecord Linear [backend weights bias l2-max-constraint]
   cp/PLayerSetup
   (setup [layer batch-size]
     (let [weights-shape (math/shape-2d weights)
           n-output (first weights-shape)
           n-input (second weights-shape)]
-      (-> (allocate-weights-and-l2-temp-data net layer weights bias batch-size)
-          (assoc :output (network/new-array net [n-output] batch-size)
-                 :input-gradient (network/new-array net [n-input] batch-size)))))
+      (-> (allocate-weights-and-l2-temp-data backend layer weights bias batch-size)
+          (assoc :output (nn-backend/new-array backend [n-output] batch-size)
+                 :input-gradient (nn-backend/new-array backend [n-input] batch-size)))))
 
   cp/PLayerSize
   (input-size [layer] (second (math/shape-2d weights)))
@@ -173,11 +173,11 @@
   (batch-size [layer] (:batch-size layer))
 
   PBackend
-  (get-backend [layer] net)
+  (get-backend [layer] backend)
 
   cp/PModule
   (calc [layer input]
-    (network/biased-multiply! net input weights bias (:output layer))
+    (nn-backend/biased-multiply! backend input weights bias (:output layer))
     layer)
 
   (output [layer] (:output layer))
@@ -191,8 +191,8 @@
           weight-gradient (:weight-gradient layer)
           bias-gradient (:bias-gradient layer)
           output (:output layer)]
-      (network/biased-multiply-backward!
-       net input weights bias output
+      (nn-backend/biased-multiply-backward!
+       backend input weights bias output
        input-gradient weight-gradient bias-gradient output-gradient))
     layer)
 
@@ -206,14 +206,14 @@
 
 
 (defn linear
-  [net n-inputs n-outputs & {:keys [weights bias l2-max-constraint]}]
+  [backend n-inputs n-outputs & {:keys [weights bias l2-max-constraint]}]
     (let [weights (or weights
-                      (network/array net (util/weight-matrix n-outputs n-inputs)))
-        bias (or bias (network/new-array net [n-outputs]))]
-      (->Linear net weights bias l2-max-constraint)))
+                      (nn-backend/array backend (util/weight-matrix n-outputs n-inputs)))
+        bias (or bias (nn-backend/new-array backend [n-outputs]))]
+      (->Linear backend weights bias l2-max-constraint)))
 
 
-(defrecord Convolutional [net weights bias ^ConvLayerConfig conv-config l2-max-constraint]
+(defrecord Convolutional [backend weights bias ^ConvLayerConfig conv-config l2-max-constraint]
   cp/PLayerSetup
   (setup [layer batch-size]
     (let [out-channels (.num-out-channels conv-config)
@@ -222,13 +222,13 @@
           in-channels (.num-in-channels conv-config)
           in-width (.width conv-config)
           in-height (.height conv-config)]
-     (-> (allocate-weights-and-l2-temp-data net layer weights bias batch-size)
-         (assoc :convolution-impl (network/create-layer net
-                                                        (network/convolution-desc conv-config
+     (-> (allocate-weights-and-l2-temp-data backend layer weights bias batch-size)
+         (assoc :convolution-impl (nn-backend/create-layer backend
+                                                        (nn-backend/convolution-desc conv-config
                                                                                   batch-size))
-                :output (network/new-array net [out-channels (* out-height out-width)]
+                :output (nn-backend/new-array backend [out-channels (* out-height out-width)]
                                            batch-size)
-                :input-gradient (network/new-array net [in-channels (* in-width in-height)]
+                :input-gradient (nn-backend/new-array backend [in-channels (* in-width in-height)]
                                                    batch-size)))))
   cp/PLayerSize
   (input-size [layer] (* (.width conv-config) (.height conv-config)
@@ -241,11 +241,11 @@
   (batch-size [layer] (:batch-size layer))
 
   PBackend
-  (get-backend [layer] net)
+  (get-backend [layer] backend)
 
   cp/PModule
   (calc [layer input]
-    (network/weighted-forward! (:convolution-impl layer) input (:output layer) weights bias)
+    (nn-backend/weighted-forward! (:convolution-impl layer) input (:output layer) weights bias)
     layer)
 
   (output [layer] (:output layer))
@@ -254,7 +254,7 @@
   (forward [layer input]
     (cp/calc layer input))
   (backward [layer input output-gradient]
-    (network/weighted-backward! (:convolution-impl layer)
+    (nn-backend/weighted-backward! (:convolution-impl layer)
                                 input (:output layer) weights bias
                                 (:weight-gradient layer) (:bias-gradient layer)
                                 (:input-gradient layer) output-gradient)
@@ -281,22 +281,22 @@
                                                    num-input-channels
                                                    num-kernels)
         weights (or weights
-                    (network/array backend (util/weight-matrix num-kernels
+                    (nn-backend/array backend (util/weight-matrix num-kernels
                                                                (* (long kernel-width)
                                                                   (long kernel-height)
                                                                   (long num-input-channels)))))
         bias (or bias
-                 (network/new-array backend [num-kernels]))]
+                 (nn-backend/new-array backend [num-kernels]))]
     (->Convolutional backend weights bias conv-config l2-max-constraint)))
 
 (defrecord Pooling [backend ^ConvLayerConfig conv-config]
   cp/PLayerSetup
   (setup [layer batch-size]
     (assoc layer
-           :pooling-impl (network/create-layer backend
-                                               (network/max-pool-desc conv-config batch-size))
-           :output (network/new-array backend [(cp/output-size layer)] batch-size)
-           :input-gradient (network/new-array backend [(cp/input-size layer)] batch-size)
+           :pooling-impl (nn-backend/create-layer backend
+                                               (nn-backend/max-pool-desc conv-config batch-size))
+           :output (nn-backend/new-array backend [(cp/output-size layer)] batch-size)
+           :input-gradient (nn-backend/new-array backend [(cp/input-size layer)] batch-size)
            :batch-size batch-size))
 
   cp/PLayerSize
@@ -314,7 +314,7 @@
 
   cp/PModule
   (calc [layer input]
-    (network/forward! (:pooling-impl layer) input (:output layer))
+    (nn-backend/forward! (:pooling-impl layer) input (:output layer))
     layer)
   (output [layer] (:output layer))
 
@@ -322,7 +322,7 @@
   (forward [layer input]
     (cp/calc layer input))
   (backward [layer input output-gradient]
-    (network/backward! (:pooling-impl layer) input (:output layer)
+    (nn-backend/backward! (:pooling-impl layer) input (:output layer)
                        (:input-gradient layer) output-gradient)
     layer)
   (input-gradient [layer] (:input-gradient layer)))
@@ -342,10 +342,10 @@
   cp/PLayerSetup
   (setup [layer batch-size]
     (assoc layer
-           :output (network/new-array backend [(cp/output-size layer)] batch-size)
-           :input-gradient (network/new-array backend [(cp/input-size layer)] batch-size)
-           :mult-buffer (network/new-array backend [(cp/input-size layer)] batch-size)
-           :rand-buffer (math/->DeviceArray (dev/allocate-rand-buffer (dev/get-device backend)
+           :output (nn-backend/new-array backend [(cp/output-size layer)] batch-size)
+           :input-gradient (nn-backend/new-array backend [(cp/input-size layer)] batch-size)
+           :mult-buffer (nn-backend/new-array backend [(cp/input-size layer)] batch-size)
+           :rand-buffer (math/->DeviceArray (drv/allocate-rand-buffer (drv/get-driver backend)
                                                                       (math/ensure-factor-of-2
                                                                        (* n-items
                                                                           (long batch-size))))
@@ -364,12 +364,12 @@
           dis-type (if (= (:distribution dropout-options) :bernoulli)
                      (math/flat-desc)
                      (math/gaussian-desc (:mean dropout-options) (:variance dropout-options)))]
-      (math/generate-rands (dev/get-stream backend) (math/device-buffer (:rand-buffer this))
+      (math/generate-rands (drv/get-stream backend) (math/device-buffer (:rand-buffer this))
                            dis-type)
       (if (= (:distribution dropout-options) :bernoulli)
-        (network/prepare-bernoulli-dropout! backend (:probability dropout-options)
+        (nn-backend/prepare-bernoulli-dropout! backend (:probability dropout-options)
                                             (:rand-buffer this) (:mult-buffer this))
-        (network/prepare-gaussian-dropout! backend (:rand-buffer this) (:mult-buffer this)))
+        (nn-backend/prepare-gaussian-dropout! backend (:rand-buffer this) (:mult-buffer this)))
       this))
 
   cp/PLayerSize
@@ -378,20 +378,20 @@
 
   cp/PModule
   (calc [layer input]
-    (network/assign! (:output layer) input)
+    (nn-backend/assign! (:output layer) input)
     layer)
   (output [layer] (:output layer))
 
   cp/PNeuralTraining
   (forward [layer input]
-    (math/elem-mul (dev/get-stream backend)
+    (math/elem-mul (drv/get-stream backend)
                    1.0 (math/device-buffer input) 1
                    (math/device-buffer (:mult-buffer layer)) 1
                    (math/device-buffer (:output layer)) 1)
     layer)
 
   (backward [layer input output-gradient]
-    (math/elem-mul (dev/get-stream backend)
+    (math/elem-mul (drv/get-stream backend)
                    1.0 (math/device-buffer output-gradient) 1
                    (math/device-buffer (:mult-buffer layer)) 1
                    (math/device-buffer (:input-gradient layer)) 1)
@@ -401,17 +401,17 @@
 
 
 (defn bernoulli-dropout
-  [net n-input probability]
-  (->Dropout net n-input {:distribution :bernoulli
+  [backend n-input probability]
+  (->Dropout backend n-input {:distribution :bernoulli
                           :probability probability}))
 
 (defn gaussian-dropout
-  ([net n-input mean variance]
-   (->Dropout net n-input {:distribution :gaussian
+  ([backend n-input mean variance]
+   (->Dropout backend n-input {:distribution :gaussian
                            :mean mean
                            :variance variance}))
-  ([net n-input variance]
-   (gaussian-dropout net n-input 1.0 variance)))
+  ([backend n-input variance]
+   (gaussian-dropout backend n-input 1.0 variance)))
 
 
 (defn- layer-list-forward
@@ -495,7 +495,7 @@
 (defrecord Split [backend layers n-input]
   cp/PLayerSetup
   (setup [layer items-per-batch]
-    (let [input-gradient (network/new-array backend [n-input] items-per-batch)]
+    (let [input-gradient (nn-backend/new-array backend [n-input] items-per-batch)]
       (assoc layer
              :layers (mapv #(cp/setup % items-per-batch) layers)
              :input-gradient input-gradient)))
@@ -528,10 +528,10 @@
                        grouped-output-gradients)
           input-gradients (vec (mapcat cp/multi-input-gradient layers))
           input-gradient (:input-gradient this-layer)]
-      (dev/memset (dev/get-stream backend) (math/device-buffer input-gradient) 0 0
+      (drv/memset (drv/get-stream backend) (math/device-buffer input-gradient) 0 0
                   (math/ecount input-gradient))
       (doseq [layer-in-g input-gradients]
-        (math/sum (dev/get-stream backend) 1.0 layer-in-g 1.0 input-gradient))
+        (math/sum (drv/get-stream backend) 1.0 layer-in-g 1.0 input-gradient))
       (assoc this-layer :layers layers :input-gradient input-gradient)))
   (multi-output [layer] (vec (mapcat cp/multi-output layers)))
   (multi-input-gradient [layer] [(:input-gradient layer)])
@@ -560,16 +560,16 @@
   cp/PLayerSetup
   (setup [layer batch-size]
     (assoc layer
-           :output (network/new-array backend [n-input] batch-size)
-           :input-gradient (network/new-array backend [n-input] batch-size)
-           :bias-gradient (network/new-array backend [n-input])
-           :scale-gradient (network/new-array backend [n-input])
+           :output (nn-backend/new-array backend [n-input] batch-size)
+           :input-gradient (nn-backend/new-array backend [n-input] batch-size)
+           :bias-gradient (nn-backend/new-array backend [n-input])
+           :scale-gradient (nn-backend/new-array backend [n-input])
            ;;The first time we want to initialize the means and variances
            ;;with the entire calculated value instead of using the average
            ;;factor
            :local-average-factor 1.0
            :epsilon epsilon
-           :impl (network/create-layer backend (network/batch-normalization-desc
+           :impl (nn-backend/create-layer backend (nn-backend/batch-normalization-desc
                                                 n-input batch-size))
            :batch-size batch-size))
 
@@ -590,14 +590,14 @@
 
   cp/PModule
   (calc [layer input]
-    (network/batch-norm-calc! (:impl layer) input running-means running-variances
+    (nn-backend/batch-norm-calc! (:impl layer) input running-means running-variances
                               scale bias (:output layer) epsilon)
     layer)
   (output [layer] (:output layer))
 
   cp/PNeuralTraining
   (forward [layer input]
-    (network/batch-norm-forward! (:impl layer) input
+    (nn-backend/batch-norm-forward! (:impl layer) input
                                  running-means running-variances
                                  batch-means batch-variances
                                  scale bias (:output layer)
@@ -606,7 +606,7 @@
     (assoc layer :local-average-factor average-factor))
 
   (backward [layer input output-gradient]
-    (network/batch-norm-backward! (:impl layer) input batch-means batch-variances
+    (nn-backend/batch-norm-backward! (:impl layer) input batch-means batch-variances
                                   scale bias (:output layer)
                                   (:scale-gradient layer) (:bias-gradient layer)
                                   (:input-gradient layer) output-gradient
@@ -626,12 +626,12 @@
      (Exception. "Batch-normalization minimum epsilon is 1e-5.
 This is for cudnn compatibility.")))
   ;;Destructuring isn't lazy so we have to do it like this.
-  (let [scale (or scale (network/array backend (repeat n-input 1)))
-        bias (or bias (network/new-array backend [n-input]))
-        running-means (or means (network/new-array backend [n-input]))
-        running-variances (or variances (network/new-array backend [n-input]))
-        batch-means (network/new-array backend [n-input])
-        batch-variances (network/new-array backend [n-input])]
+  (let [scale (or scale (nn-backend/array backend (repeat n-input 1)))
+        bias (or bias (nn-backend/new-array backend [n-input]))
+        running-means (or means (nn-backend/new-array backend [n-input]))
+        running-variances (or variances (nn-backend/new-array backend [n-input]))
+        batch-means (nn-backend/new-array backend [n-input])
+        batch-variances (nn-backend/new-array backend [n-input])]
     (->BatchNormalization backend n-input average-factor scale bias
                           running-means running-variances
                           batch-means batch-variances
@@ -671,13 +671,13 @@ This is for cudnn compatibility.")))
   cp/PLayerSetup
   (setup [layer batch-size]
     (assoc layer
-           :output (network/new-array backend [n-output] batch-size)
-           :input-gradient (network/new-array backend [n-input] batch-size)
+           :output (nn-backend/new-array backend [n-output] batch-size)
+           :input-gradient (nn-backend/new-array backend [n-input] batch-size)
            ;;Give the backend a chance to create the implementation and to reorder the weights
            ;;and biases in order to match whatever the underlying implementation system needs
            ;;weights and biases is expected to be a map of keys dependent upon the recurrence
            ;;type and
-           :impl (network/create-layer backend (network/recurrent-desc
+           :impl (nn-backend/create-layer backend (nn-backend/recurrent-desc
                                                 recurrent-type recurrent-direction
                                                 n-input n-output batch-size
                                                 weights-and-biases))
@@ -695,13 +695,13 @@ This is for cudnn compatibility.")))
 
   PComputeParameters
   (parameters [layer]
-    (let [weights-and-biases (network/get-recurrent-weights-and-biases (:impl layer))]
+    (let [weights-and-biases (nn-backend/get-recurrent-weights-and-biases (:impl layer))]
       (if initial-cell-state
         [weights-and-biases initial-hidden-state initial-cell-state]
         [weights-and-biases initial-hidden-state])))
   (gradients [layer]
     (let [weight-and-bias-gradients
-          (network/get-recurrent-weight-and-bias-gradients (:impl layer))]
+          (nn-backend/get-recurrent-weight-and-bias-gradients (:impl layer))]
      (if initial-cell-state
        [weight-and-bias-gradients hidden-state-gradient cell-state-gradient]
        [weight-and-bias-gradients hidden-state-gradient])))
@@ -710,12 +710,12 @@ This is for cudnn compatibility.")))
   PLayerPrepareSerialize
   (prepare-layer-for-serialization [layer]
     (when (:impl layer)
-      (network/copy-implementation-weights-and-biases! (:impl layer) weights-and-biases))
+      (nn-backend/copy-implementation-weights-and-biases! (:impl layer) weights-and-biases))
     layer)
 
   cp/PModule
   (calc [layer input]
-    (network/recurrent-calc! (:impl layer) input
+    (nn-backend/recurrent-calc! (:impl layer) input
                              initial-hidden-state initial-cell-state
                              (:output layer))
     layer)
@@ -723,13 +723,13 @@ This is for cudnn compatibility.")))
 
   cp/PNeuralTraining
   (forward [layer input]
-    (network/recurrent-forward! (:impl layer) input
+    (nn-backend/recurrent-forward! (:impl layer) input
                                 initial-hidden-state initial-cell-state
                                 (:output layer))
     layer)
 
   (backward [layer input output-gradient]
-    (network/recurrent-backward! (:impl layer) input
+    (nn-backend/recurrent-backward! (:impl layer) input
                                  initial-hidden-state initial-cell-state
                                  hidden-state-gradient cell-state-gradient
                                  (:input-gradient layer) output-gradient)
@@ -741,16 +741,16 @@ This is for cudnn compatibility.")))
   [weight-key backend recurrent-type n-input n-output]
   (cond
     (contains? #{:recurrent} weight-key)
-    [(network/array backend (util/identity-matrix n-output))
-     (network/new-array backend [n-output])]
+    [(nn-backend/array backend (util/identity-matrix n-output))
+     (nn-backend/new-array backend [n-output])]
 
     (contains? #{:input} weight-key)
-    [(network/array backend (util/weight-matrix n-output n-input))
-     (network/new-array backend [n-output])]
+    [(nn-backend/array backend (util/weight-matrix n-output n-input))
+     (nn-backend/new-array backend [n-output])]
 
     :else
-    [(network/array backend (util/weight-matrix n-output))
-     (network/new-array backend [n-output])]))
+    [(nn-backend/array backend (util/weight-matrix n-output))
+     (nn-backend/new-array backend [n-output])]))
 
 
 (defn recurrent
@@ -762,12 +762,12 @@ This is for cudnn compatibility.")))
   (let [hidden-layer-size (long (if (= recurrent-direction :bidirectional)
                                   (* 2 (long n-output))
                                   n-output))
-        hidden-state (or hidden-state (network/new-array backend [hidden-layer-size]))
-        hidden-state-gradient (network/new-array backend [hidden-layer-size])
+        hidden-state (or hidden-state (nn-backend/new-array backend [hidden-layer-size]))
+        hidden-state-gradient (nn-backend/new-array backend [hidden-layer-size])
         [cell-state cell-state-gradient]
         (when (= recurrent-type :lstm)
-          [(or cell-state (network/new-array backend [hidden-layer-size]))
-           (network/new-array backend [hidden-layer-size])])
+          [(or cell-state (nn-backend/new-array backend [hidden-layer-size]))
+           (nn-backend/new-array backend [hidden-layer-size])])
         weight-gradient-keys (vec (concat [:input :recurrent]
                                           (get expected-recurrence-keys recurrent-type [])))
         weights-and-biases (into {}

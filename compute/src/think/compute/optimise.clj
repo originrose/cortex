@@ -1,7 +1,7 @@
 (ns think.compute.optimise
   (:require [think.compute.math :as math]
             [think.compute.datatype :as dtype]
-            [think.compute.device :as dev]
+            [think.compute.driver :as drv]
             [cortex.optimise :as opt]
             [cortex.nn.protocols :as cp]
             [clojure.core.matrix :as m])
@@ -57,16 +57,16 @@
     (let [options (.options optimiser)
           optim-type (:type options)
           optimiser (assoc optimiser :backend backend)
-          device (dev/get-device backend)
-          stream (dev/get-stream backend)
+          driver (drv/get-driver backend)
+          stream (drv/get-stream backend)
           datatype (dtype/get-datatype backend)]
       (cond
         (= optim-type :adadelta) (assoc optimiser
-                                        :grad-accum (math/new-array device stream datatype [param-count])
-                                        :dx-accum (math/new-array device stream datatype [param-count]))
+                                        :grad-accum (math/new-array driver stream datatype [param-count])
+                                        :dx-accum (math/new-array driver stream datatype [param-count]))
         (= optim-type :adam) (assoc optimiser
-                                    :m (math/new-array device stream datatype [param-count])
-                                    :v (math/new-array device stream datatype [param-count])
+                                    :m (math/new-array driver stream datatype [param-count])
+                                    :v (math/new-array driver stream datatype [param-count])
                                     :pow-beta1-t 1.0
                                     :pow-beta2-t 1.0)
         :else
@@ -117,9 +117,9 @@
   (cpu-loss [this v target]
     (cp/loss this v target))
   (setup-loss [this backend ^long batch-size ^long output-size]
-    (let [device (dev/get-device backend)
+    (let [driver (drv/get-driver backend)
           datatype (dtype/get-datatype backend)
-          output-gradient (math/new-array device (dev/get-stream backend) datatype [output-size] batch-size)]
+          output-gradient (math/new-array driver (drv/get-stream backend) datatype [output-size] batch-size)]
       (assoc this
              :backend backend
              :output-gradient output-gradient
@@ -140,7 +140,7 @@
   [this v target]
     (let [backend (:backend this)
           output-gradient (:output-gradient this)
-          stream (dev/get-stream backend)
+          stream (drv/get-stream backend)
           elem-count (math/ecount output-gradient)
           alpha 1.0]
       (math/subtract stream
@@ -155,7 +155,7 @@
   (do-calculate-loss-gradient [this v target]
     (let [backend (:backend this)
           output-gradient (:output-gradient this)
-          stream (dev/get-stream backend)
+          stream (drv/get-stream backend)
           output-size (long (:output-size this))
           alpha (/ 2.0 output-size)
           elem-count (math/ecount output-gradient)]

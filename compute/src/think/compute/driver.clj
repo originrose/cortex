@@ -1,12 +1,12 @@
-(ns think.compute.device
+(ns think.compute.driver
   (:require [think.compute.datatype :as dtype]
             [clojure.core.matrix :as m]
             [resource.core :as resource]))
 
 
-(defprotocol PDevice
-  "A device is a generic compute abstraction.  Could be a group of threads,
-  could be a machine on a network or it could be a CUDA or OpenCL device.
+(defprotocol PDriver
+  "A driver is a generic compute abstraction.  Could be a group of threads,
+  could be a machine on a network or it could be a CUDA or OpenCL driver.
   A stream is a stream of execution (analogous to a thread) where
   subsequent calls are serialized."
   (get-devices [impl])
@@ -22,9 +22,9 @@
   ;;random numbers of a particular type; for CUDA in general it is float values.
   (allocate-rand-buffer [impl elem-count]))
 
-(defprotocol PDeviceProvider
-  "Get a device from an object"
-  (get-device [impl]))
+(defprotocol PDriverProvider
+  "Get a driver from an object"
+  (get-driver [impl]))
 
 (defprotocol PStream
   ;;Offsets are in elements.  Moving data onto a device is potentially
@@ -76,6 +76,7 @@
     (wait-for-event (create-event stream))
     (resource/release upload-buffer)
     device-buffer))
+
 
 (defn device-buffer->host-array
   "Synchronously transfer a device buffer to a host array"

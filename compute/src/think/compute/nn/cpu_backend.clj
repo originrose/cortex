@@ -1,8 +1,8 @@
-(ns think.compute.nn.cpu-network
-  (:require [think.compute.nn.network :as network]
-            [think.compute.device :as dev]
+(ns think.compute.nn.cpu-backend
+  (:require [think.compute.nn.backend :as nn-backend]
+            [think.compute.driver :as drv]
             [think.compute.math :as math]
-            [think.compute.cpu-device :as cpu-dev]
+            [think.compute.cpu-driver :as cpu-drv]
             [think.compute.datatype :refer [v-aget v-aset v-alength] :as dtype]
             [think.compute.optimise :as opt]
             [think.compute.nn.layers :as layers]
@@ -10,7 +10,7 @@
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.nn.impl.layers.convolution :as conv])
-  (:import [think.compute.cpu_device CPUDevice CPUStream]
+  (:import [think.compute.cpu_driver CPUDriver CPUStream]
            [java.nio DoubleBuffer FloatBuffer]
            [think.compute.math DeviceArray Tensor]
            [think.compute.optimise AdadeltaOptimiser AdamOptimiser]
@@ -23,16 +23,16 @@
 (set! *unchecked-math* :warn-on-boxed)
 
 
-(defrecord CPUNetwork [^CPUDevice device ^CPUStream stream datatype])
+(defrecord CPUBackend [^CPUDriver driver ^CPUStream stream datatype])
 
 
-(defn create-cpu-network
-  (^CPUNetwork [datatype]
-   (let [device (cpu-dev/create-device)
-         stream (dev/create-stream device)]
-     (->CPUNetwork device stream datatype)))
-  (^CPUNetwork []
-   (create-cpu-network :double)))
+(defn create-cpu-backend
+  (^CPUDriver [datatype]
+   (let [driver (cpu-drv/create-driver)
+         stream (drv/create-stream driver)]
+     (->CPUBackend driver stream datatype)))
+  (^CPUBackend []
+   (create-cpu-backend :double)))
 
 
 (defprotocol PNIONetwork
@@ -608,13 +608,13 @@ in order to avoid adding a small number to 0."
 (defrecord ActivationLayer [act-type cpu-stream])
 
 (extend-type ActivationLayer
-  network/PNetLayer
+  nn-backend/PBackendLayer
   (forward! [layer ^DeviceArray input ^DeviceArray output]
-    (cpu-dev/with-stream-dispatch (.cpu-stream layer)
+    (cpu-drv/with-stream-dispatch (.cpu-stream layer)
       (nio-activation-forward (.device-buffer input) (.act-type layer) (.device-buffer output))))
   (backward! [layer ^DeviceArray input ^DeviceArray output
               ^DeviceArray input-gradient ^DeviceArray output-gradient]
-    (cpu-dev/with-stream-dispatch (.cpu-stream layer)
+    (cpu-drv/with-stream-dispatch (.cpu-stream layer)
       (nio-activation-backward (.device-buffer input) (.act-type layer)
                                (.device-buffer output)
                                (.device-buffer output-gradient)
@@ -622,9 +622,9 @@ in order to avoid adding a small number to 0."
 
 (defrecord SoftmaxLayer [cpu-stream n-input])
 (extend-type SoftmaxLayer
-  network/PNetLayer
+  nn-backend/PBackendLayer
   (forward! [layer ^DeviceArray input ^DeviceArray output]
-    (cpu-dev/with-stream-dispatch (.cpu-stream layer)
+    (cpu-drv/with-stream-dispatch (.cpu-stream layer)
       (nio-softmax-forward (.device-buffer input) (.device-buffer output) (.n-input layer))))
   (backward! [layer ^DeviceArray input ^DeviceArray output
               ^DeviceArray input-gradient ^DeviceArray output-gradient]
@@ -643,7 +643,7 @@ in order to avoid adding a small number to 0."
         kernel-stride (* (.k-width config) (.k-height config))
         n-cols (* kernel-stride (.num-in-channels config))
         n-rows (* output-width output-height)]
-    (network/new-array backend [n-rows n-cols] batch-size)))
+    (nn-backend/new-array backend [n-rows n-cols] batch-size)))
 
 
 (defn create-conv-layer [backend ^ConvLayerConfig conv-config ^long batch-size]
@@ -651,24 +651,24 @@ in order to avoid adding a small number to 0."
                           (conv/get-output-height conv-config :convolutional))]
     (->ConvolutionalLayer backend conv-config
                           (create-convolution-matrix conv-config backend batch-size)
-                          (math/allocate-ones (dev/get-device backend) (dev/get-stream backend)
+                          (math/allocate-ones (drv/get-driver backend) (drv/get-stream backend)
                                               (dtype/get-datatype backend) num-out-pixels))))
 
 
 (extend-type ConvolutionalLayer
-  network/PNetWeightedLayer
+  nn-backend/PBackendWeightedLayer
   (weighted-forward! [layer input output weights bias]
     (let [^ConvLayerConfig conv-config (.conv-config layer)
           output-width (conv/get-output-width conv-config :convolutional)
           output-height (conv/get-output-height conv-config :convolutional)
           num-out-pixels (* output-width output-height)
           num-out-channels (.num-out-channels conv-config)
-          cpu-stream (dev/get-stream (.backend layer))
-          current-thread-stream (cpu-dev/create-main-thread-cpu-stream)]
+          cpu-stream (drv/get-stream (.backend layer))
+          current-thread-stream (cpu-drv/create-main-thread-cpu-stream)]
       ;;In parallel process each item of the batch.
       ;;This allows us to take advantage of at least
       ;;*some* multithreading without having to explicity program much of it.
-      (cpu-dev/with-stream-dispatch cpu-stream
+      (cpu-drv/with-stream-dispatch cpu-stream
         (doall (pmap (fn [[input output input-convolved]]
                        (nio-planar-input->convolution! (math/device-buffer input)
                                                        (math/device-buffer input-convolved)
@@ -681,7 +681,7 @@ in order to avoid adding a small number to 0."
                                   1.0 weights input-convolved
                                   1.0 output))
                      (math/batched-data-to-per-input-data
-                      (dev/get-device (.backend layer))
+                      (drv/get-driver (.backend layer))
                       [input output (.input-convolved layer)]))))))
 
   (weighted-backward! [layer input output weights bias
@@ -691,13 +691,13 @@ in order to avoid adding a small number to 0."
           output-height (conv/get-output-height conv-config :convolutional)
           num-out-pixels (* output-width output-height)
           num-out-channels (.num-out-channels conv-config)
-          io-data (math/batched-data-to-per-input-data (dev/get-device (.backend layer))
+          io-data (math/batched-data-to-per-input-data (drv/get-driver (.backend layer))
                                                        [input output input-gradient
                                                         output-gradient
                                                         (.input-convolved layer)])
-          cpu-stream (dev/get-stream (.backend layer))
-          current-thread-stream (cpu-dev/create-main-thread-cpu-stream)]
-      (cpu-dev/with-stream-dispatch cpu-stream
+          cpu-stream (drv/get-stream (.backend layer))
+          current-thread-stream (cpu-drv/create-main-thread-cpu-stream)]
+      (cpu-drv/with-stream-dispatch cpu-stream
         ;;compute the weights gradient.  These aren't too expensive but we cannot easily
         ;;parallelize this because it is an accumulation.
         (doseq [[input output input-gradient output-gradient input-convolved] io-data]
@@ -736,17 +736,17 @@ in order to avoid adding a small number to 0."
 
 
 (extend-type MaxPooling
-  network/PNetLayer
+  nn-backend/PBackendLayer
   (forward! [layer input output]
-    (cpu-dev/with-stream-dispatch (dev/get-stream (.backend layer))
+    (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
       (doall (pmap (fn [[input output]]
                      (nio-max-pooling-forward (math/device-buffer input)
                                               (math/device-buffer output)
                                               (.conv-config layer)))
-                   (math/batched-data-to-per-input-data (dev/get-device (.backend layer))
+                   (math/batched-data-to-per-input-data (drv/get-driver (.backend layer))
                                                         [input output])))))
   (backward! [layer input output input-gradient output-gradient]
-    (cpu-dev/with-stream-dispatch (dev/get-stream (.backend layer))
+    (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
       (doall (pmap (fn [[input output input-gradient output-gradient]]
                      (nio-fill (math/device-buffer input-gradient) 0)
                      (nio-max-pooling-backward (math/device-buffer input)
@@ -755,16 +755,16 @@ in order to avoid adding a small number to 0."
                                                (math/device-buffer output-gradient)
                                                (.conv-config layer)))
                    (math/batched-data-to-per-input-data
-                    (dev/get-device (.backend layer))
+                    (drv/get-driver (.backend layer))
                     [input output input-gradient output-gradient]))))))
 
 
 (defrecord BatchNormalization [backend])
 (extend-type BatchNormalization
-  network/PBatchNormalization
+  nn-backend/PBatchNormalization
   (batch-norm-calc! [layer input running-means running-variances scale bias output epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-     (cpu-dev/with-stream-dispatch (dev/get-stream (:backend layer))
+     (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
        (nio-bn-calc (math/device-buffer input)
                     (math/device-buffer running-means)
                     (math/device-buffer running-variances)
@@ -777,7 +777,7 @@ in order to avoid adding a small number to 0."
                         saved-means saved-variances
                         scale bias output average-factor epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-dev/with-stream-dispatch (dev/get-stream (:backend layer))
+      (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
        (nio-update-means-variances (math/device-buffer input)
                                    (math/device-buffer running-means)
                                    (math/device-buffer running-variances)
@@ -785,13 +785,13 @@ in order to avoid adding a small number to 0."
                                    (math/device-buffer saved-variances)
                                    batch-size batch-stride
                                    average-factor epsilon)))
-    (network/batch-norm-calc! layer input saved-means saved-variances
+    (nn-backend/batch-norm-calc! layer input saved-means saved-variances
                               scale bias output epsilon))
   (batch-norm-backward! [layer input saved-means saved-variances scale bias output
                          scale-gradient bias-gradient input-gradient output-gradient
                          epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-     (cpu-dev/with-stream-dispatch (dev/get-stream (:backend layer))
+     (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
        (nio-bn-backward (math/device-buffer input)
                         (math/device-buffer saved-means)
                         (math/device-buffer saved-variances)
@@ -813,7 +813,7 @@ in order to avoid adding a small number to 0."
                        weights-and-biases
                        weight-and-bias-gradients
                        weight-and-bias-keys]
-  network/PRecurrent
+  nn-backend/PRecurrent
   (get-recurrent-weights-and-biases [layer]
     (vec (mapcat weights-and-biases weight-and-bias-keys)))
   (get-recurrent-weight-and-bias-gradients [layer]
@@ -824,7 +824,7 @@ in order to avoid adding a small number to 0."
   (recurrent-calc! [layer input initial-hidden-state initial-cell-state output]
     ;;First linear translation of the system.
     (comment
-     (network/biased-multiply! backend input (first (:input weights-and-biases))
+     (nn-backend/biased-multiply! backend input (first (:input weights-and-biases))
                                (second (:input weights-and-biases)) multiplied-input)
      (let [output-vec (split-array-into-batches output)
            hidden-vec (split-array-into-batches multiplied-hidden)
@@ -838,15 +838,15 @@ in order to avoid adding a small number to 0."
                iter-temp-out (intermediate-output-vec idx)
                input-plus-hidden (input-plus-hidden-vec idx)]
            (when (< idx batch-size)
-             (network/biased-multiply! backend input-hidden-state
+             (nn-backend/biased-multiply! backend input-hidden-state
                                        (first (:recurrence weights-and-biases))
                                        (second (:recurrence weights-and-biases))
                                        (hidden-vec idx))
-             (math/sum (dev/get-stream backend) 1.0 iter-input 1.0
+             (math/sum (drv/get-stream backend) 1.0 iter-input 1.0
                        input-plus-hiden)
              (cond
                (contains? #{:relu :tanh} recurrent-type)
-               (cpu-dev/with-stream-dispatch (dev/get-stream backend)
+               (cpu-drv/with-stream-dispatch (drv/get-stream backend)
                  (nio-activation-forward (math/device-buffer iter-temp-out)
                                          recurrent-type
                                          (math/device-buffer iter-output)))
@@ -854,7 +854,7 @@ in order to avoid adding a small number to 0."
                (throw (Exception. "Unrecognized recurrence type")))
              (recur (inc idx) iter-output running-cell-state)))))))
   (recurrent-forward! [layer input hidden-state cell-state output]
-    (network/recurrent-calc! layer input hidden-state cell-state output))
+    (nn-backend/recurrent-calc! layer input hidden-state cell-state output))
   (recurrent-backward! [layer input hidden-state cell-state
                         hidden-state-gradient cell-state-gradient
                         input-gradient output-gradient]
@@ -862,7 +862,7 @@ in order to avoid adding a small number to 0."
      ;;Chain rule this stuff backwards...
      (cond
        (contains? #{:relu :tanh} recurrent-type)
-       (cpu-dev/with-stream-dispatch (dev/get-stream backend)
+       (cpu-drv/with-stream-dispatch (drv/get-stream backend)
          (nio-activation-backward (math/device-buffer running-hidden-state)
                                   recurrent-type
                                   (math/device-buffer output)
@@ -880,7 +880,7 @@ in order to avoid adding a small number to 0."
         [idx 0 (< idx batch-size) (inc idx)]
         (let [ridx (- batch-size idx 1)]
           ;;gradient for hidden state
-          (network/biased-multiply-backward! backend (hidden-state-input ridx)
+          (nn-backend/biased-multiply-backward! backend (hidden-state-input ridx)
                                              (first (:recurrence weights-and-biases))
                                              (second (:recurrence weights-and-biases))
                                              (out-gradient-vec ridx)
@@ -889,7 +889,7 @@ in order to avoid adding a small number to 0."
                                              (second (:recurrence weight-and-bias-gradients))
                                              (out-gradient-vec ridx))
 
-          (network/biased-multiply-backward! backend (input-vec ridx)
+          (nn-backend/biased-multiply-backward! backend (input-vec ridx)
                                              (first (:input weights-and-biases))
                                              (second (:input weights-and-biases))
                                              (out-gradient-vec ridx)
@@ -900,55 +900,55 @@ in order to avoid adding a small number to 0."
           )
 
         )))
-    (network/biased-multiply-backward! backend )
+    (nn-backend/biased-multiply-backward! backend )
     )
   )
 
 
 
 
-(extend-type CPUNetwork
+(extend-type CPUBackend
   dtype/PDatatype
-  (get-datatype [net] (.datatype net))
-  dev/PDeviceProvider
-  (get-device [net] (.device net))
-  dev/PStreamProvider
-  (get-stream [net] (.stream net))
-  network/PLayerCreation
-  (create-layer [net {:keys [layer-type] :as layer-desc}]
+  (get-datatype [backend] (.datatype backend))
+  drv/PDriverProvider
+  (get-driver [backend] (.driver backend))
+  drv/PStreamProvider
+  (get-stream [backend] (.stream backend))
+  nn-backend/PLayerCreation
+  (create-layer [backend {:keys [layer-type] :as layer-desc}]
     (cond
       (contains? #{:sigmoid :relu :tanh} layer-type)
-      (->ActivationLayer layer-type (.stream net))
+      (->ActivationLayer layer-type (.stream backend))
       (= :softmax layer-type)
-      (->SoftmaxLayer (.stream net) (:output-size layer-desc))
+      (->SoftmaxLayer (.stream backend) (:output-size layer-desc))
       (= :convolution layer-type)
-      (create-conv-layer net (:conv-config layer-desc) (:batch-size layer-desc))
+      (create-conv-layer backend (:conv-config layer-desc) (:batch-size layer-desc))
       (= :max-pooling layer-type)
-      (->MaxPooling net (:conv-config layer-desc))
+      (->MaxPooling backend (:conv-config layer-desc))
       (= :batch-normalization layer-type)
-      (->BatchNormalization net)
+      (->BatchNormalization backend)
       :else (throw (Exception. (str "Unrecognized layer type: " layer-type)))))
   opt/POptimiseBackend
   (adadelta-step! [backend ^DeviceArray gradient ^DeviceArray parameters
                    gradient-alpha param-offset decay epsilon
                    ^DeviceArray grad-sq-accum ^DeviceArray dx-sq-accum]
-    (cpu-dev/with-stream-dispatch (.stream backend)
+    (cpu-drv/with-stream-dispatch (.stream backend)
       (nio-adadelta-step! (.device-buffer gradient) (.device-buffer parameters)
                           gradient-alpha param-offset decay epsilon
                           (.device-buffer grad-sq-accum) (.device-buffer dx-sq-accum))))
   (adam-step! [backend ^DeviceArray gradient ^DeviceArray parameters gradient-alpha param-offset
                alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t ^DeviceArray m ^DeviceArray v]
-    (cpu-dev/with-stream-dispatch (.stream backend)
+    (cpu-drv/with-stream-dispatch (.stream backend)
       (nio-adam-step! (.device-buffer gradient) (.device-buffer parameters)
                       gradient-alpha param-offset alpha beta1 beta2 epsilon
                       pow-beta1-t pow-beta2-t (.device-buffer m) (.device-buffer v))))
-  network/PDropout
+  nn-backend/PDropout
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]
-    (cpu-dev/with-stream-dispatch (.stream backend)
+    (cpu-drv/with-stream-dispatch (.stream backend)
       (nio-prepare-bernoulli-dropout (math/device-buffer mult-buffer)
                                      (math/device-buffer rand-buffer) probability)))
   ;;Gaussian distribution copied to mult buffer.
   (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]
-    (cpu-dev/with-stream-dispatch (.stream backend)
+    (cpu-drv/with-stream-dispatch (.stream backend)
       (nio-prepare-gaussian-dropout (math/device-buffer mult-buffer)
                                     (math/device-buffer rand-buffer)))))

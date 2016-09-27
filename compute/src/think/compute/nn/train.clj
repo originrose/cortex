@@ -1,7 +1,7 @@
 (ns think.compute.nn.train
-  (:require [think.compute.device :as dev]
+  (:require [think.compute.driver :as drv]
             [think.compute.math :as math]
-            [think.compute.nn.network :as network]
+            [think.compute.nn.backend :as nn-backend]
             [think.compute.nn.layers :as layers]
             [think.compute.optimise :as opt]
             [think.compute.math :as math]
@@ -42,7 +42,7 @@
             0
             (partition 2 (interleave gradients parameters)))
     (doseq [grad gradients]
-      (dev/memset (dev/get-stream backend) (math/device-buffer grad) 0 0 (math/ecount grad)))
+      (drv/memset (drv/get-stream backend) (math/device-buffer grad) 0 0 (math/ecount grad)))
     (layers/post-update network)
     (assoc train-config
            :network network
@@ -71,7 +71,7 @@
                 [(assoc train-config
                         :batching-system batching-system
                         :network network)
-                 (conj results (mapv #(network/to-double-array backend %)
+                 (conj results (mapv #(nn-backend/to-double-array backend %)
                                      (cp/multi-output network)))]))
             [train-config []]
             (range (batch/get-num-batches (:batching-system train-config))))))
@@ -132,7 +132,7 @@ takes [train-config results] and returns [train-config results]"
     (let [backend (layers/get-backend net)
           batch-size (layers/batch-size net)
           batching-system (-> (batch/create-dataset-batching-system input-labels (mapv first output-labels-and-loss) batch-size
-                                                                    dataset (dev/get-device backend) (dev/get-stream backend)
+                                                                    dataset (drv/get-driver backend) (drv/get-stream backend)
                                                                     (dtype/get-datatype backend))
                               (batch/setup true))
           loss-fns (mapv (fn [[label loss] output-size]
@@ -156,7 +156,7 @@ takes [train-config results] and returns [train-config results]"
     (let [backend (layers/get-backend net)
           batch-size (layers/batch-size net)
           batching-system (-> (batch/create-dataset-batching-system input-labels [] batch-size
-                                                                    dataset (dev/get-device backend) (dev/get-stream backend)
+                                                                    dataset (drv/get-driver backend) (drv/get-stream backend)
                                                                     (dtype/get-datatype backend))
                               (batch/setup false))]
       (second (run-and-reshape {:network net :batching-system batching-system} :running)))))

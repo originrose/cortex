@@ -1,8 +1,8 @@
 # compute
 
 Library designed to provide a generic compute abstraction to allow some level of shared
-implementation between a cpu and cuda design.  Potentially could be used for a multiple-machine
-abstraction as well.
+implementation between a cpu and cuda design.  
+
 
 ## License
 
