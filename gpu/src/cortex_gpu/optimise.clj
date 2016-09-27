@@ -79,7 +79,8 @@
                       gradient (second param-and-grad)]
                   (.position m-ptr offset)
                   (.position v-ptr offset)
-                  (cudnn/adam-step alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t gradient-beta gradient parameters m v)
+                  (cudnn/adam-step alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
+                                   gradient-beta gradient parameters m v)
                   (+ offset (cudnn/ecount parameters))))
               0
               parameters-and-gradients)

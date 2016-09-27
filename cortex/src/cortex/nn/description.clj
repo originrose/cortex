@@ -44,9 +44,6 @@ channel 2 with n-outputs"
   [(first (apply linear num-output opts))
    {:type :logistic}])
 
-(defn gaussian-noise [] { :type :guassian-noise})
-
-(defn k-sparse [k] {:type :k-sparse :k k})
 
 (defn dropout
   "Dropout supports both bernoulli and gaussian distributed data.  Bernoulli is typical dropout
@@ -92,6 +89,22 @@ while guassian is (1,1) centered noise that is multiplied by the inputs."
 (defn split
   [branches]
   [{:type :split :branches branches}])
+
+
+(defn batch-normalization
+  "Create a batch normalization layer:
+https://arxiv.org/pdf/1502.03167v3.pdf.
+ave-factor is the exponential falloff for the running averages of mean and variance
+while epsilon is the stabilization factor for the variance (because we need inverse variance
+and we don't want to divide by zero."
+  [ave-factor & {:keys [epsilon]
+                 :or {epsilon 1e-4}}]
+  (when (< (double epsilon) 1e-5)
+    (throw (Exception. "batch-normalization minimum epsilon is 1e-5.
+This is for cudnn compatibility.")))
+  {:type :batch-normalization
+   :average-factor ave-factor
+   :epsilon epsilon})
 
 
 (def example-mnist-description
@@ -187,6 +200,10 @@ while guassian is (1,1) centered noise that is multiplied by the inputs."
   (let [io-size (:output-size previous)]
     (assoc item :input-size io-size :output-size io-size)))
 
+(defmethod build-desc :batch-normalization
+  [previous item]
+  (build-pass-through-desc previous item))
+
 (defmethod build-desc :split
   [previous item]
   (let [retval (build-pass-through-desc previous item)
@@ -264,14 +281,6 @@ while guassian is (1,1) centered noise that is multiplied by the inputs."
 (defmethod create-module :softmax
   [desc]
   (layers/softmax [(:output-size desc)]))
-
-(defmethod create-module :k-sparse
-  [desc]
-  (layers/k-sparse (:k desc)))
-
-(defmethod create-module :guassian-noise
-  [desc]
-  (layers/guassian-noise))
 
 
 (defmethod create-module :convolutional

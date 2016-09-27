@@ -254,11 +254,3 @@ as the input"
                                                    stride-x stride-y
                                                    num-input-channels)]
     (conv/->Pooling conv-config)))
-
-
-(defn k-sparse
-  [k]
-  #?(:clj (impl/->KSparse k)
-     :cljs (throw (js/Error. "KSparse is not implemented for clojurescript"))))
-
-(defn guassian-noise [] (impl/->GaussianForwardNoise))

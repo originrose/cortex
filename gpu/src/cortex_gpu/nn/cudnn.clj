@@ -1239,32 +1239,35 @@ Backward Data: %s %d"
                         ^cudnn$cudnnTensorStruct output-tensor
                         ^cudnn$cudnnPoolingStruct pooling-descriptor])
 
+;;This function does exist in current cudnn libraries ealier versions on mac missed it
+;;thus but the javacpp team had to remove it from their libraries for a time.  It is back
+;;so next javacpp-cuda release we can uncomment this.
+(comment
+ (defn get-cudnn-pooling-output-sizes
+   [^ConvLayerConfig config ^long batch-size]
+   (let [pooling-desc (cudnn$cudnnPoolingStruct.)
+         input-tensor (create-tensor batch-size
+                                     (.num-in-channels config)
+                                     (.height config)
+                                     (.width config))
+         output-dims (int-array 4)]
 
-(defn get-cudnn-pooling-output-sizes
-  [^ConvLayerConfig config ^long batch-size]
-  (let [pooling-desc (cudnn$cudnnPoolingStruct.)
-        input-tensor (create-tensor batch-size
-                                    (.num-in-channels config)
-                                    (.height config)
-                                    (.width config))
-        output-dims (int-array 4)]
+     (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
+     (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
+                  pooling-desc
+                  cudnn/CUDNN_POOLING_MAX
+                  cudnn/CUDNN_PROPAGATE_NAN
+                  (.k-height config) (.k-width config)
+                  (.pady config) (.padx config)
+                  (.stride-h config) (.stride-w config)))
 
-    (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
-    (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
-                 pooling-desc
-                 cudnn/CUDNN_POOLING_MAX
-                 cudnn/CUDNN_PROPAGATE_NAN
-                 (.k-height config) (.k-width config)
-                 (.pady config) (.padx config)
-                 (.stride-h config) (.stride-w config)))
-
-    (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
-                 pooling-desc
-                 input-tensor
-                 4
-                 output-dims))
-    (cudnn/cudnnDestroyPoolingDescriptor pooling-desc)
-    (vec output-dims)))
+     (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
+                  pooling-desc
+                  input-tensor
+                  4
+                  output-dims))
+     (cudnn/cudnnDestroyPoolingDescriptor pooling-desc)
+     (vec output-dims))))
 
 
 (defn max-pooling-setup
@@ -1289,21 +1292,22 @@ Backward Data: %s %d"
                  (.k-height config) (.k-width config)
                  (.pady config) (.padx config)
                  (.stride-h config) (.stride-w config)))
-
-    (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
-                 pooling-desc
-                 input-tensor
-                 4
-                 output-dims))
-
-    ;;These do not have to match; cudnn can take care of it if they are off.
+;;These do not have to match; cudnn can take care of it if they are off.
     ;;https://devtalk.nvidia.com/default/topic/949999/cuda-programming-and-performance/cudnn-calculates-layer-sizes-different-than-caffe/
-    (comment (let [[n c h w] output-dims]
-               (when-not (and (= output-width w)
-                              (= output-height h))
-                 (throw (Exception. (format "Pooling layer size mismatch: cudnn %s calculated %s"
-                                            [w h]
-                                            [output-width output-height]))))))
+    (comment
+     (cudnn-call (cudnn/cudnnGetPoolingNdForwardOutputDim
+                  pooling-desc
+                  input-tensor
+                  4
+                  output-dims))
+
+
+     (let [[n c h w] output-dims]
+       (when-not (and (= output-width w)
+                      (= output-height h))
+         (throw (Exception. (format "Pooling layer size mismatch: cudnn %s calculated %s"
+                                    [w h]
+                                    [output-width output-height]))))))
     (resource/track (map->PoolingData
                      {:input-tensor input-tensor
                       :output-tensor output-tensor

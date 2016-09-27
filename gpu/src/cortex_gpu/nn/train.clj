@@ -70,7 +70,8 @@
   [{:keys [network batch-size] :as train-config} batch-type]
   (let [train-config (batch/setup-batching-system-per-epoch train-config batch-type)
         next-output (fn [train-config idx]
-                      (let [{:keys [train-config input-buffers]} (batch/get-batching-system-buffers train-config idx batch-type)]
+                      (let [{:keys [train-config input-buffers]}
+                            (batch/get-batching-system-buffers train-config idx batch-type)]
                         (cp/multi-output (cp/multi-calc network input-buffers))))
         n-output (cp/multi-output-size network)
         num-batches (batch/get-num-batches train-config)]

@@ -137,7 +137,8 @@
   cp/PLayerSetup
   (setup [layer items-per-batch]
     (let [total-input (* n-input n-channels)
-          softmax-tensor (cudnn/create-tensor (cudnn/channel-last) items-per-batch n-input 1 n-channels)]
+          softmax-tensor (cudnn/create-tensor (cudnn/channel-last) items-per-batch
+                                              n-input 1 n-channels)]
       (assoc layer
              :output (cudnn/new-array [total-input] items-per-batch)
              :input-gradient (cudnn/new-array [total-input] items-per-batch)
@@ -199,9 +200,11 @@ channel 2 with n-outputs"
   (multi-input-size [layer] (cp/multi-input-size (first layers)))
   (multi-output-size [layer] (cp/multi-output-size (last layers)))
   (multi-calc [this-layer input-vec]
-    (layer-list-forward this-layer input-vec (fn [layer input-vec] (cp/multi-calc layer input-vec))))
+    (layer-list-forward this-layer input-vec (fn [layer input-vec]
+                                               (cp/multi-calc layer input-vec))))
   (multi-forward [this-layer input-vec]
-    (layer-list-forward this-layer input-vec (fn [layer input-vec] (cp/multi-forward layer input-vec))))
+    (layer-list-forward this-layer input-vec (fn [layer input-vec]
+                                               (cp/multi-forward layer input-vec))))
   (multi-backward [this-layer input-vec output-gradient-vec]
     (let [layer-and-prev (reverse (map vector layers (cons nil layers)))]
       (assoc this-layer :layers
@@ -211,7 +214,8 @@ channel 2 with n-outputs"
                                                            input-vec)
                                          new-layer (cp/multi-backward layer local-input-vec
                                                                       output-gradient-vec)
-                                         new-output-gradient-vec (cp/multi-input-gradient new-layer)]
+                                         new-output-gradient-vec (cp/multi-input-gradient
+                                                                  new-layer)]
                                      [(conj layers new-layer) new-output-gradient-vec]))
                                  [(list) output-gradient-vec]
                                  layer-and-prev))))))

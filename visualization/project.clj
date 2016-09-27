@@ -10,5 +10,4 @@
                  [thinktopic/tsne-core "0.1.0"]
                  [incanter/incanter-core "1.5.7"]
                  [incanter/incanter-charts "1.5.7"]
-                 [thinktopic/cortex "0.1.1-SNAPSHOT"]
-                 [thinktopic/tsne-core "0.1.0"]])
+                 [thinktopic/cortex "0.2.1-SNAPSHOT"]])
