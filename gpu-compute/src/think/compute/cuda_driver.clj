@@ -1,12 +1,12 @@
-(ns think.compute.cuda-device
-  (:require [think.compute.device :as dev]
+(ns think.compute.cuda-driver
+  (:require [think.compute.driver :as drv]
             [think.compute.datatype :as dtype]
             [clojure.java.io :as io]
             [resource.core :as resource]
             [think.compute.javacpp-datatype :as jcpp-dtype]
             [clojure.core.matrix.protocols :as mp]
             [think.compute.math :as math]
-            [think.compute.cpu-device :as cpu-dev])
+            [think.compute.cpu-driver :as cpu-drv])
   (:import [org.bytedeco.javacpp cuda
             BytePointer IntPointer LongPointer DoublePointer
             Pointer PointerPointer FloatPointer ShortPointer
@@ -259,21 +259,21 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
     (resource/track rand-context)))
 
 
-(defrecord CudaDevice [device-functions ^cublas$cublasContext cublas ^curand$curandGenerator_st curand])
+(defrecord CudaDriver [device-functions ^cublas$cublasContext cublas ^curand$curandGenerator_st curand])
 
-(defrecord CudaStream [^CudaDevice device ^cuda$CUstream_st stream])
+(defrecord CudaStream [^CudaDriver driver ^cuda$CUstream_st stream])
 
-(extend-protocol dev/PStreamProvider
+(extend-protocol drv/PStreamProvider
   CudaStream
   (get-stream [item] (:stream item))
   cuda$CUstream_st
   (get-stream [item] item))
 
-(extend-protocol dev/PDeviceProvider
-  CudaDevice
-  (get-device [item] item)
+(extend-protocol drv/PDriverProvider
+  CudaDriver
+  (get-driver [item] item)
   CudaStream
-  (get-device [item] (:device item)))
+  (get-driver [item] (.driver ^CudaStream item)))
 
 
 (extend-type Pointer
@@ -281,7 +281,7 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
   (release-resource [item]))
 
 
-(defn create-cuda-device
+(defn create-cuda-driver
   []
   (create-context)
   (let [device-functions {:memset (load-all-datatype-function "memset")
@@ -290,15 +290,15 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
                                                  "elementwise_multiply")
                           :l2-constraint-scale (load-float-double-function
                                                 "l2_constraint_scale")}]
-    (->CudaDevice device-functions (create-blas-context) (create-rand-context))))
+    (->CudaDriver device-functions (create-blas-context) (create-rand-context))))
 
 
 (defn get-blas
-  ^cublas$cublasContext [^CudaDevice device]
+  ^cublas$cublasContext [^CudaDriver device]
   (.cublas device))
 
 (defn get-rand
-  ^curand$curandGenerator_st [^CudaDevice device]
+  ^curand$curandGenerator_st [^CudaDriver device]
   (.curand device))
 
 
@@ -306,17 +306,17 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
   "Setting the blas stream is not threadsafe so we have to lock the object
 before we set it, do the operation, and unlock the object after."
   [stream & body]
-  `(let [^cublas$cublasContext ~'cublas (get-blas (dev/get-device ~stream))]
+  `(let [^cublas$cublasContext ~'cublas (get-blas (drv/get-driver ~stream))]
      (locking ~'cublas
-       (cublas/cublasSetStream_v2 ~'cublas (dev/get-stream ~stream))
+       (cublas/cublasSetStream_v2 ~'cublas (drv/get-stream ~stream))
        ~@body)))
 
 
 (defmacro rand-with-stream
   [stream & body]
-  `(let [^curand$curandGenerator_st ~'rand-context (get-rand (dev/get-device ~stream))]
+  `(let [^curand$curandGenerator_st ~'rand-context (get-rand (drv/get-driver ~stream))]
      (locking ~'rand-context
-       (curand/curandSetStream ~'rand-context (dev/get-stream ~stream))
+       (curand/curandSetStream ~'rand-context (drv/get-stream ~stream))
        ~@body)))
 
 
@@ -332,8 +332,8 @@ before we set it, do the operation, and unlock the object after."
   (get-datatype [item] (dtype/get-datatype ptr)))
 
 
-(extend-type CudaDevice
-  dev/PDevice
+(extend-type CudaDriver
+  drv/PDriver
   (get-devices [impl] (list-devices))
   (set-current-device [impl device]
     (cuda/cudaSetDevice ^int (:device-id device)))
@@ -356,7 +356,7 @@ before we set it, do the operation, and unlock the object after."
           new-size (* byte-size length)]
       (->DevicePointer new-size (jcpp-dtype/offset-pointer (.ptr buffer) offset))))
   (allocate-rand-buffer [impl elem-count]
-    (dev/allocate-device-buffer impl elem-count :float)))
+    (drv/allocate-device-buffer impl elem-count :float)))
 
 
 (defn check-copy-buffer-types-and-sizes
@@ -466,7 +466,7 @@ before we set it, do the operation, and unlock the object after."
                                     grid-dim-x grid-dim-y grid-dim-z
                                     block-dim-x block-dim-y block-dim-z
                                     shared-mem-size
-                                    ^cuda$CUstream_st (dev/get-stream stream)
+                                    ^cuda$CUstream_st (drv/get-stream stream)
                                     arg-pointer
                                     nil))))
 
@@ -553,7 +553,7 @@ relies only on blockDim.x block.x and thread.x"
 
 (defn dev-fn-from-stream
   [stream fn-name dtype]
-  (get-in (:device-functions (dev/get-device stream)) [fn-name dtype :fn]))
+  (get-in (:device-functions (drv/get-driver stream)) [fn-name dtype :fn]))
 
 (extend-type DoublePointer
   PCudaMath
@@ -562,7 +562,7 @@ relies only on blockDim.x block.x and thread.x"
               B b-colstride
               beta C c-colstride
               ^CudaStream stream]
-    (cpu-dev/col->row-gemm
+    (cpu-drv/col->row-gemm
      (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
           alpha ^DoublePointer A a-rowstride
           ^DoublePointer B b-rowstride
@@ -588,13 +588,13 @@ relies only on blockDim.x block.x and thread.x"
      beta C c-colstride))
   (cuda-sum [x x-elem-count alpha beta y y-elem-count res res-elem-count stream]
     (launch-linear-kernel
-     (dev/get-stream stream)
+     (drv/get-stream stream)
      (dev-fn-from-stream stream :sum :double) (max (long x-elem-count) (long y-elem-count)) 0
      (double alpha) x (int x-elem-count)
      (double beta) y (int y-elem-count)
      res (int res-elem-count)))
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
-    (cpu-dev/col->row-gemv
+    (cpu-drv/col->row-gemv
      (fn [trans-a? a-row-count a-col-count
           alpha ^DoublePointer A a-rowstride
           ^DoublePointer x inc-x
@@ -644,7 +644,7 @@ relies only on blockDim.x block.x and thread.x"
               B b-colstride
               beta C c-colstride
               ^CudaStream stream]
-    (cpu-dev/col->row-gemm
+    (cpu-drv/col->row-gemm
      (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
           alpha ^FloatPointer A a-rowstride
           ^FloatPointer B b-rowstride
@@ -669,7 +669,7 @@ relies only on blockDim.x block.x and thread.x"
      B b-colstride
      beta C c-colstride))
   (cuda-sum [x x-elem-count alpha beta y y-elem-count res res-elem-count stream]
-    (launch-linear-kernel (dev/get-stream stream)
+    (launch-linear-kernel (drv/get-stream stream)
                           (dev-fn-from-stream stream :sum :float)
                           (max (long x-elem-count) (long y-elem-count))
                           0
@@ -677,7 +677,7 @@ relies only on blockDim.x block.x and thread.x"
                           (float beta) y (int y-elem-count)
                           res (int res-elem-count)))
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
-    (cpu-dev/col->row-gemv
+    (cpu-drv/col->row-gemv
      (fn [trans-a? a-row-count a-col-count
           alpha ^FloatPointer A a-rowstride
           ^FloatPointer x inc-x
@@ -738,7 +738,7 @@ relies only on blockDim.x block.x and thread.x"
 
 
 (extend-type CudaStream
-  dev/PStream
+  drv/PStream
   (copy-host->device [stream host-buffer host-offset device-buffer device-offset elem-count]
     (generalized-cuda-async-copy stream host-buffer host-offset device-buffer device-offset
                                  elem-count cuda/cudaMemcpyHostToDevice))
@@ -757,7 +757,7 @@ relies only on blockDim.x block.x and thread.x"
                bytes (* (long elem-count) buf-dtype-size)
                offset (* (long device-offset) buf-dtype-size)]
            (cuda/cudaMemsetAsync (->ptr device-buffer offset) (int 0) (long bytes) cuda-stream))
-         (let [^CudaDevice device (.device stream)
+         (let [^CudaDriver device (.driver stream)
                memset-fn (get-in (.device-functions device) [:memset buf-dtype :fn])]
            (launch-linear-kernel stream memset-fn elem-count 0
                                  (->ptr device-buffer device-offset)
@@ -809,7 +809,7 @@ relies only on blockDim.x block.x and thread.x"
 
 
 (extend-type cuda$CUevent_st
-  dev/PEvent
+  drv/PEvent
   (wait-for-event [evt]
     (cuda/cudaEventSynchronize evt))
   resource/PResource

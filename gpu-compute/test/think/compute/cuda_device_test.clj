@@ -1,36 +1,36 @@
 (ns think.compute.cuda-device-test
   (:require [clojure.test :refer :all]
-            [think.compute.verify.backend-test :as backend]
+            [think.compute.verify.driver :as verify-driver]
             [think.compute.verify.utils :as verify-utils]
-            [think.compute.cuda-device :as cuda-device]))
+            [think.compute.cuda-driver :as cuda-driver]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
 
-(defn create-device
+(defn create-driver
   []
-  (cuda-device/create-cuda-device))
+  (cuda-driver/create-cuda-driver))
 
 (verify-utils/def-all-dtype-test simple-stream
-  (backend/simple-stream (create-device) verify-utils/*datatype*))
+  (verify-driver/simple-stream (create-driver) verify-utils/*datatype*))
 
 (verify-utils/def-double-float-test gemm
-  (backend/gemm (create-device) verify-utils/*datatype*))
+  (verify-driver/gemm (create-driver) verify-utils/*datatype*))
 
 (verify-utils/def-double-float-test sum
-  (backend/sum (create-device) verify-utils/*datatype*))
+  (verify-driver/sum (create-driver) verify-utils/*datatype*))
 
 (verify-utils/def-double-float-test subtract
-  (backend/subtract (create-device) verify-utils/*datatype*))
+  (verify-driver/subtract (create-driver) verify-utils/*datatype*))
 
 (verify-utils/def-double-float-test gemv
-  (backend/gemv (create-device) verify-utils/*datatype*))
+  (verify-driver/gemv (create-driver) verify-utils/*datatype*))
 
 (verify-utils/def-double-float-test mul-rows
-  (backend/mul-rows (create-device) verify-utils/*datatype*))
+  (verify-driver/mul-rows (create-driver) verify-utils/*datatype*))
 
 (verify-utils/def-double-float-test elem-mul
-  (backend/elem-mul (create-device) verify-utils/*datatype*))
+  (verify-driver/elem-mul (create-driver) verify-utils/*datatype*))
 
 (verify-utils/def-double-float-test l2-constraint-scale
-  (backend/l2-constraint-scale (create-device) verify-utils/*datatype*))
+  (verify-driver/l2-constraint-scale (create-driver) verify-utils/*datatype*))

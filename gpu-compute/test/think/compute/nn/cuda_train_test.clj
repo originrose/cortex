@@ -2,7 +2,7 @@
   (:require [clojure.test :refer :all]
             [think.compute.verify.nn.train :as verify-train]
             [think.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
-            [think.compute.nn.cuda-network :as cuda-net]))
+            [think.compute.nn.cuda-backend :as cuda-backend]))
 
 
 (use-fixtures :each verify-utils/test-wrapper)
@@ -10,7 +10,7 @@
 
 (defn create-network
   []
-  (cuda-net/create-network verify-utils/*datatype*))
+  (cuda-backend/create-backend verify-utils/*datatype*))
 
 (def-double-float-test train-step
   (verify-train/test-train-step (create-network)))

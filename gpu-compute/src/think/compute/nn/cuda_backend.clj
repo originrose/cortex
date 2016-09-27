@@ -1,10 +1,10 @@
-(ns think.compute.nn.cuda-network
-  (:require [think.compute.cuda-device :refer [->ptr value->ptr] :as cuda-dev]
+(ns think.compute.nn.cuda-backend
+  (:require [think.compute.cuda-driver :refer [->ptr value->ptr] :as cuda-drv]
             [think.compute.javacpp-datatype :as jcpp-dtype]
             [think.compute.datatype :as dtype]
-            [think.compute.device :as dev]
+            [think.compute.driver :as drv]
             [think.compute.optimise :as opt]
-            [think.compute.nn.network :as network]
+            [think.compute.nn.backend :as nn-backend]
             [think.compute.nn.layers :as layers]
             [cortex.nn.impl.layers.convolution :as conv]
             [think.compute.math :as math]
@@ -14,7 +14,7 @@
             cudnn$cudnnPoolingStruct
             BytePointer IntPointer LongPointer DoublePointer Pointer PointerPointer
             SizeTPointer FloatPointer ShortPointer]
-           [think.compute.cuda_device CudaDevice CudaStream]
+           [think.compute.cuda_driver CudaDriver CudaStream]
            [think.compute.math DeviceArray]
            [cortex.nn.impl.layers.convolution ConvLayerConfig]))
 
@@ -49,7 +49,7 @@
      retval#))
 
 (defonce forward-algorithms
-  (cuda-dev/reverse-hash-map
+  (cuda-drv/reverse-hash-map
    {"CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM"         0
     "CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM" 1
     "CUDNN_CONVOLUTION_FWD_ALGO_GEMM"                  2
@@ -59,7 +59,7 @@
 
 
 (defonce backward-filter-algorithms
-  (cuda-dev/reverse-hash-map
+  (cuda-drv/reverse-hash-map
    {
     "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0"         0
     "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1"         1
@@ -69,7 +69,7 @@
 
 
 (defonce backward-data-algorithms
-  (cuda-dev/reverse-hash-map
+  (cuda-drv/reverse-hash-map
    {
     "CUDNN_CONVOLUTION_BWD_DATA_ALGO_0"          0
     "CUDNN_CONVOLUTION_BWD_DATA_ALGO_1"          1
@@ -176,32 +176,32 @@
   (^cudnn$cudnnActivationStruct [mode] (create-activation-desc mode cudnn/CUDNN_PROPAGATE_NAN 0.0)))
 
 
-(defrecord CudaNetwork [^CudaDevice device ^CudaStream stream ^cudnn$cudnnContext cudnn-context datatype network-functions])
+(defrecord CudaBackend [^CudaDriver driver ^CudaStream stream ^cudnn$cudnnContext cudnn-context datatype network-functions])
 
-(defn create-network
-  ([^CudaDevice device ^CudaStream stream datatype]
-   (let [network-functions {:adadelta-step (cuda-dev/load-float-double-function "adadelta.fatbin" "adadelta_step")
-                            :adam-step (cuda-dev/load-float-double-function "adam.fatbin" "adam_step")
-                            :prepare-bernoulli-dropout (cuda-dev/load-float-double-function "prepare_bernoulli_dropout.fatbin"
+(defn create-backend
+  ([^CudaDriver driver ^CudaStream stream datatype]
+   (let [network-functions {:adadelta-step (cuda-drv/load-float-double-function "adadelta.fatbin" "adadelta_step")
+                            :adam-step (cuda-drv/load-float-double-function "adam.fatbin" "adam_step")
+                            :prepare-bernoulli-dropout (cuda-drv/load-float-double-function "prepare_bernoulli_dropout.fatbin"
                                                                                             "prepare_bernoulli_dropout")
-                            :prepare-gaussian-dropout (cuda-dev/load-float-double-function "prepare_gaussian_dropout.fatbin"
+                            :prepare-gaussian-dropout (cuda-drv/load-float-double-function "prepare_gaussian_dropout.fatbin"
                                                                                            "prepare_gaussian_dropout")}]
-     (->CudaNetwork device stream (create-cudnn-context) datatype network-functions)))
-  ([datatype] (let [device (cuda-dev/create-cuda-device)
-                    stream (dev/create-stream device)]
-                (create-network device stream datatype)))
-  ([] (create-network :double)))
+     (->CudaBackend driver stream (create-cudnn-context) datatype network-functions)))
+  ([datatype] (let [driver (cuda-drv/create-cuda-driver)
+                    stream (drv/create-stream driver)]
+                (create-backend driver stream datatype)))
+  ([] (create-backend :double)))
 
 (defn get-cudnn
-  ^cudnn$cudnnContext [^CudaNetwork network]
+  ^cudnn$cudnnContext [^CudaBackend network]
   (.cudnn-context network))
 
 (defmacro stream-with-cudnn
   [backend & body]
-  `(let [stream# (dev/get-stream ~backend)
+  `(let [stream# (drv/get-stream ~backend)
          ~'cudnn-context (get-cudnn ~backend)]
      (locking ~'cudnn-context
-       (cudnn/cudnnSetStream ~'cudnn-context (dev/get-stream stream#))
+       (cudnn/cudnnSetStream ~'cudnn-context (drv/get-stream stream#))
        ~@body)))
 
 
@@ -220,46 +220,46 @@
 (extend-type DoublePointer
   PCUDAOptimiseMethod
   (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :adadelta-step :double) item-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adadelta-step :double) item-count 0
                                    (double decay) (double epsilon)
                                    grad-accum dx-accum
                                    (double gradient-alpha)
                                    gradient parameters item-count))
   (cuda-adam-step! [gradient parameters gradient-alpha alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t m v item-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :adam-step :double) item-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adam-step :double) item-count 0
                                    (double alpha) (double beta1) (double beta2) (double epsilon)
                                    (double pow-beta1-t) (double pow-beta2-t)
                                    (double gradient-alpha)
                                    gradient parameters m v
                                    item-count))
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
                                    mult-buffer rand-buffer (double probability) elem-count))
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :double) elem-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :double) elem-count 0
                                    mult-buffer rand-buffer elem-count)))
 
 
 (extend-type FloatPointer
   PCUDAOptimiseMethod
   (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :adadelta-step :float) item-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adadelta-step :float) item-count 0
                                    (float decay) (float epsilon)
                                    grad-accum dx-accum
                                    (float gradient-alpha)
                                    gradient parameters item-count))
   (cuda-adam-step! [gradient parameters gradient-alpha alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t m v item-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :adam-step :float) item-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adam-step :float) item-count 0
                                    (float alpha) (float beta1) (float beta2) (float epsilon)
                                    (float pow-beta1-t) (float pow-beta2-t)
                                    (float gradient-alpha)
                                    gradient parameters m v
                                    item-count))
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :float) elem-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :float) elem-count 0
                                    mult-buffer rand-buffer (float probability) elem-count))
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]
-    (cuda-dev/launch-linear-kernel (dev/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :float) elem-count 0
+    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :float) elem-count 0
                                    mult-buffer rand-buffer elem-count)))
 
 
@@ -284,7 +284,7 @@
 
 
 (extend-type ActivationLayer
-  network/PNetLayer
+  nn-backend/PBackendLayer
   (forward! [layer input output]
     (let [datatype (dtype/get-datatype (.backend layer))
           tensor (.data-tensor layer)]
@@ -311,7 +311,7 @@
 (defrecord SoftmaxLayer [backend tensor])
 
 (extend-type SoftmaxLayer
-  network/PNetLayer
+  nn-backend/PBackendLayer
   (forward! [layer input output]
     (let [datatype (dtype/get-datatype (.backend layer))]
       (stream-with-cudnn (.backend layer)
@@ -320,12 +320,12 @@
                                               cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
                                               (value->ptr 1 datatype)
                                               (.tensor layer)
-                                              (cuda-dev/->ptr input)
+                                              (cuda-drv/->ptr input)
                                               (value->ptr 0 datatype)
                                               (.tensor layer)
-                                              (cuda-dev/->ptr output))))))
+                                              (cuda-drv/->ptr output))))))
   (backward! [layer input output input-gradient output-gradient]
-    (layers/softmax-backward! (dev/get-stream (.backend layer)) input-gradient output-gradient)))
+    (layers/softmax-backward! (drv/get-stream (.backend layer)) input-gradient output-gradient)))
 
 
 (defrecord ConvolutionLayer [backend
@@ -505,7 +505,7 @@ Backward Data: %s %d"
                                     (.get backward-filter-workspace-size)
                                     (.get backward-data-workspace-size))
           workspace (when-not (= 0 total-workspace-size)
-                      (dev/allocate-device-buffer (dev/get-device backend) total-workspace-size :byte))]
+                      (drv/allocate-device-buffer (drv/get-driver backend) total-workspace-size :byte))]
       (map->ConvolutionLayer
        {:backend backend
         :workspace workspace
@@ -521,7 +521,7 @@ Backward Data: %s %d"
         :bias-tensor bias-tensor}))))
 
 (extend-type ConvolutionLayer
-  network/PNetWeightedLayer
+  nn-backend/PBackendWeightedLayer
   (weighted-forward! [layer input output weights bias]
     (stream-with-cudnn
      (.backend layer)
@@ -666,7 +666,7 @@ Backward Data: %s %d"
       :pooling-descriptor pooling-desc})))
 
 (extend-type PoolingLayer
-  network/PNetLayer
+  nn-backend/PBackendLayer
   (forward! [layer input output]
     (stream-with-cudnn
      (.backend layer)
@@ -714,7 +714,7 @@ Backward Data: %s %d"
     (->BatchNormalization backend io-tensor var-tensor)))
 
 (extend-type BatchNormalization
-  network/PBatchNormalization
+  nn-backend/PBatchNormalization
   (batch-norm-calc! [layer input means variances scale bias output epsilon]
     (let [backend (:backend layer)
           datatype (dtype/get-datatype backend)
@@ -798,10 +798,10 @@ Backward Data: %s %d"
 
 
 
-(extend-type CudaNetwork
-  dev/PDeviceProvider
-  (get-device [impl] (.device impl))
-  dev/PStreamProvider
+(extend-type CudaBackend
+  drv/PDriverProvider
+  (get-driver [impl] (.driver impl))
+  drv/PStreamProvider
   (get-stream [impl] (.stream impl))
   dtype/PDatatype
   (get-datatype [impl] (.datatype impl))
@@ -821,7 +821,7 @@ Backward Data: %s %d"
                      (->ptr m param-offset) (->ptr v param-offset)
                      (dtype/ecount gradient)
                      backend))
-  network/PLayerCreation
+  nn-backend/PLayerCreation
   (create-layer [backend {:keys [layer-type batch-size output-size] :as layer-desc}]
     (cond
       (contains? #{:relu :tanh :sigmoid} layer-type)
@@ -838,7 +838,7 @@ Backward Data: %s %d"
       (create-batch-normalization backend output-size batch-size)
       :else (throw (Exception. (str "Failed to create layer type: " layer-type)))))
 
-  network/PDropout
+  nn-backend/PDropout
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]
     (cuda-prepare-bernoulli-dropout! (->ptr mult-buffer) probability
                                      (->ptr rand-buffer) (math/ecount mult-buffer) backend))
