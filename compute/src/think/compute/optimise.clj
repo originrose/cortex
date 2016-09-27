@@ -1,4 +1,6 @@
 (ns think.compute.optimise
+  "Generic optimization backend to allow optimization paths backed by various drivers.  This includes
+optimisers specifically and loss functions."
   (:require [think.compute.math :as math]
             [think.compute.datatype :as dtype]
             [think.compute.driver :as drv]
@@ -28,8 +30,9 @@
    :epsilon 1e-8})
 
 
-;;Backends implement this
 (defprotocol POptimiseBackend
+  "Perform one step of the adadelta calculation.  Because the gradients and parameters may be stored in different
+buffers the param offset is required as the accumulation buffers are only one buffer."
   (adadelta-step! [backend gradient parameters gradient-alpha param-offset decay epsilon grad_sq_accum dx_sq_accum])
   (adam-step! [backend gradient parameters gradient-alpha param-offset alpha beta1 beta2 epsilon
                pow_beta1_t pow_beta2_t m v]))

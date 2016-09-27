@@ -1,4 +1,6 @@
 (ns think.compute.nn.gradient-check
+  "Implementation of a gradient checker for anything implementing the neural network protocols
+  in cortex."
   (:require [cortex.nn.protocols :as cp]
             [think.compute.nn.backend :as nn-backend]
             [think.compute.math :as math]

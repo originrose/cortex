@@ -1,11 +1,23 @@
 (ns think.compute.nn.backend
+  "Neural network backends provide the driver-specific computations that cannot be represented
+  with the generalized math layer provided in math.clj or where cudnn provides a specific optimized
+  implementation.
+  A backend is expected to have access to:
+  1.  A specific driver.
+  2.  A stream of execution.
+  3.  A datatype used to specify what the backing data should be.
+
+  It is also expected to be capable of providing backend specific implementations for various layer types.
+  There are a set of functions that correspond to some specific math functions but take a backend instead
+  of a driver and stream to streamline creating data for a given backend."
+
   (:require [think.compute.math :as math]
             [think.compute.driver :as drv]
             [think.compute.datatype :as dtype]
             [cortex.nn.impl.layers.convolution])
   (:import [cortex.nn.impl.layers.convolution ConvLayerConfig]))
 
-;;Math bindings to make using a backend easier.
+
 (defn array
   ([backend data items-per-batch]
    (math/array (drv/get-driver backend) (drv/get-stream backend) (dtype/get-datatype backend)

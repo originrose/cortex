@@ -1,4 +1,12 @@
 (ns think.compute.driver
+  "Base set of protocols required to move information from the host to the device as well as enable
+  some form of computation on a given device.  There is a cpu implementation provided for reference.
+
+  This file describes three basic datatypes:
+  Driver - Enables enumeration of devices as well as creation of streams and host or device buffers.
+  Stream - Stream of execution occuring on the device.
+  Event - Synchronization primitive.  Events are created un-triggered and get triggered their associated
+  stream gets to the point where the event was created."
   (:require [think.compute.datatype :as dtype]
             [clojure.core.matrix :as m]
             [resource.core :as resource]))
@@ -8,49 +16,57 @@
   "A driver is a generic compute abstraction.  Could be a group of threads,
   could be a machine on a network or it could be a CUDA or OpenCL driver.
   A stream is a stream of execution (analogous to a thread) where
-  subsequent calls are serialized."
-  (get-devices [impl])
-  (set-current-device [impl device])
-  (get-current-device [impl])
-  (create-stream [impl])
-  (allocate-host-buffer [impl elem-count elem-type])
-  (allocate-device-buffer [impl elem-count elem-type])
-  ;;Create a sub buffer that shares backing store with this main buffer but can
-  ;;represent a subsection.
-  (sub-buffer-impl [impl buffer offset length])
-  ;;The random number generators of different devices will usually be required to produce
-  ;;random numbers of a particular type; for CUDA in general it is float values.
-  (allocate-rand-buffer [impl elem-count]))
+  subsequent calls are serialized.  All buffers are implement a few of the datatype
+  interfaces, at least get-datatype and ecount.  Host buffers are expected to implement
+  enough of the datatype interfaces to allow a copy operation from generic datatypes
+  into them.  This means at least PAccess."
+  (get-devices [impl]
+    "Get a list of devices accessible to the system.")
+  (set-current-device [impl device]
+    "Set the current device.  In for cuda this sets the current device in thread-specific storage so expecting
+this to work in some thread independent way is a bad assumption.")
+  (get-current-device [impl]
+    "Get the current device from the current thread.")
+  (create-stream [impl]
+    "Create a stream of execution.  Streams are indepenent threads of execution.  They can be synchronized
+with each other and the main thread using events.")
+  (allocate-host-buffer [impl elem-count elem-type]
+    "Allocate a host buffer.  Transfer from host to device requires data first copied into a host buffer
+and then uploaded to a device buffer.")
+  (allocate-device-buffer [impl elem-count elem-type]
+    "Allocate a device buffer.  This is the generic unit of data storage used for computation.")
+  (sub-buffer-impl [impl device-buffer offset length]
+    "Create a sub buffer that shares the backing store with the main buffer.")
+  (allocate-rand-buffer [impl elem-count]
+    "Allocate a buffer used for rands.  Random number generation in general needs a divisible-by-2 element count
+and a floating point buffer (cuda cuRand limitation)"))
 
 (defprotocol PDriverProvider
   "Get a driver from an object"
   (get-driver [impl]))
 
 (defprotocol PStream
-  ;;Offsets are in elements.  Moving data onto a device is potentially
-  ;;a multiple step process from
-  ;;getting the data in a packed java array and then onto a device-specific host buffer and then
-  ;;finally a host->device call.  Moving data back until you can manipulate it on the JVM is
-  ;;potentially another multiple step process.  In all these steps the types must match.
+  "Basic functionality expected of streams.  Streams are an abstraction of a stream of execution
+and can be synchonized with the host or with each other using events."
   (copy-host->device [stream host-buffer host-offset
                       device-buffer device-offset elem-count])
   (copy-device->host [stream device-buffer device-offset
                       host-buffer host-offset elem-count])
   (copy-device->device [stream dev-a dev-a-off dev-b dev-b-off elem-count])
-  ;;Set the value in a buffer to a constant value.
   (memset [stream device-buffer device-offset elem-val elem-count])
-  ;;Create an event in a stream
-  (create-event [stream])
-  ;;Ensure this stream cannot proceed until this event is triggered.
-  (sync-event [stream event]))
+  (create-event [stream]
+    "Create an event for synchronization.  The event is triggered when the stream
+executes to the event.")
+  (sync-event [stream event]
+    "Have this stream pause until a given event is triggered."))
 
 (defprotocol PStreamProvider
   "Get a stream from an object"
   (get-stream [impl]))
 
 (defprotocol PEvent
-  ;;Wait on the host till the event has been triggered
-  (wait-for-event [event]))
+  (wait-for-event [event]
+    "Wait on the host until an event is triggered."))
 
 
 (defn sub-buffer

@@ -1,4 +1,8 @@
 (ns think.compute.nn.layers
+  "Base set of layers expected to work across all backends.  These layers implement the
+cortex protocols around nn layers and provide some implementation of their respective types
+in order to ease the implementation burden across backends and ensure as much of a unified
+implementation as possible."
   (:require [cortex.nn.protocols :as cp]
             [think.compute.nn.backend :as nn-backend]
             [think.compute.math :as math]
@@ -617,7 +621,10 @@
 
 (defn batch-normalization
   "Create a batch normalization layer.  Average factor exponential falloff
-  used for the running means and variances."
+  used for the running means and variances.
+  https://arxiv.org/pdf/1502.03167v3.pdf.
+  This layer type is unlikely to work with small batch sizes;  as it does do some numerical analysis
+  and gaussian normalization of the batch a small batch may throw off optimization later."
   [backend n-input average-factor
    & {:keys [scale bias means variances epsilon]
       :or {epsilon 1e-4}}]

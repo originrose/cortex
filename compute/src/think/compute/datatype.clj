@@ -1,4 +1,16 @@
 (ns think.compute.datatype
+  "Generalized efficient manipulations of sequences of primitive datatype.  Includes specializations
+  for java arrays, array views (subsection of an array) and nio buffers.  There are specializations to allow
+  implementations to provide efficient full typed copy functions when the types can be ascertained.  Usually
+  this involves a double-dispatch on both the src and dest arguments:
+  https://en.wikipedia.org/wiki/Double_dispatch.
+
+  Generic operations include:
+  1. datatype of this sequence.
+  2. Writing to, reading from.
+  3. Construction.
+  4. Efficient mutable copy from one sequence to another."
+
   (:require [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m])

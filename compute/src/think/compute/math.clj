@@ -1,4 +1,8 @@
 (ns think.compute.math
+  "Basic math abstracting that provides a set of mathematical operations on streams an an aggregate
+datatype that combines a buffer of data with a description of that data (named a tensor).
+These operations are expected to be provided and uniform across drivers and code written to the interfaces
+in here should be 100% portable across different compute drivers."
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
             [think.compute.driver :as drv]
@@ -23,10 +27,9 @@
 (defprotocol PMath
   "Base math abstraction.  Note the constants (alpha, beta) must be in the same
   datatype as the buffers.  The buffers must be device buffers and the matrixes are
-  assumed to be column major.:
-  gemm: c = alpha * ((trans-a? A) * (trans-b? B)) + beta * C
+  assumed to be row major.
+  gemm: C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C
   sum: y = a*x + b*y
-  subtract: result =  (alpha*x - beta*y)
   gemv: y = alpha * A * x + y
   mul-rows (diagonal gemm): given a matrix and vector, multiply each row by the
     corresponding element in the vector.  Place result in C.
@@ -36,22 +39,32 @@
               a-row-count a-col-count b-col-count
               alpha A a-colstride
               B b-colstride
-              beta C c-colstride])
-  ;;x-elem-count and y-elem-count need to be evenly divisible into each other.  In this case
-  ;;the sum loops visiting each item of the larger vector once.
-  (sum-impl [stream alpha x beta y result])
-  (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y])
-  (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride])
-  (elem-mul [stream alpha a inc-a b inc-b res inc-res])
-  ;;Given a vector that contains x^2, in-place assign a value
-  ;;such that
-  ;;(if (< (sqrt x) constraint)
-  ;; 1.0
-  ;; (/ constraint (sqrt x)))
-  (l2-constraint-scale [stream a inc-a l2-max-constraint])
-  (generate-rands [stream rand-buffer distribution]))
+              beta C c-colstride]
+    "C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C.
+All arguments come in as row major.")
+  (sum-impl [stream alpha x beta y result]
+    "result = a*x + b*y.
+This function can be used as an accumulator assuming (ecount y) < (ecount x) and
+(rem (ecount x) (ecount y)) == 0.
+It is used in fact when accumulating batch gradients and so x is several times the length
+of y.  Implementations need to use a threadsafe compare-and-set type implementation because result
+could be x or y.")
+  (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
+    "Generalized gemv implementation function.  A is a row-major matrix.")
+  (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride]
+    "given a matrix and vector, multiply each row by the corresponding element in the vector.  Place result in C.
+Used for scaling the rows of a matrix.")
+  (elem-mul [stream alpha a inc-a b inc-b res inc-res]
+    "res  = alpha* a * b.  This is an elementwise multiply where result is expected
+to be same length as a and b.")
 
-(defmacro math-error
+  (l2-constraint-scale [stream a inc-a l2-max-constraint]
+    "Given a vector that contains x^2,
+a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
+  (generate-rands [stream rand-buffer distribution]
+    "Generate some random numbers defined by the distribution."))
+
+  (defmacro math-error
   [msg]
   `(throw (Exception. ~msg)))
 
@@ -65,6 +78,7 @@
 (defrecord Tensor [^long batch-size ^long channel-count ^long height ^long width order])
 
 (defn create-tensor
+  "Create a tensor from the incoming data.  Currently the tensor members are named in a NN-specific way."
   ([batch-size channel-count height width]
    (->Tensor batch-size channel-count height width planar-order))
   ([channel-count height width]
@@ -75,6 +89,7 @@
    (create-tensor 1 1 1 width)))
 
 (defn core-mat-shape->tensor
+  "Given a core-matrix shape produce a tensor."
   (^Tensor [shape]
    (apply create-tensor shape))
   (^Tensor [shape ^long batch-size]
@@ -89,14 +104,14 @@
 
 
 (defprotocol PShapeInfo
-  ;;The one dimensional shape of an item [elem-count]
-  (shape-1d [item])
-  ;;shape where we have [(*all-other-dimensions) lowest-dimension]
-  (shape-2d [item])
-  ;;[batch-size (quot num-elems batch-size)]
-  (batch-shape [item])
-  ;;Number of batches implied by the shape
-  (batch-size [item]))
+  (shape-1d [item]
+    "The one dimensional shape of an item [elem-count]")
+  (shape-2d [item]
+    "shape where we have [(*all-other-dimensions) lowest-dimension]")
+  (batch-shape [item]
+    "[batch-size (quot num-elems batch-size)]")
+  (batch-size [item]
+    "Number of batches implied by the shape"))
 
 
 (extend-type Tensor
@@ -130,6 +145,7 @@
 
 
 (defn make-array-of-type
+  "Given a datatype and a specific amount of data then produce an array of that specific type."
   [datatype data]
   (let [data (or (mp/as-double-array data)
                  data)]
@@ -140,13 +156,16 @@
 
 ;;Give a generic object get the buffer that is on the device.
 (defprotocol PGetDeviceBuffer
-  (device-buffer [item]))
+  (device-buffer [item]
+    "Given a generic object product the device buffer backing data store for the object."))
 
 (extend-protocol PGetDeviceBuffer
   Object
   (device-buffer [item] item))
 
 
+;;An array is a combination of a device buffer backing store
+;;and a tensor describing how the data is stored in the array.
 (defrecord DeviceArray [device-buffer ^Tensor tensor])
 
 (extend-type DeviceArray
@@ -164,10 +183,13 @@
 
 
 (defn array
+  "Create an array.  Similar to the core-matrix array function but also takes a batch-size
+argument for creating an array storing a batch of data."
   ([device stream datatype data batch-size]
    (let [batch-size (long batch-size)
          data-shape (m/shape data)
          data-ary (make-array-of-type datatype data)
+         ;;synchronous call.
          data-ptr (drv/host-array->device-buffer device stream data-ary)
          n-elems (m/ecount data-ary)
          tensor (core-mat-shape->tensor data-shape batch-size)]
@@ -175,6 +197,7 @@
   ([device stream datatype data] (array device stream datatype 1)))
 
 (defn new-array
+  "Create a new array with a given core-matrix shape and batch size."
   ([device stream datatype shape batch-size]
    (let [batch-size (long batch-size)
          tensor (core-mat-shape->tensor shape)
@@ -204,43 +227,52 @@
     (->DeviceArray retval (create-tensor elem-count))))
 
 (defn ecount
+  "Wrapper for core-matrix ecount."
   ^long [ary]
   (m/ecount ary))
 
 (defn assign!
+  "Assign one array to another."
   [stream ^DeviceArray dest ^DeviceArray src]
   (drv/copy-device->device stream (.device-buffer src)
                            0 (.device-buffer dest)
                            0 (ecount src)))
 
 (defn with-tensor
+  "Given the data in this array, create a new array with a different tensor."
   [^DeviceArray ary ^Tensor tensor]
   (->DeviceArray (.device-buffer ary) tensor))
 
 
 (defn as-column-vector
+  "Create a vector with 1x(ecount arg) vector."
   [^DeviceArray ary]
   (with-tensor ary (create-tensor (m/ecount ary))))
 
 
 (defn as-row-vector
+  "Create a vector with (ecount ary) rows and 1 column."
   [^DeviceArray ary]
   (with-tensor ary (create-tensor (m/ecount ary) 1)))
 
 
 (defn as-2d-matrix
+  "Given a device array create a 2d matrix.  See definition of shape-2d"
   [^DeviceArray ary]
   (let [[n-rows n-cols] (shape-2d ary)]
     (with-tensor ary (create-tensor 1 1 n-rows n-cols))))
 
 
 (defn as-2d-batch-matrix
+  "Given a device array create a batch matrix.  See definition of batch-shape."
   [^DeviceArray ary]
   (let [[n-rows n-cols] (batch-shape ary)]
     (with-tensor ary (create-tensor 1 1 n-rows n-cols))))
 
 
 (defn to-core-matrix
+  "Convert a device array to a core-matrix type.  This uses generic code and so if you know your backend
+supports it then there may be a faster way to do this operation."
   ([device stream ^DeviceArray ary shape]
    (let [retval (m/new-array :vectorz shape)
          ^doubles ret-ary (mp/as-double-array retval)
@@ -257,7 +289,9 @@
                      (shape-1d ary)
                      (shape-2d ary)))))
 
+
 (defn device-array->array
+  "Copy a DeviceArray into a java array of a given datatype."
   [device stream datatype ^DeviceArray ary]
   (let [elem-count (ecount ary)
         retval (dtype/make-array-of-type datatype elem-count)
@@ -267,7 +301,9 @@
     (dtype/copy! host-buf 0 retval 0 elem-count)
     retval))
 
+
 (defn to-double-array
+  "Copy an DeviceArray into a double array."
   [device stream ^DeviceArray ary]
   (device-array->array device stream :double ary))
 
@@ -322,7 +358,8 @@
 
 
 (defn sum
-  "c = ax + by.  C may be either x or y."
+  "c = ax + by.  C may be either x or y.  Implementations must support y
+being smaller than X so it can act as an accumulator for X."
   ([stream alpha x beta y result]
    (let [x-elems (long (ecount x))
          y-elems (long (ecount y))
@@ -336,6 +373,7 @@
 
 
 (defn subtract
+  "result = alpha*x - beta*y."
   ([stream alpha x beta y result]
    (sum stream alpha x (* -1.0 (double beta)) y result)))
 
@@ -346,6 +384,8 @@
 
 
 (defn split-array-into-batches
+  "Given a device array with some batch size return a vector
+of device arrays one for each element in the batch."
   [driver ^DeviceArray ary-data]
   (let [^Tensor tensor (.tensor ary-data)
         [batch-size batch-stride] (batch-shape ary-data)
@@ -361,6 +401,9 @@
 
 
 (defn batched-data-to-per-input-data
+  "Given a sequence of DeviceArrays return a sequence of arrays with the device
+arrays split into one entry per batch.  So for example if I have a batch size of 5
+and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 output-2 ...]]"
   [driver data-array-seq]
   (vec (partition (count data-array-seq)
                   (apply interleave
