@@ -18,3 +18,4 @@ export AWS_SECRET_ACCESS_KEY=$secret_key
 export LEIN_USERNAME=$access_key
 export LEIN_PASSPHRASE=$secret_key
 export LEIN_PASSWORD=$secret_key
+sleep 10
