@@ -21,7 +21,7 @@ before_install:
   - mkdir -p compute/checkouts && ln -s cortex compute/checkouts/cortex
   - mkdir -p gpu-compute/checkouts && ln -s cortex gpu-compute/checkouts/cortex && ln -s compute gpu-compute/checkouts/compute
 
-before_script:
+install:
   - cd $TEST_DIR && lein deps
   
 script:
