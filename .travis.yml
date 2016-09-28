@@ -1,0 +1,27 @@
+language: clojure
+env:
+  global:
+  - secure: TJm042ig7W0XxCbVOJ/sClBuq1EL7rERJA6fu8UbMMy3FIkO0ZNb/yuv2JwEmoH1IAM31Ye4175rk5I8SCfksWiHJqBtPldjEnOyqn85wdumksJfJ+NTT30r0ivMT0AETCgCM78gUtEO2vATaXcGUtDXm/USERehbjZRK0/G3trarqkXiKaHFZbW23xuGozaz1/BnMBb4Ip/FonhKoAGF4m05W+APRppL1LnJ2wLvBMkPfQbGLIwWIpHi945uPK1svGQkB1XbLT9ZzViIZc9lM80DYAcKdmM8EhmVMrR/d1ZlcorX2yKBwZPW5k+5DzHM5ZnDokIGI+McmbIBqdB6hYaSKT0dSFQa6ZIQliuP3nRZvkjxbKrXnhr7OXRpnNqDP5zWFmxQ93GcGDD+QuIlWFDQX0329RWPi55aWbrT52ePb3Gjpz0/M3cvnUDfj1YexgMr/98SaFCmKJwbwxy2dc53skpg74RbeCPydj6ekh+gfBQ+BBb7wyfaeHfL9KkaSLF+3aQpjWSd64xLB0AIkCC4K/9NbFfFx9efawzadcN9juBkye+PY5NrKDLkBG6KnKRrv4GFZ4lR0eS6/tdUqTPsa08iSmU0VhjuVHWChgAm9guv32tEZ4BX95VUVCD9C/b9m7Jou+PTanPvtvUvAjxXeIg0SLyOd8uyCUe4AI=
+    
+  - secure: rJBnyfyTEk+/r/horPfk6nz0YHTqYvj2FkhOf4xRasL8vDrn/x0dhYPMb+8+iTqSJPRkfxVq04EaiHWT9IAoxWdAIBbRAhHIFZZTLUt5Pk2T/iAGYSefRhk+fUwaADgHDRY8hiz1eDUaz+IuTCEtuW32i5eFj919C/lQN+oc2iNFi1U7BYp27dKApysbsaZfTGt+vw7UdtpPLgPq1aYP9LM0eZrNz5cSTVWHgwInmZhBqpIRB3Z7sEZ06BmM30AngyqazPsRODZPvg1ziJboVNMreCPMpZQRYiExOXCTg9BT39mXyNASaIa7ZcFt1PLzJwcq1CPP9fJhyKLTGW/KPCPUswjrjYh+Iqq6jGztnfUxRUOgz5CBNGXfOuodS/vfuz6yF25OjKNIQohQMeRpQGWFw99nP4B6SzJzXBoqxWzOr7cJxrlBwyTIb/CIZXCkI2tXqSFe2+uWMuhIcx+BwYYtOLHsMblaInzcTP97FuMamV2voNOa4O7jYFJxqxmJuyYAY9UXSmTQfksJDE/taYVQ5ALEpwlxKoU5uFlhUujst+8isfifSSncHhLpeXIQL2W7SBrzD3oPyKDAwkwUlhEVXjEyUA7Z8UbFinxGxY98YgCYCyAJ8EWzyBK1FNibo3W7z5CotED5tkssajFjl4cSaIbvs5fukSgn4Xo96+A=
+
+
+env:
+  - TEST_DIR=cortex
+  - TEST_DIR=compute
+    
+jdk: oraclejdk8
+
+before_install:
+  - wget https://releases.hashicorp.com/vault/0.6.1/vault_0.6.1_linux_amd64.zip -O vault.zip
+  - unzip vault.zip
+  - export PATH=$PATH:$PWD
+  - ". scripts/s3-deploy-access"
+  - mkdir -p visualization/checkouts && ln -s cortex visualization/checkouts/cortex
+  - mkdir -p compute/checkouts && ln -s cortex compute/checkouts/cortex
+  - mkdir -p gpu-compute/checkouts && ln -s cortex gpu-compute/checkouts/cortex && ln -s compute gpu-compute/checkouts/compute
+
+script: cd $TEST_DIR && lein test && lein install
+  
+after_success:
+  cd cortex && lein deploy && cd ../compute && lein deploy
