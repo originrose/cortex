@@ -21,7 +21,11 @@ before_install:
   - mkdir -p compute/checkouts && ln -s cortex compute/checkouts/cortex
   - mkdir -p gpu-compute/checkouts && ln -s cortex gpu-compute/checkouts/cortex && ln -s compute gpu-compute/checkouts/compute
 
-script: cd $TEST_DIR && lein test && lein install
+before_script:
+  - cd $TEST_DIR && lein deps
+  
+script:
+  - cd $TEST_DIR && lein test && lein install
   
 after_success:
-  cd cortex && lein deploy && cd ../compute && lein deploy
+  - cd cortex && lein deploy && cd ../compute && lein deploy
