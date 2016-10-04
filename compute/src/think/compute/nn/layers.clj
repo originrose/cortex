@@ -166,8 +166,8 @@ implementation as possible."
           n-output (first weights-shape)
           n-input (second weights-shape)]
       (-> (allocate-weights-and-l2-temp-data backend layer weights bias batch-size)
-          (assoc :output (nn-backend/new-array backend [n-output] batch-size)
-                 :input-gradient (nn-backend/new-array backend [n-input] batch-size)))))
+        (assoc :output (nn-backend/new-array backend [n-output] batch-size)
+               :input-gradient (nn-backend/new-array backend [n-input] batch-size)))))
 
   cp/PLayerSize
   (input-size [layer] (second (math/shape-2d weights)))
@@ -196,8 +196,8 @@ implementation as possible."
           bias-gradient (:bias-gradient layer)
           output (:output layer)]
       (nn-backend/biased-multiply-backward!
-       backend input weights bias output
-       input-gradient weight-gradient bias-gradient output-gradient))
+        backend input weights bias output
+        input-gradient weight-gradient bias-gradient output-gradient))
     layer)
 
   (input-gradient [layer] (:input-gradient layer))
@@ -298,7 +298,7 @@ implementation as possible."
   (setup [layer batch-size]
     (assoc layer
            :pooling-impl (nn-backend/create-layer backend
-                                               (nn-backend/max-pool-desc conv-config batch-size))
+                                                  (nn-backend/max-pool-desc conv-config batch-size))
            :output (nn-backend/new-array backend [(cp/output-size layer)] batch-size)
            :input-gradient (nn-backend/new-array backend [(cp/input-size layer)] batch-size)
            :batch-size batch-size))
@@ -307,8 +307,8 @@ implementation as possible."
   (input-size [layer] (* (.width conv-config) (.height conv-config)
                          (.num-in-channels conv-config)))
 
-  (output-size [layer] (* (conv/get-output-width conv-config :convolutional)
-                          (conv/get-output-height conv-config :convolutional)
+  (output-size [layer] (* (conv/get-output-width conv-config :pooling)
+                          (conv/get-output-height conv-config :pooling)
                           (.num-out-channels conv-config)))
   PBatchSize
   (batch-size [layer] (:batch-size layer))
@@ -327,7 +327,7 @@ implementation as possible."
     (cp/calc layer input))
   (backward [layer input output-gradient]
     (nn-backend/backward! (:pooling-impl layer) input (:output layer)
-                       (:input-gradient layer) output-gradient)
+                          (:input-gradient layer) output-gradient)
     layer)
   (input-gradient [layer] (:input-gradient layer)))
 
@@ -351,8 +351,8 @@ implementation as possible."
            :mult-buffer (nn-backend/new-array backend [(cp/input-size layer)] batch-size)
            :rand-buffer (math/->DeviceArray (drv/allocate-rand-buffer (drv/get-driver backend)
                                                                       (math/ensure-factor-of-2
-                                                                       (* n-items
-                                                                          (long batch-size))))
+                                                                        (* n-items
+                                                                           (long batch-size))))
                                             (math/create-tensor batch-size 1 1 n-items))
            :batch-size batch-size))
 
@@ -372,7 +372,7 @@ implementation as possible."
                            dis-type)
       (if (= (:distribution dropout-options) :bernoulli)
         (nn-backend/prepare-bernoulli-dropout! backend (:probability dropout-options)
-                                            (:rand-buffer this) (:mult-buffer this))
+                                               (:rand-buffer this) (:mult-buffer this))
         (nn-backend/prepare-gaussian-dropout! backend (:rand-buffer this) (:mult-buffer this)))
       this))
 
@@ -382,7 +382,7 @@ implementation as possible."
 
   cp/PModule
   (calc [layer input]
-    (nn-backend/assign! (:output layer) input)
+    (nn-backend/assign! backend (:output layer) input)
     layer)
   (output [layer] (:output layer))
 
@@ -464,7 +464,7 @@ implementation as possible."
                                          new-layer (cp/multi-backward layer local-input-vec
                                                                       output-gradient-vec)
                                          new-output-gradient-vec (cp/multi-input-gradient
-                                                                  new-layer)]
+                                                                   new-layer)]
                                      [(conj layers new-layer) new-output-gradient-vec]))
                                  [(list) output-gradient-vec]
                                  layer-and-prev))))))

@@ -321,23 +321,24 @@ supports it then there may be a faster way to do this operation."
      (when-not-error (>= a-colstride ^long a-col-count) "a-col-stride is less than a-col-count")
      (when-not-error (>= b-colstride ^long b-col-count) "b-col-stride is less than b-col-count")
      (when-not-error (>= c-colstride ^long c-col-count) "c-col-stride is less than c-col-count")
-     (let [[a-row-count a-col-count] (if trans-a?
-                                       [a-col-count a-row-count]
-                                       [a-row-count a-col-count])
-           [b-row-count b-col-count] (if trans-b?
-                                       [b-col-count b-row-count]
-                                       [b-row-count b-col-count])]
-       (when-not-error (= a-col-count b-row-count) "A col count doesn't match B row count")
-       (when-not-error (= a-row-count c-row-count) "C row count doesn't match A row count")
-       (when-not-error (= b-col-count c-col-count) "C col count doesn't match B col count")
+     (let [[a-row-count a-col-count :as a-shape] (if trans-a?
+                                                   [a-col-count a-row-count]
+                                                   [a-row-count a-col-count])
+           [b-row-count b-col-count :as b-shape] (if trans-b?
+                                                   [b-col-count b-row-count]
+                                                   [b-row-count b-col-count])
+           c-shape [c-row-count c-col-count]]
+       (when-not-error (= a-col-count b-row-count) (format "A %s col count doesn't match B %s row count" a-shape b-shape))
+       (when-not-error (= a-row-count c-row-count) (format "C %s row count doesn't match A %s row count" c-shape a-shape))
+       (when-not-error (= b-col-count c-col-count) (format "C %s col count doesn't match B %s col count" c-shape b-shape))
        (gemm-impl stream trans-a? trans-b? a-row-count a-col-count b-col-count
                   alpha A a-colstride
                   B b-colstride
                   beta C c-colstride))))
   ([stream trans-a? trans-b? alpha A B beta C]
    (let [[a-rows a-cols] (shape-2d A)
-        [b-rows b-cols] (shape-2d B)
-        [c-rows c-cols] (shape-2d C)]
+         [b-rows b-cols] (shape-2d B)
+         [c-rows c-cols] (shape-2d C)]
      (gemm stream trans-a? trans-b? a-rows a-cols b-rows b-cols c-rows c-cols
            alpha (device-buffer A) a-cols (device-buffer B) b-cols
            beta (device-buffer C) c-cols))))

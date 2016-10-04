@@ -36,6 +36,7 @@
   [(desc/input 28 28 1)
    (desc/convolutional 5 0 1 20)
    (desc/max-pooling 2 0 2)
+   (desc/dropout 0.9)
    (desc/convolutional 5 0 1 50)
    (desc/max-pooling 2 0 2)
    (desc/batch-normalization 0.9)
@@ -46,8 +47,8 @@
 
 (defn train-mnist-network
   "Train an mnist network.  This function is somewhat abstracted so that
-you can train a network that is either straight or branched.  Returns trained
-network and dataset used to train network."
+  you can train a network that is either straight or branched.  Returns trained
+  network and dataset used to train network."
   [backend
    {:keys [max-sample-count output-labels-and-loss network-description]
     :or {output-labels-and-loss [[:labels (opt/softmax-loss)]]
@@ -56,8 +57,8 @@ network and dataset used to train network."
         epoch-count 4
         network (compute-desc/build-and-create-network network-description backend batch-size)
         dataset (-> (mnist-dataset)
-                    (ds/take-n :training-count max-sample-count
-                               :testing-count max-sample-count
-                               :running-count max-sample-count))]
+                  (ds/take-n :training-count max-sample-count
+                             :testing-count max-sample-count
+                             :running-count max-sample-count))]
     [(train/train network (opt/adam) dataset [:data] output-labels-and-loss epoch-count)
      dataset]))
