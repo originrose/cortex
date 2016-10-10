@@ -2,7 +2,7 @@
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
-            [resource.core :as resource])
+            [think.resource.core :as resource])
   (:import [com.indeed.util.mmap Memory MMapBuffer]
            [java.nio.channels FileChannel FileChannel$MapMode]
            [java.nio ByteOrder ByteBuffer DoubleBuffer]

@@ -2,7 +2,7 @@
   (:require [think.compute.cpu-driver :as cpu]
             [think.compute.driver :as drv]
             [think.compute.datatype :as dtype]
-            [resource.core :as resource]
+            [think.resource.core :as resource]
             [clojure.test :refer :all]
             [think.compute.verify.utils :refer [def-all-dtype-test
                                                 def-double-float-test] :as test-utils]

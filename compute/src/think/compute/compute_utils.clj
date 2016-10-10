@@ -1,6 +1,6 @@
 (ns think.compute.compute-utils
   (:require [clojure.core.async :as async]
-            [resource.core :as resource]))
+            [think.resource.core :as resource]))
 
 
 (defn- async-channel-to-lazy-seq

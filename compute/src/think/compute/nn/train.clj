@@ -7,7 +7,7 @@
             [think.compute.math :as math]
             [think.compute.batching-system :as batch]
             [think.compute.datatype :as dtype]
-            [resource.core :as resource]
+            [think.resource.core :as resource]
             [cortex.nn.protocols :as cp]
             [clojure.core.matrix :as m]))
 

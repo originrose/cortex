@@ -3,7 +3,7 @@
             [think.compute.math :as c-math]
             [think.compute.datatype :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
             [clojure.core.async :as async]
-            [resource.core :as resource]
+            [think.resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m])
   (:import [java.nio ByteBuffer IntBuffer ShortBuffer LongBuffer

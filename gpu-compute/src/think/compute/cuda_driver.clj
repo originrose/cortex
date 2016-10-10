@@ -2,7 +2,7 @@
   (:require [think.compute.driver :as drv]
             [think.compute.datatype :as dtype]
             [clojure.java.io :as io]
-            [resource.core :as resource]
+            [think.resource.core :as resource]
             [think.compute.javacpp-datatype :as jcpp-dtype]
             [clojure.core.matrix.protocols :as mp]
             [think.compute.math :as math]

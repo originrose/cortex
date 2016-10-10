@@ -1,6 +1,6 @@
 (ns think.compute.verify.utils
   (:require [clojure.core.matrix :as m]
-            [resource.core :as resource]
+            [think.resource.core :as resource]
             [clojure.test :refer [deftest]])
   (:import [java.math BigDecimal MathContext]))
 

@@ -9,7 +9,7 @@
   stream gets to the point where the event was created."
   (:require [think.compute.datatype :as dtype]
             [clojure.core.matrix :as m]
-            [resource.core :as resource]))
+            [think.resource.core :as resource]))
 
 
 (defprotocol PDriver

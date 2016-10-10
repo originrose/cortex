@@ -8,7 +8,7 @@
             [think.compute.nn.layers :as layers]
             [cortex.nn.impl.layers.convolution :as conv]
             [think.compute.math :as math]
-            [resource.core :as resource])
+            [think.resource.core :as resource])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
             cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
             cudnn$cudnnPoolingStruct
