@@ -4,6 +4,31 @@
 Neural networks, regression and feature learning in Clojure.  Please see the design document for a modular breakdown of the project.
 
 
+## Cortex Design
+
+Cortex is currently split into three main projects and a number of sub projects.
+ * cortex - high level protocols and simple experimental implementation.
+ * compute - general purpose compute abstraction for high-performance cpu and gpu implementations.
+ * gpu-compute - cuda implementation of compute abstraction, bindings to cudnn.
+
+Additionally you will find:
+ * datasets - code for importing and managing datasets.
+ * visualization - code for debugging neural nets and visualization data (tsne).
+
+* training a model
+
+Please see the various unit tests and examples for training a model.  Specifically see:
+[mnist verification](compute/src/think/compute/verify/nn/mnist.clj).
+
+
+
+### Existing Framework Comparisons
+
+* Stanford CS 231 [Lecture 12](http://cs231n.stanford.edu/slides/winter1516_lecture12.pdf) contains a detailed
+  breakdown of Caffe, Torch, Theano, and TensorFlow.
+
+
+
 ### TODO:
 
  * hdf5 import of major keras models (vgg-net).  This requires each model along with a single input and per-layer outputs for that input.  Please don't ask for anything to be supported unless you can provide the appropriate thorough test.
@@ -25,12 +50,12 @@ Neural networks, regression and feature learning in Clojure.  Please see the des
 
 ### Getting Started:
 
- * Get the project and run lein test.  The various unit tests train various models.
+ * Get the project and run lein test in both cortex and compute.  The various unit tests train various models.
 
  
 ### See also:
-`design.md`
-`next_steps.md`
+
+[Roadmap](ROADMAP.md)
 
 ## Gradient descent
 
