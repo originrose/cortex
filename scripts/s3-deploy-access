@@ -3,7 +3,7 @@
 export VAULT_ADDR='https://thinktopic.com:8200'
 
 echo "Requesting access to S3 maven repository..."
-creds=`vault read aws/creds/deploy`
+creds=`vault read secret/thinktopic/deploy`
 access_key=$(echo "$creds" | awk '/access_key/ { print $2 }')
 secret_key=$(echo "$creds" | awk '/secret_key/ { print $2 }')
 
