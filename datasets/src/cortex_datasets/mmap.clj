@@ -62,6 +62,17 @@ convertable to double arrays."
    (mem-map-file fname FileChannel$MapMode/READ_ONLY ByteOrder/BIG_ENDIAN)))
 
 
+(defn read-mmap-entry!
+  [^Memory buffer, ^long idx ^doubles retval]
+  (let [offset (* idx entry-num-doubles)
+        entry-num-doubles (alength retval)]
+    ;;It would be ideal if there were bulk methods for this implemented in c++.  It would also
+    ;;be ideal of those methods handled simple conversion i.e. from float->double.  Until then...
+    (c-for [idx 0 (< idx entry-num-doubles) (inc idx)]
+           (aset retval idx (.getDouble buffer (* (+ offset idx) Double/BYTES))))
+    retval))
+
+
 (defn read-mmap-entry
   ^doubles [^Memory buffer, ^long idx ^long entry-num-doubles]
   (let [offset (* idx entry-num-doubles)

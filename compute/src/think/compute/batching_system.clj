@@ -41,6 +41,20 @@
   (get-cpu-labels [bs]))
 
 
+(defprotocol PDatasetFastAccess
+  (get-elements! [ds index-seq output-index-seq output-buffer-seq]))
+
+
+(extend-type Object
+  PDatasetFastAccess
+  (get-elements! [ds index-seq output-index-seq output-buffer-seq]
+    (let [ds-data (ds/get-elements ds index-seq output-index-seq)]
+      (doall (map (fn [ds-data-item output-buffer]
+                    (dtype/copy-raw->item! ds-data-item output-buffer 0))
+                  ds-data output-buffer-seq))
+      output-buffer-seq)))
+
+
 (defrecord DatasetBatchingSystem [input-dataset-indexes output-dataset-indexes ^long batch-size
                                   dataset driver stream datatype])
 
@@ -52,7 +66,8 @@
                                                shapes))
         input-dataset-indexes (mapv label->index-map input-labels)
         output-dataset-indexes (mapv label->index-map output-labels)
-        invalid-labels (vec (remove #(contains? label->index-map %) (concat input-labels output-labels)))]
+        invalid-labels (vec (remove #(contains? label->index-map %)
+                                    (concat input-labels output-labels)))]
     (when-not (= 0 (count invalid-labels))
       (throw (Exception. (format "Dataset is missing labels: %s" invalid-labels))))
     (->DatasetBatchingSystem input-dataset-indexes output-dataset-indexes batch-size
@@ -81,13 +96,9 @@
 
 
 (defn upload-data
-  [raw-data driver stream batch-buffer]
+  [driver stream batch-buffer]
   (let [{:keys [device-array host-buffer]} batch-buffer
         data-len (long (dtype/ecount device-array))]
-    (when-not (or (= (dtype/ecount raw-data) (dtype/ecount host-buffer))
-                  (= (dtype/ecount host-buffer) (dtype/ecount device-array)))
-      (throw (Exception. "Upload data batch buffer size mismatch")))
-    (dtype/copy-raw->item! raw-data host-buffer 0)
     (drv/copy-host->device stream host-buffer 0 (math/device-buffer device-array) 0 data-len)))
 
 
@@ -139,17 +150,21 @@
           stream (.stream bs)
           buffer-map (:buffer-map bs)
           batch-index-set (vec (keys buffer-map))
-          ds-data (ds/get-elements dataset (indexes batch-idx) batch-index-set)
-          ds-data-buffers (map (fn [data-elem batch-buffer-idx]
-                                [data-elem (buffer-map batch-buffer-idx)])
-                              ds-data batch-index-set)]
-      (doseq [[data buffer] ds-data-buffers]
-        (upload-data data device stream buffer))
+          batch-buffers (mapv (fn [idx]
+                                (:host-buffer (buffer-map idx)))
+                              batch-index-set)
+          ds-data-buffers (map (fn [batch-buffer-idx]
+                                 (buffer-map batch-buffer-idx))
+                               batch-index-set)]
+      (get-elements! dataset (indexes batch-idx) batch-index-set batch-buffers)
+      (doseq [buffer ds-data-buffers]
+        (upload-data device stream buffer))
       (let [input-buffers (mapv :device-array (map buffer-map (.input-dataset-indexes bs)))
             retval {:batching-system bs
                     :input-buffers input-buffers}]
         (if (:require-batch-output? bs)
-          (assoc retval :output-buffers (mapv :device-array (map buffer-map (.output-dataset-indexes bs))))
+          (assoc retval :output-buffers (mapv :device-array
+                                              (map buffer-map (.output-dataset-indexes bs))))
           retval))))
 
   (has-cpu-labels? [bs] (.output-dataset-indexes bs))
