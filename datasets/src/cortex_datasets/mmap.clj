@@ -64,8 +64,8 @@ convertable to double arrays."
 
 (defn read-mmap-entry!
   [^Memory buffer, ^long idx ^doubles retval]
-  (let [offset (* idx entry-num-doubles)
-        entry-num-doubles (alength retval)]
+  (let [entry-num-doubles (alength retval)
+        offset (* idx entry-num-doubles)]
     ;;It would be ideal if there were bulk methods for this implemented in c++.  It would also
     ;;be ideal of those methods handled simple conversion i.e. from float->double.  Until then...
     (c-for [idx 0 (< idx entry-num-doubles) (inc idx)]
