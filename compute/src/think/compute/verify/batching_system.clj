@@ -14,7 +14,7 @@
            (dtype/copy-raw->item! (range (* data-size idx) (* data-size (+ idx 1)))
                                   output-buffer 0)
            output-buffer)
-         (apply list index-seq))))
+         index-seq)))
 
 
 (defrecord GenerativeDataset [^long input-size ^long output-size ^long num-indexes]
