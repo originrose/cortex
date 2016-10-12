@@ -3,6 +3,13 @@
 
 Neural networks, regression and feature learning in Clojure.  Please see the design document for a modular breakdown of the project.
 
+## Mailing List
+
+https://groups.google.com/forum/#!forum/clojure-cortex
+
+## Usage
+
+At this stage you will need to clone and install cortex yourself.  Once things have stabilized a bit we'll start publishing jars to Clojars.
 
 ## Cortex Design
 
