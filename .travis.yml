@@ -1,28 +1,21 @@
 language: clojure
-
-
 env:
   global:
-    - secure: TJm042ig7W0XxCbVOJ/sClBuq1EL7rERJA6fu8UbMMy3FIkO0ZNb/yuv2JwEmoH1IAM31Ye4175rk5I8SCfksWiHJqBtPldjEnOyqn85wdumksJfJ+NTT30r0ivMT0AETCgCM78gUtEO2vATaXcGUtDXm/USERehbjZRK0/G3trarqkXiKaHFZbW23xuGozaz1/BnMBb4Ip/FonhKoAGF4m05W+APRppL1LnJ2wLvBMkPfQbGLIwWIpHi945uPK1svGQkB1XbLT9ZzViIZc9lM80DYAcKdmM8EhmVMrR/d1ZlcorX2yKBwZPW5k+5DzHM5ZnDokIGI+McmbIBqdB6hYaSKT0dSFQa6ZIQliuP3nRZvkjxbKrXnhr7OXRpnNqDP5zWFmxQ93GcGDD+QuIlWFDQX0329RWPi55aWbrT52ePb3Gjpz0/M3cvnUDfj1YexgMr/98SaFCmKJwbwxy2dc53skpg74RbeCPydj6ekh+gfBQ+BBb7wyfaeHfL9KkaSLF+3aQpjWSd64xLB0AIkCC4K/9NbFfFx9efawzadcN9juBkye+PY5NrKDLkBG6KnKRrv4GFZ4lR0eS6/tdUqTPsa08iSmU0VhjuVHWChgAm9guv32tEZ4BX95VUVCD9C/b9m7Jou+PTanPvtvUvAjxXeIg0SLyOd8uyCUe4AI= 
-    - secure: rJBnyfyTEk+/r/horPfk6nz0YHTqYvj2FkhOf4xRasL8vDrn/x0dhYPMb+8+iTqSJPRkfxVq04EaiHWT9IAoxWdAIBbRAhHIFZZTLUt5Pk2T/iAGYSefRhk+fUwaADgHDRY8hiz1eDUaz+IuTCEtuW32i5eFj919C/lQN+oc2iNFi1U7BYp27dKApysbsaZfTGt+vw7UdtpPLgPq1aYP9LM0eZrNz5cSTVWHgwInmZhBqpIRB3Z7sEZ06BmM30AngyqazPsRODZPvg1ziJboVNMreCPMpZQRYiExOXCTg9BT39mXyNASaIa7ZcFt1PLzJwcq1CPP9fJhyKLTGW/KPCPUswjrjYh+Iqq6jGztnfUxRUOgz5CBNGXfOuodS/vfuz6yF25OjKNIQohQMeRpQGWFw99nP4B6SzJzXBoqxWzOr7cJxrlBwyTIb/CIZXCkI2tXqSFe2+uWMuhIcx+BwYYtOLHsMblaInzcTP97FuMamV2voNOa4O7jYFJxqxmJuyYAY9UXSmTQfksJDE/taYVQ5ALEpwlxKoU5uFlhUujst+8isfifSSncHhLpeXIQL2W7SBrzD3oPyKDAwkwUlhEVXjEyUA7Z8UbFinxGxY98YgCYCyAJ8EWzyBK1FNibo3W7z5CotED5tkssajFjl4cSaIbvs5fukSgn4Xo96+A=
+  - secure: OwFFz14wvwY3IOeMrz14bHxTS1phbMQgHR5SZ+3Nb35SnsuqTulUylwk0LjSZGU/UxpGHWif/2y4JL5ySWwHT967ISUa9IkiEBItX4WB1NXz6bJmhMwbdyYnDqHvOH4FtOJ3LbpV5AlNez6tOpdQUTmDH9oUpr7fdYN/RcJY4MonyJn9BvaV+AFuMGWaPmBLZDJfSTSD0BCYkWg9qOOQDKpBcXznn0V8XB0HR2GrhBCZH5eAwfT3y6p0aSSNP+epk2nH+wESagQrI256yUbzvfeE4QmKKzqb7nuf2+w3fHLdsUnPjreDdUaEDAVAIE7/RWcpQyTDRSe5Hlfay6eIjTsauH11AxhDSZjAMgFkS+Q2YGIZajkO2YT/UJJa33mDhAwuJ1AS175ejot5m0JarwY0eM0IAAirFxIA5HPZuud7CILWWrR6YGB4Y7Fh/1cHkFxPmDXiHaYWTfaD5ZAUelnJyh+lBco4PVuH1lQHgW1Vc0kT3sABhaHucW67JFuzUBajQ5r6QvIWXnl6JnFKmbB3/w6kTooPTV4pLN2banKGe9N6AfWBbmjxufZiXWgUla6U7zHvPjc+QGKp3U1tJUMUMDd0blvg0FcDncHQIQh99OA/UnQtY0zSrwVjdLnFQ4KMISCH+pxv4A/oFlt7adybrUJpJKqoyKf+yitilr8=
+  - secure: PpcMooqfLUsmvi7X+/kIeuUzuAFyfDmeCFQvToHYp5QmEivtMdewI5zEQGSgCA2lkhy3tKtzqySUvfzlKzgrqapZYnfaLkIHopk+HM1jk3j+O0Ofs8A5BL3OSoNXpTG4qfyWGf4TTjzxuN6R86bNFpUZLmqTAE8cWSVctusCG438ibzeSPPTWgSbAWBySPjmfix84AeIXAUPS5Wun25x4wdkvp7p0yopN3vRzl4jqTPDe1ZRCSuoqmVlt5Kmi+Vk0QrJV+6hNW2ZiKXINf5WJxKCuxrLbgvdgS9VIBp/M1ddP0I7PsxSMt++4Y4cAd6GITCkefjXAfB03QwrUYcsZX1sJcE9DSH84WAlZYIwDFK+vdnta4TLsK9tMg2gFFVukQZ+OQ26TqFFBaFyXPhIaCy3jlXbNpWy3GFBJq1GnJb+uOWvMUJhxxEmuVGmJLEB8CisAI0Y1vh2Ipem64kjYUARhtBuf1vBGsiYzp9gL/jKDgmdC444Ant2VvAbA+ePuG3DJwX89yebfbcc/uPaRDOrpG03Ml/Ru32U69/j2I8kOe1o+QYIgWDzAgesM0yXOOgbM7nsFAfEn0uqPYwqKkiF+k5Uy3R1IPTI6aAJlj0Du7OO1ia9SALwX/pdwNAALsEJxUILbDnx6MCsFKH1VDXUDyOd6zVb/AeKTQEpcTk=
   matrix:
-    - TEST_DIR=cortex
-    - TEST_DIR=datasets
-    - TEST_DIR=compute
-    
+  - TEST_DIR=cortex
+  - TEST_DIR=datasets
+  - TEST_DIR=compute
 jdk: oraclejdk8
-
 before_install:
-  - wget https://releases.hashicorp.com/vault/0.6.1/vault_0.6.1_linux_amd64.zip -O vault.zip
-  - unzip vault.zip
-  - export PATH=$PATH:$PWD
-  - ". scripts/s3-deploy-access"
-
+- wget https://releases.hashicorp.com/vault/0.6.1/vault_0.6.1_linux_amd64.zip -O vault.zip
+- unzip vault.zip
+- export PATH=$PATH:$PWD
+- ". scripts/s3-deploy-access"
 install:
-  - cd $TEST_DIR && lein deps
-  
+- cd $TEST_DIR && lein deps
 script:
-  - lein test
-  
+- lein test
 after_success:
-  - lein deploy
+- lein deploy
