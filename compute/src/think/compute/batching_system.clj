@@ -115,7 +115,7 @@ only reduces 1 memcpy so it is probably not worth it."
 
 (defn seq-to-partitioned-vec
   [data-seq batch-size]
-  (mapv vec (partition batch-size data-seq)))
+  (vec (partition batch-size data-seq)))
 
 (extend-type DatasetBatchingSystem
   PBatchingSystem
