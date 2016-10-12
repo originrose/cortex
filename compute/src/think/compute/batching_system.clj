@@ -42,6 +42,9 @@
 
 
 (defprotocol PDatasetFastAccess
+  "The fastest conceivable implementation of reading data will be to copy it directly into the batch upload buffer.
+So this is the pathway to make that happen *but* to do it sanely you need the compute's datatype layer.  At best however, this
+only reduces 1 memcpy so it is probably not worth it."
   (get-elements! [ds index-seq output-index-seq output-buffer-seq]))
 
 
