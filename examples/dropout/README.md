@@ -1,14 +1,8 @@
 # dropout
 
-A Clojure library designed to ... well, that part is up to you.
+An example usage of dropout.
 
-## Usage
-
-FIXME
-
-## License
-
-Copyright © 2016 FIXME
+Copyright © 2016 ThinkTopic
 
 Distributed under the Eclipse Public License either version 1.0 or (at
 your option) any later version.
