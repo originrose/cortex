@@ -6,6 +6,7 @@
     [cortex.nn.function-test]
     [cortex.nn.layers-test]
     [cortex.nn.module-test]
+    [cortex.nn.layers-test]
     [cortex.nn.network-test]
     [cortex.nn.performance-test]
     [cortex.nn.network-test]

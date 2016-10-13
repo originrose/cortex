@@ -47,8 +47,8 @@
       input-gradient))
 
 ;; TANH
-;; Module implementing a Logistic activation function over a numerical array
-#?(:cljs (register-module cortex.nn.impl.layers.Logistic))
+;; Module implementing a Tanh activation function over a numerical array
+#?(:cljs (register-module cortex.nn.impl.layers.Tanh))
 (defrecord Tanh [output input-gradient]
   cp/PModule
     (calc [this input]
@@ -77,13 +77,64 @@
       input-gradient))
 
 
+;; SOFTPLUS
+;; Module implementing a Logistic activation function over a numerical array
+#?(:cljs (register-module cortex.nn.impl.layers.Softplus))
+(defrecord Softplus [output input-gradient]
+  cp/PModule
+    (calc [this input]
+      (m/assign! output input)
+      (m/softplus! output)
+      this)
+
+    (output [this]
+      (:output this))
+
+  cp/PNeuralTraining
+    (forward [this input]
+      (cp/calc this input))
+
+    (backward [this input output-gradient]
+      (let []
+        ;; input gradient = logistic(input) * output-gradient
+        (m/assign! input-gradient input)
+        (m/logistic! input-gradient)
+        (m/mul! input-gradient output-gradient)
+
+        ;; finally return this, input-gradient has been updated in-place
+        this))
+
+    (input-gradient [this]
+      input-gradient))
+
+
 
 ;; DROPOUT
 ;; Module implementing "dropout" functionality when training
 ;; dropout field stores 0.0 or 1.0/probability as multiplicative noise
 ;; Works as a identity function otherwise
+
+(defn create-dropout-noise-fn 
+  "Create a default dropout noise function, which keeps units with the given probability
+   and scales them by 1.0/probability" 
+  [probability]
+  (let [probability (double probability)
+        _ (when-not (<= 0.0 probability 1.0) (println "Warning: Dropout probability not valid: " probability)) 
+        inv-prob (double (/ 1.0 probability))]
+    (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0))))
+
+(defn create-gaussian-multiplicative-noise-fn 
+  "Create a gaussian multiplicative noise function, which keeps units with the given probability
+   and scales them by N(1.0,sd) otherwise" 
+  [probability sd]
+  (let [probability (double probability)
+        sd (double sd)
+        rng (java.util.Random.) 
+        _ (when-not (<= 0.0 probability 1.0) (println "Warning: Noise probability not valid: " probability))]
+    (fn ^double [^double _] (if (< (Math/random) probability) (+ 1.0 (* sd (.nextGaussian rng))) 1.0))))
+
 #?(:cljs (register-module cortex.nn.impl.layers.Dropout))
-(defrecord Dropout [output input-gradient probability dropout]
+(defrecord Dropout [output input-gradient dropout noise-fn]
   cp/PModule
   (calc [this input]
     (m/assign! output input)
@@ -94,12 +145,12 @@
 
   cp/PNeuralTrainingOptional
   (prepare-forward [this]
-    (let [probability (double probability)
-          inv-prob (/ 1.0 probability)]
-      (m/emap! (fn ^double [^double _] (if (< (Math/random) probability) inv-prob 0.0)) dropout)))
+    (m/emap! noise-fn dropout)
+    this)
 
-  cp/PNeuralTraining
+  cp/PNeuralTraining 
   (forward [this input]
+    ;; note: assumes that prepare-forward has been run
     (m/assign! output input)
     (m/mul! output dropout)
     this)
@@ -166,7 +217,6 @@
   (forward [this input]
     (cp/calc this input)
     this)
-
 
   (backward [this input output-gradient]
     (m/assign! input-gradient output-gradient)
@@ -463,131 +513,3 @@
                       (cp/clone down)
                       (m/clone input-tmp)
                       (m/clone output-tmp))))
-
-;(defrecord ReflectiveEncoder
-;  [up down input-tmp output-tmp]
-;  cp/PModule
-;    (cp/calc [this input]
-;      (let [new-up (cp/calc up input)]
-;        (if (identical? new-up up)
-;          this
-;          (ReflectiveEncoder. new-up down input-tmp output-tmp))))
-;
-;    (cp/output [m]
-;      (cp/output up))
-;
-;  cp/PNeuralTraining
-;    (forward [this input]
-;      (m/assign! input-tmp input)
-;      (let [up (cp/calc up input)
-;            _ (m/assign! output-tmp (cp/output up)) ;; output-tmp contains output from up
-;            down (cp/forward down output-tmp)
-;            ]
-;        (ReflectiveEncoder. up down input-tmp output-tmp)))
-;
-;    (backward [this input output-gradient]
-;      (let [down (cp/backward down output-tmp error)
-;            _ (m/assign! input-tmp (cp/output down)) ;; use input-tmp for reconstructed input
-;            up (cp/forward up input-tmp)
-;            _ (m/add! output-tmp (cp/input-gradient down)) ;; output-tmp contains gradient
-;            up (cp/backward up input output-tmp)
-;            ]
-;        (ReflectiveEncoder. up down input-tmp output-tmp)))
-;
-;    (input-gradient [this]
-;      (cp/input-gradient up))
-;
-;    cp/PGradient
-;    (gradient [this]
-;      (concat (cp/gradient up) (cp/gradient down)))
-;
-;    cp/PParameters
-;    (parameters [this]
-;      (concat (cp/parameters up) (cp/parameters down)))
-;
-;    (update-parameters [this parameters]
-;      (let [nup (cp/parameter-count up)
-;            ndown (cp/parameter-count down)
-;            up (cp/update-parameters up (m/subvector parameters 0 nup))
-;            down (cp/update-parameters down (m/subvector parameters nup ndown))]
-;        (ReflectiveEncoder. up down input-tmp output-tmp)))
-;
-;    cp/PModuleClone
-;      (clone [this]
-;        (ReflectiveEncoder. (cp/clone up)
-;                            (cp/clone down)
-;                            (m/clone input-tmp)
-;                            (m/clone output-tmp))))
-
-
-#?(:clj
-   (defrecord KSparse [^long k]
-     cp/PModule
-     (cp/calc [this input]
-       (let [^PriorityQueue queue (or (:queue this)
-                                      (PriorityQueue. k (reify java.util.Comparator
-                                                          (compare ^int [this o1 o2]
-                                                            (int (- (double (o1 0))
-                                                                    (double (o2 0))))))))
-             output (or (:output this)
-                        (m/new-array :vectorz (m/shape input)))
-             dotvec (or (:dotvec this)
-                        (m/new-array :vectorz (m/shape input)))]
-         (m/assign! dotvec 0.0)
-         (m/assign! output input)
-         (.clear queue)
-         (doall (m/emap-indexed! (fn [idx value]
-                                   (.add queue [value (first idx)])
-                                   (when (> (.size queue) k)
-                                     (.remove queue (.peek queue)))
-                                   value)
-                                 output))
-         (doseq [[value idx] (seq queue)]
-           (m/mset! dotvec idx 1.0))
-         (m/mul! output dotvec)
-         (assoc this :queue queue
-                :output output
-                :dotvec dotvec)))
-
-
-     (cp/output [m]
-       (:output m))
-
-     cp/PNeuralTraining
-     (forward [this input]
-       (cp/calc this input))
-
-     (backward [this input output-gradient]
-       (let [input-gradient (or (:input-gradient this)
-                                (m/new-array :vectorz (m/shape output-gradient)))]
-         (m/assign! input-gradient output-gradient)
-         (m/mul! input-gradient (:dotvec this))
-         (assoc this :input-gradient input-gradient)))
-
-     (input-gradient [this]
-       (:input-gradient this))))
-
-
-(defrecord GaussianForwardNoise []
-  cp/PModule
-  (calc [this input]
-    (let [output (:or (:output this)
-                      (b/new-array (m/shape input)))]
-      (m/assign! output input)
-      (m/emap! noise-fn output)
-      (assoc this :output output)))
-  (output [m]
-    (:output m))
-
-  cp/PNeuralTraining
-  (forward [this input]
-    (cp/calc this input))
-
-  (backward [this input output-gradient]
-    (let [input-gradient (or (:input-gradient this)
-                             (b/new-array (m/shape output-gradient)))]
-      (m/assign! input-gradient output-gradient)
-      (assoc this :input-gradient input-gradient)))
-
-  (input-gradient [this]
-    (:input-gradient this)))

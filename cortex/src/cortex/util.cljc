@@ -1,10 +1,12 @@
 (ns cortex.util
+  (:refer-clojure :exclude [defonce])
   (:require
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
     [clojure.string :as str]
     [cortex.nn.protocols :as cp]
     [cortex.nn.backends :as b]
+    [clojure.pprint :as pp]
     #?(:cljs [goog.string :refer [format]]))
 
   #?(:clj (:import [mikera.vectorz Vectorz]))
@@ -16,10 +18,39 @@
 
 ;;;; Vars
 
+(defmacro defonce
+  "Like clojure.core/defonce, but allows docstring."
+  {:added "1.0"
+   :arglists '([symbol doc-string? init?])}
+  [name & args]
+  `(let [^clojure.lang.Var v# (ns-resolve '~(ns-name *ns*) '~name)]
+     (when (or (nil? v#)
+               (not (.hasRoot v#)))
+       (def ~name ~@args))))
+
 (defmacro def-
-  "same as def, yielding non-public def"
+  "Analogue to defn- for def."
   [name & decls]
   (list* `def (with-meta name (assoc (meta name) :private true)) decls))
+
+;;;; Timing
+
+(defmacro ctime*
+  "Returns a map where :return is the value of expr and :time is
+  the CPU time needed to evaluate it, in milliseconds."
+  [expr]
+  `(let [thread# (java.lang.management.ManagementFactory/getThreadMXBean)
+         start# (.getCurrentThreadCpuTime thread#)
+         return# ~expr
+         end# (.getCurrentThreadCpuTime thread#)]
+     {:return return#
+      :time (/ (- end# start#) 1000000.0)}))
+
+(defmacro ctime
+  "Returns the CPU time needed to evaluate expr in a user-friendly
+  string, in the same format as clojure.core/time."
+  [expr]
+  `(format "Elapsed time: %f msecs" (:time (ctime* ~expr))))
 
 ;;;; Mathematics
 
@@ -50,7 +81,7 @@
 
 (defn relative-error
   "Calculates the relative error between two values."
-  [^double a ^double b]
+  ^double [^double a ^double b]
   (if-not (and (zero? a) (zero? b))
     (/ (Math/abs (- a b))
        (max (Math/abs a) (Math/abs b)))
@@ -123,6 +154,13 @@
     (if-let [ss (seq (filter identity (map seq colls)))]
       (concat (map first ss) (apply interleave-all (map rest ss))))))
 
+(defn pad
+  "If coll is of length less than n, pads it to length n using pad-seq."
+  [n pad-seq coll]
+  (if (seq (drop n coll))
+    coll
+    (take n (concat coll pad-seq))))
+
 ;;;; Collections
 
 (defn map-keys
@@ -144,6 +182,94 @@
 (defn map-entry
   [k v]
   (clojure.lang.MapEntry/create k v))
+
+(defn approx=
+  "Determines if the collections are all equal, but allows floating-point
+  numbers to differ by a specified relative error. Works with arbitrarily
+  deeply nested collections. For collections with no floating-point numbers,
+  behaves the same as regular =. Also works if you provide plain
+  floating-point numbers instead of collections. Notice that integers will
+  be compared exactly, because presumably you will not have rounding errors
+  with integers. Thus:
+
+  (approx= 0.1 10 11) => false
+  (approx= 0.1 10.0 11.0) => true
+
+  Does not require collections to be of compatible types, i.e. sets can be
+  equal to vectors. As a result, works seamlessly with core.matrix vectors
+  of different implementations.
+
+  See also approx-diff."
+  [error & colls]
+  (let [seqs (map (partial tree-seq seq-like? seq)
+                  colls)]
+    (and (apply = (map count seqs))
+         (->> seqs
+           (apply map (fn [& items]
+                        (cond
+                          (every? float? items)
+                          (<= (relative-error (apply min items)
+                                              (apply max items))
+                              ^double error)
+                          (every? seq-like? items)
+                          true
+                          :else
+                          (apply = items))))
+           (every? identity)))))
+
+(defn approx-diff
+  "Recursively traverses the given data structures, which should be
+  identical except for corresponding floating-point numbers and the
+  concrete types of sequence-like objects.
+
+  Returns a data structure of the same form as the provided ones,
+  with floating-point numbers replaced with the relative errors of
+  the corresponding sets of numbers.
+
+  See also approx=."
+  [& colls]
+  (cond
+    (every? float? colls)
+    (relative-error (apply min colls)
+                    (apply max colls))
+    (every? list? colls)
+    (->> colls
+      (apply map (partial apply approx-diff))
+      (apply list))
+    (every? map-entry? colls)
+    (map-entry (apply approx-diff (map key colls))
+               (apply approx-diff (map val colls)))
+    (every? seq-like? colls)
+    (->> colls
+      (apply map approx-diff)
+      (into (empty (first colls))))
+    (apply = colls)
+    (first colls)
+    :else
+    (throw
+      (IllegalArgumentException.
+        (str "Divergent nodes: " colls)))))
+
+(defn vectorize
+  "Recursively turns a data structure into nested vectors. All sequence-like
+  types except maps and strings are transformed into vectors, but the structure
+  of the data is maintained. Transforms core.matrix vectors into normal Clojure
+  vectors.
+
+  (vectorize (list 1 2 {\"key\" #{3 4} (list) (new-vector 3 5)} [6 7]))
+  => [1 2 {\"key\" [4 3], [] [5 5 5]} [6 7]]"
+  [data]
+  (cond
+    (map? data)
+    (into {}
+          (map (fn [[k v]]
+                 [(vectorize k)
+                  (vectorize v)])
+               data))
+    (seq-like? data)
+    (mapv vectorize data)
+    :else
+    data))
 
 ;;;; Lazy maps
 
@@ -285,13 +411,17 @@
 
 ;;;; Lazy maps -- map type
 
+(declare LazyMap->printable)
+
 (deftype LazyMap [^clojure.lang.IPersistentMap contents]
 
   clojure.lang.Associative
   (containsKey [this k]
-    (.containsKey contents k))
+    (and contents
+         (.containsKey contents k)))
   (entryAt [this k]
-    (lazy-map-entry k (.valAt contents k)))
+    (and contents
+         (lazy-map-entry k (.valAt contents k))))
 
   clojure.lang.IFn
   (invoke [this k]
@@ -305,11 +435,13 @@
 
   clojure.lang.ILookup
   (valAt [this k]
-    (force (.valAt contents k)))
+    (and contents
+         (force (.valAt contents k))))
   (valAt [this k not-found]
     ;; This will not behave properly if not-found is a Delay,
     ;; but that's a pretty obscure edge case.
-    (force (.valAt contents k not-found)))
+    (and contents
+         (force (.valAt contents k not-found))))
 
   clojure.lang.IMapIterable
   (keyIterator [this]
@@ -327,11 +459,14 @@
 
   clojure.lang.IPersistentCollection
   (count [this]
-    (.count contents))
+    (if contents
+      (.count contents)
+      0))
   (empty [this]
-    (.empty contents))
+    (or (not contents)
+        (.empty contents)))
   (cons [this o]
-    (LazyMap. (.cons contents o)))
+    (LazyMap. (.cons (or contents {}) o)))
   (equiv [this o]
     (.equiv
       ^clojure.lang.IPersistentCollection
@@ -339,9 +474,9 @@
 
   clojure.lang.IPersistentMap
   (assoc [this key val]
-    (LazyMap. (.assoc contents key val)))
+    (LazyMap. (.assoc (or contents {}) key val)))
   (without [this key]
-    (LazyMap. (.without contents key)))
+    (LazyMap. (.without (or contents {}) key)))
 
   clojure.lang.Seqable
   (seq [this]
@@ -359,13 +494,32 @@
 
   java.lang.Object
   (toString [this]
-    (str (map-vals #(if (and (delay? %)
-                             (not (realized? %)))
-                      (->PlaceholderText "<unrealized>")
-                      (force %))
-                   contents))))
+    (str (LazyMap->printable this))))
 
 (extend-print LazyMap #(.toString ^LazyMap %))
+
+(defn LazyMap->printable
+  "Converts a lazy map to a regular map that has placeholder text
+  for the unrealized values. No matter what is done to the returned
+  map, the original map will not be forced."
+  [m]
+  (map-vals #(if (and (delay? %)
+                      (not (realized? %)))
+               (->PlaceholderText "<unrealized>")
+               (force %))
+            (.contents ^LazyMap m)))
+
+(defn lazy-map-dispatch
+  "This is a dispatch function for clojure.pprint that prints
+  lazy maps without forcing them."
+  [obj]
+  (cond
+    (instance? LazyMap obj)
+    (pp/simple-dispatch (LazyMap->printable obj))
+    (instance? PlaceholderText obj)
+    (pr obj)
+    :else
+    (pp/simple-dispatch obj)))
 
 (defmacro lazy-map
   [map]
@@ -381,6 +535,16 @@
   [m]
   (into {} m))
 
+(defn ->?LazyMap
+  "Behaves the same as ->LazyMap, except that if m is already a lazy
+  map, returns it directly. This prevents the creation of a lazy map
+  wrapping another lazy map, which (while not terribly wrong) is not
+  the best."
+  [m]
+  (if (instance? LazyMap m)
+    m
+    (->LazyMap m)))
+
 ;;;; Arrays and matrices
 
 (def EMPTY-VECTOR (m/new-array [0]))
@@ -390,19 +554,86 @@
   ([shape]
    (m/new-array :vectorz shape)))
 
+(defn calc-mean-variance
+  [data]
+  (let [num-elems (double (m/ecount data))
+        elem-sum (double (m/esum data))]
+    (if (= num-elems 0.0)
+      {:mean 0
+       :variance 0}
+      (let [mean (/ elem-sum num-elems)
+            variance (/ (double (m/ereduce (fn [^double sum val]
+                                             (let [temp-val (- mean (double val))]
+                                               (+ sum (* temp-val temp-val))))
+                                           0.0
+                                           data))
+                        num-elems)]
+        {:mean mean
+         :variance variance}))))
+
+(defn ensure-gaussian!
+  [data ^double mean ^double variance]
+  (let [actual-stats (calc-mean-variance data)
+        actual-variance (double (:variance actual-stats))
+        actual-mean (double (:mean actual-stats))
+        variance-fix (Math/sqrt (double (if (> actual-variance 0.0)
+                                          (/ variance actual-variance)
+                                          1.0)))
+        adjusted-mean (* actual-mean variance-fix)
+        mean-fix (- mean adjusted-mean)]
+    (doall (m/emap! (fn [^double data-var]
+                      (+ (* variance-fix data-var)
+                         mean-fix))
+                    data))))
+
+
+(defonce weight-initialization-types
+  [:xavier
+   :bengio-glorot
+   :relu])
+
+
+(defn weight-initialization-variance
+  "http://andyljones.tumblr.com/post/110998971763/an-explanation-of-xavier-initialization"
+  [^long n-inputs ^long n-outputs initialization-type]
+  (condp = initialization-type
+    :xavier (/ 1.0 n-inputs)
+    :bengio-glorot (/ 2.0 (+ n-inputs n-outputs))
+    :relu (/ 2.0 n-inputs)
+    (throw (Exception. (format "%s fails to match any initialization type."
+                               initialization-type)))))
+
+
 (defn weight-matrix
   "Creates a randomised weight matrix.
+  Weights are gaussian values 0-centered with variance that is dependent upon
+  the type of initialization [xavier, bengio-glorot, relu].
+  http://andyljones.tumblr.com/post/110998971763/an-explanation-of-xavier-initialization.
+  Initialization defaults to xavier."
+  ([^long n-output ^long n-input initialization-type]
+   (let [mean 0.0
+         variance (weight-initialization-variance n-input n-output initialization-type)]
+     ;;Java's gaussian generated does not generate great gaussian values for small
+     ;;values of n (mean and variance will be > 20% off).  Even for large-ish (100-1000)
+     ;;ones the variance is usually off by around 10%.
+     (b/array (vec (repeatedly n-output
+                               #(ensure-gaussian! (double-array
+                                                   (vec (repeatedly
+                                                         n-input
+                                                         rand-gaussian)))
+                                                  mean variance))))))
+  ([^long n-output ^long n-input] (weight-matrix n-output n-input :xavier)))
 
-   Weights are gaussian values scaled acoording to 1/sqrt(no. columns). This ensures that outputs are distributed
-   on a similar scale to inputs, and provides reasonable initial gradient propagation."
-  [rows cols]
-  (let [weight-scale (Math/sqrt (/ 1.0 (double cols)))]
-    (b/array
-      (mapv (fn [_]
-              (vec (repeatedly cols
-                               #(* weight-scale
-                                   (rand-gaussian)))))
-            (range rows)))))
+
+(defn identity-matrix
+  "Creates a square identity matrix"
+  ([^long n-output]
+   (b/array (mapv (fn [^long idx]
+                    (let [retval (double-array n-output)]
+                      (aset retval idx 1.0)))
+                  (range n-output)))))
+
+
 
 (defn random-matrix
   "Constructs an array of the given shape with random normally distributed element values"
@@ -441,11 +672,15 @@
 
 
 (defn get-or-new-array
+  "Gets an array from the associative dtata structure item, or returns a new empty array 
+   of the specified shape"
   [item kywd shape]
   (or (get item kywd)
       (b/new-array shape)))
 
 (defn get-or-array
+  "Gets an array from the associative dtata structure item, or returns a new mutable array 
+   containing a clone of data"
   [item kywd data]
   (or (get item kywd)
       (b/array data)))

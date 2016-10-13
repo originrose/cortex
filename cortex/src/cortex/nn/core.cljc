@@ -22,12 +22,17 @@
     (cp/calc m input)))
 
 (defn output
-  "Gets the ouput for a module. Throws an exception if not available."
+  "Gets the ouptut for a module. Assumes that either `calc` or a `forward` pass has been run.
+
+   Throws an exception if not available."
   ([m]
     (or (cp/output m) (error "No output available for module: " #?(:clj (class m) :cljs (type m))))))
 
 (defn calc-output
-  "Runs the calculation for a module. Returns the module output."
+  "Performs the calculation for a module, as per `calc`. This is intended for use when you just want
+   to use the module for computation, and do not care about the resulting module stats.
+
+   Returns the module output as per `output`."
   ([m input]
    (cp/output (cp/calc m input))))
 
@@ -56,7 +61,18 @@
 (defn forward
   "Runs the forward training pass on a neural network module."
   ([m input]
-    (cp/forward m input)))
+    (let [m (cp/prepare-forward m)]
+      (cp/forward m input))))
+
+(defn input-size
+  "Returns the size of the module input array."
+  ([m]
+    (cp/input-size m)))
+
+(defn output-size
+  "Returns the size of the module output array."
+  ([m]
+    (cp/output-size m)))
 
 (defn backward
   "Runs the backward training pass on a neural network module. Input must be the same as used
@@ -68,7 +84,6 @@
   "Gets the input gradient for a module. Throws an exception if not available."
   ([m]
    (or (cp/input-gradient m) (error "No input gradient available - maybe run backward pass first?"))))
-
 
 (defn optimise
   "Optimises a module using the given optimiser. Returns an [optimiser module] pair"
@@ -91,7 +106,7 @@
              :packed-grads grads)
       module]))
   ([optimiser module]
-   (optimise optimiser module 1)))
+    (optimise optimiser module 1)))
 
 ;; ===========================================================================
 ;; Module construction and combinator functions

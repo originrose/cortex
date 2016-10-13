@@ -83,8 +83,7 @@
   "Trains a network for a single training example.
    Returns network with updated gradient."
   [input answer network loss-fn]
-  (let [network (cp/prepare-forward network)
-        network (core/forward network input)
+  (let [network (core/forward network input)
         temp-answer (core/output network)
         loss (cp/loss loss-fn temp-answer answer)
         loss-gradient (cp/loss-gradient loss-fn temp-answer answer)]

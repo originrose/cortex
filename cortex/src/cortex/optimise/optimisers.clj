@@ -15,9 +15,9 @@
   the reason that APersistentMap rather than IPersistentMap is
   used.
 
-  (Note that the PParameters protocol is also implemented by
-  pure functions, so it is not done here, but rather in the
-  shared namespace cortex.optimise.parameters.)
+  (Note that, for maps, the PParameters protocol is also implemented
+  by pure functions, so it is not done here, but rather in the shared
+  namespace cortex.optimise.parameters.)
 
   A Clojure function representing a gradient optimiser must
   take parameter and gradient vectors and return an updated
@@ -39,19 +39,29 @@
 
 ;;;; Protocol extensions
 
+(defn fn->map
+  "Converts a fn optimiser to a map optimiser."
+  [function]
+  {:update (fn [state gradient]
+             (let [state (update state :params function gradient)]
+               ;; This makes it much easier to debug a common mistake:
+               (when (map? (:params state))
+                 (throw (IllegalStateException.
+                          "fn acting as optimiser must return vector: did you need to call the fn to produce an optimiser map or fn?")))
+               state))})
+
 (extend-type clojure.lang.IFn
+  cp/PParameters
+  (parameters [this])
+  (update-parameters [this params]
+    (cp/update-parameters (fn->map this) params))
+
   cp/PGradientOptimiser
-  (compute-parameters [this gradient parameters]
-    (cp/compute-parameters
-      {:update (fn [state gradient]
-                 (let [state (update state :params this gradient)]
-                   ;; This makes it much easier to debug a common mistake:
-                   (when (map? (:params state))
-                     (throw (IllegalStateException.
-                              "fn acting as optimiser must return vector: did you need to call the fn to produce an optimiser map or fn?")))
-                   state))}
-      gradient
-      parameters)))
+  (compute-parameters [this gradient params]
+    (cp/compute-parameters (fn->map this) gradient params))
+
+  cp/PIntrospection
+  (get-state [this]))
 
 (extend-type clojure.lang.APersistentMap
   cp/PGradientOptimiser
@@ -73,6 +83,14 @@
 ;;;; Clojure implementations
 
 (defn sgd-clojure
+  "Stochastic gradient descent. Steps by the negative gradient
+  multiplied by the learning rate. This is technically not
+  'stochastic' gradient descent unless the function being optimised
+  has mini-batching functionality built in, but 'SGD' is a very
+  well-known term so that is what is used for the name of the
+  function. See [1].
+
+  [1]: https://en.wikipedia.org/wiki/Stochastic_gradient_descent"
   [& {:keys [learning-rate]
       :or {learning-rate 0.1}}]
   (fn [params gradient]
@@ -81,16 +99,57 @@
           gradient))))
 
 (defn accumulate
+  "Accumulates a running average, according to the formula:
+
+  E[x]_{t+1} = ρE[x]_t + (1 - ρ)x
+
+  where
+
+  ρ => decay-rate
+  E[x]_t => running-avg
+  x => value
+  E[x]_{t+1} => returned"
   [decay-rate running-avg value]
   (+ (* decay-rate running-avg)
      (* (- 1 decay-rate) value)))
 
 (defn adadelta-clojure
-  [& {:keys [decay conditioning]
-      :or {decay 0.95
+  "ADADELTA. Gradient descent algorithm designed to eliminate
+  sensitivity to hyperparameter settings. See [1]. The algorithm
+  is reproduced below:
+
+  Require: Decay rate ρ, Constant ε
+  Require: Initial parameter x₁
+  1: Initialize accumulation variables E[g²]_0 = 0, E[Δx²]_0 = 0
+  2: for t = 1 : T do %% Loop over # of updates
+  3:   Compute Gradient: g_t
+  4:   Accumulate Gradient: E[g²]_t = ρE[g²]_{t-1} + (1 - ρ)g_t²
+  5:   Compute Update: Δx_t = -RMS[Δx]_{t-1}/RMS[g]_t g_t
+  6:   Accumulate Updates: E[Δx²]_t = ρE[Δx²]_{t-1} + (1 - ρ)Δx_t²
+  7:   Apply Update: x_{t+1} = x_t + Δx_t
+  8: end for
+
+  where
+
+  ρ => decay-rate
+  ε => conditioning
+  x => params
+  g => gradient
+  E[g²] => acc-gradient
+  E[Δx²] => acc-step
+
+  Note that all vector operations are per-component.
+
+  ADADELTA tends to undergo oscillations and diverge when it gets
+  too close to a minimum. See the Mathematica applet for a visual
+  demonstration of this behavior.
+
+  [1]: http://arxiv.org/pdf/1212.5701.pdf"
+  [& {:keys [decay-rate conditioning]
+      :or {decay-rate 0.95
            conditioning 1e-6}}]
   (letfn [(acc [acc-x x]
-            (accumulate decay acc-x x))
+            (accumulate decay-rate acc-x x))
           (rms [acc-x]
             (m/sqrt
               (+ acc-x
@@ -110,6 +169,45 @@
                   :params params}))}))
 
 (defn adam-clojure
+  "Adam. Improved combination of AdaGrad and RMSProp. See [2]. The
+  algorithm is reproduced below:
+
+  Require: α: Stepsize
+  Require: β₁, β₂ ∈ [0, 1): Exponential decay rates for the moment estimates
+  Require: f(θ): Stochastic objective function with parameters θ
+  Require: θ₀: Initial parameter vector
+    m₀ = 0 (Initialize 1st moment vector)
+    v₀ = 0 (Initialize 2nd moment vector)
+    t = 0 (Initial timestep)
+    while θ_t not converged do
+      t = t + 1
+      g_t = ∇_θ f_t(θ_{t-1}) (Get gradients w.r.t. stochastic objective at timestep t)
+      m_t = β₁ · m_{t-1} + (1 - β₁) · g_t (Update biased first moment estimate)
+      v_t = β₂ · v_{t-1} + (1 - β₂) · g_t² (Update biased second raw moment estimate)
+      mˆ_t = m_t / (1 - β₁^t) (Compute bias-corrected first moment estimate)
+      vˆ_t = v_t / (1 - β₂^t) (Compute bias-corrected second raw moment estimate)
+      θ_t = θ_{t-1} - α · mˆ_t / (√(vˆ_t) + ε) (Update parameters)
+    end while
+    return θ_t (Resulting parameters)
+
+  where
+
+  α => step-size
+  β₁ => first-moment-decay
+  β₂ => second-moment-decay
+  ε => conditioning
+  t => num-steps
+  θ => params
+  g => gradient
+  m => first-moment
+  v => second-moment
+  mˆ => first-moment*
+  vˆ => second-moment*
+
+  Adam appears to perform better than ADADELTA, with both faster convergence and more
+  resistance to oscillations, in general.
+
+  [2]: http://arxiv.org/pdf/1412.6980v8.pdf."
   [& {:keys [step-size first-moment-decay
              second-moment-decay conditioning]
       :or {step-size 0.001

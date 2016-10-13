@@ -1,4 +1,5 @@
 (ns cortex.util-test
+  (:refer-clojure :exclude [defonce])
   (:require
     #?(:cljs [cljs.test :refer-macros [deftest is testing]]
        :clj [clojure.test :refer [deftest is testing]])
@@ -19,10 +20,15 @@
   (is (= (relative-error 10 9) 0.1)))
 
 (deftest avg-test
-  (is (< (Math/abs (- (avg 1 3 7) (double 11/3)))
-         1e-6))
-  (is (= (apply avg (range 10)) 4.5))
-  (is (= (avg 2 -3) -0.5)))
+  (is (approx= 1e-12
+               (avg 1 3 7)
+               (double 11/3)))
+  (is (approx= 1e-12
+               (apply avg (range 10))
+               4.5))
+  (is (approx= 1e-12
+               (avg 2 -3)
+               -0.5)))
 
 ;;;; Sequences
 
@@ -41,6 +47,14 @@
   (is (= (interleave-all (range 5)) (range 5)))
   (is (= (interleave-all [:a :b :c] [:d :e] [:f :g :h :i])
          [:a :d :f :b :e :g :c :h :i])))
+
+(deftest pad-test
+  (is (= (pad 5 (range 5) [:a :b :c])
+         [:a :b :c 0 1]))
+  (is (= (pad 3 (range 5) [:a :b :c])
+         [:a :b :c]))
+  (is (= (pad 2 (range 5) [:a :b :c])
+         [:a :b :c])))
 
 ;;;; Collections
 
@@ -62,6 +76,37 @@
   (is (= (key (map-entry :a :b)) :a))
   (is (= (val (map-entry :a :b)) :b))
   (is (= (vec (map-entry nil nil)) [nil nil])))
+
+(deftest approx=-test
+  (testing "comparing floats"
+    (is (false? (approx= 0.1 10 11)))
+    (is (false? (approx= 0.1 10 11.0)))
+    (is (true? (approx= 0.1 10.0 11.0)))
+    (is (false? (approx= 0.09 10.0 11.0))))
+  (testing "comparing more than two floats"
+    (is (false? (approx= 0.1 10.0 10.75 11.5)))
+    (is (true? (approx= 0.1 10.0 10.5 11.0))))
+  (testing "comparing vectors"
+    (is (false? (approx= 0.1
+                         (m/array :vectorz [10.0 11.0])
+                         [11.5 10.0])))
+    (is (true? (approx= 0.1
+                        (m/array :vectorz [10.0 11.0])
+                        [11.0 10.0]))))
+  (testing "comparing nested data structures"
+    (is (false? (approx= 0.1
+                         {:a [10.0 11.0] :b 10.0}
+                         {:a [11.0 10.0] :c 10.0})))
+    (is (false? (approx= 0.1
+                         {:a [10.0 11.0] :b 10.0}
+                         {:a [12.0 10.0] :b 10.0})))
+    (is (true? (approx= 0.1
+                        {:a [10.0 11.0] :b 10.0}
+                        {:a [11.0 10.0] :b 10.0}))))
+  (testing "lists of different lengths"
+    (is (false? (approx= 0.1
+                         [1.0 2.0 3.0]
+                         [1.0 2.0])))))
 
 ;;;; Lazy maps
 
@@ -112,8 +157,8 @@
     (is (= (-> (make-lazy-map)
              (dissoc :a :b)
              (keys)
-             (set)
-             #{:c}))))
+             (set))
+           #{:c})))
   (testing "lazy maps support default value for lookup"
     (is (= (:d (make-lazy-map) :default)
            :default))
@@ -163,7 +208,7 @@
                         :c (println "value :c was realized")})]
                (doseq [k [:b :c]]
                  (k m))))
-           "value :b was realized\nvalue :c was realized\n")))
+           (format "value :b was realized%nvalue :c was realized%n"))))
   (testing "forcing a lazy map"
     (is (= (->> (lazy-map
                   {:a (println "value :a was realized")
@@ -250,4 +295,4 @@
 
 (deftest sprintf-test
   (is (= (with-out-str (sprintf "%(d%n" [[1 -3 5] [-7 3]]))
-         "[[1 (3) 5] [(7) 3]]\n")))
+         (format "[[1 (3) 5] [(7) 3]]%n"))))

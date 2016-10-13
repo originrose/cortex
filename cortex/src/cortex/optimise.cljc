@@ -6,6 +6,7 @@
   (:refer-clojure :exclude [+ - * /])
   (:require
     [clojure.core.matrix :as m]
+    [clojure.core.matrix.stats :as stats]
     [clojure.core.matrix.operators :refer [+ - * /]]
     [clojure.core.matrix.protocols :as mp]
     [clojure.core.matrix.linear :as linear]
@@ -150,6 +151,126 @@ Returns new parameters"
    (->AdaDelta)))
 
 ;; ==============================================
+;; Fast Newton optimiser
+;;
+;; Experimental optimiser that computes a continuously updates estimate of the second derivative of
+;; the gradient in order to perform newton's method style gradient descent
+;;
+;; should be invariant to scaling etc.
+
+(defn accumulate! 
+  [^double decay target source]
+  (m/scale-add! target (- 1.0 decay) source decay))
+
+(defmacro clamp-double
+  "Macro to clamp a double value within a specified range"
+  [x min max]
+  `(let [x# (double ~x)
+         min# (double ~min)
+         max# (double ~max)] (if (< x# min#) min# 
+                               (if (> x# max#) max#
+                                 x#))))
+
+(defrecord Newton []
+  cp/PGradientOptimiser
+  (compute-parameters [this gradient parameters]
+    (let [decay (double (or (:decay-rate this) 0.1))
+          step-ratio (double (or (:step-ratio this) 0.1))
+          step-limit (double (or (:step-limit this) 2.0))
+          elem-count (long (m/ecount parameters))
+          elem-shape [elem-count]
+          ;; prepare or acquire arrays
+          ex     (util/get-or-array this :ex parameters)
+          eg     (util/get-or-array this :eg gradient)
+          exx    (or (:exx this) (m/add! (m/mutable (m/square ex)) 1.0)) ;; over-estimate initial exx
+          exg    (or (:exg this) (m/add! (m/mutable (m/mul ex eg)) 1.0)) ;; over-estimate initial exg
+          tmp    (util/get-or-new-array this :tmp elem-shape)
+          gdiff  (util/get-or-new-array this :gdiff elem-shape)
+          dx     (util/get-or-new-array this :dx elem-shape)
+          params (util/get-or-array this :parameters parameters)
+          
+          _ (m/assign! params parameters) ;; take efficient copy of current params
+          
+          _ (m/assign! tmp params) ;; tmp = x
+          _ (accumulate! decay ex tmp) 
+          _ (m/mul! tmp params) ;; tmp = x^2
+          _ (accumulate! decay exx tmp) 
+          _ (m/assign! tmp gradient) ;; tmp = g
+          _ (accumulate! decay eg tmp) 
+          _ (m/mul! tmp params) ;; tmp = x.g
+          _ (accumulate! decay exg tmp) 
+          
+          _ (m/assign! tmp ex)
+          _ (m/mul! tmp eg) ;; tmp = ex.eg
+          _ (m/sub! tmp exg) ;; tmp = ex.eg - exg
+          _ (m/assign! gdiff tmp) ;; dg = ex.eg - exg
+          _ (m/assign! tmp ex) 
+          _ (m/mul! tmp ex) ;; tmp = ex.ex
+          _ (m/sub! tmp exx) ;; tmp = ex.ex - exx
+          _ (m/div! gdiff tmp) ;; gdiff = (ex.eg - exg) / (ex.ex - exx)  (i.e. the gradient estimate)
+          
+          _ (m/emap! (fn [^double x] (if (< x 0.0) (Math/sqrt (- x)) 0.0)) 
+                     tmp) ;; tmp = sqrt (exx - ex.ex), i.e. s.d. of x
+          
+          _ (m/abs! gdiff) ;; gdiff = |(ex.eg - exg) / (ex.ex - exx)| (i.e. the absolute value of gradient)
+          _ (m/assign! dx gdiff) ;; dx = gdiff
+          _ (m/emap! (fn [^double dg ^double g] 
+                       (let [dg (if (or (Double/isInfinite dg) (Double/isNaN dg)) 1.0 dg)
+                             res (if (== 0 dg) ;; zero gradient implies infinite step size! so we want to take maximum step in direction of -g
+                                   (if (< 0 g) Double/POSITIVE_INFINITY 
+                                     (if (> 0 g) 
+                                       Double/NEGATIVE_INFINITY
+                                       0.0))
+                                   (- (/ (* g step-ratio) dg)))]
+                         res))
+                     dx gradient) ;; dx = proposed step size 
+          _ (m/emap! (fn [^double dx ^double xsd] 
+                       ;; i.e. dx = limit step sizes to step-limit times s.d. of x 
+                       ;; this handles the case of zero gradient (which would otherwise result in infinite steps)
+                       (clamp-double dx (* xsd (- step-limit)) (* xsd step-limit)))
+                     dx tmp) 
+          
+          _ (m/add! params dx)
+          ]
+      (assoc this
+             :ex ex             
+             :eg eg
+             :exx exx
+             :exg exg
+             :gdiff gdiff
+             :dx dx
+             :tmp tmp
+             :parameters params)))
+  cp/PParameters
+  (parameters [this]
+    [(:parameters this)]))
+
+
+(defn newton-optimiser
+  "Constructs a fast newton optimiser of the given size (parameter length)
+
+   Options map may include:
+    :decay-rate   = rate of decay for statistics estimates (default 0.1)
+    :step-ratio   = Proportion of step size to take towards estimated optimum (default = 0.1)
+    :step-limit   = Maximum step size as proportion of standard deviation of pearamter (default = 2.0)"
+  ([]
+   (->Newton))
+  ([options]
+   (map->Newton options)))
+
+(comment ;; test for convergence
+         (let [no (newton-optimiser)
+               x (m/array :vectorz [1])
+               grad (fn [x] (m/mul x 2.0))]
+           (loop [i 0 no no x x]
+             (when (< i 20) (let [g (grad x)
+                                  no (cp/compute-parameters no g x)
+                                  newx (first (cp/parameters no))]
+                              (println (str "Iteration: " i " x = " x " g = " g " newx = " newx))
+                              (recur (inc i) no newx)))))
+         )
+
+;; ==============================================
 ;; Mikera optimiser
 ;; TODO: complete conversion of algorithm
 
@@ -255,6 +376,10 @@ Returns new parameters"
       (m/emap (fn [a b] (if (number? a) a b)) target activation)
     :else target))
 
+
+;; ================================================================================
+;; mean squared error loss function
+
 (defn mean-squared-error
   "Computes the mean squared error of an activation array and a target array"
   ([activation target]
@@ -277,7 +402,36 @@ Returns new parameters"
   ([]
     (->MSELoss)))
 
+;; ================================================================================
+;; mean absolute error loss function
+
+(defn mean-absolute-error
+  "Computes the mean absolute error of an activation array and a target array"
+  ([activation target]
+   (let [target (process-nulls activation target)]
+      (/ (double (m/esum (m/abs (m/sub activation target))))
+         (double (m/ecount activation))))))
+
+(defrecord MAELoss []
+  cp/PLossFunction
+  (loss [this v target]
+    (mean-absolute-error v target))
+
+  (loss-gradient [this v target]
+    (let [target (process-nulls v target)
+          r (m/sub v target)]
+      (m/signum! r) 
+      (m/scale! r (/ 1.0 (double (m/ecount v)))))))
+
+(defn mae-loss
+  "Returns a Mean Absolute Error (MAE) loss function"
+  ([]
+    (->MAELoss)))
+
 (def SMALL-NUM 1e-30)
+
+;; ================================================================================
+;; Cross Entropy loss function
 
 ;;Non mutually exclusive ce loss
 (defrecord CrossEntropyLoss []

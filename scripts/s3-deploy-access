@@ -1,0 +1,21 @@
+#!/bin/bash
+
+export VAULT_ADDR='https://thinktopic.com:8200'
+
+echo "Requesting access to S3 maven repository..."
+creds=`vault read secret/thinktopic/deploy`
+access_key=$(echo "$creds" | awk '/access_key/ { print $2 }')
+secret_key=$(echo "$creds" | awk '/secret_key/ { print $2 }')
+
+echo "export AWS_ACCESS_KEY_ID=$access_key"
+echo "export AWS_SECRET_ACCESS_KEY=$secret_key"
+echo "export LEIN_USERNAME=$access_key"
+echo "export LEIN_PASSPHRASE=$secret_key"
+echo "export LEIN_PASSWORD=$secret_key"
+
+export AWS_ACCESS_KEY_ID=$access_key
+export AWS_SECRET_ACCESS_KEY=$secret_key
+export LEIN_USERNAME=$access_key
+export LEIN_PASSPHRASE=$secret_key
+export LEIN_PASSWORD=$secret_key
+sleep 10

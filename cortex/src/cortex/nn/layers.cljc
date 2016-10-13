@@ -55,8 +55,27 @@
     (cortex.nn.impl.layers.Dropout.
       (util/empty-array shape)
       (util/empty-array shape)
-      (double probability)
-      (util/empty-array shape))))
+      (util/empty-array shape)
+      (impl/create-dropout-noise-fn probability)
+      nil
+      {:probability (double probability)})))
+
+(defn gaussian-multiplicative-noise
+  "Creates a multiplicative gaussian noise module of the given shape.
+
+   During training, gauassian noise will be applied with the given probability, in which case:
+     x -> x * N(1.0,sd)"
+  ([shape noise-fn]
+    (when-not (coll? shape)
+      (error "Dropout layer constructor requires a shape vector"))
+    (cortex.nn.impl.layers.Dropout.
+      (util/empty-array shape)
+      (util/empty-array shape)
+      (util/empty-array shape)
+      noise-fn))
+  ([shape probability sd]
+    (let [noise-fn (impl/create-gaussian-multiplicative-noise-fn probability sd)]
+      (gaussian-multiplicative-noise shape noise-fn))))
 
 (defn scale
   "Creates a linear scaling layer with the specified shape and multiplication factor
@@ -82,6 +101,15 @@
         (util/empty-array shape)
         (util/empty-array shape))))
 
+(defn softplus
+  "Creates a softplus module of the given shape."
+  ([shape]
+    (when-not (coll? shape)
+      (error "softplus layer constructor requires a shape vector"))
+    (cortex.nn.impl.layers.Softplus.
+        (util/empty-array shape)
+        (util/empty-array shape))))
+
 (defn relu
   "Creates a rectified linear (ReLU) module of the given shape.
 
@@ -98,7 +126,11 @@
 
 (defn linear
   "Constructs a weighted linear transformation module using a dense matrix and bias vector.
-   Shape of input and output are determined by the weight matrix."
+   Shape of input and output are determined by the weight matrix.
+
+   Options available: 
+    :l2-max-constraint = constraint to apply to l2 norm of rows (i.e. the vector of weights for each output)
+    :weight-scale      = factor to multiply the weights during initialisation (default 1.0)"
   ([weights bias]
     (linear weights bias nil))
   ([weights bias options]
@@ -108,6 +140,8 @@
           [n-outputs n-inputs] (m/shape weights)
           n-outputs (long n-outputs)
           n-inputs (long n-inputs)]
+      (if-let [weight-scale (:weight-scale options)]
+        (m/scale! weights weight-scale))
       (when-not (== n-outputs (m/dimension-count bias 0)) (error "Mismatched weight and bias shapes"))
       (-> wm
         (assoc :weight-gradient (util/empty-array [n-outputs n-inputs]))
@@ -115,7 +149,13 @@
         (assoc :input-gradient (util/empty-array [n-inputs]))))))
 
 (defn linear-layer
-  "Creates a linear layer with a new randomised weight matrix for the given number of inputs and outputs"
+  "Creates a linear layer with a new randomised weight matrix for the given number of inputs and outputs.
+
+   Options available:
+    :weights           = specify the weight matrix to use directly
+    :bias              = specify the bias vector to use directly
+    :l2-max-constraint = constraint to apply to l2 norm of rows (i.e. the vector of weights for each output)
+    :weight-scale      = factor to multiply the weights during initialisation (default 1.0)"
   ([n-inputs n-outputs & {:keys [weights bias l2-max-constraint] :as options}]
     (linear (or weights (util/weight-matrix n-outputs n-inputs))
             (or bias (util/empty-array [n-outputs]))
@@ -214,11 +254,3 @@ as the input"
                                                    stride-x stride-y
                                                    num-input-channels)]
     (conv/->Pooling conv-config)))
-
-
-(defn k-sparse
-  [k]
-  #?(:clj (impl/->KSparse k)
-     :cljs (throw (js/Error. "KSparse is not implemented for clojurescript"))))
-
-(defn guassian-noise [] (impl/->GaussianForwardNoise))

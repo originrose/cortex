@@ -2,7 +2,7 @@
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
-            [resource.core :as resource])
+            [think.resource.core :as resource])
   (:import [com.indeed.util.mmap Memory MMapBuffer]
            [java.nio.channels FileChannel FileChannel$MapMode]
            [java.nio ByteOrder ByteBuffer DoubleBuffer]
@@ -60,6 +60,17 @@ convertable to double arrays."
      (.memory r-file)))
   (^Memory [^String fname]
    (mem-map-file fname FileChannel$MapMode/READ_ONLY ByteOrder/BIG_ENDIAN)))
+
+
+(defn read-mmap-entry!
+  [^Memory buffer, ^long idx ^doubles retval]
+  (let [entry-num-doubles (alength retval)
+        offset (* idx entry-num-doubles)]
+    ;;It would be ideal if there were bulk methods for this implemented in c++.  It would also
+    ;;be ideal of those methods handled simple conversion i.e. from float->double.  Until then...
+    (c-for [idx 0 (< idx entry-num-doubles) (inc idx)]
+           (aset retval idx (.getDouble buffer (* (+ offset idx) Double/BYTES))))
+    retval))
 
 
 (defn read-mmap-entry

@@ -4,6 +4,8 @@
   (:use [cortex.nn.core])
   (:require [clojure.core.matrix :as m]
             [cortex.nn.layers :as layers]
+            [cortex.nn.network :as network]
+            [cortex.optimise :as opt]
             [cortex.nn.protocols :as cp]
             [cortex.util :as util]
             [clojure.test.check :as sc]
@@ -83,6 +85,43 @@
         (is (equals-one-of #{[0 0] [0 -2] [2 0] [2 -2]}
                           (input-gradient (backward (forward a input) input [1 -1]))))))))
 
+(deftest test-gaussian-multiplicative
+  (testing "noise - calculation has no effect"
+    (let [a (layers/gaussian-multiplicative-noise [3] 1.0 0.5)]
+      (is (m/equals [1 2 3] (calc-output a [1 2 3])))))
+  (testing "noise - forward causes changes"
+    (let [a (layers/gaussian-multiplicative-noise [3] 1.0 0.5)]
+      (is (not (m/equals [1 2 3] (output (forward a [1 2 3])))))))
+  (testing "backprop"
+    (let [a (layers/gaussian-multiplicative-noise [3] 1.0 0.5)
+          input [1.0 2.0 3.0]]
+      (dotimes [i 10] 
+        (is (m/equals (input-gradient (backward (forward a input) input [1 1 1]))
+                      (:dropout a)))))))
+
+(deftest test-dropout-forward
+  (let [dm (layers/dropout [20] 0.5)
+        input (util/random-matrix [20])]
+    (testing "Correct dropout proportion"
+             (is (== 0.5 (:probability dm))))
+    (testing "Dropout should make no changes to regular output" 
+             (let [out1 (calc-output dm input)] 
+               (is (m/equals out1 input))))
+    (testing "Dropout should make changes during forward pass"
+             (let [out2 (output (forward dm input))]
+               (is (not (m/equals out2 input)))))))
+
+(deftest test-dropout-train
+  (let [dm (layers/dropout [20] 0.5)
+        input (util/random-matrix [20])
+        target (util/random-matrix [20])
+        optimiser (cortex.optimise/sgd-optimiser 0.1 0.99)
+        loss-fn (cortex.optimise/mse-loss)]
+    (testing "Train step succeeds"
+             (is (m/zero-matrix? (input-gradient dm)))
+             (let [dm (network/train-step input target dm loss-fn)]
+               (is (not (m/zero-matrix? (input-gradient dm))))))))
+
 (deftest test-linear
   (testing "basic calculation"
     (let [a (layers/linear [[1 2] [-3 -4]] [10 100])
@@ -110,7 +149,11 @@
       (is (m/equals [5 11]
                     (calc-output a [1 2])))
       (is (m/equals [0 0 0 0 0 0]
-                    (gradient a))))))
+                    (gradient a)))))
+  (testing "weight initialisation"
+    (is (not (m/zero-matrix? (:weights (layers/linear-layer 2 2)))))
+    (is (m/zero-matrix? (:weights (layers/linear-layer 2 2 :weight-scale 0.0))))))
+
 
 (deftest test-l2-constraint
   (testing "unconstrained update"

@@ -47,12 +47,16 @@
     ((:gradient this) (cp/parameters this))))
 
 (defn value
+  "Shorthand for getting the value of a function for a particular parameter
+  vector."
   [function params]
   (-> function
     (cp/update-parameters params)
     (cp/output)))
 
 (defn gradient
+  "Shorthand for getting the gradient of a function for a particular parameter
+  vector."
   [function params]
   (-> function
     (cp/update-parameters params)

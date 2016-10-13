@@ -20,20 +20,25 @@
     "Returns a cloned module"))
 
 (defprotocol PParameters
-  "Protocol for a module that supports parameters. The default implementation returns an empty parameter vector."
+  "Protocol for a module that supports parameters. The default implementation returns
+an empty parameter vector."
   (parameters [m]
     "Gets the parameters for this module, as a vector.")
 
   (update-parameters [m parameters]
-    "Updates the parameters for this module to the given parameter values. Returns the updated module"))
+    "Updates the parameters for this module to the given parameter values. 
+     Clears the accumulated gradient and returns the updated module"))
+
 
 (defprotocol PParameterCount
-  "Protocol for computing the parameter count. The default implementation just calls count on the parameter vector.."
+  "Protocol for computing the parameter count. The default implementation just calls
+count on the parameter vector.."
   (parameter-count [m]
     "Gets the number of parameters for this module, as a long value."))
 
 (defprotocol PGradient
-  "Protocol for a module that supports accumulated gradients for optimisation. This vector should be exactly the
+  "Protocol for a module that supports accumulated gradients for optimisation.
+This vector should be exactly the
   same length as the parameter vector.
   The default implementation returns an empty gradient vector."
   (gradient [m]
@@ -49,13 +54,17 @@
   "Protocol for modules that can be trained with forward / back propagation."
   (forward [this input]
     "Run a forward computation pass and return the updated module. output will be
-  available for later retrieval. Input and intermediate states will be stored for
-  futuere backward pass usage.")
+    available for later retrieval. Input and intermediate states will be stored for
+    future backward pass usage.
+
+   During training prepare-forward must be called first to ensure that any necessary 
+   pre-training calculations are performed. forward itself should be deterministic,
+   but prepare-forward may modify stochastic state (e.g. dropout).")
 
   (backward [this input output-gradient]
     "Back propagate errors through the module with respect to the input.  Returns the
   module with input-gradient set (gradient at the inputs). Input must be the same
-  as used in the forward pass.")
+  as used in the corresponding forward pass.")
 
   (input-gradient [this]
     "Gets the computed input gradients for a module. Assumes the backward pass has been run."))
@@ -64,7 +73,9 @@
 (defprotocol PNeuralTrainingOptional
   "Some layers will want to do things before the forward pass like update random number buffers.
   This allows things like dropout to play well with gradient checking in that prepare-forward can
-  be called once but forward can be called multiple times (normally 1 + 2 * n-params)."
+  be called once but forward can be called multiple times (normally 1 + 2 * n-params).
+
+  prepare-forward should return its parameter unmodified if no preparation is required."
   (prepare-forward [this]))
 
 
@@ -82,11 +93,13 @@
   Intended for use with update-parameters after completion of a (mini-)batch."))
 
 (defprotocol PGradientOptimiser
-  "A gradient optimiser is an abstraction for objects that update parameters based on gradient observations.
+  "A gradient optimiser is an abstraction for objects that update parameters based on
+gradient observations.
   Gradient optimisers typically contain relating to previous observations, momentum etc."
   (compute-parameters
     [optimiser gradient parameters]
-    "Computes updated parameters using the given average gradient. Returns the updated gradient optimiser.
+    "Computes updated parameters using the given average gradient. Returns the updated gradient
+optimiser.
   Users can then call `parameters` on this object to get the updated parameters"))
 
 (defprotocol PIntrospection
