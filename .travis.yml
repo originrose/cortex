@@ -7,6 +7,8 @@ env:
   - TEST_DIR=cortex
   - TEST_DIR=datasets
   - TEST_DIR=compute
+  - TEST_DIR=keras
+  
 jdk: oraclejdk8
 before_install:
 - wget https://releases.hashicorp.com/vault/0.6.1/vault_0.6.1_linux_amd64.zip -O vault.zip
