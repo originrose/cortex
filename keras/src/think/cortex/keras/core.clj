@@ -29,7 +29,8 @@
                                                       stride-x stride-y kernel-count))
         conv-desc (assoc conv-desc :id id)]
     (when-not (= (:dim_ordering config) "tf")
-      (throw (Exception. "Please convert model to 'tf' weights.  'th' weights are not supported.")))
+      (throw
+       (Exception. "Please convert model to 'tf' weights.  'th' weights are not supported.")))
     (if activation
       [conv-desc {:type activation}]
       [conv-desc])))
@@ -70,6 +71,21 @@
                   [(keyword (hdf5/get-name node-child))
                    node-child])
                 (hdf5/get-children node))))
+
+(defn- reshape-time-test
+  []
+  (let [n-rows 100
+        n-cols 1000
+        src-array (double-array (* n-rows n-cols))]
+    (println "reshape time")
+    (time (dotimes [idx 10]
+            (m/reshape src-array [n-rows n-cols])))
+    (println "c-for time")
+    (time (dotimes [idx 10]
+            (let [^"[[D" dest (make-array Double/TYPE n-rows n-cols)]
+              (c-for [row 0 (< row n-rows) (inc row)]
+                     (java.lang.System/arraycopy src-array (* row n-cols)
+                                                 (get dest row) 0 n-cols)))))))
 
 
 (defn to-core-matrix
@@ -126,7 +142,8 @@
                         weight-ds (get weight-map weight-id)
                         bias-ds (get weight-map bias-id)]
                     (when-not (and weight-ds bias-ds)
-                      (throw (Exception. (format "Failed to find weights and bias: wanted %s, found %s"
+                      (throw (Exception.
+                              (format "Failed to find weights and bias: wanted %s, found %s"
                                                  [weight-id bias-id] (keys weight-map)))))
                     (println "loading weights/bias for" (:id desc))
                     (let [weight-raw-data (:data (hdf5/->clj weight-ds))
@@ -145,19 +162,3 @@
   (-> (read-model model-json-fname)
       model->simple-description
       (load-weights-for-description weight-hdf5-fname)))
-
-
-
-(defn reshape-time-test
-  []
-  (let [n-rows 100
-        n-cols 1000
-        src-array (double-array (* n-rows n-cols))]
-    (println "reshape time")
-    (time (dotimes [idx 10]
-            (m/reshape src-array [n-rows n-cols])))
-    (println "c-for time")
-    (time (dotimes [idx 10]
-            (let [^"[[D" dest (make-array Double/TYPE n-rows n-cols)]
-              (c-for [row 0 (< row n-rows) (inc row)]
-                     (java.lang.System/arraycopy src-array (* row n-cols) (get dest row) 0 n-cols)))))))
