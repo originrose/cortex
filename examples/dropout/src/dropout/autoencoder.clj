@@ -5,10 +5,7 @@
             [cortex-datasets.mnist :as mnist]
             [clojure.core.matrix :as m]
             [mikera.image.core :as image]
-            [cortex-gpu.nn.description :as gpu-desc]
-            [cortex-gpu.nn.train :as gpu-train]
-            [resource.core :as resource]
-            [cortex-gpu.nn.cudnn :as cudnn]
+            [think.resource.core :as resource]
             [cortex-visualization.nn.core :as nn-vis]
             [tsne.core :as tsne]))
 
@@ -23,7 +20,7 @@
 
 (defn build-and-create-network
   [description]
-  (gpu-desc/build-and-create-network description))
+  (desc/build-and-create-network description))
 
 
 (defn single-target-network
@@ -169,7 +166,7 @@
          network (build-and-create-network network-desc)
          training-labels (get labels :training)
          test-labels (get labels :test)
-         network (gpu-train/train network optimiser loss-fn @training-data training-labels
+         network (net/train network optimiser loss-fn @training-data training-labels
                                   batch-size n-epochs
                                   @test-data test-labels)]
      {:network (vec (flatten (desc/network->description network)))})))
@@ -180,12 +177,11 @@
 
 (defn train-network
   [net-name]
-  (with-bindings {#'cudnn/*cudnn-datatype* (float 0.0)}
-    (let [network-fn (get network-fns net-name)
-          _ (println "training" net-name)
-          network-and-score (train-and-evaluate (network-fn) (opt/adam))]
-      (swap! networks assoc net-name
-             network-and-score))))
+  (let [network-fn (get network-fns net-name)
+        _ (println "training" net-name)
+        network-and-score (train-and-evaluate (network-fn) (opt/adam))]
+    (swap! networks assoc net-name
+           network-and-score)))
 
 
 (defn train-networks
