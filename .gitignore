@@ -17,3 +17,8 @@ target
 checkouts
 .lein-*
 .nrepl-port
+
+# Intellij
+**/.idea
+*.iml
+*.iws
