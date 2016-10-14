@@ -1,12 +1,6 @@
 (ns mnist.core
-  (:require [cortex.nn.protocols :as cp]
-            [cortex.util :as util]
-            [cortex.nn.layers :as layers]
-            [clojure.core.matrix :as m]
-            [cortex-datasets.mnist :as mnist]
+  (:require [cortex-datasets.mnist :as mnist]
             [cortex.optimise :as opt]
-            [cortex.nn.core :as core]
-            [clojure.core.matrix.random :as rand]
             [cortex.nn.network :as net]
             [cortex.nn.description :as desc]
             [cortex.nn.caffe :as caffe]
@@ -25,7 +19,7 @@
 
 (def n-epochs 2)
 (def batch-size 10)
-(def loss-fn (opt/mse-loss))
+(def loss-fn (opt/cross-entropy-loss))
 
 
 (defn create-network
@@ -44,10 +38,6 @@
 (defn create-optimizer
   [network]
   (opt/adam))
-
-(defn test-train-step
-  []
-  (net/train-step (first @training-data) (first @training-labels) (create-network) loss-fn))
 
 (defn train
   []
@@ -87,9 +77,15 @@
 
 (defn evaluate-caffe-mnist
   []
-  (let [network (load-caffe-mnist)]
-    (net/evaluate-softmax network @test-data @test-labels)))
+  (let [network (load-caffe-mnist)
+        fraction-correct (evaluate network)]
+    (println (format "Network score: %g" fraction-correct))
+    (println (format "Network mse-score %g" (evaluate-mse network)))))
 
 (defn -main
   [& args]
-  (train-and-evaluate))
+  (do
+    (println "Training convent on MNIST from scratch.")
+    (train-and-evaluate)
+    (println "Loading LeNet Caffe model for inference.")
+    (evaluate-caffe-mnist)))
