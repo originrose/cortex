@@ -1,7 +1,9 @@
 # Cortex ![TravisCI](https://travis-ci.com/thinktopic/cortex.svg?token=pNFS4aJt3yqGNNwZvG5z&branch=master)
 
 
-Neural networks, regression and feature learning in Clojure.  Please see the design document for a modular breakdown of the project.
+Neural networks, regression and feature learning in Clojure.
+
+Cortex has been developed by [ThinkTopic](http://thinktopic.com) in collaboration with [Mike Anderson](https://github.com/mikera).
 
 ## Mailing List
 

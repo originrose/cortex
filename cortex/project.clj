@@ -1,5 +1,8 @@
 (defproject thinktopic/cortex "0.2.1-SNAPSHOT"
   :description "A neural network toolkit for Clojure."
+  :url "https://github.com/thinktopic/cortex"
+  :license {:name "Eclipse Public License"
+            :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.taoensso/timbre "4.3.1"]
                  [org.clojure/test.check "0.9.0"]
