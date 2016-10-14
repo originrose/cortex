@@ -1,4 +1,5 @@
 language: clojure
+requires: sudo
 env:
   global:
   - secure: OwFFz14wvwY3IOeMrz14bHxTS1phbMQgHR5SZ+3Nb35SnsuqTulUylwk0LjSZGU/UxpGHWif/2y4JL5ySWwHT967ISUa9IkiEBItX4WB1NXz6bJmhMwbdyYnDqHvOH4FtOJ3LbpV5AlNez6tOpdQUTmDH9oUpr7fdYN/RcJY4MonyJn9BvaV+AFuMGWaPmBLZDJfSTSD0BCYkWg9qOOQDKpBcXznn0V8XB0HR2GrhBCZH5eAwfT3y6p0aSSNP+epk2nH+wESagQrI256yUbzvfeE4QmKKzqb7nuf2+w3fHLdsUnPjreDdUaEDAVAIE7/RWcpQyTDRSe5Hlfay6eIjTsauH11AxhDSZjAMgFkS+Q2YGIZajkO2YT/UJJa33mDhAwuJ1AS175ejot5m0JarwY0eM0IAAirFxIA5HPZuud7CILWWrR6YGB4Y7Fh/1cHkFxPmDXiHaYWTfaD5ZAUelnJyh+lBco4PVuH1lQHgW1Vc0kT3sABhaHucW67JFuzUBajQ5r6QvIWXnl6JnFKmbB3/w6kTooPTV4pLN2banKGe9N6AfWBbmjxufZiXWgUla6U7zHvPjc+QGKp3U1tJUMUMDd0blvg0FcDncHQIQh99OA/UnQtY0zSrwVjdLnFQ4KMISCH+pxv4A/oFlt7adybrUJpJKqoyKf+yitilr8=
@@ -12,7 +13,7 @@ env:
 
 branches:
   only:
-    - master
+  - master
     
 jdk: oraclejdk8
 before_install:
@@ -20,6 +21,8 @@ before_install:
 - unzip vault.zip
 - export PATH=$PATH:$PWD
 - ". scripts/s3-deploy-access"
+- sudo apt-get install libhdf5-dev
+
 install:
 - cd $TEST_DIR && lein deps
 script:
