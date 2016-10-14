@@ -6,7 +6,8 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/hdf5 "0.1.0-SNAPSHOT"]
                  [thinktopic/cortex "0.2.1-SNAPSHOT"]
-                 [cheshire "5.6.3"]]
+                 [cheshire "5.6.3"]
+                 [thinktopic/compute "0.1.0-SNAPSHOT"]]
   :plugins [[s3-wagon-private "1.1.2"]]
   :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
                                 :passphrase :env
