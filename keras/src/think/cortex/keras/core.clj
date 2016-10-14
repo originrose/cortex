@@ -79,6 +79,9 @@
                           (dtype/copy! data 0 double-data 0 (m/ecount data))
                           double-data)
                         data)]
+
+    ;;https://github.com/mikera/core.matrix/issues/299
+
     ;;The simple case of using m/reshape has serious performance issues.
     (case (count ideal-shape)
       1 data
