@@ -42,12 +42,33 @@
         [stride-x stride-y] (get config :strides)]
     (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)))
 
+(defmethod model-item->desc :Activation
+  [{:keys [config]}]
+  {:type (keyword (:activation config))})
+
+(defmethod model-item->desc :Dropout
+  [{:keys [config]}]
+  (desc/dropout (- 1.0 (:p config))))
+
+(defmethod model-item->desc :Flatten
+  [_]
+  [])
+
+(defmethod model-item->desc :Dense
+  [{:keys [config]}]
+  (let [output-size (long (:output_dim config))
+        activation (keyword (get config :activation "linear"))
+        retval (first (desc/linear output-size))]
+    (if-not (= activation :linear)
+      [retval {:type activation}]
+      [retval])))
 
 (defn model->simple-description
   [model]
-  (when-not (= (:class_name model) "Sequential")
-    (throw (Exception. "Only sequential models supported")))
-  (let [[_ width height n-channels] (get-in model [:config 0 :config :batch_input_shape])
+  (let [model  (if (= (:class_name model) "Sequential")
+                 (:config model)
+                 (vec model))
+        [_ width height n-channels] (get-in model [0 :config :batch_input_shape])
         ;;move zeropadding into convolution modules
         model-vector (reduce (fn [model-vector {:keys [class_name config] :as current}]
                                (if (and (= (keyword class_name) :Convolution2D)
@@ -59,7 +80,7 @@
                                                                :config)
                                                           %)))
                                  (conj model-vector current)))
-                             [] (get-in model [:config]))]
+                             [] model)]
     ;;TODO models with a single channel input and figure out planar vs. interleaved
     (vec
      (flatten (concat (desc/input width height n-channels)
@@ -120,40 +141,45 @@
   [(:output-size desc)
    (quot (m/ecount weights-raw-data) (:output-size desc))])
 
+(defn- load-weights
+  [desc-seq weight-file]
+  (let [weight-entry (first (filter (fn [node]
+                                      (= (hdf5/get-name node)
+                                         "model_weights"))
+                                    (hdf5/get-children weight-file)))
+        _ (when-not weight-entry
+            (throw (Exception. "Weight file does not appear to contain model_weights.")))
+        node-map (hdf5-child-map weight-entry)]
+    (println node-map)
+    (mapv (fn [desc]
+            (let [weight-node (get node-map (:id desc))]
+              (if (and weight-node (seq (hdf5/get-children weight-node)))
+                (let [weight-map (hdf5-child-map weight-node)
+                      ;;Is this any more robust than just assuming first child is weights
+                      ;;and second child is bias?
+                      weight-id (keyword (str (name (:id desc)) "_W"))
+                      bias-id (keyword (str (name (:id desc)) "_b"))
+                      weight-ds (get weight-map weight-id)
+                      bias-ds (get weight-map bias-id)]
+                  (when-not (and weight-ds bias-ds)
+                    (throw (Exception.
+                            (format "Failed to find weights and bias: wanted %s, found %s"
+                                    [weight-id bias-id] (keys weight-map)))))
+                  (println "loading weights/bias for" (:id desc))
+                  (let [weight-raw-data (:data (hdf5/->clj weight-ds))
+                        weight-shape (get-weight-shape desc weight-raw-data)]
+                    (assoc desc
+                           :weights (to-core-matrix weight-raw-data weight-shape)
+                           :bias (to-core-matrix (:data (hdf5/->clj bias-ds))
+                                                 [(second weight-shape)]))))
+                desc)))
+          desc-seq)))
+
+
 (defn load-weights-for-description
   [desc-seq weights-fname]
   (resource/with-resource-context
-    (let [weight-file (hdf5/open-file weights-fname)
-          weight-entry (first (filter (fn [node]
-                                        (= (hdf5/get-name node)
-                                           "model_weights"))
-                                      (hdf5/get-children weight-file)))
-          _ (when-not weight-entry
-              (throw (Exception. "Weight file does not appear to contain model_weights.")))
-          node-map (hdf5-child-map weight-entry)]
-      (mapv (fn [desc]
-              (let [weight-node (get node-map (:id desc))]
-                (if (and weight-node (seq (hdf5/get-children weight-node)))
-                  (let [weight-map (hdf5-child-map weight-node)
-                        ;;Is this any more robust than just assuming first child is weights
-                        ;;and second child is bias?
-                        weight-id (keyword (str (name (:id desc)) "_W"))
-                        bias-id (keyword (str (name (:id desc)) "_b"))
-                        weight-ds (get weight-map weight-id)
-                        bias-ds (get weight-map bias-id)]
-                    (when-not (and weight-ds bias-ds)
-                      (throw (Exception.
-                              (format "Failed to find weights and bias: wanted %s, found %s"
-                                                 [weight-id bias-id] (keys weight-map)))))
-                    (println "loading weights/bias for" (:id desc))
-                    (let [weight-raw-data (:data (hdf5/->clj weight-ds))
-                          weight-shape (get-weight-shape desc weight-raw-data)]
-                     (assoc desc
-                            :weights (to-core-matrix weight-raw-data weight-shape)
-                            :bias (to-core-matrix (:data (hdf5/->clj bias-ds))
-                                                  [(second weight-shape)]))))
-                  desc)))
-            desc-seq))))
+    (load-weights (desc-seq (hdf5/open-file weights-fname)))))
 
 
 (defn model->description
@@ -162,3 +188,22 @@
   (-> (read-model model-json-fname)
       model->simple-description
       (load-weights-for-description weight-hdf5-fname)))
+
+
+(defn load-combined-hdf5-file
+  [fname]
+  (resource/with-resource-context
+    (let [model-file (hdf5/open-file fname)
+          file-data (hdf5-child-map model-file)
+          printer (fn [item]
+                    (clojure.pprint/pprint item)
+                    item)
+          src-desc (-> (:model_config file-data)
+                       hdf5/->clj
+                       :data
+                       first
+                       (json/parse-string keyword)
+                       model->simple-description)
+          weight-desc (load-weights src-desc model-file)]
+      weight-desc
+      )))
