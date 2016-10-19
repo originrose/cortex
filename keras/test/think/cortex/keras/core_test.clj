@@ -25,5 +25,5 @@
 
 (deftest verify-mnist
   (let [test-model (keras/load-combined-hdf5-file "models/mnist_combined.h5")
-        verification-failure (keras-verify/verify-model test-model)]
-    (is (empty? verification-failure))))
+        verification-failure (keras-verify/verify-model test-model {})]
+    (is (empty? (:cpu verification-failure)))))

@@ -10,12 +10,18 @@
             [clojure.string :as string]))
 
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* true)
+
+
 (defn read-model
   [fname]
   (json/parse-string (slurp fname) keyword))
 
+
 (defmulti model-item->desc (fn [item]
                              (keyword (:class_name item))))
+
 
 (defmethod model-item->desc :Convolution2D
   [{:keys [config]}]
@@ -34,7 +40,7 @@
        (Exception. "Please convert model to 'tf' weights.  'th' weights are not supported.")))
     (if (and activation
              (not= activation :linear))
-      [conv-desc {:type activation :id (keyword (str (:name config) "-activation"))}]
+      [(assoc conv-desc :embedded-activation true) {:type activation :id (keyword (str (:name config) "-activation")) :embedded id}]
       [conv-desc])))
 
 
@@ -46,9 +52,11 @@
      (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
      [0] #(assoc % :id (keyword (:name config))))))
 
+
 (defmethod model-item->desc :Activation
   [{:keys [config]}]
   {:type (keyword (:activation config)) :id (keyword (:name config))})
+
 
 (defmethod model-item->desc :Dropout
   [{:keys [config]}]
@@ -63,11 +71,12 @@
   [{:keys [config]}]
   (let [output-size (long (:output_dim config))
         activation (keyword (get config :activation "linear"))
+        id (keyword (:name config))
         retval (-> (first (desc/linear output-size))
-                   (assoc :id (keyword (:name config))))
+                   (assoc :id id))
         ]
     (if-not (= activation :linear)
-      [retval {:type activation :id (keyword (str (:name config) "-activation"))}]
+      [(assoc retval :embedded-activation true) {:type activation :id (keyword (str (:name config) "-activation") :embedded id)}]
       [retval])))
 
 (defn model->simple-description
@@ -141,13 +150,30 @@
           leftover idx
           stride-idx 0]
      (if (< stride-idx num-strides)
-       (let [stride (strides stride-idx)
+       (let [stride (long (strides stride-idx))
              next-item (quot leftover stride)
              next-leftover (rem leftover stride)]
          (recur (if-not (= 0 stride-idx)
                   (conj retval next-item)
                   retval) next-leftover (inc stride-idx)))
        (conj retval leftover)))))
+
+
+(defn- strides-idx->dim-indexes!
+  [^ints strides ^long idx ^ints retval]
+  (let [num-strides (alength strides)]
+   (loop [leftover idx
+          stride-idx 0]
+     (if (< stride-idx num-strides)
+       (let [stride (aget strides stride-idx)
+             next-item (quot leftover stride)
+             next-leftover (rem leftover stride)]
+         (when-not (= 0 stride-idx)
+           (aset retval (dec stride-idx) next-item))
+         (recur next-leftover (inc stride-idx)))
+       (do
+         (aset retval (dec stride-idx) (int leftover))
+         retval)))))
 
 
 (defn- strides-dim-indexes->idx
@@ -164,11 +190,34 @@
         retval))))
 
 
+(defn- strides-dim-indexes-ary->idx
+  ^long [^ints strides ^ints dim-indexes]
+  (let [n-elems (alength strides)]
+    (loop [retval 0
+           idx 0]
+      (if (< idx n-elems)
+        (recur (+ retval (* (long (if (= idx (- n-elems 1))
+                                    1
+                                    (aget strides (inc idx))))
+                            (long (aget dim-indexes idx))))
+               (inc idx))
+        retval))))
+
+
 (defn- input-idx->output-idx
   ^long [input-idx input-strides reshape-indexes output-strides]
   (let [input-dim-indexes (strides-idx->dim-indexes input-strides input-idx)
         output-dim-indexes (mapv input-dim-indexes reshape-indexes)]
     (strides-dim-indexes->idx output-strides output-dim-indexes)))
+
+
+(defn- input-idx->output-idx!
+  [input-idx ^ints input-strides ^ints reshape-indexes ^ints output-strides ^ints input-dim-indexes ^ints output-dim-indexes]
+  (let [dim-size (alength input-strides)]
+    (strides-idx->dim-indexes! input-strides input-idx input-dim-indexes)
+    (c-for [idx 0 (< idx dim-size) (inc idx)]
+           (aset output-dim-indexes idx (aget input-dim-indexes (aget reshape-indexes idx))))
+    (strides-dim-indexes-ary->idx output-strides output-dim-indexes)))
 
 
 (defn- reshape-data
@@ -178,11 +227,15 @@ produce a new array of double values in the order desired"
   (let [^doubles data (ensure-doubles data)
         n-elems (long (reduce * data-dims))
         retval (double-array (alength data))
-        input-strides (dims->strides data-dims)
-        output-dims (mapv data-dims reshape-indexes)
-        output-strides (dims->strides output-dims)]
+        input-strides (int-array (dims->strides data-dims))
+        output-dims (int-array (mapv data-dims reshape-indexes))
+        output-strides (int-array (dims->strides output-dims))
+        input-dim-indexes (int-array (count input-strides))
+        output-dim-indexes (int-array (count input-strides))
+        reshape-indexes (int-array reshape-indexes)]
+    ;;If there is a faster way of doing this I don't know it...
     (c-for [idx 0 (< idx n-elems) (inc idx)]
-           (let [output-idx (input-idx->output-idx idx input-strides reshape-indexes output-strides)]
+           (let [output-idx (input-idx->output-idx! idx input-strides reshape-indexes output-strides input-dim-indexes output-dim-indexes)]
              (aset retval output-idx (aget data idx))))
     retval))
 
@@ -307,7 +360,8 @@ produce a new array of double values in the order desired"
                          :data (to-core-matrix node-data [(m/ecount node-data)])}])))
        (sort-by first)
        (map second)
-       (remove #(= (:layer-type %) :Flatten))
+       (remove #(or (= (:layer-type %) :Flatten)
+                    (= (:layer-type %) :ZeroPadding2D)))
        vec))
 
 (def layer-type-map
@@ -324,12 +378,14 @@ produce a new array of double values in the order desired"
   [layer-types]
   (->> layer-types
        (map (fn [[cortex-type keras-type]]
-              (let [entry (layer-type-map keras-type)]
-                (when-not (and entry
-                               (if (set? entry)
-                                 (contains? entry cortex-type)
-                                 (= entry cortex-type)))
-                  [cortex-type keras-type]))))
+              ;;Not every layer has a keras output
+              (when keras-type
+               (let [entry (layer-type-map keras-type)]
+                 (when-not (and entry
+                                (if (set? entry)
+                                  (contains? entry cortex-type)
+                                  (= entry cortex-type)))
+                   [cortex-type keras-type])))))
        (remove nil?)
        seq))
 
@@ -340,16 +396,36 @@ produce a new array of double values in the order desired"
     [(:output-height built-desc) (:output-width built-desc) (:output-channels built-desc)]))
 
 
+(defn- associate-layer-outputs
+  "Output a layer output per desc associated with that desc.
+Output may be nil for a given desc."
+  [desc-seq output-seq]
+  (loop [desc (first desc-seq)
+         desc-seq (rest desc-seq)
+         output-seq output-seq
+         retval []]
+    (if desc
+      (let [[retval output-seq] (if (:embedded-activation desc)
+                                  [(conj retval [desc nil]) output-seq]
+                                  [(conj retval [desc (if (contains? desc :embedded)
+                                                        (assoc (first output-seq) :layer-type :Activation)
+                                                        (first output-seq))])
+                                   (rest output-seq)])]
+        (recur (first desc-seq) (rest desc-seq) output-seq retval))
+      retval)))
+
+
 (defn- reshape-layer-outputs
   [[built-desc {:keys [data layer-type] :as layer-output}]]
-  (if-let [keras-dims (built-desc->keras-output-dims built-desc)]
-    (do
-      (println "Reshaping output for:" (:id built-desc))
-      ;;keras: 0 height 1 width 2 n-channels
-      ;;cortex: 0 n-channels 1 height 2 width
-      (assoc layer-output
-             :data (reshape-data data keras-dims [2 0 1])))
-    layer-output))
+  (when layer-output
+   (if-let [keras-dims (built-desc->keras-output-dims built-desc)]
+     (do
+       (println "Reshaping output for:" (:id built-desc) keras-dims (count data) layer-type)
+       ;;keras: 0 height 1 width 2 n-channels
+       ;;cortex: 0 n-channels 1 height 2 width
+       (assoc layer-output
+              :data (reshape-data data keras-dims [2 0 1])))
+     layer-output)))
 
 
 (defn load-combined-hdf5-file
@@ -387,7 +463,7 @@ produce a new array of double values in the order desired"
                       (double-array (vec (repeat (reduce * input-shape) 1.0))))
           input (to-core-matrix file-data input-shape)
           layer-outputs (->> (layer-output->ordered-data (:layer_outputs file-child-map))
-                             (map vector (drop 1 built-description))
+                             (associate-layer-outputs (drop 1 built-description))
                              (mapv reshape-layer-outputs))
 
           type-map (vec (map vector
