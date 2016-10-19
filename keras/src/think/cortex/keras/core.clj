@@ -28,15 +28,13 @@
         activation (keyword (get config :activation))
         conv-desc (first (desc/convolutional-expanded kernel-x kernel-y pad-x pad-y
                                                       stride-x stride-y kernel-count))
-        conv-desc (assoc conv-desc
-                         :id id)
-        ]
+        conv-desc (assoc conv-desc :id id)]
     (when-not (= (:dim_ordering config) "tf")
       (throw
        (Exception. "Please convert model to 'tf' weights.  'th' weights are not supported.")))
     (if (and activation
              (not= activation :linear))
-      [conv-desc {:type activation}]
+      [conv-desc {:type activation :id (keyword (str (:name config) "-activation"))}]
       [conv-desc])))
 
 
@@ -44,15 +42,18 @@
   [{:keys [config]}]
   (let [[kernel-x kernel-y] (get config :pool_size)
         [stride-x stride-y] (get config :strides)]
-    (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)))
+    (update-in
+     (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
+     [0] #(assoc % :id (keyword (:name config))))))
 
 (defmethod model-item->desc :Activation
   [{:keys [config]}]
-  {:type (keyword (:activation config))})
+  {:type (keyword (:activation config)) :id (keyword (:name config))})
 
 (defmethod model-item->desc :Dropout
   [{:keys [config]}]
-  (desc/dropout (- 1.0 (:p config))))
+  (assoc (desc/dropout (- 1.0 (:p config)))
+         :id (keyword (:name config))))
 
 (defmethod model-item->desc :Flatten
   [_]
@@ -66,7 +67,7 @@
                    (assoc :id (keyword (:name config))))
         ]
     (if-not (= activation :linear)
-      [retval {:type activation}]
+      [retval {:type activation :id (keyword (str (:name config) "-activation"))}]
       [retval])))
 
 (defn model->simple-description
@@ -213,9 +214,17 @@ produce a new array of double values in the order desired"
   [(:output-size desc)
    (quot (m/ecount weights-raw-data) (:output-size desc))])
 
+
 (defn built-desc->keras-dims
   [built-desc]
-  (if (= (:type built-desc) :convolutional)))
+  (cond
+    (= (:type built-desc) :convolutional)
+    [(:kernel-height built-desc) (:kernel-width built-desc) (:input-channels built-desc) (:num-kernels built-desc)]
+    (= (:type built-desc) :linear)
+    (if (:input-channels built-desc)
+      [(:input-width built-desc) (:input-height built-desc) (:input-channels built-desc) (:output-size built-desc)]
+      [(:input-size built-desc) (:output-size built-desc)])))
+
 
 (defn- load-weights
   [desc-seq weight-file]
@@ -249,9 +258,14 @@ produce a new array of double values in the order desired"
                         weight-raw-data (:data weight-clj)
                         weight-shape (get-weight-shape desc weight-raw-data)
                         weight-double-data (if-let [keras-dims (built-desc->keras-dims built-desc)]
-                                             ;;Keras dimensions are: 3 height 2 width 1 n-channels 0 n-filters
+                                             ;;Keras dimensions are: 0 height 1 width 2 n-channels 3 n-filters
                                              ;;We want: n-filters n-channels height width
-                                             (reshape-data weight-raw-data keras-dims [0 1 3 2])
+                                             (do
+                                               (println "Reshaping weights for" (:id desc))
+                                               (if (= 4 (count keras-dims))
+                                                 (reshape-data weight-raw-data keras-dims [3 2 0 1])
+                                                 ;;Simple transpose for linear layers as keras stores data in column major format.
+                                                 (reshape-data weight-raw-data keras-dims [1 0])))
                                              (ensure-doubles weight-raw-data))]
                     (assoc desc
                            :weights (to-core-matrix weight-double-data weight-shape)
@@ -320,6 +334,24 @@ produce a new array of double values in the order desired"
        seq))
 
 
+(defn built-desc->keras-output-dims
+  [built-desc]
+  (when (every? #(contains? built-desc %) [:output-channels :output-height :output-width])
+    [(:output-height built-desc) (:output-width built-desc) (:output-channels built-desc)]))
+
+
+(defn- reshape-layer-outputs
+  [[built-desc {:keys [data layer-type] :as layer-output}]]
+  (if-let [keras-dims (built-desc->keras-output-dims built-desc)]
+    (do
+      (println "Reshaping output for:" (:id built-desc))
+      ;;keras: 0 height 1 width 2 n-channels
+      ;;cortex: 0 n-channels 1 height 2 width
+      (assoc layer-output
+             :data (reshape-data data keras-dims [2 0 1])))
+    layer-output))
+
+
 (defn load-combined-hdf5-file
   [fname]
   (resource/with-resource-context
@@ -334,10 +366,13 @@ produce a new array of double values in the order desired"
                        first
                        (json/parse-string keyword)
                        model->simple-description)
+          ;;We build the description in order to propagate information down the network.
+          ;;We then use this information to do weight and output reordering
+          built-description (desc/build-full-network-description src-desc)
 
           weight-desc (load-weights (mapv vector
                                           src-desc
-                                          (desc/build-full-network-description src-desc))
+                                          built-description)
                                     model-file)
           input-desc (first weight-desc)
           input-shape (if (:output-width input-desc)
@@ -351,7 +386,10 @@ produce a new array of double values in the order desired"
                         (:data (hdf5/->clj input-data)))
                       (double-array (vec (repeat (reduce * input-shape) 1.0))))
           input (to-core-matrix file-data input-shape)
-          layer-outputs (layer-output->ordered-data (:layer_outputs file-child-map))
+          layer-outputs (->> (layer-output->ordered-data (:layer_outputs file-child-map))
+                             (map vector (drop 1 built-description))
+                             (mapv reshape-layer-outputs))
+
           type-map (vec (map vector
                              (map :type (drop 1 weight-desc))
                              (map :layer-type layer-outputs)))]
