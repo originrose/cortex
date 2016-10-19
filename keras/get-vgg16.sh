@@ -1,7 +1,3 @@
 #!/bin/bash
-mkdir -p models/vgg16
-cd models/vgg16
-wget https://s3-us-west-2.amazonaws.com/thinktopic.cortex/models/keras/vgg16/layer_output.tgz
-wget https://s3-us-west-2.amazonaws.com/thinktopic.cortex/models/keras/vgg16/weights.hd5
-wget https://s3-us-west-2.amazonaws.com/thinktopic.cortex/models/keras/vgg16/model.json
-tar -xvzf layer_output.tgz
+mkdir -p models
+wget https://s3-us-west-2.amazonaws.com/thinktopic.cortex/models/keras/decomposed_vgg16_model.h5 -O models/vgg16_combined.h5
