@@ -1,16 +1,20 @@
 language: clojure
 requires: sudo
+services:
+  - docker
+
 env:
-  global: 
+  global:
   matrix:
   - TEST_DIR=cortex
   - TEST_DIR=datasets
   - TEST_DIR=compute
   - TEST_DIR=keras
+
 branches:
   only:
   - master
-  
+
 jdk: oraclejdk8
 
 before_install:
