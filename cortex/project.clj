@@ -12,8 +12,7 @@
                  [thinktopic/caffe-protobuf "0.1.0"]
                  [net.mikera/clojure-utils "0.7.0"]
                  [core.blas "1.0.2"]
-                 [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
-                 [rhizome "0.2.5"]]
+                 [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]
 
   :java-source-paths ["java"]
 

@@ -1,7 +1,6 @@
 (ns cortex.tree
   (:require [clojure.core.matrix :as mat]
-            [clojure.zip :as zip]
-            [rhizome.viz :as viz]))
+            [clojure.zip :as zip]))
 
 (defn shuffle-with-seed
   "Return a random permutation of coll with a seed."
@@ -167,16 +166,19 @@
                        :split-fn split-fn)]
     (decision-tree* X Y options)))
 
-(defn view-tree
-  [t]
-  (let [node-label
-        (fn [n]
-          {:label
-           (if-let [split (:split n)]
-             (format "X[%d] <= %.2f" (:feature-index n) split)
-             (format "Y = %s" (:target n)))})]
-    (viz/view-graph (node-seq t) :children
-                    :node->descriptor node-label)))
+;;This is fine for dev but it makes the build fail because rhizome must do initialization
+;;of X11 based stuff globally.
+(comment
+ (defn view-tree
+   [t]
+   (let [node-label
+         (fn [n]
+           {:label
+            (if-let [split (:split n)]
+              (format "X[%d] <= %.2f" (:feature-index n) split)
+              (format "Y = %s" (:target n)))})]
+     (viz/view-graph (node-seq t) :children
+                     :node->descriptor node-label))))
 
 (defn tree-search
   [node sample]

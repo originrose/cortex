@@ -6,8 +6,7 @@
     [clojure.core.matrix.random :as randm]
     #?(:cljs [thi.ng.ndarray.core :as nd])
     [clojure.zip :as zip]
-    [cortex.tree :as tree]
-    [rhizome.viz :as viz]))
+    [cortex.tree :as tree]))
 
 (def IRISES (read-string (slurp "resources/iris.edn")))
 (def X (mat/matrix (map drop-last IRISES)))
