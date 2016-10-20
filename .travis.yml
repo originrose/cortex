@@ -18,5 +18,7 @@ before_install:
 - export PATH=$PATH:$PWD
 - mkdir -p ~/.lein && cp profiles.clj ~/.lein/profiles.clj
 
+install:
+
 script:
 - cd $TEST_DIR && ./build-and-deploy.sh
