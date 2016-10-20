@@ -8,7 +8,6 @@ env:
   - TEST_DIR=cortex
   - TEST_DIR=datasets
   - TEST_DIR=compute
-  - TEST_DIR=keras
   
 
 branches:
@@ -21,7 +20,6 @@ before_install:
 - unzip vault.zip
 - export PATH=$PATH:$PWD
 - ". scripts/s3-deploy-access"
-- sudo apt-get install libhdf5-dev
 
 install:
 - cd $TEST_DIR && lein deps
