@@ -10,7 +10,9 @@ env:
 branches:
   only:
   - master
+  
 jdk: oraclejdk8
+
 before_install:
 - openssl aes-256-cbc -K $encrypted_4e2073fd950b_key -iv $encrypted_4e2073fd950b_iv -in profiles.clj.enc -out profiles.clj -d
 - wget https://releases.hashicorp.com/vault/0.6.1/vault_0.6.1_linux_amd64.zip -O vault.zip
@@ -19,8 +21,10 @@ before_install:
 - mkdir -p ~/.lein && cp profiles.clj ~/.lein/profiles.clj
 
 install:
+  - echo "install"
 
 before_script:
+  - echo "before_script"
 
 script:
 - cd $TEST_DIR && ./build-and-deploy.sh
