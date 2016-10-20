@@ -6,6 +6,7 @@ env:
   - TEST_DIR=cortex
   - TEST_DIR=datasets
   - TEST_DIR=compute
+  - TEST_DIR=keras
 branches:
   only:
   - master
@@ -17,9 +18,5 @@ before_install:
 - export PATH=$PATH:$PWD
 - mkdir -p ~/.lein && cp profiles.clj ~/.lein/profiles.clj
 
-install:
-- cd $TEST_DIR && lein deps
 script:
-- lein test
-after_success:
-- lein deploy clojars
+- cd $TEST_DIR && ./build-and-deploy.sh
