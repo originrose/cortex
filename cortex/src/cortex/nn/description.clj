@@ -393,3 +393,52 @@ This is for cudnn compatibility.")))
    (flatten
     (concat (layer->input network)
             (layer->description network)))))
+
+;;Verify a description.  If it passes, return nothing.  If it fails, return
+;;{:verification-fail-reasons [...] :description desc}
+(defmulti verify-description (fn [desc] (:type desc)))
+
+(defn verify-weight-and-bias-shape
+  [{:keys [weights bias] :as desc} expected-w-n-rows expected-w-n-cols]
+  (when (and weights bias)
+   (let [[w-n-rows w-n-cols] (m/shape weights)
+         [b-n-rows] (m/shape bias)]
+     (when-not (and (= expected-w-n-rows w-n-rows)
+                    (= expected-w-n-cols w-n-cols)
+                    (= b-n-rows expected-w-n-rows))
+       {:verification-fail-reasons
+        [(format "weight-shape %s does not match expected shape %s
+bias shape %s does not match expected shape %s"
+                 [w-n-rows w-n-cols]
+                 [expected-w-n-rows expected-w-n-cols]
+                 [b-n-rows] [expected-w-n-rows])]
+        :desc desc}))))
+
+(defmethod verify-description :convolutional
+  [{:keys [weights bias input-channels kernel-width kernel-height
+           output-width output-height output-channels
+           input-width input-height] :as desc}]
+  (let [weight-n-rows (long output-channels)
+        weight-n-cols (* (long input-channels) (long kernel-width) (long kernel-height))]
+    (verify-weight-and-bias-shape desc weight-n-rows weight-n-cols)))
+
+(defmethod verify-description :linear
+  [desc]
+  (let [weight-n-rows (:output-size desc)
+        weight-n-cols (:input-size desc)]
+    (verify-weight-and-bias-shape desc weight-n-rows weight-n-cols)))
+
+(defmethod verify-description :default
+  [_] nil)
+
+
+(defn build-and-verify-trained-network
+  "Build the network, ensure the weights and biases are in place and of the
+appropriate sizes.  Returns any descriptions that fail verification
+along with failure reasons."
+  [desc]
+  (let [built-desc (build-full-network-description desc)]
+    (->> (build-full-network-description desc)
+         flatten
+         (map verify-description)
+         (remove nil?))))
