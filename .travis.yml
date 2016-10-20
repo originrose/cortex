@@ -1,29 +1,25 @@
 language: clojure
 requires: sudo
 env:
-  global:
-  - secure: OwFFz14wvwY3IOeMrz14bHxTS1phbMQgHR5SZ+3Nb35SnsuqTulUylwk0LjSZGU/UxpGHWif/2y4JL5ySWwHT967ISUa9IkiEBItX4WB1NXz6bJmhMwbdyYnDqHvOH4FtOJ3LbpV5AlNez6tOpdQUTmDH9oUpr7fdYN/RcJY4MonyJn9BvaV+AFuMGWaPmBLZDJfSTSD0BCYkWg9qOOQDKpBcXznn0V8XB0HR2GrhBCZH5eAwfT3y6p0aSSNP+epk2nH+wESagQrI256yUbzvfeE4QmKKzqb7nuf2+w3fHLdsUnPjreDdUaEDAVAIE7/RWcpQyTDRSe5Hlfay6eIjTsauH11AxhDSZjAMgFkS+Q2YGIZajkO2YT/UJJa33mDhAwuJ1AS175ejot5m0JarwY0eM0IAAirFxIA5HPZuud7CILWWrR6YGB4Y7Fh/1cHkFxPmDXiHaYWTfaD5ZAUelnJyh+lBco4PVuH1lQHgW1Vc0kT3sABhaHucW67JFuzUBajQ5r6QvIWXnl6JnFKmbB3/w6kTooPTV4pLN2banKGe9N6AfWBbmjxufZiXWgUla6U7zHvPjc+QGKp3U1tJUMUMDd0blvg0FcDncHQIQh99OA/UnQtY0zSrwVjdLnFQ4KMISCH+pxv4A/oFlt7adybrUJpJKqoyKf+yitilr8=
-  - secure: PpcMooqfLUsmvi7X+/kIeuUzuAFyfDmeCFQvToHYp5QmEivtMdewI5zEQGSgCA2lkhy3tKtzqySUvfzlKzgrqapZYnfaLkIHopk+HM1jk3j+O0Ofs8A5BL3OSoNXpTG4qfyWGf4TTjzxuN6R86bNFpUZLmqTAE8cWSVctusCG438ibzeSPPTWgSbAWBySPjmfix84AeIXAUPS5Wun25x4wdkvp7p0yopN3vRzl4jqTPDe1ZRCSuoqmVlt5Kmi+Vk0QrJV+6hNW2ZiKXINf5WJxKCuxrLbgvdgS9VIBp/M1ddP0I7PsxSMt++4Y4cAd6GITCkefjXAfB03QwrUYcsZX1sJcE9DSH84WAlZYIwDFK+vdnta4TLsK9tMg2gFFVukQZ+OQ26TqFFBaFyXPhIaCy3jlXbNpWy3GFBJq1GnJb+uOWvMUJhxxEmuVGmJLEB8CisAI0Y1vh2Ipem64kjYUARhtBuf1vBGsiYzp9gL/jKDgmdC444Ant2VvAbA+ePuG3DJwX89yebfbcc/uPaRDOrpG03Ml/Ru32U69/j2I8kOe1o+QYIgWDzAgesM0yXOOgbM7nsFAfEn0uqPYwqKkiF+k5Uy3R1IPTI6aAJlj0Du7OO1ia9SALwX/pdwNAALsEJxUILbDnx6MCsFKH1VDXUDyOd6zVb/AeKTQEpcTk=
+  global: 
   matrix:
   - TEST_DIR=cortex
   - TEST_DIR=datasets
   - TEST_DIR=compute
-  
-
 branches:
   only:
   - master
-    
 jdk: oraclejdk8
 before_install:
+- openssl aes-256-cbc -K $encrypted_4e2073fd950b_key -iv $encrypted_4e2073fd950b_iv -in profiles.clj.enc -out profiles.clj -d
 - wget https://releases.hashicorp.com/vault/0.6.1/vault_0.6.1_linux_amd64.zip -O vault.zip
 - unzip vault.zip
 - export PATH=$PATH:$PWD
-- ". scripts/s3-deploy-access"
+- mkdir -p ~/.lein && cp profiles.clj ~/.lein/profiles.clj
 
 install:
 - cd $TEST_DIR && lein deps
 script:
 - lein test
 after_success:
-- lein deploy
+- lein deploy clojars

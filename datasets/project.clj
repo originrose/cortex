@@ -8,14 +8,4 @@
                  [net.mikera/core.matrix "0.50.0"]
                  [thinktopic/resource "1.1.0"]
                  [com.indeed/util-mmap "1.0.20"]
-                 [com.github.ben-manes.caffeine/caffeine "2.3.1"]]
-  :plugins [[s3-wagon-private "1.1.2"]]
-  :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
-                                :passphrase :env
-                                :username :env
-                                :releases false}
-                  "releases"  {:url "s3p://thinktopic.jars/releases/"
-                               :passphrase :env
-                               :username :env
-                               :snapshots false
-                               :sign-releases false}})
+                 [com.github.ben-manes.caffeine/caffeine "2.3.1"]])
