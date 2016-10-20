@@ -20,5 +20,7 @@ before_install:
 
 install:
 
+before_script:
+
 script:
 - cd $TEST_DIR && ./build-and-deploy.sh
