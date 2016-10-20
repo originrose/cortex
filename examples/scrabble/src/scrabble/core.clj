@@ -25,20 +25,21 @@
 
 ;; coders
 
-(defn num->bit-array [input & {:keys [bits]
-                               :or {bits 4}}]
+(defn num->bit-array
   "Takes a number, returns a vector of floats representing the number in
   binary. Optionally specify the number of bits for padding."
- (->> (clojure.pprint/cl-format nil (str "~" bits ",'0',B") input)
-      (mapv #(new Double (str %)))))
+  [input & {:keys [bits] :or {bits 4}}]
+  (->> (clojure.pprint/cl-format nil (str "~" bits ",'0',B") input)
+       (mapv #(new Double (str %)))))
 
-(defn char->bit-array [character]
+(defn char->bit-array
   "Takes a character, returns and bit vector with a 1.0 in the nth position
   where n is the offset from the character 'a'."
+  [character]
   (let [offset (- (int character) (int \a))
         begin (take offset (repeatedly #(new Double 0.0)))
         end (take (- 26 offset 1) (repeatedly #(new Double 0.0)))]
-  (into [] (concat begin [1.0] end))))
+    (into [] (concat begin [1.0] end))))
 
 ;; decoder
 
@@ -48,7 +49,9 @@
        clojure.string/join
        (Integer/parseInt 2)))
 
+
 (def training-data (into [] (for [k (keys scrabble-values)] (char->bit-array k))))
+
 ;; convert the "labels" of the scrabble pieces (scores) into floating-point bit-arrays
 (def training-labels (into [] (for [v (vals scrabble-values)] (num->bit-array v))))
 
@@ -59,7 +62,7 @@
 (def input-width (last (m/shape training-data)))
 (def output-width (last (m/shape training-labels)))
 (def hidden-layer-size 4)
-(def n-epochs 1) ;;epoch is a pass through the dataset
+(def n-epochs 100) ;;epoch is a pass through the dataset
 (def learning-rate 0.1)
 (def momentum 0.1)
 (def batch-size 1) ;;For this example a small batch size is ideal
@@ -80,9 +83,6 @@
   )
 
 
-(defn test-train-step
-  []
-  (net/train-step (first training-data) (first training-labels) (create-network) loss-fn))
 
 (defn train
   []
@@ -100,10 +100,12 @@
 
 (defn evaluate
   [network]
- (classify network \j)
- (classify network \k)
- (net/evaluate network training-data training-labels)
-  )
+  (do
+    (classify network \j)
+    (classify network \k)
+    (classify network \a)
+    (classify network \q)
+    (net/evaluate network training-data training-labels)))
 
 
 (defn train-and-evaluate

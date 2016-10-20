@@ -3,9 +3,11 @@
 
 (def epsilon 1e-6)
 
-(defmacro very-near?
-  [x y]
-  `(< (Math/abs (- ~x ~y)) epsilon))
+(defn very-near-epsilon?
+  [epsilon x y]
+  (< (Math/abs (- x y)) epsilon))
+  
+(def very-near? (partial very-near-epsilon? epsilon))
 
 (defn matrix-col-totals
   [data]
