@@ -5,7 +5,6 @@
             [cortex.nn.description :as desc]
             [cortex.nn.protocols :as cp]
             [think.compute.nn.backend :as backend]
-            [think.compute.nn.cuda-backend :as cuda-backend]
             [clojure.core.matrix :as m]
             [think.compute.nn.description :as compute-desc]
             [think.resource.core :as resource]
@@ -38,14 +37,15 @@
    (when-let [verification-failure (seq (desc/build-and-verify-trained-network full-cortex-desc))]
      (throw (Exception. (format "Description verification failed:\n %s"
                                 (with-out-str (clojure.pprint/pprint verification-failure))))))
+   (comment
+    :gpu
+    (when gpu
+      (resource/with-resource-context
+        (verify-model-on-backend (cuda-backend/create-backend :double) full-cortex-desc input layer-output-vec))))
    {:cpu
     (when cpu
       (resource/with-resource-context
         (verify-model-on-backend (cpu-back/create-cpu-backend) full-cortex-desc input layer-output-vec)))
-    :gpu
-    (when gpu
-      (resource/with-resource-context
-        (verify-model-on-backend (cuda-backend/create-backend :double) full-cortex-desc input layer-output-vec)))
     })
   ([{:keys [model input layer-outputs]} opts]
    (verify-model model input layer-outputs opts)))
