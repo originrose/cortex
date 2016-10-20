@@ -48,7 +48,7 @@ Please see the various unit tests and examples for training a model.  Specifical
 
  * Better training - currently there are lots of things that don't train as well as we would like.  This could be because we are using Adam exclusively instead of sgd, it could be because of bugs in the code or it could be because we need different weight initialization.  In any case, building larger nets that train better is of course of critical importance.
 
- * Speaking of larger nets, multiple GPU support and multiple machine support (which probable would be helped by the above graph based description layer.
+ * Speaking of larger nets, multiple GPU support and multiple machine support (which could be helped by the above graph based description layer).
 
  * Profiling GPU system to make sure we are using as much GPU as possible in the single-gpu case.
 
