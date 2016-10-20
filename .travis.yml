@@ -6,9 +6,9 @@ services:
 env:
   global:
   matrix:
-  - TEST_DIR=cortex
-  - TEST_DIR=datasets
-  - TEST_DIR=compute
+#  - TEST_DIR=cortex
+#  - TEST_DIR=datasets
+#  - TEST_DIR=compute
   - TEST_DIR=keras
 
 branches:

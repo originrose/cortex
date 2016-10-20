@@ -11,4 +11,4 @@ RUN apt-get install -y wget zip g++ && \
     cp vault lein /usr/local/bin && \
     mkdir /root/.lein
 
-ADD ../profiles.clj /root/.lein/profiles.clj
+ADD profiles.clj /root/.lein/profiles.clj
