@@ -107,12 +107,14 @@
          loss (opt/mse-loss)
          optimizer (opt/adadelta)
          batch-size 1
-         dataset (ds/->InMemoryDataset :corn [CORN-DATA CORN-LABELS]
-                                       [{:label :data :shape 2}
-                                        {:label :labels :shape 1}]
-                                       (range (count CORN-DATA)) (range (count CORN-DATA)) nil)
+         corn-indexes (range (count CORN-DATA))
+         dataset (ds/->InMemoryDataset [CORN-DATA CORN-LABELS] {:data {:shape 2 :index 0}
+                                                                :labels {:shape 1 :index 1}}
+                                       {:training corn-indexes
+                                        :holdout corn-indexes})
          net (cp/setup net batch-size)
-         net (train/train net optimizer dataset [:data] [[:labels loss]] n-epochs)
+         net (train/train net optimizer dataset [:data] [[:labels loss]] n-epochs
+                          :epoch-train-filter nil)
          ;;First here because we want the results that correspond to the network's *first* output
          results (first (train/run net dataset [:data]))
          mse (opt/evaluate-mse results CORN-LABELS)]
