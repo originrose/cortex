@@ -28,19 +28,25 @@
   "Returns array with 1. values assigned to false positives."
   [y y_hat]
   {:pre [(= (m/shape y) (m/shape y_hat))]}
-  (m/emul (wrongs y y_hat) y_hat))
+  (m/eq 1 (m/emap - y_hat y)))
 
 (defn false-negatives
   "Returns array with 1. values assigned to false negatives."
   [y y_hat]
   {:pre [(= (m/shape y) (m/shape y_hat))]}
-  (m/emul (wrongs y y_hat) (m/emap (partial m/ne 1.) y)))
+  (m/eq 1 (m/emap - y y_hat)))
 
 (defn true-positives
   "Returns array with 1. values assigned to true positives."
   [y y_hat]
   {:pre [(= (m/shape y) (m/shape y_hat))]}
   (m/emul y y_hat))
+
+(defn true-negatives
+  "Returns array with 1. values assigned to true negatives."
+  [y y_hat]
+  {:pre [(= (m/shape y) (m/shape y_hat))]}
+  (m/eq 0 (m/emap + y y_hat)))
 
 (defn recall
   "Returns recall for a binary classifier, a measure of false negative rate"
