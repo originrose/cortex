@@ -14,9 +14,9 @@
                                     dataset-label-name :labels
                                     batch-type :holdout}}]
   (let [run-results (nth (train/run net dataset input-labels) output-index)
-        answer-seq (first (ds/get-data-sequence-from-dataset
-                           dataset dataset-label-name
-                           batch-type (layers/batch-size net)))]
+        answer-seq (ds/get-data-sequence-from-dataset
+                    dataset dataset-label-name
+                    batch-type (layers/batch-size net))]
     (double (opt/evaluate-softmax run-results answer-seq))))
 
 

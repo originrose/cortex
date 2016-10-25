@@ -28,13 +28,12 @@
 (defn mnist-eval-dataset
   [image-count]
   (let [indexes (num-random-indexes (count @mnist/training-data) image-count)]
-   (ds/->InMemoryDataset :mnist [(mapv re-bias-mnist @mnist/training-data)
-                                 @mnist/training-labels]
-                         [{:label :data :shape (ds/image-shape 1 28 28)}
-                          {:label :labels :shape 10}]
-                         indexes
-                         indexes
-                         nil)))
+   (ds/->InMemoryDataset  [(mapv re-bias-mnist @mnist/training-data)
+                           @mnist/training-labels]
+                          {:data {:shape (ds/create-image-shape 1 28 28) :index 0}
+                           :labels {:shape 10 :index 1}}
+                          {:training indexes :cross-validation indexes
+                           :holdout indexes :all indexes})))
 
 
 (defn caffe-mnist
@@ -45,5 +44,5 @@
         batch-size 10
         net (desc/build-and-create-network caffe-desc backend batch-size)
         dataset (mnist-eval-dataset image-count)
-        score (nn-eval/evaluate-softmax net dataset [:data] :softmax-index 0 :label-index 1)]
+        score (nn-eval/evaluate-softmax net dataset [:data] :batch-type :holdout :dataset-label-name :labels)]
     (is (> score 0.98))))
