@@ -1,8 +1,6 @@
 (ns cortex.metrics
   (:require [clojure.core.matrix :as m]))
 
-(m/set-current-implementation :vectorz)
-
 (defn wrongs
   "Given `y` array of ground truth labels and `y_hat` classifier predictions,
   returns array with 1.0 values where `y` does not equal `y_hat`."
