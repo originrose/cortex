@@ -101,22 +101,26 @@
 (defn test-corn
   [backend]
   ;;Don't print out per-epoch results.
-  (with-bindings {#'train/*train-epoch-reporter* nil}
-   (let [net (layers/linear backend 2 1)
-         n-epochs 5000
-         loss (opt/mse-loss)
-         optimizer (opt/adadelta)
-         batch-size 1
-         dataset (ds/->InMemoryDataset :corn [CORN-DATA CORN-LABELS]
-                                       [{:label :data :shape 2}
-                                        {:label :labels :shape 1}]
-                                       (range (count CORN-DATA)) (range (count CORN-DATA)) nil)
-         net (cp/setup net batch-size)
-         net (train/train net optimizer dataset [:data] [[:labels loss]] n-epochs)
-         ;;First here because we want the results that correspond to the network's *first* output
-         results (first (train/run net dataset [:data]))
-         mse (opt/evaluate-mse results CORN-LABELS)]
-     (is (< mse 25)))))
+  (let [net (layers/linear backend 2 1)
+        n-epochs 5000
+        loss (opt/mse-loss)
+        optimizer (opt/adadelta)
+        batch-size 1
+        corn-indexes (range (count CORN-DATA))
+        dataset (ds/create-in-memory-dataset {:data {:data CORN-DATA
+                                                     :shape 2}
+                                              :labels {:data CORN-LABELS
+                                                       :shape 1}}
+                                             (ds/create-index-sets (count CORN-DATA)
+                                                                   :training-split 1.0
+                                                                   :randomize? false))
+        net (cp/setup net batch-size)
+        net (train/train net optimizer dataset [:data] [[:labels loss]] n-epochs
+                         :epoch-train-filter nil)
+        ;;First here because we want the results that correspond to the network's *first* output
+        results (first (train/run net dataset [:data]))
+        mse (opt/evaluate-mse results CORN-LABELS)]
+    (is (< mse 25))))
 
 
 (defn layer->description

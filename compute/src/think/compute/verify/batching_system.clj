@@ -19,18 +19,18 @@
 
 (defrecord GenerativeDataset [^long input-size ^long output-size ^long num-indexes]
   ds/PDataset
-  (dataset-name [ds] :generative)
-  (shapes [ds] [{:label :input :shape input-size}
-                {:label :output :shape output-size}])
-  (get-elements [ds index-seq output-index-seq]
-    (mapv (fn [output-idx]
-            (case (long output-idx)
-              0 (generate-buffer-seq input-size index-seq)
-              1 (generate-buffer-seq output-size index-seq)))
-          output-index-seq))
-  (has-indexes? [ds index-type] true)
-  (get-indexes [ds index-type]
-    (vec (range num-indexes))))
+  (shapes [ds] {:input input-size
+                :output output-size})
+  (get-batches [ds batch-size batch-type elem-names]
+    (let [indexes (vec (range num-indexes))
+          batches (partition batch-size indexes)]
+      (map (fn [batch-indexes]
+             (mapv (fn [data-name]
+                     (condp = data-name
+                       :input (generate-buffer-seq input-size batch-indexes)
+                       :output (generate-buffer-seq output-size batch-indexes)))
+                   elem-names))
+           batches))))
 
 
 (defn copy-device-buffer-to-output-ary
@@ -54,10 +54,9 @@
         input-record (double-array (* input-size num-elems))
         output-record (double-array (* output-size num-elems))
         system (-> (batching-system/create-dataset-batching-system [:input] [:output] batch-size dataset driver stream datatype)
-                   (batching-system/setup true)
-                   (batching-system/setup-epoch :testing))]
-    (doseq [batch-idx (range (batching-system/get-num-batches system))]
-      (let [{:keys [batching-system input-buffers output-buffers]} (batching-system/get-batch-buffers system batch-idx)]
+                   (batching-system/setup))]
+    (doseq [[batch-idx batch-data] (map-indexed vector (batching-system/get-batches system :training true))]
+      (let [{:keys [input-buffers output-buffers]} batch-data]
         (copy-device-buffer-to-output-ary (input-buffers 0) batch-idx input-record driver stream)
         (copy-device-buffer-to-output-ary (output-buffers 0) batch-idx output-record driver stream)))
 

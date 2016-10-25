@@ -19,22 +19,10 @@
            (aset retval idx (+ (aget input-data idx) 0.5)))
     retval))
 
-(defn num-random-indexes
-  [num-items num-indexes]
-  (vec (if num-indexes
-         (take num-indexes (range num-items))
-         (range num-items))))
 
 (defn mnist-eval-dataset
   [image-count]
-  (let [indexes (num-random-indexes (count @mnist/training-data) image-count)]
-   (ds/->InMemoryDataset :mnist [(mapv re-bias-mnist @mnist/training-data)
-                                 @mnist/training-labels]
-                         [{:label :data :shape (ds/image-shape 1 28 28)}
-                          {:label :labels :shape 10}]
-                         indexes
-                         indexes
-                         nil)))
+  (ds/take-n image-count (mnist/mnist-dataset :data-transform-function re-bias-mnist)))
 
 
 (defn caffe-mnist
@@ -45,5 +33,5 @@
         batch-size 10
         net (desc/build-and-create-network caffe-desc backend batch-size)
         dataset (mnist-eval-dataset image-count)
-        score (nn-eval/evaluate-softmax net dataset [:data] :softmax-index 0 :label-index 1)]
+        score (nn-eval/evaluate-softmax net dataset [:data] :batch-type :holdout :dataset-label-name :labels)]
     (is (> score 0.98))))
