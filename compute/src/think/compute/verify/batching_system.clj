@@ -19,8 +19,8 @@
 
 (defrecord GenerativeDataset [^long input-size ^long output-size ^long num-indexes]
   ds/PDataset
-  (shapes [ds] {:input {:shape input-size :index 0}
-                :output {:shape output-size :index 1}})
+  (shapes [ds] {:input input-size
+                :output output-size})
   (get-batches [ds batch-size batch-type elem-names]
     (let [indexes (vec (range num-indexes))
           batches (partition batch-size indexes)]

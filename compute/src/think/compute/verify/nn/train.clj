@@ -107,10 +107,13 @@
         optimizer (opt/adadelta)
         batch-size 1
         corn-indexes (range (count CORN-DATA))
-        dataset (ds/->InMemoryDataset [CORN-DATA CORN-LABELS] {:data {:shape 2 :index 0}
-                                                               :labels {:shape 1 :index 1}}
-                                      {:training corn-indexes
-                                       :holdout corn-indexes})
+        dataset (ds/create-in-memory-dataset {:data {:data CORN-DATA
+                                                     :shape 2}
+                                              :labels {:data CORN-LABELS
+                                                       :shape 1}}
+                                             (ds/create-index-sets (count CORN-DATA)
+                                                                   :training-split 1.0
+                                                                   :randomize? false))
         net (cp/setup net batch-size)
         net (train/train net optimizer dataset [:data] [[:labels loss]] n-epochs
                          :epoch-train-filter nil)

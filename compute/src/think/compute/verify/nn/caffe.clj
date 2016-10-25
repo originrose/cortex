@@ -19,21 +19,10 @@
            (aset retval idx (+ (aget input-data idx) 0.5)))
     retval))
 
-(defn num-random-indexes
-  [num-items num-indexes]
-  (vec (if num-indexes
-         (take num-indexes (range num-items))
-         (range num-items))))
 
 (defn mnist-eval-dataset
   [image-count]
-  (let [indexes (num-random-indexes (count @mnist/training-data) image-count)]
-   (ds/->InMemoryDataset  [(mapv re-bias-mnist @mnist/training-data)
-                           @mnist/training-labels]
-                          {:data {:shape (ds/create-image-shape 1 28 28) :index 0}
-                           :labels {:shape 10 :index 1}}
-                          {:training indexes :cross-validation indexes
-                           :holdout indexes :all indexes})))
+  (ds/take-n image-count (mnist/mnist-dataset :data-transform-function re-bias-mnist)))
 
 
 (defn caffe-mnist

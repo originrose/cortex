@@ -15,18 +15,23 @@
 
 
 (defn mnist-dataset
-  []
-  (let [data (vec (concat @training-data @test-data))
+  [& {:keys [data-transform-function]
+      :or {data-transform-function identity}}]
+  (let [data (mapv data-transform-function (concat @training-data @test-data))
         labels (vec (concat @training-labels @test-labels))
         num-training-data (count @training-data)
-        training-indexes (range num-training-data)
-        test-indexes (range num-training-data (+ num-training-data (count @test-data)))]
-    (ds/->InMemoryDataset [data labels]
-                          (into {} [(ds/->image-shape :data 1 28 28 0)
-                                    (ds/->simple-shape :labels 10 1)])
-                         {:training training-indexes :cross-validation test-indexes
-                          :holdout test-indexes :all (concat training-indexes test-indexes)})))
-
+        total-data (+ num-training-data (count @test-data))
+        training-split (double (/ num-training-data
+                                  total-data))
+        cv-split (- 1.0 training-split)]
+    (ds/create-in-memory-dataset {:data {:data data
+                                         :shape (ds/create-image-shape 1 28 28)}
+                                  :labels {:data labels
+                                           :shape 10}}
+                                 (ds/create-index-sets total-data
+                                                       :training-split training-split
+                                                       :cv-split cv-split
+                                                       :randimize? false))))
 
 (def basic-network-description
   [(desc/input 28 28 1)
@@ -52,7 +57,7 @@
   (let [batch-size 10
         epoch-count 4
         network (compute-desc/build-and-create-network network-description backend batch-size)
-        dataset (-> (mnist-dataset)
-                    (ds/take-n max-sample-count))]
+        dataset (->> (mnist-dataset)
+                     (ds/take-n max-sample-count))]
     [(train/train network (opt/adam) dataset [:data] output-labels-and-loss epoch-count)
      dataset]))

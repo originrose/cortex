@@ -21,37 +21,124 @@
    :width width})
 
 
+(defn shape-ecount
+  [ds-shape]
+  (if (number? ds-shape)
+    (long ds-shape)
+    (let [{:keys [^long channel-count ^long width ^long height]} ds-shape]
+      (* channel-count width height))))
+
+
+(defn create-split-ranges
+  "Given a training split and a cv-split create
+the training,cv,and holdout splits."
+  [training-split cv-split]
+  (let [training-split (double (max 0.0 (min 1.0 (or training-split 1.0))))
+        cv-split-max (- 1.0 training-split)
+        cv-split (min cv-split-max (or cv-split (- 1.0 training-split)))
+        holdout-split-max (- 1.0 training-split cv-split)
+        holdout-split (if (> (Math/abs holdout-split-max) 0.001)
+                        holdout-split-max
+                        0.0)
+        training-range [0.0 training-split]
+        cv-range (if (> cv-split 0.0)
+                   [training-split (+ training-split cv-split)]
+                   training-range)
+        holdout-range (if (> holdout-split 0.0)
+                        [(second cv-range) 1.0]
+                        cv-range)]
+    {:training-range training-range
+     :cross-validation-range cv-range
+     :holdout-range holdout-range}))
+
+(defn rel-range->absolute-range
+  [[rel-start rel-end :as range] ^long item-count]
+  [(long (Math/round (* item-count (double rel-start))))
+   (long (Math/round (* item-count (double rel-end))))])
+
+
+(defn takev-range
+  [[^long abs-start ^long abs-end] coll]
+  (->> (drop abs-start coll)
+       (take (- abs-end abs-start))
+       vec))
+
+(defn takev-rel-range
+  [item-range item-count coll]
+  (takev-range (rel-range->absolute-range item-range item-count) coll))
+
+
+(defn create-index-sets
+  "Create a training/testing split of indexes.  Returns a map
+with three keys, :training, :cross-validation, :holdout where the testing
+indexes are withheld from the training set.  The running indexes
+are the same as the testing indexes at this time.
+If cv-split is provided then the amount used for holdout is:
+(max 0.0 (- 1.0 training-split cv-split))
+else cv and holdout are the same index set and the amount used for
+holdout and cv is (max 0.0 (- 1.0 training-split)).
+If training split is 1.0 then all indexes are used for everything."
+  [item-count & {:keys [training-split cv-split max-items randomize?]
+                 :or {training-split 0.6 cv-split 0.2 randomize? true}}]
+  ;;The code below uses both item count and max items so that we can a random subset
+  ;;of the total index count in the case where max-items < item-count
+  (let [max-items (or max-items item-count)
+        {:keys [training-range cross-validation-range holdout-range]} (create-split-ranges training-split cv-split)
+        all-indexes (vec (take max-items (if randomize?
+                                           (shuffle (range item-count))
+                                           (range item-count))))
+        item-count (count all-indexes)
+        training-indexes (takev-rel-range training-range item-count all-indexes)
+        cv-indexes (takev-rel-range cross-validation-range item-count all-indexes)
+        holdout-indexes (takev-rel-range holdout-range item-count all-indexes)]
+    {:training training-indexes
+     :cross-validation cv-indexes
+     :holdout holdout-indexes
+     :all all-indexes}))
+
+
+
+
+
+
 (defprotocol PDataset
-  ;; Return a map of name to shape where shape is either an integer
-  ;; or a more complex shape definition a layout, num-channels, width and height
-  (shapes [ds])
+  "The dataset protocol provides uniform access to named sequences of data.
+The system will expect to be able to access each sequence of data within a batch
+with a separate thread but it will not assume that access within the sequence is
+threadsafe meaning it will completely process the current item before moving to the
+next item."
 
-  ;;Return a vector of sequences, one for each shape name in the label sequence.
-  ;;So to clarify if I have a dataset with six items for training
-  ;;where each item is composed of an image, a histogram and a label, I may call:
-  ;;
-  ;;(get-batches ds 3 :training [:image :label :histogram])
-  ;;and I should get back a potentially lazy sequence of batches, each batch has a
-  ;;vector of items
-  ;; ([(image image image)(label label label)(hist hist hist)]
-  ;;  [(image image image)(label label label)(hist hist hist)])
-  (get-batches [ds batch-size batch-type shape-name-seq]))
+  (shapes [ds]
+    "Return a map of name to shape where shape is either an integer
+or a more complex shape definition a layout, num-channels, width and height")
 
 
-(defn labels-shapes->indexes
-  [label-seq shape-seq]
-  (mapv
-   (into {} (map-indexed (fn [idx shape]
-                           [(:name shape) idx])
-                         shape-seq))
-   label-seq))
+  (get-batches [ds batch-size batch-type shape-name-seq]
+    "Return a vector of sequences, one for each shape name in the label sequence.
+  So to clarify if I have a dataset with six items for training
+  where each item is composed of an image, a histogram and a label, I may call:
 
-(defrecord InMemoryDataset [data-seq shapes-with-indexes index-sets]
+  (get-batches ds 3 :training [:image :label :histogram])
+  and I should get back a potentially lazy sequence of batches, each batch has a
+  vector of items
+   ([(image image image)(label label label)(hist hist hist)]
+    [(image image image)(label label label)(hist hist hist)])"
+    ))
+
+
+
+;;Data shape map is a map of name-> {:data [large randomly addressable sequence of data] :shape (integer or image shape)}
+;;Index sets are either a map of batch-type->index sequence *or* just a sequence of indexes
+(defrecord InMemoryDataset [data-shape-map index-sets]
   PDataset
-  (shapes [this] shapes-with-indexes)
-  (get-batches [this batch-size batch-type output-name-seq]
-    (let [data-indexes (mapv (comp :index shapes-with-indexes) output-name-seq)
-          indexes (get index-sets batch-type)
+  (shapes [this] (into {} (map (fn [[k v]]
+                                 [k (get v :shape)])
+                               data-shape-map)))
+
+  (get-batches [this batch-size batch-type name-seq]
+    (let [indexes (if (map? index-sets)
+                    (get index-sets batch-type)
+                    index-sets)
           batches (->> (if (= batch-type :training)
                          (shuffle indexes)
                          indexes)
@@ -61,61 +148,26 @@
              ;;the overal batch sequence can be lazy.
              ;;each batch specifically can be a vector of lazy sequences, one for each
              ;;item of the batch.
-             (mapv (fn [data-index]
-                     (let [output-data (nth data-seq data-index)]
+             (mapv (fn [item-name]
+                     (let [output-data (get-in data-shape-map [item-name :data])]
                        (map output-data batch-index-seq)))
-                   data-indexes))
+                   name-seq))
            batches))))
 
 
-(defn ->simple-shape
-  [name item & [index]]
-  (let [item-count (long (if (number? item)
-                           item
-                           (m/ecount (first item))))]
-    [name
-     {:shape item-count
-      :index index}]))
 
-
-(defn ->image-shape
-  [name n-channels img-height img-width & [index]]
-  [name {:shape (create-image-shape n-channels img-height img-width)
-         :index index}])
-
-
-(defn create-random-index-sets
-  "Create a training/testing split of indexes.  Returns a map
-with three keys, :training, :cross-validation, :holdout where the testing
-indexes are withheld from the training set.  The running indexes
-are the same as the testing indexes at this time."
-  [item-count & {:keys [training-split max-items]
-                 :or {training-split 0.8}}]
-  ;;The code below uses both item count and max items so that we can a random subset
-  ;;of the total index count in the case where max-items < item-count
-  (let [max-items (or max-items item-count)
-        all-indexes (vec (take max-items (shuffle (range item-count))))
-        item-count (count all-indexes)
-        training-count (long (* item-count training-split))
-        training-indexes (vec (take training-count all-indexes))
-        testing-indexes (vec (drop training-count all-indexes))
-        running-indexes testing-indexes]
-    {:training training-indexes
-     :cross-validation testing-indexes
-     :holdout running-indexes
-     :all all-indexes}))
-
-
-
-(defn data->dataset
-  ([data labels]
-   (let [index-sets (create-random-index-sets (count data))
-         shapes (into {}  [(->simple-shape :data data 0)
-                           (->simple-shape :labels labels 1)])]
-     (->InMemoryDataset [data labels] shapes index-sets)))
-  ([data]
-   (->InMemoryDataset [data] (into {} [(->simple-shape data 0)])
-                      (create-random-index-sets (count data)))))
+(defn create-in-memory-dataset
+  [data-shape-map index-sets]
+  ;;Small bit of basic error checking.
+  (doseq [[k v] data-shape-map]
+    (let [{:keys [data shape]} v]
+      (when-not (and data shape)
+        (throw (Exception. (format "Either data or shape missing for key: %s" k))))
+      (when-not (= (m/ecount (first data))
+                   (shape-ecount shape))
+        (throw (Exception. (format "shape ecount (%s) doesn't match (first data) ecount (%s) for key %s."
+                                   (shape-ecount shape) (m/ecount data) k))))))
+  (->InMemoryDataset data-shape-map index-sets))
 
 
 ;;Limit the total batch count either overall independent of indexes or
@@ -135,7 +187,7 @@ are the same as the testing indexes at this time."
 
 (defn take-n
   "If a key isn't provided then we assume we want the full set of indexes."
-  [dataset max-sample-count-or-limit-map]
+  [max-sample-count-or-limit-map dataset]
   (->TakeNDataset dataset max-sample-count-or-limit-map))
 
 

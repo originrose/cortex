@@ -74,7 +74,7 @@
         device (.driver batching-system)
         name-map (map #(vector
                         %
-                        (create-batch-buffer device (dataset-shape->array batching-system (get-in shapes [% :shape]))))
+                        (create-batch-buffer device (dataset-shape->array batching-system (get shapes %))))
                       names)]
     (into {} name-map)))
 
