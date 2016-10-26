@@ -521,9 +521,9 @@ in order to avoid adding a small number to 0."
                              ^DoubleArrayView output-gradient ^ConvLayerConfig conv-config]
     (cpu-max-pooling-backward-impl input output input-gradient output-gradient conv-config
                                    double))
-  (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatBuffer rand-buffer probability]
+  (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
     (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability double))
-  (cpu-prepare-gaussian-dropout [mult-buffer ^FloatBuffer rand-buffer]
+  (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
     (cpu-prepare-gaussian-impl mult-buffer rand-buffer double))
   (cpu-bn-calc [^DoubleArrayView input ^DoubleArrayView means ^DoubleArrayView variances
                 ^DoubleArrayView scale ^DoubleArrayView bias ^DoubleArrayView output
