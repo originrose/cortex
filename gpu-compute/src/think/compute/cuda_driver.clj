@@ -6,7 +6,8 @@
             [think.compute.javacpp-datatype :as jcpp-dtype]
             [clojure.core.matrix.protocols :as mp]
             [think.compute.math :as math]
-            [think.compute.cpu-driver :as cpu-drv])
+            [think.compute.cpu-driver :as cpu-drv]
+            [think.compute.math-util :as mu])
   (:import [org.bytedeco.javacpp cuda
             BytePointer IntPointer LongPointer DoublePointer
             Pointer PointerPointer FloatPointer ShortPointer
@@ -562,7 +563,7 @@ relies only on blockDim.x block.x and thread.x"
               B b-colstride
               beta C c-colstride
               ^CudaStream stream]
-    (cpu-drv/col->row-gemm
+    (mu/col->row-gemm
      (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
           alpha ^DoublePointer A a-rowstride
           ^DoublePointer B b-rowstride
@@ -594,7 +595,7 @@ relies only on blockDim.x block.x and thread.x"
      (double beta) y (int y-elem-count)
      res (int res-elem-count)))
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
-    (cpu-drv/col->row-gemv
+    (mu/col->row-gemv
      (fn [trans-a? a-row-count a-col-count
           alpha ^DoublePointer A a-rowstride
           ^DoublePointer x inc-x
@@ -644,7 +645,7 @@ relies only on blockDim.x block.x and thread.x"
               B b-colstride
               beta C c-colstride
               ^CudaStream stream]
-    (cpu-drv/col->row-gemm
+    (mu/col->row-gemm
      (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
           alpha ^FloatPointer A a-rowstride
           ^FloatPointer B b-rowstride
@@ -677,7 +678,7 @@ relies only on blockDim.x block.x and thread.x"
                           (float beta) y (int y-elem-count)
                           res (int res-elem-count)))
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
-    (cpu-drv/col->row-gemv
+    (mu/col->row-gemv
      (fn [trans-a? a-row-count a-col-count
           alpha ^FloatPointer A a-rowstride
           ^FloatPointer x inc-x

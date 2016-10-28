@@ -165,11 +165,18 @@ The function signature will be:
 
 
 (defn ->view
-  [item ^long offset ^long elem-count]
-  (let [item-ecount (long (m/ecount item))]
-    (when-not (>= (- item-ecount offset) elem-count)
-      (throw (Exception. "View out of range")))
-    (->view-impl item offset elem-count)))
+  ([item ^long offset ^long elem-count]
+   (let [item-ecount (long (m/ecount item))]
+     (when-not (>= (- item-ecount offset) elem-count)
+       (throw (Exception. "View out of range")))
+     (->view-impl item offset elem-count)))
+  ([item]
+   (->view item 0 (m/ecount item))))
+
+
+(defn make-view
+  [datatype item-count-or-seq]
+  (->view (make-array-of-type datatype item-count-or-seq)))
 
 
 (extend-type ByteArrayView
@@ -312,27 +319,27 @@ The function signature will be:
 
 ;;Macros to use to use the sub views as efficiently as one uses arrays.
 (defmacro v-aset
-  [sub-view item-offset value]
-  `(aset (.data ~sub-view) (+ (.offset ~sub-view) ~item-offset) ~value))
+  [array-view item-offset value]
+  `(aset (.data ~array-view) (+ (.offset ~array-view) ~item-offset) ~value))
 
 (defmacro v-aget
-  [sub-view item-offset]
-  `(aget (.data ~sub-view) (+ (.offset ~sub-view) ~item-offset)))
+  [array-view item-offset]
+  `(aget (.data ~array-view) (+ (.offset ~array-view) ~item-offset)))
 
 (defmacro v-aset-rem
-  [sub-view item-offset value]
-  `(aset (.data ~sub-view) (rem (+ (.offset ~sub-view) ~item-offset)
-                                (.length ~sub-view))
+  [array-view item-offset value]
+  `(aset (.data ~array-view) (rem (+ (.offset ~array-view) ~item-offset)
+                                (.length ~array-view))
          ~value))
 
 (defmacro v-aget-rem
-  [sub-view item-offset]
-  `(aget (.data ~sub-view) (rem (+ (.offset ~sub-view) ~item-offset)
-                                (.length ~sub-view))))
+  [array-view item-offset]
+  `(aget (.data ~array-view) (rem (+ (.offset ~array-view) ~item-offset)
+                                (.length ~array-view))))
 
 (defmacro v-alength
-  [sub-view]
-  `(.length ~sub-view))
+  [array-view]
+  `(.length ~array-view))
 
 
 (defprotocol PView

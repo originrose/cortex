@@ -17,7 +17,7 @@
            [cortex.nn.impl.layers.convolution ConvLayerConfig]
            [java.util Arrays]
            [java.util.concurrent ForkJoinPool Callable Future]
-           [think.compute ArrayView]))
+           [think.compute ArrayView DoubleArrayView FloatArrayView]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -35,30 +35,30 @@
    (create-cpu-backend :double)))
 
 
-(defprotocol PNIONetwork
+(defprotocol PCPUNetworkImpl
   "Implementation of various functions based on buffer datatype."
-  (nio-activation-forward [input-buf act-type output-buf])
-  (nio-activation-backward [input-buf act-type output-buf
+  (cpu-activation-forward [input-buf act-type output-buf])
+  (cpu-activation-backward [input-buf act-type output-buf
                             output-gradient input-gradient])
-  (nio-softmax-forward [input-buf output-buf n-input])
-  (nio-adadelta-step! [gradient parameters gradient-alpha param-offset
+  (cpu-softmax-forward [input-buf output-buf n-input])
+  (cpu-adadelta-step! [gradient parameters gradient-alpha param-offset
                        decay epsilon grad-accum dx-accum])
-  (nio-adam-step! [gradient parameters gradient-alpha param-offset alpha beta1 beta2 epsilon
+  (cpu-adam-step! [gradient parameters gradient-alpha param-offset alpha beta1 beta2 epsilon
                    pow_beta1_t pow_beta2_t m v])
-  (nio-planar-input->convolution! [input input-convolved conv-config])
-  (nio-convolution->planar-output! [input-convolved input-gradient conv-config])
-  (nio-fill [buffer value])
-  (nio-max-pooling-forward [input output conv-config])
-  (nio-max-pooling-backward [input output input-gradient output-gradient conv-config])
-  (nio-prepare-bernoulli-dropout [mult-buffer rand-buffer probability])
-  (nio-prepare-gaussian-dropout [mult-buffer rand-buffer])
-  (nio-bn-calc [input running-means running-variances
+  (cpu-planar-input->convolution! [input input-convolved conv-config])
+  (cpu-convolution->planar-output! [input-convolved input-gradient conv-config])
+  (cpu-fill [buffer value])
+  (cpu-max-pooling-forward [input output conv-config])
+  (cpu-max-pooling-backward [input output input-gradient output-gradient conv-config])
+  (cpu-prepare-bernoulli-dropout [mult-buffer rand-buffer probability])
+  (cpu-prepare-gaussian-dropout [mult-buffer rand-buffer])
+  (cpu-bn-calc [input running-means running-variances
                 scale bias output batch-size batch-stride])
-  (nio-update-means-variances [input
+  (cpu-update-means-variances [input
                                running-means running-variances
                                saved-means saved-variances
                                batch-size batch-stride ave-factor epsilon])
-  (nio-bn-backward [input saved-means saved-variances scale bias output
+  (cpu-bn-backward [input saved-means saved-variances scale bias output
                     scale-gradient bias-gradient input-gradient
                     output-gradient batch-size batch-stride]))
 
@@ -107,7 +107,7 @@
                                   ~@body)))))
 
 
-(defmacro nio-act-forward-impl
+(defmacro cpu-act-forward-impl
   [act-type input output cast-fn]
   `(let [src# (ArrayView/toView ~input)
          dest# (ArrayView/toView ~output)
@@ -129,7 +129,7 @@
               (v-aset dest# idx#
                     (Math/tanh (v-aget src# idx#)))))))
 
-(defmacro nio-act-backward-impl
+(defmacro cpu-act-backward-impl
   [act-type input output output-gradient input-gradient cast-fn]
   `(let [src# (ArrayView/toView ~input)
          dest# (ArrayView/toView ~output)
@@ -182,7 +182,7 @@
        sum-val#)))
 
 
-(defmacro nio-softmax-forward-impl
+(defmacro cpu-softmax-forward-impl
   [n-input input-buf output-buf cast-fn]
   `(let [~n-input (long ~n-input)
          src# (ArrayView/toView ~input-buf)
@@ -202,7 +202,7 @@
                                   sum-val#))))))))
 
 
-(defmacro nio-planar-input->convolution!-impl
+(defmacro cpu-planar-input->convolution!-impl
   [input output config cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          output-ary# (ArrayView/toView ~output)]
@@ -216,7 +216,7 @@
          (v-aset output-ary# ~'output-conv-addr input-val#))))))
 
 
-(defmacro nio-convolution->planar-output!-impl
+(defmacro cpu-convolution->planar-output!-impl
   "Sum the convolution up to the planar input."
   [conv-input-gradient input-gradient config cast-fn]
   ;;I am using input to mean upstream or in this case destination so that
@@ -234,7 +234,7 @@
                input-val# (v-aget input-ary# ~'output-conv-addr)]
            (v-aset output-ary# ~'input-addr (+ input-val# output-val#))))))))
 
-(defmacro nio-max-pooling-forward-impl
+(defmacro cpu-max-pooling-forward-impl
   [input output config cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          output-ary# (ArrayView/toView ~output)]
@@ -254,7 +254,7 @@
            (v-aset output-ary# output-addr# input-val#)))))))
 
 
-(defmacro nio-max-pooling-backward-impl
+(defmacro cpu-max-pooling-backward-impl
   [input output input-gradient output-gradient config cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          output-ary# (ArrayView/toView ~output)
@@ -277,7 +277,7 @@
                  (+ (v-aget input-gradient-ary# input-addr#)
                     (v-aget output-gradient-ary# output-addr#)))))))))
 
-(defmacro nio-prepare-bernoulli-impl
+(defmacro cpu-prepare-bernoulli-impl
   [mult-buffer rand-buffer probability cast-fn]
   `(let [probability# (~cast-fn ~probability)
          scale-val# (~cast-fn (/ 1.0 probability#))
@@ -292,7 +292,7 @@
                                 scale-val#))))))
 
 
-(defmacro nio-prepare-gaussian-impl
+(defmacro cpu-prepare-gaussian-impl
   [mult-buffer rand-buffer cast-fn]
   `(let [mult-ary# (ArrayView/toView ~mult-buffer)
          elem-count# (.length mult-ary#)
@@ -302,7 +302,7 @@
                     (~cast-fn (v-aget rand-ary# idx#))))))
 
 
-(defmacro nio-bn-calc-impl
+(defmacro cpu-bn-calc-impl
   [input means variances scale bias output batch-size batch-stride cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          means-ary# (ArrayView/toView ~means)
@@ -342,7 +342,7 @@ in order to avoid adding a small number to 0."
             (recur (+ sum-var# ~stmt) (inc ~idx-var))
             sum-var#)))))
 
-(defmacro nio-update-means-variances-impl
+(defmacro cpu-update-means-variances-impl
   [input running-means running-variances
    saved-means saved-variances
    batch-size batch-stride ave-factor epsilon cast-fn]
@@ -390,7 +390,7 @@ in order to avoid adding a small number to 0."
                                                            var-batch-size#))
                                               ave-factor#)))))))
 
-(defmacro nio-bn-backward-impl [input means variances scale bias output
+(defmacro cpu-bn-backward-impl [input means variances scale bias output
                                 scale-gradient bias-gradient input-gradient
                                 output-gradient batch-size batch-stride cast-fn]
   `(let [batch-size# (long ~batch-size)
@@ -482,150 +482,156 @@ in order to avoid adding a small number to 0."
                      (~cast-fn (+ (+ sum-part-1# sum-part-3#) sum-part-2#))))))))))
 
 
-(extend-type DoubleBuffer
-  PNIONetwork
-  (nio-activation-forward [input-buf act-type ^DoubleBuffer output-buf]
-    (nio-act-forward-impl act-type input-buf output-buf double))
-  (nio-activation-backward [input act-type ^DoubleBuffer output
-                            ^DoubleBuffer output-gradient
-                            ^DoubleBuffer input-gradient]
-    (nio-act-backward-impl act-type input output output-gradient input-gradient double))
-  (nio-softmax-forward [input-buf ^DoubleBuffer output-buf ^long n-input]
-    (nio-softmax-forward-impl n-input input-buf output-buf double))
-  (nio-adadelta-step! [gradient ^DoubleBuffer parameters gradient-alpha
-                       param-offset decay epsilon ^DoubleBuffer grad-accum
-                       ^DoubleBuffer dx-accum]
-    (AdadeltaOptimiser/step_d (double gradient-alpha) (.array gradient) (.array parameters)
+(extend-type DoubleArrayView
+  PCPUNetworkImpl
+  (cpu-activation-forward [input-buf act-type ^DoubleArrayView output-buf]
+    (cpu-act-forward-impl act-type input-buf output-buf double))
+  (cpu-activation-backward [input act-type ^DoubleArrayView output
+                            ^DoubleArrayView output-gradient
+                            ^DoubleArrayView input-gradient]
+    (cpu-act-backward-impl act-type input output output-gradient input-gradient double))
+  (cpu-softmax-forward [input-buf ^DoubleArrayView output-buf ^long n-input]
+    (cpu-softmax-forward-impl n-input input-buf output-buf double))
+  (cpu-adadelta-step! [gradient ^DoubleArrayView parameters gradient-alpha
+                       param-offset decay epsilon ^DoubleArrayView grad-accum
+                       ^DoubleArrayView dx-accum]
+    (AdadeltaOptimiser/step_d (double gradient-alpha) (.data gradient) (.data parameters)
                               (int param-offset) (double decay) (double epsilon)
-                              (.array grad-accum) (.array dx-accum)))
-  (nio-adam-step! [gradient ^DoubleBuffer parameters gradient-alpha param-offset
+                              (.data grad-accum) (.data dx-accum)))
+  (cpu-adam-step! [gradient ^DoubleArrayView parameters gradient-alpha param-offset
                    alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
-                   ^DoubleBuffer m ^DoubleBuffer v]
-    (AdamOptimiser/step_d (double gradient-alpha) (.array gradient) (.array parameters)
+                   ^DoubleArrayView m ^DoubleArrayView v]
+    (AdamOptimiser/step_d (double gradient-alpha) (.data gradient) (.data parameters)
                           param-offset (double alpha) (double beta1) (double beta2)
                           (double epsilon) (double pow-beta1-t) (double pow-beta2-t)
-                          (.array m) (.array v)))
-  (nio-planar-input->convolution! [input ^DoubleBuffer input-convolved
+                          (.data m) (.data v)))
+  (cpu-planar-input->convolution! [input ^DoubleArrayView input-convolved
                                    ^ConvLayerConfig conv-config]
-    (nio-planar-input->convolution!-impl input input-convolved conv-config double))
-  (nio-convolution->planar-output! [input-convolved ^DoubleBuffer input-gradient
+    (cpu-planar-input->convolution!-impl input input-convolved conv-config double))
+  (cpu-convolution->planar-output! [input-convolved ^DoubleArrayView input-gradient
                                     ^ConvLayerConfig conv-config]
-    (nio-convolution->planar-output!-impl input-convolved input-gradient conv-config double))
+    (cpu-convolution->planar-output!-impl input-convolved input-gradient conv-config double))
 
-  (nio-fill [buffer value]
-    (Arrays/fill (.array buffer) (.arrayOffset buffer)
-                 (+ (.arrayOffset buffer) (.remaining buffer)) (double value)))
-  (nio-max-pooling-forward [input ^DoubleBuffer output ^ConvLayerConfig conv-config]
-    (nio-max-pooling-forward-impl input output conv-config double))
-  (nio-max-pooling-backward [input ^DoubleBuffer output ^DoubleBuffer input-gradient
-                             ^DoubleBuffer output-gradient ^ConvLayerConfig conv-config]
-    (nio-max-pooling-backward-impl input output input-gradient output-gradient conv-config
+  (cpu-fill [buffer value]
+    (Arrays/fill (.data buffer) (.offset buffer)
+                 (+ (.offset buffer) (.length buffer)) (double value)))
+  (cpu-max-pooling-forward [input ^DoubleArrayView output ^ConvLayerConfig conv-config]
+    (cpu-max-pooling-forward-impl input output conv-config double))
+  (cpu-max-pooling-backward [input ^DoubleArrayView output ^DoubleArrayView input-gradient
+                             ^DoubleArrayView output-gradient ^ConvLayerConfig conv-config]
+    (cpu-max-pooling-backward-impl input output input-gradient output-gradient conv-config
                                    double))
-  (nio-prepare-bernoulli-dropout [mult-buffer ^FloatBuffer rand-buffer probability]
-    (nio-prepare-bernoulli-impl mult-buffer rand-buffer probability double))
-  (nio-prepare-gaussian-dropout [mult-buffer ^FloatBuffer rand-buffer]
-    (nio-prepare-gaussian-impl mult-buffer rand-buffer double))
-  (nio-bn-calc [^DoubleBuffer input ^DoubleBuffer means ^DoubleBuffer variances
-                ^DoubleBuffer scale ^DoubleBuffer bias ^DoubleBuffer output
+  (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
+    (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability double))
+  (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
+    (cpu-prepare-gaussian-impl mult-buffer rand-buffer double))
+  (cpu-bn-calc [^DoubleArrayView input ^DoubleArrayView means ^DoubleArrayView variances
+                ^DoubleArrayView scale ^DoubleArrayView bias ^DoubleArrayView output
                 batch-size batch-stride]
-    (nio-bn-calc-impl input means variances scale bias output batch-size batch-stride double))
-  (nio-update-means-variances [input
-                               ^DoubleBuffer running-means ^DoubleBuffer running-variances
-                               ^DoubleBuffer saved-means ^DoubleBuffer saved-variances
+    (cpu-bn-calc-impl input means variances scale bias output batch-size batch-stride double))
+  (cpu-update-means-variances [input
+                               ^DoubleArrayView running-means ^DoubleArrayView running-variances
+                               ^DoubleArrayView saved-means ^DoubleArrayView saved-variances
                                batch-size batch-stride ave-factor epsilon]
-    (nio-update-means-variances-impl input running-means running-variances
+    (cpu-update-means-variances-impl input running-means running-variances
                                      saved-means saved-variances
                                      batch-size batch-stride
                                      ave-factor epsilon double))
-  (nio-bn-backward [input ^DoubleBuffer means ^DoubleBuffer variances ^DoubleBuffer scale
-                    ^DoubleBuffer bias ^DoubleBuffer output ^DoubleBuffer scale-gradient
-                    ^DoubleBuffer bias-gradient ^DoubleBuffer input-gradient
-                    ^DoubleBuffer output-gradient batch-size batch-stride]
-    (nio-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
+  (cpu-bn-backward [input ^DoubleArrayView means ^DoubleArrayView variances ^DoubleArrayView scale
+                    ^DoubleArrayView bias ^DoubleArrayView output ^DoubleArrayView scale-gradient
+                    ^DoubleArrayView bias-gradient ^DoubleArrayView input-gradient
+                    ^DoubleArrayView output-gradient batch-size batch-stride]
+    (cpu-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
                           input-gradient output-gradient batch-size batch-stride double)))
 
 
-(extend-type FloatBuffer
-  PNIONetwork
-  (nio-activation-forward [input-buf act-type ^FloatBuffer output-buf]
-    (nio-act-forward-impl act-type input-buf output-buf float))
-  (nio-activation-backward [input act-type ^FloatBuffer output
-                            ^FloatBuffer output-gradient
-                            ^FloatBuffer input-gradient]
-    (nio-act-backward-impl act-type input output output-gradient input-gradient float))
-  (nio-softmax-forward [input-buf ^FloatBuffer output-buf ^long n-input]
-    (nio-softmax-forward-impl n-input input-buf output-buf float))
-  (nio-adadelta-step! [gradient ^FloatBuffer parameters gradient-alpha param-offset decay epsilon
-                       ^FloatBuffer grad-accum ^FloatBuffer dx-accum]
-    (AdadeltaOptimiser/step_f (float gradient-alpha) (.array gradient) (.array parameters)
+(extend-type FloatArrayView
+  PCPUNetworkImpl
+  (cpu-activation-forward [input-buf act-type ^FloatArrayView output-buf]
+    (cpu-act-forward-impl act-type input-buf output-buf float))
+  (cpu-activation-backward [input act-type ^FloatArrayView output
+                            ^FloatArrayView output-gradient
+                            ^FloatArrayView input-gradient]
+    (cpu-act-backward-impl act-type input output output-gradient input-gradient float))
+  (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input]
+    (cpu-softmax-forward-impl n-input input-buf output-buf float))
+  (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha param-offset decay epsilon
+                       ^FloatArrayView grad-accum ^FloatArrayView dx-accum]
+    (AdadeltaOptimiser/step_f (float gradient-alpha) (.data gradient) (.data parameters)
                               (int param-offset) (float decay) (float epsilon)
-                              (.array grad-accum) (.array dx-accum)))
-  (nio-adam-step! [gradient ^FloatBuffer parameters gradient-alpha param-offset
+                              (.data grad-accum) (.data dx-accum)))
+  (cpu-adam-step! [gradient ^FloatArrayView parameters gradient-alpha param-offset
                    alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
-                   ^FloatBuffer m ^FloatBuffer v]
-    (AdamOptimiser/step_f (float gradient-alpha) (.array gradient) (.array parameters)
+                   ^FloatArrayView m ^FloatArrayView v]
+    (AdamOptimiser/step_f (float gradient-alpha) (.data gradient) (.data parameters)
                           param-offset (float alpha) (float beta1) (float beta2) (float epsilon)
-                          (float pow-beta1-t) (float pow-beta2-t) (.array m) (.array v)))
-  (nio-planar-input->convolution! [input ^FloatBuffer input-convolved
+                          (float pow-beta1-t) (float pow-beta2-t) (.data m) (.data v)))
+  (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved
                                    ^ConvLayerConfig conv-config]
-    (nio-planar-input->convolution!-impl input input-convolved conv-config float))
-  (nio-convolution->planar-output! [input-convolved ^FloatBuffer input-gradient
+    (cpu-planar-input->convolution!-impl input input-convolved conv-config float))
+  (cpu-convolution->planar-output! [input-convolved ^FloatArrayView input-gradient
                                     ^ConvLayerConfig conv-config]
-    (nio-convolution->planar-output!-impl input-convolved input-gradient conv-config float))
-  (nio-fill [buffer value]
-    (Arrays/fill (.array buffer) (.arrayOffset buffer)
-                 (+ (.arrayOffset buffer) (.remaining buffer)) (float value)))
-  (nio-max-pooling-forward [input ^FloatBuffer output ^ConvLayerConfig conv-config]
-    (nio-max-pooling-forward-impl input output conv-config float))
-  (nio-max-pooling-backward [input ^FloatBuffer output ^FloatBuffer input-gradient
-                             ^FloatBuffer output-gradient ^ConvLayerConfig conv-config]
-    (nio-max-pooling-backward-impl input output input-gradient output-gradient conv-config
+    (cpu-convolution->planar-output!-impl input-convolved input-gradient conv-config float))
+  (cpu-fill [buffer value]
+    (Arrays/fill (.data buffer) (.offset buffer)
+                 (+ (.offset buffer) (.length buffer)) (float value)))
+  (cpu-max-pooling-forward [input ^FloatArrayView output ^ConvLayerConfig conv-config]
+    (cpu-max-pooling-forward-impl input output conv-config float))
+  (cpu-max-pooling-backward [input ^FloatArrayView output ^FloatArrayView input-gradient
+                             ^FloatArrayView output-gradient ^ConvLayerConfig conv-config]
+    (cpu-max-pooling-backward-impl input output input-gradient output-gradient conv-config
                                    float))
-  (nio-prepare-bernoulli-dropout [mult-buffer ^FloatBuffer rand-buffer probability]
-    (nio-prepare-bernoulli-impl mult-buffer rand-buffer probability float))
-  (nio-prepare-gaussian-dropout [mult-buffer ^FloatBuffer rand-buffer]
-    (nio-prepare-gaussian-impl mult-buffer rand-buffer float))
-  (nio-bn-calc [^FloatBuffer input ^FloatBuffer means ^FloatBuffer variances
-                ^FloatBuffer scale ^FloatBuffer bias ^FloatBuffer output
+  (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
+    (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability float))
+  (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
+    (cpu-prepare-gaussian-impl mult-buffer rand-buffer float))
+  (cpu-bn-calc [^FloatArrayView input ^FloatArrayView means ^FloatArrayView variances
+                ^FloatArrayView scale ^FloatArrayView bias ^FloatArrayView output
                 batch-size batch-stride]
-    (nio-bn-calc-impl input means variances scale bias output batch-size batch-stride float))
-  (nio-update-means-variances [input
-                               ^FloatBuffer running-means ^FloatBuffer running-variances
-                               ^FloatBuffer saved-means ^FloatBuffer saved-variances
+    (cpu-bn-calc-impl input means variances scale bias output batch-size batch-stride float))
+  (cpu-update-means-variances [input
+                               ^FloatArrayView running-means ^FloatArrayView running-variances
+                               ^FloatArrayView saved-means ^FloatArrayView saved-variances
                                batch-size batch-stride ave-factor epsilon]
-    (nio-update-means-variances-impl input running-means running-variances
+    (cpu-update-means-variances-impl input running-means running-variances
                                      saved-means saved-variances
                                      batch-size batch-stride
                                      ave-factor epsilon float))
-  (nio-bn-backward [input ^FloatBuffer means ^FloatBuffer variances ^FloatBuffer scale
-                    ^FloatBuffer bias ^FloatBuffer output ^FloatBuffer scale-gradient
-                    ^FloatBuffer bias-gradient ^FloatBuffer input-gradient
-                    ^FloatBuffer output-gradient batch-size batch-stride]
-    (nio-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
+  (cpu-bn-backward [input ^FloatArrayView means ^FloatArrayView variances ^FloatArrayView scale
+                    ^FloatArrayView bias ^FloatArrayView output ^FloatArrayView scale-gradient
+                    ^FloatArrayView bias-gradient ^FloatArrayView input-gradient
+                    ^FloatArrayView output-gradient batch-size batch-stride]
+    (cpu-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
                           input-gradient output-gradient batch-size batch-stride float)))
 
 
 (defrecord ActivationLayer [act-type cpu-stream])
 
+
+(defn device-array->view
+  [dev-ary]
+  (dtype/->view (math/device-buffer dev-ary)))
+
+
 (extend-type ActivationLayer
   nn-backend/PBackendLayer
   (forward! [layer ^DeviceArray input ^DeviceArray output]
     (cpu-drv/with-stream-dispatch (.cpu-stream layer)
-      (nio-activation-forward (.device-buffer input) (.act-type layer) (.device-buffer output))))
+      (cpu-activation-forward (device-array->view input) (.act-type layer) (device-array->view output))))
   (backward! [layer ^DeviceArray input ^DeviceArray output
               ^DeviceArray input-gradient ^DeviceArray output-gradient]
     (cpu-drv/with-stream-dispatch (.cpu-stream layer)
-      (nio-activation-backward (.device-buffer input) (.act-type layer)
-                               (.device-buffer output)
-                               (.device-buffer output-gradient)
-                               (.device-buffer input-gradient)))))
+      (cpu-activation-backward (device-array->view input) (.act-type layer)
+                               (device-array->view output)
+                               (device-array->view output-gradient)
+                               (device-array->view input-gradient)))))
 
 (defrecord SoftmaxLayer [cpu-stream n-input])
 (extend-type SoftmaxLayer
   nn-backend/PBackendLayer
   (forward! [layer ^DeviceArray input ^DeviceArray output]
     (cpu-drv/with-stream-dispatch (.cpu-stream layer)
-      (nio-softmax-forward (.device-buffer input) (.device-buffer output) (.n-input layer))))
+      (cpu-softmax-forward (device-array->view input) (device-array->view output) (.n-input layer))))
   (backward! [layer ^DeviceArray input ^DeviceArray output
               ^DeviceArray input-gradient ^DeviceArray output-gradient]
     (layers/softmax-backward! (.cpu-stream layer) input-gradient output-gradient)))
@@ -670,8 +676,8 @@ in order to avoid adding a small number to 0."
       ;;*some* multithreading without having to explicity program much of it.
       (cpu-drv/with-stream-dispatch cpu-stream
         (doall (pmap (fn [[input output input-convolved]]
-                       (nio-planar-input->convolution! (math/device-buffer input)
-                                                       (math/device-buffer input-convolved)
+                       (cpu-planar-input->convolution! (device-array->view input)
+                                                       (device-array->view input-convolved)
                                                        (.conv-config layer))
                        ;;set the output to the bias...can't think of another way of doing this.
                        (math/gemm current-thread-stream true false
@@ -720,12 +726,12 @@ in order to avoid adding a small number to 0."
                                                (math/create-tensor num-out-channels
                                                                    num-out-pixels))]
                          ;;set input gradient at this batch location to empty
-                         (nio-fill (math/device-buffer input-gradient) 0)
+                         (cpu-fill (device-array->view input-gradient) 0)
                          (math/gemm current-thread-stream true false
                                     1.0 output-gradient weights
                                     0.0 input-convolved))
-                       (nio-convolution->planar-output! (math/device-buffer input-convolved)
-                                                        (math/device-buffer input-gradient)
+                       (cpu-convolution->planar-output! (device-array->view input-convolved)
+                                                        (device-array->view input-gradient)
                                                         conv-config))
                      io-data))))))
 
@@ -740,19 +746,19 @@ in order to avoid adding a small number to 0."
   (forward! [layer input output]
     (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
       (doall (pmap (fn [[input output]]
-                     (nio-max-pooling-forward (math/device-buffer input)
-                                              (math/device-buffer output)
+                     (cpu-max-pooling-forward (device-array->view input)
+                                              (device-array->view output)
                                               (.conv-config layer)))
                    (math/batched-data-to-per-input-data (drv/get-driver (.backend layer))
                                                         [input output])))))
   (backward! [layer input output input-gradient output-gradient]
     (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
       (doall (pmap (fn [[input output input-gradient output-gradient]]
-                     (nio-fill (math/device-buffer input-gradient) 0)
-                     (nio-max-pooling-backward (math/device-buffer input)
-                                               (math/device-buffer output)
-                                               (math/device-buffer input-gradient)
-                                               (math/device-buffer output-gradient)
+                     (cpu-fill (device-array->view input-gradient) 0)
+                     (cpu-max-pooling-backward (device-array->view input)
+                                               (device-array->view output)
+                                               (device-array->view input-gradient)
+                                               (device-array->view output-gradient)
                                                (.conv-config layer)))
                    (math/batched-data-to-per-input-data
                     (drv/get-driver (.backend layer))
@@ -765,12 +771,12 @@ in order to avoid adding a small number to 0."
   (batch-norm-calc! [layer input running-means running-variances scale bias output epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
      (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-       (nio-bn-calc (math/device-buffer input)
-                    (math/device-buffer running-means)
-                    (math/device-buffer running-variances)
-                    (math/device-buffer scale)
-                    (math/device-buffer bias)
-                    (math/device-buffer output)
+       (cpu-bn-calc (device-array->view input)
+                    (device-array->view running-means)
+                    (device-array->view running-variances)
+                    (device-array->view scale)
+                    (device-array->view bias)
+                    (device-array->view output)
                     batch-size batch-stride))))
   (batch-norm-forward! [layer input
                         running-means running-variances
@@ -778,11 +784,11 @@ in order to avoid adding a small number to 0."
                         scale bias output average-factor epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
       (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-       (nio-update-means-variances (math/device-buffer input)
-                                   (math/device-buffer running-means)
-                                   (math/device-buffer running-variances)
-                                   (math/device-buffer saved-means)
-                                   (math/device-buffer saved-variances)
+       (cpu-update-means-variances (device-array->view input)
+                                   (device-array->view running-means)
+                                   (device-array->view running-variances)
+                                   (device-array->view saved-means)
+                                   (device-array->view saved-variances)
                                    batch-size batch-stride
                                    average-factor epsilon)))
     (nn-backend/batch-norm-calc! layer input saved-means saved-variances
@@ -792,16 +798,16 @@ in order to avoid adding a small number to 0."
                          epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
      (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-       (nio-bn-backward (math/device-buffer input)
-                        (math/device-buffer saved-means)
-                        (math/device-buffer saved-variances)
-                        (math/device-buffer scale)
-                        (math/device-buffer bias)
-                        (math/device-buffer output)
-                        (math/device-buffer scale-gradient)
-                        (math/device-buffer bias-gradient)
-                        (math/device-buffer input-gradient)
-                        (math/device-buffer output-gradient)
+       (cpu-bn-backward (device-array->view input)
+                        (device-array->view saved-means)
+                        (device-array->view saved-variances)
+                        (device-array->view scale)
+                        (device-array->view bias)
+                        (device-array->view output)
+                        (device-array->view scale-gradient)
+                        (device-array->view bias-gradient)
+                        (device-array->view input-gradient)
+                        (device-array->view output-gradient)
                         batch-size batch-stride)))))
 
 
@@ -847,9 +853,9 @@ in order to avoid adding a small number to 0."
              (cond
                (contains? #{:relu :tanh} recurrent-type)
                (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-                 (nio-activation-forward (math/device-buffer iter-temp-out)
+                 (cpu-activation-forward (device-array->view iter-temp-out)
                                          recurrent-type
-                                         (math/device-buffer iter-output)))
+                                         (device-array->view iter-output)))
                :else
                (throw (Exception. "Unrecognized recurrence type")))
              (recur (inc idx) iter-output running-cell-state)))))))
@@ -863,11 +869,11 @@ in order to avoid adding a small number to 0."
      (cond
        (contains? #{:relu :tanh} recurrent-type)
        (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-         (nio-activation-backward (math/device-buffer running-hidden-state)
+         (cpu-activation-backward (device-array->view running-hidden-state)
                                   recurrent-type
-                                  (math/device-buffer output)
-                                  (math/device-buffer output-gradient)
-                                  (math/device-buffer temp-out-gradient)))
+                                  (device-array->view output)
+                                  (device-array->view output-gradient)
+                                  (device-array->view temp-out-gradient)))
        :else
        (throw (Exception. "Unrecognized recurrence type")))
      (let [out-gradient-vec (split-array-into-batches temp-out-gradient)
@@ -933,22 +939,22 @@ in order to avoid adding a small number to 0."
                    gradient-alpha param-offset decay epsilon
                    ^DeviceArray grad-sq-accum ^DeviceArray dx-sq-accum]
     (cpu-drv/with-stream-dispatch (.stream backend)
-      (nio-adadelta-step! (.device-buffer gradient) (.device-buffer parameters)
+      (cpu-adadelta-step! (device-array->view gradient) (device-array->view parameters)
                           gradient-alpha param-offset decay epsilon
-                          (.device-buffer grad-sq-accum) (.device-buffer dx-sq-accum))))
+                          (device-array->view grad-sq-accum) (device-array->view dx-sq-accum))))
   (adam-step! [backend ^DeviceArray gradient ^DeviceArray parameters gradient-alpha param-offset
                alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t ^DeviceArray m ^DeviceArray v]
     (cpu-drv/with-stream-dispatch (.stream backend)
-      (nio-adam-step! (.device-buffer gradient) (.device-buffer parameters)
+      (cpu-adam-step! (device-array->view gradient) (device-array->view parameters)
                       gradient-alpha param-offset alpha beta1 beta2 epsilon
-                      pow-beta1-t pow-beta2-t (.device-buffer m) (.device-buffer v))))
+                      pow-beta1-t pow-beta2-t (device-array->view m) (device-array->view v))))
   nn-backend/PDropout
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]
     (cpu-drv/with-stream-dispatch (.stream backend)
-      (nio-prepare-bernoulli-dropout (math/device-buffer mult-buffer)
-                                     (math/device-buffer rand-buffer) probability)))
+      (cpu-prepare-bernoulli-dropout (device-array->view mult-buffer)
+                                     (device-array->view rand-buffer) probability)))
   ;;Gaussian distribution copied to mult buffer.
   (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]
     (cpu-drv/with-stream-dispatch (.stream backend)
-      (nio-prepare-gaussian-dropout (math/device-buffer mult-buffer)
-                                    (math/device-buffer rand-buffer)))))
+      (cpu-prepare-gaussian-dropout (device-array->view mult-buffer)
+                                    (device-array->view rand-buffer)))))
