@@ -15,22 +15,23 @@
 
 
 (defn mnist-dataset
-  []
-  (let [data (vec (concat @training-data @test-data))
+  [& {:keys [data-transform-function]
+      :or {data-transform-function identity}}]
+  (let [data (mapv data-transform-function (concat @training-data @test-data))
         labels (vec (concat @training-labels @test-labels))
-        training-indexes (vec (range (count @training-data)))
-        ;;This is extremely bad practice in normal machine learning but this implementation
-        ;;is used to test if the nn learns with extremely small sample counts (100 samples).  If
-        ;;we don't do this then the net appears to fail to train in a lot of situations where the test set
-        ;;just differs too much from the training set while the network is in fact working perfectly.
-        test-indexes training-indexes]
-   (ds/->InMemoryDataset :mnist [data labels]
-                         [{:label :data :shape (ds/image-shape 1 28 28)}
-                          {:label :labels :shape 10}]
-                         training-indexes
-                         test-indexes
-                         nil)))
-
+        num-training-data (count @training-data)
+        total-data (+ num-training-data (count @test-data))
+        training-split (double (/ num-training-data
+                                  total-data))
+        cv-split (- 1.0 training-split)]
+    (ds/create-in-memory-dataset {:data {:data data
+                                         :shape (ds/create-image-shape 1 28 28)}
+                                  :labels {:data labels
+                                           :shape 10}}
+                                 (ds/create-index-sets total-data
+                                                       :training-split training-split
+                                                       :cv-split cv-split
+                                                       :randimize? false))))
 
 (def basic-network-description
   [(desc/input 28 28 1)
@@ -56,9 +57,7 @@
   (let [batch-size 10
         epoch-count 4
         network (compute-desc/build-and-create-network network-description backend batch-size)
-        dataset (-> (mnist-dataset)
-                  (ds/take-n :training-count max-sample-count
-                             :testing-count max-sample-count
-                             :running-count max-sample-count))]
+        dataset (->> (mnist-dataset)
+                     (ds/take-n max-sample-count))]
     [(train/train network (opt/adam) dataset [:data] output-labels-and-loss epoch-count)
      dataset]))
