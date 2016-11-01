@@ -15,6 +15,9 @@ def shape_to_array(shape):
         retval.append(x)
     return retval
 
+def create_dataset_from_blob(f,blob):
+    return f.create_dataset(None, blob.shape, data=blob.data, dtype='f')
+
 
 def export_model(model_def, model_weights):
     net = caffe.Net(model_def, model_weights, caffe.TEST)
@@ -26,14 +29,22 @@ def export_model(model_def, model_weights):
     layer_group = f.create_group('layer_outputs')
 
     for b in net.blobs:
-        layer_group[b] = f.create_dataset(b, net.blobs[b].shape, data=net.blobs[b].data, dtype='f')
-        
-    f.close()
-    
+        layer_group[b] = create_dataset_from_blob(f, net.blobs[b])
 
+    with open (model_def, "r" ) as myfile:
+        model_text = myfile.read()
+
+    f['model_prototxt'] = net.to_proto()
+
+    layer_weights = f.create_group('model_weights')
+
+    for p in net.params:
+        weight_group = layer_weights.create_group(p)
+        weight_group[p + '_W'] = create_dataset_from_blob(f, net.params[p][0])
+        weight_group[p + '_b'] = create_dataset_from_blob(f, net.params[p][1])
+
+    f.close()
 
 if __name__ == "__main__":
     caffe.set_mode_cpu()
     export_model(sys.argv[1], sys.argv[2])
-
-0
