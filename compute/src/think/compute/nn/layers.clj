@@ -44,14 +44,15 @@ implementation as possible."
 
 
 ;;tanh relu logistic softmax
-(defrecord SimpleLayer [backend n-input layer-type]
+(defrecord SimpleLayer [backend n-input layer-impl-desc]
   cp/PLayerSetup
   (setup [layer batch-size]
     (assoc layer
            :output (nn-backend/new-array backend [n-input] batch-size)
            :input-gradient (nn-backend/new-array backend [n-input] batch-size)
-           :layer-impl (nn-backend/create-layer backend {:layer-type layer-type
-                                                  :batch-size batch-size :output-size n-input})
+           :layer-impl (nn-backend/create-layer backend (assoc layer-impl-desc
+                                                               :output-size n-input
+                                                               :batch-size batch-size))
            :batch-size batch-size))
 
   PBatchSize
@@ -86,7 +87,7 @@ implementation as possible."
 
 (defn activation
   [backend n-input act-type]
-  (->SimpleLayer backend n-input act-type))
+  (->SimpleLayer backend n-input {:layer-type act-type}))
 
 (defn relu
   [backend n-input] (activation backend n-input :relu))
@@ -108,7 +109,7 @@ implementation as possible."
 
 (defn softmax
   [backend n-input]
-  (->SimpleLayer backend n-input :softmax))
+  (->SimpleLayer backend n-input {:layer-type :softmax}))
 
 (defn allocate-l2-temp-data
   [{:keys [weights l2-max-constraint backend] :as layer}]
@@ -647,48 +648,13 @@ This is for cudnn compatibility.")))
 
 ;;For thorough explanation please see:
 ;; http://www.cs.toronto.edu/~fritz/absps/imagenet.pdf, section 3.3
-(defrecord LocalResponseNormalization [backend n-input k n alpha beta]
-  cp/PLayerSetup
-  (setup [layer batch-size]
-    (assoc layer
-           :output (nn-backend/new-array backend [n-input] batch-size)
-           :input-gradient (nn-backend/new-array backend [n-input] batch-size)
-           :batch-size batch-size
-           :impl (nn-backend/create-layer backend (nn-backend/lrn-desc k n alpha beta))))
-  PBatchSize
-  (batch-size [layer] (:batch-size layer))
-
-  PBackend
-  (get-backend [layer] backend)
-
-  cp/PLayerSize
-  (input-size [layer] n-input)
-  (output-size [layer] n-input)
-
-  cp/PModule
-  (calc [layer input]
-    (nn-backend/forward! (:impl layer) input (:output layer))
-    layer)
-
-  (output [layer] (:output layer))
-
-  cp/PNeuralTraining
-  (forward [layer input]
-    (cp/calc layer input))
-
-  (backward [layer input output-gradient]
-    (nn-backend/backward! (:layer layer)
-                          input (:output layer)
-                          (:input-gradient layer)
-                          output-gradient)
-    layer)
-  (input-gradient [layer] (:input-gradient layer)))
-
-
 (defn local-response-normalization
-  [backend & {:keys [k n alpha beta]
-              :or {k 2 n 5 alpha 1e-4 beta 0.75}}]
-  (->LocalResponseNormalization backend k n alpha beta))
+  [backend n-input
+   & {:keys [k n alpha beta]
+      :or {k 2 n 5 alpha 1e-4 beta 0.75}}]
+  (->SimpleLayer backend n-input
+                 {:layer-type :local-response-normalization
+                  :k k :n n :alpha alpha :beta beta}))
 
 
 (def recurrent-types
