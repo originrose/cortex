@@ -645,6 +645,52 @@ This is for cudnn compatibility.")))
                           epsilon)))
 
 
+;;For thorough explanation please see:
+;; http://www.cs.toronto.edu/~fritz/absps/imagenet.pdf, section 3.3
+(defrecord LocalResponseNormalization [backend n-input k n alpha beta]
+  cp/PLayerSetup
+  (setup [layer batch-size]
+    (assoc layer
+           :output (nn-backend/new-array backend [n-input] batch-size)
+           :input-gradient (nn-backend/new-array backend [n-input] batch-size)
+           :batch-size batch-size
+           :impl (nn-backend/create-layer backend (nn-backend/lrn-desc k n alpha beta))))
+  PBatchSize
+  (batch-size [layer] (:batch-size layer))
+
+  PBackend
+  (get-backend [layer] backend)
+
+  cp/PLayerSize
+  (input-size [layer] n-input)
+  (output-size [layer] n-input)
+
+  cp/PModule
+  (calc [layer input]
+    (nn-backend/forward! (:impl layer) input (:output layer))
+    layer)
+
+  (output [layer] (:output layer))
+
+  cp/PNeuralTraining
+  (forward [layer input]
+    (cp/calc layer input))
+
+  (backward [layer input output-gradient]
+    (nn-backend/backward! (:layer layer)
+                          input (:output layer)
+                          (:input-gradient layer)
+                          output-gradient)
+    layer)
+  (input-gradient [layer] (:input-gradient layer)))
+
+
+(defn local-response-normalization
+  [backend & {:keys [k n alpha beta]
+              :or {k 2 n 5 alpha 1e-4 beta 0.75}}]
+  (->LocalResponseNormalization backend k n alpha beta))
+
+
 (def recurrent-types
   [:relu
    :tanh
