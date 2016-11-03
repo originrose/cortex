@@ -137,11 +137,10 @@ The function signature will be:
   [item item-offset dest dest-offset elem-count]
   `(let [~item-offset (long ~item-offset)
          ~dest-offset (long ~dest-offset)
-         ~elem-count (long ~elem-count)]
-     (loop [~'idx 0]
-       (when (< ~'idx ~elem-count)
-         (.put ~dest (+ ~'idx ~dest-offset) (aget ~item (+ ~'idx ~item-offset)))
-         (recur (inc ~'idx))))
+         ~elem-count (long ~elem-count)
+         dest# (.duplicate ~dest)]
+     (.position dest# ~dest-offset)
+     (.put dest# ~item ~item-offset ~elem-count)
      ~dest))
 
 (defmacro set-array-constant-impl

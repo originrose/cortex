@@ -129,5 +129,5 @@
         score (nn-eval/evaluate-softmax network dataset [:data])
         network-desc (desc/network->description network)
         new-network (compute-desc/build-and-create-network network-desc backend 10)
-        new-score (nn-eval/evaluate-softmax network dataset [:data])]
+        new-score (nn-eval/evaluate-softmax new-network dataset [:data])]
     (is (utils/about-there? score new-score))))
