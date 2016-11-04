@@ -484,12 +484,31 @@ in order to avoid adding a small number to 0."
              (v-aset input-gradient-ary# batch-offset#
                      (~cast-fn (+ (+ sum-part-1# sum-part-3#) sum-part-2#))))))))))
 
+
+(defmacro a-pluseq
+  [ary idx data]
+  `(aset ~ary ~idx
+         (+ (aget ~ary ~idx) ~data)))
+
+
+(defmacro a-minuseq
+  [ary idx data]
+  `(aset ~ary ~idx
+         (- (aget ~ary ~idx) ~data)))
+
+(defmacro v-aget-squared
+  [ary idx]
+  `(let [data-val# (v-aget ~ary ~idx)]
+     (* data-val# data-val#)))
+
+
+
 (defmacro cpu-lrn-forward-impl
   [input output input-tensor n k alpha beta cast-fn]
   `(let [input# (ArrayView/toView ~input)
          output# (ArrayView/toView ~output)
          input-tensor# ~input-tensor
-         n-channels# (long (.channels input-tensor#))
+         n-channels# (long (.channel-count input-tensor#))
          height# (long (.height input-tensor#))
          width# (long (.width input-tensor#))
          n# (~cast-fn ~n)
@@ -497,10 +516,12 @@ in order to avoid adding a small number to 0."
          alpha# (~cast-fn ~alpha)
          beta# (~cast-fn ~beta)
          [batch-size# batch-stride#] (math/batch-shape input-tensor#)
+         batch-size# (long batch-size#)
+         batch-stride# (long batch-stride#)
          channel-stride# (* width# height#)
          num-pixels# channel-stride#
          half-n# (long (quot n# 2))
-         initial-end# (max 0 (min n-channels (- half-n# 1)))]
+         initial-end# (max 0 (min n-channels# (- half-n# 1)))]
      (c-for
       [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
       (let [start-offset# (* batch-idx# batch-stride# )
@@ -508,23 +529,31 @@ in order to avoid adding a small number to 0."
             pixel-fn#
             (fn [^long start# ^long len#]
               (let [end# (+ start# len#)
-                    ^doubles squared-sum-ary# (double-array n-channels#)]
+                    squared-sum-ary# (ArrayView/toView (double-array n-channels#))]
                 (c-for
                  [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
-                 (let [pix-offset# (+ start-offset# pix-idx#)]
+                 (let [pix-offset# (+ start-offset# pix-idx#)
+                       input# (.toStridedView input# pix-offset# channel-stride#)]
                    ;;generate initial squared sum missing the last entry
                    (c-for
                     [chan-idx# 0 (< chan-idx# initial-end#) (inc chan-idx#)]
-                    (let [input-val# (v-aget input (+ pix-offset#
-                                                      (* chan-idx# channel-stride#)))]
-                      (aset squared-sum-ary# 0
-                            (+ (aget squared-sum-ary# 0)
-                               (* input-val# input-val#)))))
+                    (.pluseq squared-sum-ary# 0 (v-aget-squared input#
+                                                                (+ pix-offset#
+                                                                   (* chan-idx# channel-stride#)))))
 
                    (c-for
-                    [chan-idx# 0 (< chan-idx# n-chnnels#) (inc chan-idx#)]
+                    [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
                     ;;To do the running sum we add next item (if exists) and subtract last item (if exists)
-                    (let [last-channel ])
+                    (let [subtract-channel# (- chan-idx# half-n#)
+                          add-channel# (+ chan-idx# half-n#)]
+                      (when (>= 0 subtract-channel#)
+                        (.minuseq squared-sum-ary# chan-idx#
+                                  (v-aget-squared input# (+ pix-offset# (* subtract-channel# channel-stride#)))))
+                      (when (< add-channel# n-channels#)
+                        (.pluseq squared-sum-ary# chan-idx#
+                                 (v-aget-squared input# (+ pix-offset# (* add-channel# channel-stride#)))))
+
+                      )
                     )
                    ))
                 ))])
