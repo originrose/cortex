@@ -500,10 +500,11 @@ in order to avoid adding a small number to 0."
          channel-stride# (* width# height#)
          num-pixels# channel-stride#
          half-n# (long (quot n# 2))
-         initial-end# (min n-channels (- half-n# 1))]
+         initial-end# (max 0 (min n-channels (- half-n# 1)))]
      (c-for
       [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
       (let [start-offset# (* batch-idx# batch-stride# )
+            ;;Create a function that will be used to parallelize the computation
             pixel-fn#
             (fn [^long start# ^long len#]
               (let [end# (+ start# len#)
@@ -519,6 +520,12 @@ in order to avoid adding a small number to 0."
                       (aset squared-sum-ary# 0
                             (+ (aget squared-sum-ary# 0)
                                (* input-val# input-val#)))))
+
+                   (c-for
+                    [chan-idx# 0 (< chan-idx# n-chnnels#) (inc chan-idx#)]
+                    ;;To do the running sum we add next item (if exists) and subtract last item (if exists)
+                    (let [last-channel ])
+                    )
                    ))
                 ))])
       (parallel-for
