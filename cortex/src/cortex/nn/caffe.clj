@@ -118,14 +118,18 @@ is accomplished in description.clj"}
   [layer-param]
   (println "Found unknown layer type: " (.getType layer-param)))
 
-
 (defn model-to-input
+  "Munges input description from caffe model file to cortex input desc.
+  Note that `getInputDimList` and `getInputShapeList` are two ways of
+  reading this based on version/type of caffe model file and there may
+  be others we haven't yet tried to support."
   [model]
-  (let [input-shape-data (first (.getInputShapeList model))
-        dims (into [] (.getDimList input-shape-data))
-        [input-batch-size n-channels width height] dims]
-    (assoc (first (desc/input width height n-channels)) :output-data-format :planar)))
-
+  (let [[batch-size n-chan width height] (or (seq (.getInputDimList model))
+                                             (-> (.getInputShapeList model)
+                                                 first
+                                                 (.getDimList)
+                                                 (into [])))]
+    (assoc (first (desc/input width height n-chan)) :output-data-format :planar)))
 
 (defn caffe->description
   [proto-model trained-model]

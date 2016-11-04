@@ -446,8 +446,8 @@
                  filter-desc
                  conv-desc
                  output-tensor
-                 cudnn/CUDNN_CONVOLUTION_FWD_PREFER_FASTEST
-                 0
+                 cudnn/CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT
+                 100000
                  forward-algo))
     (cudnn-call (cudnn/cudnnGetConvolutionForwardWorkspaceSize
                  cudnn-context
@@ -463,8 +463,8 @@
                  output-tensor
                  conv-desc
                  filter-desc
-                 cudnn/CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST
-                 0
+                 cudnn/CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT
+                 100000
                  backward-filter-algo))
     (cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterWorkspaceSize
                  cudnn-context
@@ -480,8 +480,8 @@
                  output-tensor
                  conv-desc
                  input-tensor
-                 cudnn/CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST
-                 0
+                 cudnn/CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT
+                 100000
                  backward-data-algo))
     (cudnn-call (cudnn/cudnnGetConvolutionBackwardDataWorkspaceSize
                  cudnn-context
