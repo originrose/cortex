@@ -124,7 +124,7 @@ is accomplished in description.clj"}
   reading this based on version/type of caffe model file and there may
   be others we haven't yet tried to support."
   [model]
-  (let [[batch-size n-chan width height] (or (.getInputDimList model)
+  (let [[batch-size n-chan width height] (or (seq (.getInputDimList model))
                                              (-> (.getInputShapeList model)
                                                  first
                                                  (.getDimList)
