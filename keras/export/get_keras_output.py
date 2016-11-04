@@ -9,8 +9,8 @@ Outputs:  An HDF5 file containing
         1) the output at each layer produced by a forward pass of the test-image
         2) test-image
 '''
-import sys
 import h5py
+import argparse
 import numpy as np
 from keras import backend as K
 from keras.models import model_from_json, load_model
@@ -19,7 +19,7 @@ from keras.models import model_from_json, load_model
 MODEL_DEFAULTS = {
     "optimizer": "adam",
     "loss": "categorical_crossentropy",
-    "metrics": "accuracy"
+    "metrics": ["accuracy"],
 }
 
 
@@ -90,6 +90,27 @@ def layer_outputs(h5file, json_file=None, out_fname='layer_outputs.h5'):
 
 
 if __name__ == '__main__':
-    model_fname = sys.argv[1]
-    out_fname = sys.argv[2]
-    layer_outputs(model_fname, out_fname=out_fname)
+    parser = argparse.ArgumentParser()
+    arg = parser.add_argument
+    arg("h5_file",
+        help="The h5 model or weights file. If weights, specify --json")
+    arg("out_h5_file",
+        help="The h5 model to be generated that contains outputs.")
+    arg("--json", help="A json file containing the model's architecture.",
+        action="store", type=str, default=None)
+    args = parser.parse_args()
+
+    if not (args.h5_file and args.out_h5_file):
+        print("Missing required arguments, see help.")
+        exit()
+    if args.json:
+        layer_outputs(
+            args.h5_file,
+            json_file=args.json,
+            out_fname=args.out_h5_file,
+        )
+    else:
+        layer_outputs(
+            args.h5_file,
+            out_fname=args.out_h5_file,
+        )
