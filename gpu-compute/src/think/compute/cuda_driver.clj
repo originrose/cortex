@@ -256,7 +256,7 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 (defn create-rand-context
   ^curand$curandGenerator_st []
   (let [rand-context (curand$curandGenerator_st.)]
-    (curand-call (curand/curandCreateGenerator rand-context curand/CURAND_RNG_PSEUDO_MT19937))
+    (curand-call (curand/curandCreateGenerator rand-context curand/CURAND_RNG_PSEUDO_DEFAULT))
     (resource/track rand-context)))
 
 
@@ -388,7 +388,9 @@ before we set it, do the operation, and unlock the object after."
   DevicePointer
   (->ptr-impl [item] (.ptr ^DevicePointer item))
   DeviceArray
-  (->ptr-impl [item] (->ptr-impl (math/device-buffer item))))
+  (->ptr-impl [item] (->ptr-impl (math/device-buffer item)))
+  nil
+  (->ptr-impl [item] nil))
 
 (defn ->ptr
   (^Pointer [item] (->ptr-impl item))

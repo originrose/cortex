@@ -76,10 +76,10 @@
 (defmethod create-module :batch-normalization
   [{:keys [output-size average-factor epsilon means variances scale bias]} backend]
   (layers/batch-normalization backend output-size average-factor
-                              :scale scale
-                              :bias bias
-                              :means means
-                              :variances variances
+                              :scale (to-network-array backend scale)
+                              :bias (to-network-array backend bias)
+                              :means (to-network-array backend means)
+                              :variances (to-network-array backend variances)
                               :epsilon epsilon))
 
 (declare create-network)
