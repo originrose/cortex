@@ -34,6 +34,15 @@ public final class IntArrayView extends ArrayViewBase
 	super(d.length);
 	data = d;
     }
+
+    /**
+       Member function construction to allow chaining from an existing view while preserving type.
+     */
+    public final IntArrayView construct( int offset, int capacity, int stride ) throws Exception
+    {
+	return new IntArrayView(data, offset, capacity, stride);
+    }
+
     public final int get(int idx)
     {
 	return data[index(idx)];

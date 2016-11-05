@@ -34,6 +34,15 @@ public final class DoubleArrayView extends ArrayViewBase
 	super(d.length);
 	data = d;
     }
+
+    /**
+       Member function construction to allow chaining from an existing view while preserving type.
+     */
+    public final DoubleArrayView construct( int offset, int capacity, int stride ) throws Exception
+    {
+	return new DoubleArrayView(data, offset, capacity, stride);
+    }
+
     public final double get(int idx)
     {
 	return data[index(idx)];

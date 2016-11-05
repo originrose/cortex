@@ -34,6 +34,15 @@ public final class LongArrayView extends ArrayViewBase
 	super(d.length);
 	data = d;
     }
+
+    /**
+       Member function construction to allow chaining from an existing view while preserving type.
+     */
+    public final LongArrayView construct( int offset, int capacity, int stride ) throws Exception
+    {
+	return new LongArrayView(data, offset, capacity, stride);
+    }
+
     public final long get(int idx)
     {
 	return data[index(idx)];

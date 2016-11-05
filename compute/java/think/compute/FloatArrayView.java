@@ -34,6 +34,15 @@ public final class FloatArrayView extends ArrayViewBase
 	super(d.length);
 	data = d;
     }
+
+    /**
+       Member function construction to allow chaining from an existing view while preserving type.
+     */
+    public final FloatArrayView construct( int offset, int capacity, int stride ) throws Exception
+    {
+	return new FloatArrayView(data, offset, capacity, stride);
+    }
+
     public final float get(int idx)
     {
 	return data[index(idx)];

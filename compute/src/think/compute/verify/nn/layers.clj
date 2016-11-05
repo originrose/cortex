@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [think.compute.nn.backend :as nn-backend]
             [think.compute.nn.layers :as layers]
+            [think.compute.math :as math]
             [cortex.nn.protocols :as cp]
             [clojure.core.matrix :as m]
             [think.compute.verify.utils :as utils]
@@ -465,3 +466,37 @@
       (is (utils/about-there? 21.05 (/ (m/esum running-inv-vars)
                                       input-size)
                               1e-2)))))
+
+(defn do-lrn-forward
+  [backend num-input-channels lrn-n]
+  (let [batch-size 1
+        input-dim 2
+        input-num-pixels (* input-dim input-dim)
+        n-input (* batch-size num-input-channels input-num-pixels)
+        input-data (range n-input)
+        input (math/with-tensor
+                (nn-backend/array backend (range n-input) batch-size)
+                (math/map->Tensor {:batch-size batch-size
+                                   :channel-count num-input-channels
+                                   :width input-dim
+                                   :height input-dim} ))
+        layer (cp/setup (layers/local-response-normalization
+                         backend
+                         (quot n-input batch-size)
+                         :k 0 :n lrn-n :alpha 1.0 :beta 1.0)
+                        batch-size)
+        layer (cp/forward layer input)
+        output (nn-backend/to-double-array backend (cp/output layer))]
+    {:input-data input-data
+     :output (vec output)}))
+
+(defn lrn-forward
+  [backend]
+  (let [lrn-1 (do-lrn-forward backend 3 1)]
+    (is (= (:output lrn-1)
+           (mapv #(* (double %) % %) (:input-data lrn-1)))))
+  (let [lrn-2 (do-lrn-forward backend 3 2)]
+    (is (= (:output lrn-2)
+           (mapv double
+                 [0.0 26.0 80.0 174.0 320.0 530.0 816.0
+                  1190.0 512.0 729.0 1000.0 1331.0])))))

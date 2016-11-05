@@ -504,6 +504,12 @@ in order to avoid adding a small number to 0."
   `(let [data-val# (v-aget ~ary ~idx)]
      (* data-val# data-val#)))
 
+(defn calculate-look-amounts
+  [^double n]
+  (let [look-behind (+ 1 (Math/floor (/ (- n 1) 2.0)))
+        look-ahead (- n look-behind)]
+    {:remove-index look-behind
+     :add-index look-ahead}))
 
 
 (defmacro cpu-lrn-forward-impl
@@ -514,7 +520,7 @@ in order to avoid adding a small number to 0."
          n-channels# (long (.channel-count input-tensor#))
          height# (long (.height input-tensor#))
          width# (long (.width input-tensor#))
-         n# (~cast-fn ~n)
+         n# (~cast-fn (max 1.0 (~cast-fn (min (~cast-fn ~n) n-channels#))))
          k# (~cast-fn ~k)
          alpha# (~cast-fn ~alpha)
          neg-beta# (- (~cast-fn ~beta))
@@ -523,46 +529,69 @@ in order to avoid adding a small number to 0."
          batch-stride# (long batch-stride#)
          channel-stride# (* width# height#)
          num-pixels# channel-stride#
-         half-n# (long (quot n# 2))
-         initial-end# (max 0 (min n-channels# (- half-n# 1)))]
+         ;; Normalization window width in elements.
+         ;; LRN layer uses a window [center-lookBehind, center+lookAhead],
+         ;; where lookBehind = floor ( (lrnN-1)/2), lookAhead
+         ;; = lrnN-lookBehind-1. So for n=10, the window is [k-4...k...k+5] with a total of 10
+         ;; samples.
+         ;; cudnnCreateLRNDescriptor.
+         look-data# (calculate-look-amounts n#)
+         ;;We use a running sum so when going to the next 'n'
+         ;;we want to remove the item at 'n - remove-index'
+         ;;and add the item at 'n + add-index'.  As such remove-index
+         ;;is technically one past the beginning of our range while
+         ;;add-index is the last possible valid index of our range.
+         remove-index# (long (:remove-index look-data#))
+         add-index# (long (:add-index look-data#))]
      (c-for
       [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
       (let [start-offset# (* batch-idx# batch-stride# )
             ;;Create a function that will be used to parallelize the computation
             pixel-fn#
             (fn [^long start# ^long len#]
-              (let [end# (+ start# len#)
-                    squared-sum-ary# (ArrayView/toView (double-array 1))]
-                (c-for
-                 [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
-                 (let [pix-offset# (+ start-offset# pix-idx#)
-                       ;;Setup input to stride over image channels at this pixel.
-                       input# (.toStridedView input# pix-offset# channel-stride#)
-                       output# (.toStridedView output# pix-offset# channel-stride#)]
-                   ;;generate initial squared sum missing the last entry
-                   (c-for
-                    [chan-idx# 0 (< chan-idx# initial-end#) (inc chan-idx#)]
-                    (.pluseq squared-sum-ary# 0
-                             (v-aget-squared input# chan-idx#)))
-
-                   (c-for
-                    [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
-                    ;;To do the running sum we add next item (if exists)
-                    ;;and subtract last item (if exists)
-                    (let [subtract-channel# (- chan-idx# half-n#)
-                          add-channel# (+ chan-idx# half-n#)]
-                      (when (>= 0 subtract-channel#)
-                        (.minuseq squared-sum-ary# 0
-                                  (v-aget-squared input# subtract-channel#)))
-                      (when (< add-channel# n-channels#)
-                        (.pluseq squared-sum-ary# 0
-                                 (v-aget-squared input# channel-stride#))))
-                    (let [divisor# (Math/pow (+ k#
-                                                (* alpha# (.get squared-sum-ary# 0)))
-                                             neg-beta#)]
-                      (.set output# chan-idx# (~cast-fn (/ (.get input# chan-idx#)
-                                                           divisor#)))))))))]
-        (launch-parallel-for num-pixels# pixel-fn#)))))
+              (try
+               (let [end# (+ start# len#)
+                     squared-sum-ary# (ArrayView/toView (double-array 1))]
+                 (c-for
+                  [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
+                  (let [pix-offset# (+ start-offset# pix-idx#)
+                        ;;Setup input to stride over image channels at this pixel.
+                        input# (.toStridedView input# pix-offset# channel-stride#)
+                        output# (.toStridedView output# pix-offset# channel-stride#)]
+                    ;;generate initial squared sum missing the last entry
+                    (.set squared-sum-ary# 0 0.0)
+                    (c-for
+                     [chan-idx# 0 (< chan-idx# add-index#) (inc chan-idx#)]
+                     (.pluseq squared-sum-ary# 0
+                              (v-aget-squared input# chan-idx#)))
+                    (comment (println "initial squared-sum" (.get squared-sum-ary# 0)))
+                    (c-for
+                     [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
+                     ;;To do the running sum we add next item (if exists)
+                     ;;and subtract last item (if exists)
+                     (let [subtract-channel# (- chan-idx# remove-index#)
+                           add-channel# (+ chan-idx# add-index#)]
+                       (when (>= subtract-channel# 0)
+                         (.minuseq squared-sum-ary# 0
+                                   (v-aget-squared input# subtract-channel#)))
+                       (when (< add-channel# n-channels#)
+                         (.pluseq squared-sum-ary# 0
+                                  (v-aget-squared input# add-channel#))))
+                     ;;A zero here leads to infinity as beta is nonzero positive
+                     ;;and thus negative beta is nonzero negative.  (pow 0 -1) = Infinity
+                     (comment (println "squared-sum" (.get squared-sum-ary# 0)))
+                     (let [pow-x# (Math/max
+                                   (+ k#
+                                      (* alpha# (.get squared-sum-ary# 0)))
+                                   0.000001)
+                           divisor# (Math/pow pow-x#
+                                              neg-beta#)]
+                       (.set output# chan-idx# (~cast-fn (/ (.get input# chan-idx#)
+                                                            divisor#))))))))
+               (catch Throwable e# (clojure.pprint/pprint e#))))]
+        (pixel-fn# 0 num-pixels#)
+        (comment
+         (launch-parallel-for num-pixels# pixel-fn#))))))
 
 
 (extend-type DoubleArrayView
@@ -1042,6 +1071,11 @@ in order to avoid adding a small number to 0."
       (->MaxPooling backend (:conv-config layer-desc))
       (= :batch-normalization layer-type)
       (->BatchNormalization backend)
+      (= :local-response-normalization layer-type)
+      (->LocalResponseNormalization backend (:n layer-desc)
+                                    (:k layer-desc)
+                                    (:alpha layer-desc)
+                                    (:beta layer-desc))
       :else (throw (Exception. (str "Unrecognized layer type: " layer-type)))))
   opt/POptimiseBackend
   (adadelta-step! [backend ^DeviceArray gradient ^DeviceArray parameters

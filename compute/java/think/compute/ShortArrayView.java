@@ -34,6 +34,15 @@ public final class ShortArrayView extends ArrayViewBase
 	super(d.length);
 	data = d;
     }
+
+    /**
+       Member function construction to allow chaining from an existing view while preserving type.
+     */
+    public final ShortArrayView construct( int offset, int capacity, int stride ) throws Exception
+    {
+	return new ShortArrayView(data, offset, capacity, stride);
+    }
+
     public final short get(int idx)
     {
 	return data[index(idx)];
