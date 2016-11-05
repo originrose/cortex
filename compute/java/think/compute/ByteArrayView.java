@@ -8,7 +8,9 @@ public final class ByteArrayView extends ArrayViewBase
     void checkDataLength() throws Exception
     {
 	if ( data.length < (offset + capacity) )
-	    throw new Exception ("data length is less than capacity.");
+	    throw new Exception
+		(String.format("data length %s is less than offset %s + capacity %s.",
+			       data.length, offset, capacity));
     }
     public ByteArrayView( byte[] d, int o, int cap, int str ) throws Exception
     {
@@ -32,42 +34,51 @@ public final class ByteArrayView extends ArrayViewBase
 	super(d.length);
 	data = d;
     }
-    public byte get(int idx)
+    public final byte get(int idx)
     {
 	return data[index(idx)];
     }
-    public void set(int idx, byte value)
+    public final void set(int idx, byte value)
     {
 	data[index(idx)] = value;
     }
-    public void pluseq(int idx, byte value)
+    public final void pluseq(int idx, byte value)
     {
 	data[index(idx)] += value;
     }
-    public void minuseq(int idx, byte value)
+    public final void minuseq(int idx, byte value)
     {
 	data[index(idx)] -= value;
     }
-    public void multeq(int idx, byte value)
+    public final void multeq(int idx, byte value)
     {
 	data[index(idx)] *= value;
     }
-    public void diveq(int idx, byte value)
+    public final void diveq(int idx, byte value)
     {
 	data[index(idx)] /= value;
     }
-    public void fill(byte value)
+    public final void fill(byte value)
     {
 	if (stride == 1)
 	    Arrays.fill(data, offset, (offset + capacity), value);
 	else {
 	    int len = length();
-	    for( int idx = 0; idx < len; ++idx ) 
+	    for( int idx = 0; idx < len; ++idx )
 		set(idx, value);
-	}	    
+	}
     }
-    public ByteArrayView toStridedView(int off, int str)
+    public final ByteArrayView toView(int new_offset, int len) throws Exception
     {
-	return new ByteArrayView( data, offset + off, capacity, str );
+	return new ByteArrayView(data, offset + new_offset*stride, len*stride, stride);
+    }
+    public final ByteArrayView toView(int offset) throws Exception
+    {
+	return toView(offset, length() - offset);
+    }
+    public final ByteArrayView toStridedView(int elem_offset, int str) throws Exception
+    {
+	return new ByteArrayView( data, offset + (elem_offset * stride)
+				  , capacity - (elem_offset * stride), str*stride );
     }
 }

@@ -8,7 +8,9 @@ public final class ShortArrayView extends ArrayViewBase
     void checkDataLength() throws Exception
     {
 	if ( data.length < (offset + capacity) )
-	    throw new Exception ("data length is less than capacity.");
+	    throw new Exception
+		(String.format("data length %s is less than offset %s + capacity %s.",
+			       data.length, offset, capacity));
     }
     public ShortArrayView( short[] d, int o, int cap, int str ) throws Exception
     {
@@ -32,42 +34,51 @@ public final class ShortArrayView extends ArrayViewBase
 	super(d.length);
 	data = d;
     }
-    public short get(int idx)
+    public final short get(int idx)
     {
 	return data[index(idx)];
     }
-    public void set(int idx, short value)
+    public final void set(int idx, short value)
     {
 	data[index(idx)] = value;
     }
-    public void pluseq(int idx, short value)
+    public final void pluseq(int idx, short value)
     {
 	data[index(idx)] += value;
     }
-    public void minuseq(int idx, short value)
+    public final void minuseq(int idx, short value)
     {
 	data[index(idx)] -= value;
     }
-    public void multeq(int idx, short value)
+    public final void multeq(int idx, short value)
     {
 	data[index(idx)] *= value;
     }
-    public void diveq(int idx, short value)
+    public final void diveq(int idx, short value)
     {
 	data[index(idx)] /= value;
     }
-    public void fill(short value)
+    public final void fill(short value)
     {
 	if (stride == 1)
 	    Arrays.fill(data, offset, (offset + capacity), value);
 	else {
 	    int len = length();
-	    for( int idx = 0; idx < len; ++idx ) 
+	    for( int idx = 0; idx < len; ++idx )
 		set(idx, value);
-	}	    
+	}
     }
-    public ShortArrayView toStridedView(int off, int str)
+    public final ShortArrayView toView(int new_offset, int len) throws Exception
     {
-	return new ShortArrayView( data, offset + off, capacity, str );
+	return new ShortArrayView(data, offset + new_offset*stride, len*stride, stride);
+    }
+    public final ShortArrayView toView(int offset) throws Exception
+    {
+	return toView(offset, length() - offset);
+    }
+    public final ShortArrayView toStridedView(int elem_offset, int str) throws Exception
+    {
+	return new ShortArrayView( data, offset + (elem_offset * stride)
+				  , capacity - (elem_offset * stride), str*stride );
     }
 }

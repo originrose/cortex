@@ -20,9 +20,9 @@ public class ArrayViewBase
     {
 	this(0,cap,1);
     }
-    public int length() { return capacity/stride; }
-    public int index(int idx) { return offset + idx * stride; }
-    public int checkIndex(int idx) throws Exception
+    public final int length() { return capacity/stride; }
+    public final int index(int idx) { return offset + idx * stride; }
+    public final int checkIndex(int idx) throws Exception
     {
 	int retval =index(idx);
 	if ( retval >= capacity )

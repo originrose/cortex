@@ -482,7 +482,10 @@ in order to avoid adding a small number to 0."
                           [:sum-part-2 sum-part-2#]
                           [:sum-part-3 sum-part-3#]])))
              (v-aset input-gradient-ary# batch-offset#
-                     (~cast-fn (+ (+ sum-part-1# sum-part-3#) sum-part-2#))))))))))
+                     (~cast-fn (+ (+ sum-part-1# sum-part-3#) sum-part-2#)))))
+
+          ;;(println "backward finished")
+          )))))
 
 
 (defmacro a-pluseq
@@ -514,7 +517,7 @@ in order to avoid adding a small number to 0."
          n# (~cast-fn ~n)
          k# (~cast-fn ~k)
          alpha# (~cast-fn ~alpha)
-         beta# (~cast-fn ~beta)
+         neg-beta# (- (~cast-fn ~beta))
          [batch-size# batch-stride#] (math/batch-shape input-tensor#)
          batch-size# (long batch-size#)
          batch-stride# (long batch-stride#)
@@ -529,44 +532,37 @@ in order to avoid adding a small number to 0."
             pixel-fn#
             (fn [^long start# ^long len#]
               (let [end# (+ start# len#)
-                    squared-sum-ary# (ArrayView/toView (double-array n-channels#))]
+                    squared-sum-ary# (ArrayView/toView (double-array 1))]
                 (c-for
                  [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
                  (let [pix-offset# (+ start-offset# pix-idx#)
-                       input# (.toStridedView input# pix-offset# channel-stride#)]
+                       ;;Setup input to stride over image channels at this pixel.
+                       input# (.toStridedView input# pix-offset# channel-stride#)
+                       output# (.toStridedView output# pix-offset# channel-stride#)]
                    ;;generate initial squared sum missing the last entry
                    (c-for
                     [chan-idx# 0 (< chan-idx# initial-end#) (inc chan-idx#)]
-                    (.pluseq squared-sum-ary# 0 (v-aget-squared input#
-                                                                (+ pix-offset#
-                                                                   (* chan-idx# channel-stride#)))))
+                    (.pluseq squared-sum-ary# 0
+                             (v-aget-squared input# chan-idx#)))
 
                    (c-for
                     [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
-                    ;;To do the running sum we add next item (if exists) and subtract last item (if exists)
+                    ;;To do the running sum we add next item (if exists)
+                    ;;and subtract last item (if exists)
                     (let [subtract-channel# (- chan-idx# half-n#)
                           add-channel# (+ chan-idx# half-n#)]
                       (when (>= 0 subtract-channel#)
-                        (.minuseq squared-sum-ary# chan-idx#
-                                  (v-aget-squared input# (+ pix-offset# (* subtract-channel# channel-stride#)))))
+                        (.minuseq squared-sum-ary# 0
+                                  (v-aget-squared input# subtract-channel#)))
                       (when (< add-channel# n-channels#)
-                        (.pluseq squared-sum-ary# chan-idx#
-                                 (v-aget-squared input# (+ pix-offset# (* add-channel# channel-stride#)))))
-
-                      )
-                    )
-                   ))
-                ))])
-      (parallel-for
-       pixel# num-pixels#
-       (let [
-             ])
-                    )
-      (let [])
-
-            )
-     )
-  )
+                        (.pluseq squared-sum-ary# 0
+                                 (v-aget-squared input# channel-stride#))))
+                    (let [divisor# (Math/pow (+ k#
+                                                (* alpha# (.get squared-sum-ary# 0)))
+                                             neg-beta#)]
+                      (.set output# chan-idx# (~cast-fn (/ (.get input# chan-idx#)
+                                                           divisor#)))))))))]
+        (launch-parallel-for num-pixels# pixel-fn#)))))
 
 
 (extend-type DoubleArrayView
@@ -624,8 +620,10 @@ in order to avoid adding a small number to 0."
                                      saved-means saved-variances
                                      batch-size batch-stride
                                      ave-factor epsilon double))
-  (cpu-bn-backward [input ^DoubleArrayView means ^DoubleArrayView variances ^DoubleArrayView scale
-                    ^DoubleArrayView bias ^DoubleArrayView output ^DoubleArrayView scale-gradient
+  (cpu-bn-backward [input ^DoubleArrayView means ^DoubleArrayView
+                    variances ^DoubleArrayView scale
+                    ^DoubleArrayView bias ^DoubleArrayView output
+                    ^DoubleArrayView scale-gradient
                     ^DoubleArrayView bias-gradient ^DoubleArrayView input-gradient
                     ^DoubleArrayView output-gradient batch-size batch-stride]
     (cpu-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
@@ -633,8 +631,7 @@ in order to avoid adding a small number to 0."
   (cpu-lrn-forward [input ^DoubleArrayView output ^Tensor input-tensor n k alpha beta]
     (cpu-lrn-forward-impl input output input-tensor n k alpha beta double))
   (cpu-lrn-backward [input ^DoubleArrayView output-gradient ^DoubleArrayView input-gradient
-                     ^Tensor input-tensor n k alpha beta])
-  )
+                     ^Tensor input-tensor n k alpha beta]))
 
 
 (extend-type FloatArrayView
@@ -647,7 +644,8 @@ in order to avoid adding a small number to 0."
     (cpu-act-backward-impl act-type input output output-gradient input-gradient float))
   (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input]
     (cpu-softmax-forward-impl n-input input-buf output-buf float))
-  (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha param-offset decay epsilon
+  (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha
+                       param-offset decay epsilon
                        ^FloatArrayView grad-accum ^FloatArrayView dx-accum]
     (AdadeltaOptimiser/step_f (float gradient-alpha) (.data gradient) (.data parameters)
                               (int param-offset) (float decay) (float epsilon)
@@ -915,9 +913,9 @@ in order to avoid adding a small number to 0."
   (backward! [layer input output input-gradient output-gradient]
     (let [^Tensor input-tensor (.tensor ^DeviceArray input)]
      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-       (cpu-lrn-backward (device-array input)
-                         (device-array output-gradient)
-                         (device-array input-gradient)
+       (cpu-lrn-backward (device-array->view input)
+                         (device-array->view output-gradient)
+                         (device-array->view input-gradient)
                          input-tensor
                          n k alpha beta)))))
 

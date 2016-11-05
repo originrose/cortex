@@ -60,5 +60,5 @@
 (def-double-float-test split
   (verify-layers/split-basic (create-backend)))
 
-(def-double-float-test batch-normalization
+(deftest batch-normalization
   (verify-layers/batch-normalization (create-backend)))

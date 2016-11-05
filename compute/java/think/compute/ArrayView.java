@@ -42,14 +42,13 @@ public final class ArrayView
     public static DoubleArrayView toView(DoubleArrayView data, int offset, int len)
 	throws Exception
     {
-	ensureFits(offset, len, data.length);
-	return toView(data.data, offset + data.offset, len );
+	return data.toView(offset, len);
     }
     public static DoubleArrayView toView(DoubleArrayView data, int offset ) throws Exception {
-	return toView(data.data, offset + data.offset, data.length - offset );
+	return data.toView(offset);
     }
-    public static DoubleArrayView toView(DoubleArrayView data ) throws Exception {
-	return toView(data.data, data.offset, data.length );
+    public static DoubleArrayView toView(DoubleArrayView data) throws Exception {
+	return data;
     }
 
 
@@ -80,14 +79,13 @@ public final class ArrayView
     public static FloatArrayView toView(FloatArrayView data, int offset, int len)
 	throws Exception
     {
-	ensureFits(offset, len, data.length);
-	return toView(data.data, offset + data.offset, len );
+	return data.toView(offset,len);
     }
     public static FloatArrayView toView(FloatArrayView data, int offset ) throws Exception {
-	return toView(data.data, offset + data.offset, data.length - offset );
+	return data.toView(offset);
     }
     public static FloatArrayView toView(FloatArrayView data ) throws Exception {
-	return toView(data.data, data.offset, data.length );
+	return data;
     }
 
 
@@ -119,14 +117,13 @@ public final class ArrayView
     public static LongArrayView toView(LongArrayView data, int offset, int len)
 	throws Exception
     {
-	ensureFits(offset, len, data.length);
-	return toView(data.data, offset + data.offset, len );
+	return data.toView(offset,len);
     }
     public static LongArrayView toView(LongArrayView data, int offset ) throws Exception {
-	return toView(data.data, offset + data.offset, data.length - offset );
+	return data.toView(offset);
     }
     public static LongArrayView toView(LongArrayView data ) throws Exception {
-	return toView(data.data, data.offset, data.length );
+	return data;
     }
 
 
@@ -157,14 +154,13 @@ public final class ArrayView
     public static IntArrayView toView(IntArrayView data, int offset, int len)
 	throws Exception
     {
-	ensureFits(offset, len, data.length);
-	return toView(data.data, offset + data.offset, len );
+	return data.toView(offset,len);
     }
     public static IntArrayView toView(IntArrayView data, int offset ) throws Exception {
-	return toView(data.data, offset + data.offset, data.length - offset );
+	return data.toView(offset);
     }
     public static IntArrayView toView(IntArrayView data ) throws Exception {
-	return toView(data.data, data.offset, data.length );
+	return data;
     }
 
 
@@ -195,14 +191,13 @@ public final class ArrayView
     public static ShortArrayView toView(ShortArrayView data, int offset, int len)
 	throws Exception
     {
-	ensureFits(offset, len, data.length);
-	return toView(data.data, offset + data.offset, len );
+	return data.toView(offset,len);
     }
     public static ShortArrayView toView(ShortArrayView data, int offset ) throws Exception {
-	return toView(data.data, offset + data.offset, data.length - offset );
+	return data.toView(offset);
     }
     public static ShortArrayView toView(ShortArrayView data ) throws Exception {
-	return toView(data.data, data.offset, data.length );
+	return data;
     }
 
 
@@ -235,13 +230,12 @@ public final class ArrayView
     public static ByteArrayView toView(ByteArrayView data, int offset, int len)
 	throws Exception
     {
-	ensureFits(offset, len, data.length);
-	return toView(data.data, offset + data.offset, len );
+	return data.toView(offset,len);
     }
     public static ByteArrayView toView(ByteArrayView data, int offset ) throws Exception {
-	return toView(data.data, offset + data.offset, data.length - offset );
+	return data.toView(offset);
     }
     public static ByteArrayView toView(ByteArrayView data ) throws Exception {
-	return toView(data.data, data.offset, data.length );
+	return data;
     }
 }
