@@ -620,8 +620,7 @@ Calculates: (sum(x[i]^2)*alpha + K)"
                                                             divisor#))))))))
                (catch Throwable e# (clojure.pprint/pprint e#))))]
         ;;(pixel-fn# 0 num-pixels#)
-        (launch-parallel-for num-pixels# pixel-fn#)
-        ))))
+        (launch-parallel-for num-pixels# pixel-fn#)))))
 
 
 (defmacro cpu-lrn-backward-impl
