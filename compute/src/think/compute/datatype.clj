@@ -319,16 +319,16 @@ The function signature will be:
 ;;Macros to use to use the sub views as efficiently as one uses arrays.
 (defmacro v-aset
   [array-view item-offset value]
-  `(aset (.data ~array-view) (+ (.offset ~array-view) ~item-offset) ~value))
+  `(.set ~array-view ~item-offset ~value))
 
 (defmacro v-aget
   [array-view item-offset]
-  `(aget (.data ~array-view) (+ (.offset ~array-view) ~item-offset)))
+  `(.get ~array-view ~item-offset))
 
 (defmacro v-aset-rem
   [array-view item-offset value]
-  `(aset (.data ~array-view) (rem (+ (.offset ~array-view) ~item-offset)
-                                (.length ~array-view))
+  `(.set ~array-view
+         (rem ~item-offset (.length ~array-view))
          ~value))
 
 (defmacro v-aget-rem

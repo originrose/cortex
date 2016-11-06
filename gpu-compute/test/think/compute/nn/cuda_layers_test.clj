@@ -62,3 +62,6 @@
 
 (def-double-float-test batch-normalization
   (verify-layers/batch-normalization (create-backend)))
+
+(def-double-float-test local-response-normalization-forward
+  (verify-layers/lrn-forward (create-backend)))

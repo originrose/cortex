@@ -25,3 +25,6 @@
 
 (deftest batchnorm-gradient
   (verify-gradient/bn-gradient (create-backend)))
+
+(deftest lrn-gradient
+  (verify-gradient/lrn-gradient (create-backend)))

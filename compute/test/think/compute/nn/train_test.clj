@@ -23,5 +23,5 @@
   (verify-train/test-corn (create-backend)))
 
 
-(def-double-float-test layer->description
+(deftest layer->description
   (verify-train/layer->description (create-backend)))

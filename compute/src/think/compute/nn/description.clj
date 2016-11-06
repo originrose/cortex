@@ -109,11 +109,23 @@
     :logistic
     compute-type))
 
+
+(defmulti simple-layer->description (fn [layer]
+                                      (get-in layer [:layer-impl-desc
+                                                     :layer-type])))
+
+
+(defmethod simple-layer->description :default
+  [layer]
+  {:type (convert-layer-type (get-in layer [:layer-impl-desc
+                                            :layer-type]))})
+
+
 (extend-protocol desc/PNetworkToDescription
   think.compute.nn.layers.SimpleLayer
   (layer->input [layer] (desc/input (:n-input layer)))
   (layer->description [layer]
-    {:type (convert-layer-type (:layer-type layer))})
+    (simple-layer->description layer))
 
   think.compute.nn.layers.Linear
   (layer->input [layer] (desc/input (cp/input-size layer)))

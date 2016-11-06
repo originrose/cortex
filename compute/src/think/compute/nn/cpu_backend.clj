@@ -60,7 +60,9 @@
                                batch-size batch-stride ave-factor epsilon])
   (cpu-bn-backward [input saved-means saved-variances scale bias output
                     scale-gradient bias-gradient input-gradient
-                    output-gradient batch-size batch-stride]))
+                    output-gradient batch-size batch-stride])
+  (cpu-lrn-forward [input output input-tensor n k alpha beta])
+  (cpu-lrn-backward [input output-gradient input-gradient input-tensor n k alpha beta]))
 
 (defn launch-parallel-for
   [^long num-iters parallel-for-fn]
@@ -96,15 +98,16 @@
       (doseq [^Future fut futures]
         (.get fut)))))
 
+
 (defmacro parallel-for
   [idx-var num-iters & body]
   `(launch-parallel-for ~num-iters
                         (fn [^long group-start# ^long group-len#]
                           (let [group-end# (+ group-start# group-len#)]
-                           (c-for [~idx-var group-start#
-                                   (< ~idx-var group-end#)
-                                   (inc ~idx-var)]
-                                  ~@body)))))
+                            (c-for [~idx-var group-start#
+                                    (< ~idx-var group-end#)
+                                    (inc ~idx-var)]
+                                   ~@body)))))
 
 
 (defmacro cpu-act-forward-impl
@@ -479,7 +482,236 @@ in order to avoid adding a small number to 0."
                           [:sum-part-2 sum-part-2#]
                           [:sum-part-3 sum-part-3#]])))
              (v-aset input-gradient-ary# batch-offset#
-                     (~cast-fn (+ (+ sum-part-1# sum-part-3#) sum-part-2#))))))))))
+                     (~cast-fn (+ (+ sum-part-1# sum-part-3#) sum-part-2#)))))
+
+          ;;(println "backward finished")
+          )))))
+
+
+(defmacro a-pluseq
+  [ary idx data]
+  `(aset ~ary ~idx
+         (+ (aget ~ary ~idx) ~data)))
+
+
+(defmacro a-minuseq
+  [ary idx data]
+  `(aset ~ary ~idx
+         (- (aget ~ary ~idx) ~data)))
+
+(defmacro v-aget-squared
+  [ary idx]
+  `(let [data-val# (v-aget ~ary ~idx)]
+     (* data-val# data-val#)))
+
+(defn calculate-look-amounts
+  [^double n]
+  (let [look-behind (+ 1 (Math/floor (/ (- n 1) 2.0)))
+        look-ahead (- n look-behind)]
+    {:remove-index look-behind
+     :add-index look-ahead}))
+
+(defmacro calc-squared-sums!
+  "Calculate a running squared sum placing result in squared-sum-ary.
+remove-index and add index are defined as one past the beginning
+of the range relative to n and the end of the range (inclusive).
+Calculates: (sum(x[i]^2)*alpha + K)"
+  [input n-items remove-index add-index squared-sum-view alpha k cast-fn ]
+  `(let [input# ~input
+         n-items# ~n-items
+         remove-index# ~remove-index
+         add-index# ~add-index
+         squared-sum-view# ~squared-sum-view
+         alpha# (~cast-fn ~alpha)
+         k# (~cast-fn ~k)]
+     (.fill squared-sum-view# 0)
+     (let [initial-sum#
+           (loop [item-idx# 0
+                  initial-sum# 0.0]
+             (if (< item-idx# add-index#)
+               (recur (inc item-idx#)
+                      (+ initial-sum#
+                         (v-aget-squared input# item-idx#)))
+               initial-sum#))]
+       (loop [item-idx# 0
+              running-sum# (double initial-sum#)]
+         (when (< item-idx# n-items#)
+           (let [subtract-item# (- item-idx# remove-index#)
+                 add-item# (+ item-idx# add-index#)
+                 running-sum# (double running-sum#)
+                 running-sum# (double
+                               (if (>= subtract-item# 0)
+                                 (- running-sum#
+                                    (v-aget-squared input# subtract-item#))
+                                 running-sum#))
+                 running-sum# (double
+                               (if (< add-item# n-items#)
+                                 (+ running-sum#
+                                    (v-aget-squared input# add-item#))
+                                 running-sum#))]
+             (.set squared-sum-view# item-idx# (+ k#
+                                                  (* alpha#
+                                                     (~cast-fn running-sum#))))
+             (recur (inc item-idx#) running-sum#)))))))
+
+
+(defn safe-positive-pow
+  "Assuming X is supposed to be positive, perform a safe pow where we do not let X go to zero."
+  ^double [^double x ^double y]
+  (if (< y 0.0)
+    (Math/pow (Math/max x 1e-6) y)
+    (Math/pow x y)))
+
+
+(defmacro cpu-lrn-forward-impl
+  [input output input-tensor n k alpha beta cast-fn]
+  `(let [input# (ArrayView/toView ~input)
+         output# (ArrayView/toView ~output)
+         input-tensor# ~input-tensor
+         n-channels# (long (.channel-count input-tensor#))
+         height# (long (.height input-tensor#))
+         width# (long (.width input-tensor#))
+         n# (~cast-fn (max 1.0 (~cast-fn (min (~cast-fn ~n) n-channels#))))
+         k# (~cast-fn ~k)
+         alpha# (/ (~cast-fn ~alpha)
+                   n#)
+         beta# (~cast-fn ~beta)
+         neg-beta# (- beta#)
+         [batch-size# batch-stride#] (math/batch-shape input-tensor#)
+         batch-size# (long batch-size#)
+         batch-stride# (long batch-stride#)
+         channel-stride# (* width# height#)
+         num-pixels# channel-stride#
+         ;; Normalization window width in elements.
+         ;; LRN layer uses a window [center-lookBehind, center+lookAhead],
+         ;; where lookBehind = floor ( (lrnN-1)/2), lookAhead
+         ;; = lrnN-lookBehind-1. So for n=10, the window is [k-4...k...k+5] with a total of 10
+         ;; samples.
+         ;; cudnnCreateLRNDescriptor.
+         look-data# (calculate-look-amounts n#)
+         ;;We use a running sum so when going to the next 'n'
+         ;;we want to remove the item at 'n - remove-index'
+         ;;and add the item at 'n + add-index'.  As such remove-index
+         ;;is technically one past the beginning of our range while
+         ;;add-index is the last possible valid index of our range.
+         remove-index# (long (:remove-index look-data#))
+         add-index# (long (:add-index look-data#))]
+     (c-for
+      [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
+      (let [start-offset# (* batch-idx# batch-stride# )
+            ;;Create a function that will be used to parallelize the computation
+            pixel-fn#
+            (fn [^long start# ^long len#]
+              (try
+               (let [end# (+ start# len#)
+                     squared-sum-view# (ArrayView/toView (double-array n-channels#))]
+                 (c-for
+                  [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
+                  (let [pix-offset# (+ start-offset# pix-idx#)
+                        ;;Setup input to stride over image channels at this pixel.
+                        input# (.toStridedView input# pix-offset# channel-stride#)
+                        output# (.toStridedView output# pix-offset# channel-stride#)]
+                    (calc-squared-sums! input# n-channels# remove-index# add-index#
+                                        squared-sum-view# alpha# k# ~cast-fn)
+                    (c-for
+                     [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
+                     (let [divisor# (safe-positive-pow
+                                     (.get squared-sum-view# chan-idx#)
+                                     beta#)]
+                       (.set output# chan-idx# (~cast-fn (/ (.get input# chan-idx#)
+                                                            divisor#))))))))
+               (catch Throwable e# (clojure.pprint/pprint e#))))]
+        ;;(pixel-fn# 0 num-pixels#)
+        (launch-parallel-for num-pixels# pixel-fn#)))))
+
+
+(defmacro cpu-lrn-backward-impl
+  "backward pass, calculated using sage:
+https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/local-response-normalization.txt"
+  [input output-gradient input-gradient
+   input-tensor n k alpha beta cast-fn]
+  `(let [input# (ArrayView/toView ~input)
+         output-gradient# (ArrayView/toView ~output-gradient)
+         input-gradient# (ArrayView/toView ~input-gradient)
+         input-tensor# ~input-tensor
+         n-channels# (long (.channel-count input-tensor#))
+         height# (long (.height input-tensor#))
+         width# (long (.width input-tensor#))
+         n# (~cast-fn (max 1.0 (~cast-fn (min (~cast-fn ~n) n-channels#))))
+         k# (~cast-fn ~k)
+         alpha# (/ (~cast-fn ~alpha)
+                   n#)
+         beta# (~cast-fn ~beta)
+         neg-beta# (- beta#)
+         [batch-size# batch-stride#] (math/batch-shape input-tensor#)
+         batch-size# (long batch-size#)
+         batch-stride# (long batch-stride#)
+         channel-stride# (* width# height#)
+         num-pixels# channel-stride#
+         look-data# (calculate-look-amounts n#)
+         ;;We use a running sum so when going to the next 'n'
+         ;;we want to remove the item at 'n - remove-index'
+         ;;and add the item at 'n + add-index'.  As such remove-index
+         ;;is technically one past the beginning of our range while
+         ;;add-index is the last possible valid index of our range.
+         remove-index# (long (:remove-index look-data#))
+         add-index# (long (:add-index look-data#))]
+     (c-for
+      [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
+      (let [start-offset# (* batch-idx# batch-stride# )
+            ;;Create a function that will be used to parallelize the computation
+            pixel-fn#
+            (fn [^long start# ^long len#]
+              (try
+               (let [end# (+ start# len#)
+                     squared-sum-view# (ArrayView/toView (double-array n-channels#))]
+                 (c-for
+                  [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
+                  (let [pix-offset# (+ start-offset# pix-idx#)
+                        ;;Setup input to stride over image channels at this pixel.
+                        input# (.toStridedView input# pix-offset# channel-stride#)
+                        output-gradient# (.toStridedView output-gradient#
+                                                         pix-offset# channel-stride#)
+                        input-gradient# (.toStridedView input-gradient#
+                                                         pix-offset# channel-stride#)]
+                    (calc-squared-sums! input# n-channels# remove-index# add-index#
+                                       squared-sum-view# alpha# k# ~cast-fn)
+                    (c-for
+                     [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
+                     (let [range-start# (long (max 0 (+ (- chan-idx# remove-index#) 1)))
+                           past-range-end# (long (min n-channels# (+ chan-idx# add-index# 1)))]
+                       (loop [range-idx# range-start#
+                              output-accum# (double 0.0)]
+                         (if (< range-idx# past-range-end#)
+                           (let [squared-to-beta# (safe-positive-pow
+                                                   (.get squared-sum-view#
+                                                         range-idx#)
+                                                   beta#)
+                                 squared-to-beta-minus-one#
+                                 (safe-positive-pow
+                                  (.get squared-sum-view#
+                                        range-idx#)
+                                  (- beta# 1.0))
+
+
+                                 shared-quantity# (/ (* -2.0 squared-to-beta-minus-one#
+                                                        (.get input# chan-idx#)
+                                                        (.get input# range-idx#)
+                                                        alpha# beta#)
+                                                     (* squared-to-beta#
+                                                        squared-to-beta#))
+                                 addend# (double
+                                          (if (= range-idx# chan-idx#)
+                                            (/ 1.0 squared-to-beta#)
+                                            0.0))]
+                             (recur (inc range-idx#)
+                                    (double
+                                     (+ output-accum#
+                                        (* (+ shared-quantity# addend#)
+                                           (.get output-gradient# range-idx#))))))
+                           (.set input-gradient# chan-idx# output-accum#))))))))
+               (catch Throwable e# (clojure.pprint/pprint e#))))]
+        (launch-parallel-for num-pixels# pixel-fn#)))))
 
 
 (extend-type DoubleArrayView
@@ -537,12 +769,20 @@ in order to avoid adding a small number to 0."
                                      saved-means saved-variances
                                      batch-size batch-stride
                                      ave-factor epsilon double))
-  (cpu-bn-backward [input ^DoubleArrayView means ^DoubleArrayView variances ^DoubleArrayView scale
-                    ^DoubleArrayView bias ^DoubleArrayView output ^DoubleArrayView scale-gradient
+  (cpu-bn-backward [input ^DoubleArrayView means ^DoubleArrayView
+                    variances ^DoubleArrayView scale
+                    ^DoubleArrayView bias ^DoubleArrayView output
+                    ^DoubleArrayView scale-gradient
                     ^DoubleArrayView bias-gradient ^DoubleArrayView input-gradient
                     ^DoubleArrayView output-gradient batch-size batch-stride]
     (cpu-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
-                          input-gradient output-gradient batch-size batch-stride double)))
+                          input-gradient output-gradient batch-size batch-stride double))
+  (cpu-lrn-forward [input ^DoubleArrayView output ^Tensor input-tensor n k alpha beta]
+    (cpu-lrn-forward-impl input output input-tensor n k alpha beta double))
+  (cpu-lrn-backward [input ^DoubleArrayView output-gradient ^DoubleArrayView input-gradient
+                     ^Tensor input-tensor n k alpha beta]
+    (cpu-lrn-backward-impl input output-gradient input-gradient input-tensor
+                           n k alpha beta double)))
 
 
 (extend-type FloatArrayView
@@ -555,7 +795,8 @@ in order to avoid adding a small number to 0."
     (cpu-act-backward-impl act-type input output output-gradient input-gradient float))
   (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input]
     (cpu-softmax-forward-impl n-input input-buf output-buf float))
-  (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha param-offset decay epsilon
+  (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha
+                       param-offset decay epsilon
                        ^FloatArrayView grad-accum ^FloatArrayView dx-accum]
     (AdadeltaOptimiser/step_f (float gradient-alpha) (.data gradient) (.data parameters)
                               (int param-offset) (float decay) (float epsilon)
@@ -602,7 +843,13 @@ in order to avoid adding a small number to 0."
                     ^FloatArrayView bias-gradient ^FloatArrayView input-gradient
                     ^FloatArrayView output-gradient batch-size batch-stride]
     (cpu-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
-                          input-gradient output-gradient batch-size batch-stride float)))
+                          input-gradient output-gradient batch-size batch-stride float))
+  (cpu-lrn-forward [input ^FloatArrayView output ^Tensor input-tensor n k alpha beta]
+    (cpu-lrn-forward-impl input output input-tensor n k alpha beta float))
+  (cpu-lrn-backward [input ^FloatArrayView output-gradient ^FloatArrayView input-gradient
+                     ^Tensor input-tensor n k alpha beta]
+    (cpu-lrn-backward-impl input output-gradient input-gradient input-tensor
+                           n k alpha beta float)))
 
 
 (defrecord ActivationLayer [act-type cpu-stream])
@@ -631,7 +878,8 @@ in order to avoid adding a small number to 0."
   nn-backend/PBackendLayer
   (forward! [layer ^DeviceArray input ^DeviceArray output]
     (cpu-drv/with-stream-dispatch (.cpu-stream layer)
-      (cpu-softmax-forward (device-array->view input) (device-array->view output) (.n-input layer))))
+      (cpu-softmax-forward (device-array->view input) (device-array->view output)
+                           (.n-input layer))))
   (backward! [layer ^DeviceArray input ^DeviceArray output
               ^DeviceArray input-gradient ^DeviceArray output-gradient]
     (layers/softmax-backward! (.cpu-stream layer) input-gradient output-gradient)))
@@ -811,6 +1059,34 @@ in order to avoid adding a small number to 0."
                         batch-size batch-stride)))))
 
 
+(defrecord LocalResponseNormalization [backend ^long width ^long height ^long n-channels
+                                       n k alpha beta]
+  nn-backend/PBackendLayer
+  (forward! [layer input output]
+    (let [^Tensor input-tensor (.tensor ^DeviceArray input)
+          data-tensor (math/create-tensor (.batch-size input-tensor)
+                                          n-channels
+                                          height
+                                          width)]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-lrn-forward (device-array->view input)
+                         (device-array->view output)
+                         data-tensor
+                         n k alpha beta))))
+  (backward! [layer input output input-gradient output-gradient]
+    (let [^Tensor input-tensor (.tensor ^DeviceArray input)
+          data-tensor (math/create-tensor (.batch-size input-tensor)
+                                          n-channels
+                                          height
+                                          width)]
+     (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+       (cpu-lrn-backward (device-array->view input)
+                         (device-array->view output-gradient)
+                         (device-array->view input-gradient)
+                         data-tensor
+                         n k alpha beta)))))
+
+
 (defrecord Recurrrent [backend recurrent-type recurrent-directions
                        ^long n-input ^long n-output ^long batch-size
                        multiplied-input
@@ -933,6 +1209,15 @@ in order to avoid adding a small number to 0."
       (->MaxPooling backend (:conv-config layer-desc))
       (= :batch-normalization layer-type)
       (->BatchNormalization backend)
+      (= :local-response-normalization layer-type)
+      (->LocalResponseNormalization backend
+                                    (long (:width layer-desc))
+                                    (long (:height layer-desc))
+                                    (long (:n-channels layer-desc))
+                                    (:n layer-desc)
+                                    (:k layer-desc)
+                                    (:alpha layer-desc)
+                                    (:beta layer-desc))
       :else (throw (Exception. (str "Unrecognized layer type: " layer-type)))))
   opt/POptimiseBackend
   (adadelta-step! [backend ^DeviceArray gradient ^DeviceArray parameters

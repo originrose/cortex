@@ -32,7 +32,7 @@
   (verify-driver/mul-rows static-device test-utils/*datatype*))
 
 (def-double-float-test elem-mul
-  (verify-driver/elem-mul static-device test-utils/*datatype*))
+  (verify-driver/elem-mul static-device :float))
 
 (def-double-float-test l2-constraint-scale
   (verify-driver/l2-constraint-scale static-device test-utils/*datatype*))

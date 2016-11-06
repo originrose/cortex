@@ -11,7 +11,7 @@
             [think.resource.core :as resource])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
             cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
-            cudnn$cudnnPoolingStruct
+            cudnn$cudnnPoolingStruct cudnn$cudnnLRNStruct
             BytePointer IntPointer LongPointer DoublePointer Pointer PointerPointer
             SizeTPointer FloatPointer ShortPointer]
            [think.compute.cuda_driver CudaDriver CudaStream]
@@ -95,7 +95,10 @@
     (cudnn-call (cudnn/cudnnDestroyFilterDescriptor item)))
   cudnn$cudnnPoolingStruct
   (release-resource [item]
-    (cudnn-call (cudnn/cudnnDestroyPoolingDescriptor item))))
+    (cudnn-call (cudnn/cudnnDestroyPoolingDescriptor item)))
+  cudnn$cudnnLRNStruct
+  (release-resource [item]
+    (cudnn-call (cudnn/cudnnDestroyLRNDescriptor item))))
 
 
 (defn create-cudnn-context
@@ -796,6 +799,69 @@ Backward Data: %s %d"
                    (->ptr saved-means)
                    (->ptr saved-variances)))))))
 
+;; From the cudnn documentation:
+;; Value of the alpha variance scaling parameter in the normalization formula. Inside
+;; the library code this value is divided by the window width for LRN and by
+;; (window width)^#spatialDimensions for DivisiveNormalization. By default this value is set to
+;; 1e-4 in cudnnCreateLRNDescriptor.
+(defn create-lrn-descriptor
+  [backend n k alpha beta]
+  (let [desc (cudnn$cudnnLRNStruct.)]
+    (cudnn-call (cudnn/cudnnCreateLRNDescriptor desc))
+    (cudnn-call (cudnn/cudnnSetLRNDescriptor desc
+                                             (int n)
+                                             (double alpha)
+                                             (double beta)
+                                             (double k)))
+    (resource/track desc)))
+
+
+(defrecord LocalResponseNormalization [backend
+                                       ^cudnn$cudnnLRNStruct lrn-desc
+                                       ^cudnn$cudnnTensorStruct data-tensor
+                                       datatype]
+  nn-backend/PBackendLayer
+  (forward! [layer input output]
+    (stream-with-cudnn
+     backend
+     (cudnn-call (cudnn/cudnnLRNCrossChannelForward
+                  cudnn-context
+                  lrn-desc
+                  cudnn/CUDNN_LRN_CROSS_CHANNEL_DIM1
+                  (value->ptr 1.0 datatype)
+                  data-tensor
+                  (->ptr input)
+                  (value->ptr 0.0 datatype)
+                  data-tensor
+                  (->ptr output)))))
+
+  (backward! [layer input output input-gradient output-gradient]
+    (stream-with-cudnn
+     backend
+     (cudnn-call (cudnn/cudnnLRNCrossChannelBackward
+                  cudnn-context
+                  lrn-desc
+                  cudnn/CUDNN_LRN_CROSS_CHANNEL_DIM1
+                  (value->ptr 1.0 datatype)
+                  data-tensor
+                  (->ptr output)
+                  data-tensor
+                  (->ptr output-gradient)
+                  data-tensor
+                  (->ptr input)
+                  (value->ptr 0.0 datatype)
+                  data-tensor
+                  (->ptr input-gradient))))))
+
+
+(defn create-local-response-normalization
+  [backend width height n-channels batch-size n k alpha beta]
+  (let [data-tensor (create-tensor (dtype/get-datatype backend) batch-size
+                                   n-channels height width)
+        lrn-desc (create-lrn-descriptor backend n k alpha beta)]
+    (->LocalResponseNormalization backend lrn-desc data-tensor
+                                  (dtype/get-datatype backend))))
+
 
 
 (extend-type CudaBackend
@@ -836,6 +902,11 @@ Backward Data: %s %d"
       (create-max-pooling-layer backend (:conv-config layer-desc) batch-size)
       (= layer-type :batch-normalization)
       (create-batch-normalization backend output-size batch-size)
+      (= layer-type :local-response-normalization)
+      (create-local-response-normalization backend (:width layer-desc) (:height layer-desc)
+                                           (:n-channels layer-desc) (:batch-size layer-desc)
+                                           (:n layer-desc) (:k layer-desc) (:alpha layer-desc)
+                                           (:beta layer-desc))
       :else (throw (Exception. (str "Failed to create layer type: " layer-type)))))
 
   nn-backend/PDropout

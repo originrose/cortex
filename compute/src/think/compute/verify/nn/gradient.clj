@@ -7,6 +7,7 @@
             [think.compute.driver :as drv]
             [think.compute.optimise :as opt]
             [think.compute.verify.nn.train :as train-test]
+            [think.compute.math :as math]
             [cortex.nn.protocols :as cp]
             [cortex.util :as cu]))
 
@@ -60,7 +61,8 @@
         net (layers/layer-list [(layers/linear backend 2 2)
                                 (layers/softmax backend 2)])
         loss [(opt/setup-loss (opt/softmax-loss) backend batch-size 2)]
-        input [(nn-backend/array  backend [-0.0037519929582033617 0.08154521439680502] batch-size)]
+        input [(nn-backend/array  backend [-0.0037519929582033617 0.08154521439680502]
+                                  batch-size)]
         output [(nn-backend/array backend [0 1] batch-size)]
         net (cp/setup net 1)
         train-config {:network net :loss-fn loss}]
@@ -107,5 +109,36 @@
     ;;Set the input epsilon to something pretty large because with MSE error each
     ;;individual input value has a small effect on the output and an epsilon of 1e-4
     ;;means we get gradients in the range of 1e-7 which makes the tests fail.
+    (check-gradients (grad-check/get-gradients {:network layer :loss-fn loss}
+                                               input output))))
+
+
+(defn lrn-gradient
+  [backend]
+  (let [batch-size 2
+        input-dim 2
+        input-num-pixels (* input-dim input-dim)
+        num-input-channels 3
+        lrn-n 3
+        n-input (* num-input-channels input-num-pixels)
+        input-data (flatten (repeat batch-size (range n-input)))
+        input [(math/with-tensor
+                 (nn-backend/array backend input-data batch-size)
+                 (math/map->Tensor {:batch-size batch-size
+                                    :channel-count num-input-channels
+                                    :width input-dim
+                                    :height input-dim} ))]
+        output [(math/with-tensor
+                  (nn-backend/array backend input-data batch-size)
+                  (math/map->Tensor {:batch-size batch-size
+                                     :channel-count num-input-channels
+                                     :width input-dim
+                                     :height input-dim} ))]
+        layer (cp/setup (layers/local-response-normalization
+                         backend
+                         input-dim input-dim num-input-channels
+                         :k 1 :n lrn-n :alpha 1.0 :beta 0.75)
+                        batch-size)
+        loss [(opt/setup-loss (opt/mse-loss) backend batch-size n-input)]]
     (check-gradients (grad-check/get-gradients {:network layer :loss-fn loss}
                                                input output))))
