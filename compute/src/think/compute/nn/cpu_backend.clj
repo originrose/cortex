@@ -573,7 +573,8 @@ Calculates: (sum(x[i]^2)*alpha + K)"
          width# (long (.width input-tensor#))
          n# (~cast-fn (max 1.0 (~cast-fn (min (~cast-fn ~n) n-channels#))))
          k# (~cast-fn ~k)
-         alpha# (~cast-fn ~alpha)
+         alpha# (/ (~cast-fn ~alpha)
+                   n#)
          neg-beta# (- (~cast-fn ~beta))
          [batch-size# batch-stride#] (math/batch-shape input-tensor#)
          batch-size# (long batch-size#)
@@ -637,7 +638,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
          width# (long (.width input-tensor#))
          n# (~cast-fn (max 1.0 (~cast-fn (min (~cast-fn ~n) n-channels#))))
          k# (~cast-fn ~k)
-         alpha# (~cast-fn ~alpha)
+         alpha# (/ (~cast-fn ~alpha)
+                   n#)
          beta# (~cast-fn ~beta)
          neg-beta# (- beta#)
          [batch-size# batch-stride#] (math/batch-shape input-tensor#)
@@ -1056,22 +1058,31 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                         batch-size batch-stride)))))
 
 
-(defrecord LocalResponseNormalization [backend n k alpha beta]
+(defrecord LocalResponseNormalization [backend ^long width ^long height ^long n-channels
+                                       n k alpha beta]
   nn-backend/PBackendLayer
   (forward! [layer input output]
-    (let [^Tensor input-tensor (.tensor ^DeviceArray input)]
+    (let [^Tensor input-tensor (.tensor ^DeviceArray input)
+          data-tensor (math/map->Tensor {:batch-size (.batch-size input-tensor)
+                                         :channel-count n-channels
+                                         :width width
+                                         :height height})]
       (cpu-drv/with-stream-dispatch (drv/get-stream backend)
         (cpu-lrn-forward (device-array->view input)
                          (device-array->view output)
-                         input-tensor
+                         data-tensor
                          n k alpha beta))))
   (backward! [layer input output input-gradient output-gradient]
-    (let [^Tensor input-tensor (.tensor ^DeviceArray input)]
+    (let [^Tensor input-tensor (.tensor ^DeviceArray input)
+          data-tensor (math/map->Tensor {:batch-size (.batch-size input-tensor)
+                                         :channel-count n-channels
+                                         :width width
+                                         :height height})]
      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
        (cpu-lrn-backward (device-array->view input)
                          (device-array->view output-gradient)
                          (device-array->view input-gradient)
-                         input-tensor
+                         data-tensor
                          n k alpha beta)))))
 
 

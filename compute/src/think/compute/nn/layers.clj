@@ -649,12 +649,15 @@ This is for cudnn compatibility.")))
 ;;For thorough explanation please see:
 ;; http://www.cs.toronto.edu/~fritz/absps/imagenet.pdf, section 3.3
 (defn local-response-normalization
-  [backend n-input
+  [backend width height n-channels
    & {:keys [k n alpha beta]
       :or {k 2 n 5 alpha 1e-4 beta 0.75}}]
-  (->SimpleLayer backend n-input
+  (->SimpleLayer backend (* (long width) (long height) (long n-channels))
                  {:layer-type :local-response-normalization
-                  :k k :n n :alpha alpha :beta beta}))
+                  :k k :n n :alpha alpha :beta beta
+                  :width width
+                  :height height
+                  :n-channels n-channels}))
 
 
 (def recurrent-types

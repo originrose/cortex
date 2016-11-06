@@ -136,7 +136,7 @@
                                      :height input-dim} ))]
         layer (cp/setup (layers/local-response-normalization
                          backend
-                         n-input
+                         input-dim input-dim num-input-channels
                          :k 1 :n lrn-n :alpha 1.0 :beta 0.75)
                         batch-size)
         loss [(opt/setup-loss (opt/mse-loss) backend batch-size n-input)]]

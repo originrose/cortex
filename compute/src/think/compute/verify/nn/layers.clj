@@ -487,7 +487,7 @@
                                     :height input-dim} ))
          layer (cp/setup (layers/local-response-normalization
                           backend
-                          n-input
+                          input-dim input-dim num-input-channels
                           :k 1 :n lrn-n :alpha 1.0 :beta 1.0)
                          batch-size)
          layer (cp/forward layer input)
@@ -515,14 +515,16 @@
                   (mapv double
                         (flatten
                          (repeat 2
-                                 [0.0 27.0 82.0 177.0 324.0 535.0
-                                  822.0 1197.0 520.0 738.0 1010.0 1342.0])))
+                                 [0.0 14.0 42.0 90.0 164.0 270.0
+                                  414.0 602.0 264.0 373.5 510.0 676.4999999999999])))
                   1e-4)))
   (let [lrn-data (do-lrn-forward backend 3 3)]
     (is (m/equals (:output lrn-data)
                   (mapv double
                         (flatten
                          (repeat 2
-                                 [0.0 27.0 82.0 177.0 324.0 540.0 846.0 1260.0
-                                  648.0 963.0000000000001 1370.0 1881.0])))
+                                 [0.0 9.666666666666666 28.666666666666668 60.99999999999999
+                                  110.66666666666666 183.33333333333331 286.0 424.66666666666663
+                                  221.33333333333331 326.99999999999994 463.3333333333333
+                                  634.3333333333333])))
                   1e-4))))
