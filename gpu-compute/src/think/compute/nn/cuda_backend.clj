@@ -11,7 +11,7 @@
             [think.resource.core :as resource])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
             cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
-            cudnn$cudnnPoolingStruct
+            cudnn$cudnnPoolingStruct cudnn$cudnnLRNStruct
             BytePointer IntPointer LongPointer DoublePointer Pointer PointerPointer
             SizeTPointer FloatPointer ShortPointer]
            [think.compute.cuda_driver CudaDriver CudaStream]
@@ -795,6 +795,11 @@ Backward Data: %s %d"
                    (double epsilon)
                    (->ptr saved-means)
                    (->ptr saved-variances)))))))
+
+
+(defrecord LocalResponseNormalization [backend k n alpha beta]
+
+  )
 
 
 
