@@ -64,5 +64,5 @@
   (verify-layers/batch-normalization (create-backend)))
 
 
-(deftest local-response-normalization-forward
+(def-double-float-test local-response-normalization-forward
   (verify-layers/lrn-forward (create-backend)))

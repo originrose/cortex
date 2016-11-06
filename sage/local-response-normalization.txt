@@ -26,14 +26,19 @@ squared_sum_2 = ((a_1^2 + a_2^2 + a_3^2)*alpha + k)
 squared_sum_3 = ((a_2^2 + a_3^2)*alpha + k)
 
 sage: diff(eqn,a_0)
-2*squared_sum_1^(-beta - 1)*a_0*a_1*alpha*beta*D[1]/(squared_sum_1^(-beta))^2 + (2*squared_sum_0^(-beta - 1)*a_0^2*alpha*beta/(squared_sum_0^(-beta))^2 + 1/squared_sum_0^(-beta))*D[0]
+(2*squared_sum_0^(-beta - 1)*a_0*a_0*alpha*beta/(squared_sum_0^(-beta))^2 + 1/squared_sum_0^(-beta))*D[0] +
+(2*squared_sum_1^(-beta - 1)*a_0*a_1*alpha*beta/(squared_sum_1^(-beta))^2)*D[1]
 
 sage: diff(eqn,a_1)
-2*squared_sum_0^(-beta - 1)*a_0*a_1*alpha*beta*D[0]/(squared_sum_0^(-beta))^2 + 2*squared_sum_2^(-beta - 1)*a_1*a_2*alpha*beta*D[2]/(squared_sum_2^(-beta))^2 + (2*squared_sum_1^(-beta - 1)*a_1^2*alpha*beta/(squared_sum_1^(-beta))^2 + 1/squared_sum_1^(-beta))*D[1]
+(2*squared_sum_0^(-beta - 1)*a_1*a_0*alpha*beta/(squared_sum_0^(-beta))^2)*D[0] +
+(2*squared_sum_1^(-beta - 1)*a_1*a_1*alpha*beta/(squared_sum_1^(-beta))^2 + 1/squared_sum_1^(-beta))*D[1] +
+(2*squared_sum_2^(-beta - 1)*a_1*a_2*alpha*beta/(squared_sum_2^(-beta))^2)*D[2]
 
 sage: diff(eqn,a_2)
-2*squared_sum_1^(-beta - 1)*a_1*a_2*alpha*beta*D[1]/(squared_sum_1^(-beta))^2 + 2*squared_sum_3^(-beta - 1)*a_2*a_3*alpha*beta*D[3]/(squared_sum_3^(-beta))^2 + (2*squared_sum_2^(-beta - 1)*a_2^2*alpha*beta/(squared_sum_2^(-beta))^2 + 1/squared_sum_2^(-beta))*D[2]
+(2*squared_sum_1^(-beta - 1)*a_2*a_1*alpha*beta/(squared_sum_1^(-beta))^2)*D[1] +
+(2*squared_sum_2^(-beta - 1)*a_2*a_2*alpha*beta/(squared_sum_2^(-beta))^2 + 1/squared_sum_2^(-beta))*D[2] +
+(2*squared_sum_3^(-beta - 1)*a_2*a_3*alpha*beta/(squared_sum_3^(-beta))^2)*D[3]
 
 sage: diff(eqn,a_3)
-2*squared_sum_2^(-beta - 1)*a_2*a_3*alpha*beta*D[2]/(squared_sum_2^(-beta))^2 + (2*squared_sum_3^(-beta - 1)*a_3^2*alpha*beta/(squared_sum_3^(-beta))^2 + 1/squared_sum_3^(-beta))*D[3]
-
+(2*squared_sum_2^(-beta - 1)*a_3*a_2*alpha*beta/(squared_sum_2^(-beta))^2)*D[2] +
+(2*squared_sum_3^(-beta - 1)*a_3*a_3*alpha*beta/(squared_sum_3^(-beta))^2 + 1/squared_sum_3^(-beta))*D[3]
