@@ -575,7 +575,8 @@ Calculates: (sum(x[i]^2)*alpha + K)"
          k# (~cast-fn ~k)
          alpha# (/ (~cast-fn ~alpha)
                    n#)
-         neg-beta# (- (~cast-fn ~beta))
+         beta# (~cast-fn ~beta)
+         neg-beta# (- beta#)
          [batch-size# batch-stride#] (math/batch-shape input-tensor#)
          batch-size# (long batch-size#)
          batch-stride# (long batch-stride#)
@@ -616,7 +617,7 @@ Calculates: (sum(x[i]^2)*alpha + K)"
                      [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
                      (let [divisor# (safe-positive-pow
                                      (.get squared-sum-view# chan-idx#)
-                                     neg-beta#)]
+                                     beta#)]
                        (.set output# chan-idx# (~cast-fn (/ (.get input# chan-idx#)
                                                             divisor#))))))))
                (catch Throwable e# (clojure.pprint/pprint e#))))]
@@ -682,26 +683,26 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                        (loop [range-idx# range-start#
                               output-accum# (double 0.0)]
                          (if (< range-idx# past-range-end#)
-                           (let [squared-to-neg-beta# (safe-positive-pow
-                                                       (.get squared-sum-view#
-                                                             range-idx#)
-                                                       neg-beta#)
-                                 squared-to-neg-beta-minus-one#
+                           (let [squared-to-beta# (safe-positive-pow
+                                                   (.get squared-sum-view#
+                                                         range-idx#)
+                                                   beta#)
+                                 squared-to-beta-minus-one#
                                  (safe-positive-pow
                                   (.get squared-sum-view#
                                         range-idx#)
-                                  (- neg-beta# 1.0))
+                                  (- beta# 1.0))
 
 
-                                 shared-quantity# (/ (* 2 squared-to-neg-beta-minus-one#
+                                 shared-quantity# (/ (* -2.0 squared-to-beta-minus-one#
                                                         (.get input# chan-idx#)
                                                         (.get input# range-idx#)
                                                         alpha# beta#)
-                                                     (* squared-to-neg-beta#
-                                                        squared-to-neg-beta#))
+                                                     (* squared-to-beta#
+                                                        squared-to-beta#))
                                  addend# (double
                                           (if (= range-idx# chan-idx#)
-                                            (/ 1.0 squared-to-neg-beta#)
+                                            (/ 1.0 squared-to-beta#)
                                             0.0))]
                              (recur (inc range-idx#)
                                     (double
@@ -1063,10 +1064,10 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   nn-backend/PBackendLayer
   (forward! [layer input output]
     (let [^Tensor input-tensor (.tensor ^DeviceArray input)
-          data-tensor (math/map->Tensor {:batch-size (.batch-size input-tensor)
-                                         :channel-count n-channels
-                                         :width width
-                                         :height height})]
+          data-tensor (math/create-tensor (.batch-size input-tensor)
+                                          n-channels
+                                          height
+                                          width)]
       (cpu-drv/with-stream-dispatch (drv/get-stream backend)
         (cpu-lrn-forward (device-array->view input)
                          (device-array->view output)
@@ -1074,10 +1075,10 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                          n k alpha beta))))
   (backward! [layer input output input-gradient output-gradient]
     (let [^Tensor input-tensor (.tensor ^DeviceArray input)
-          data-tensor (math/map->Tensor {:batch-size (.batch-size input-tensor)
-                                         :channel-count n-channels
-                                         :width width
-                                         :height height})]
+          data-tensor (math/create-tensor (.batch-size input-tensor)
+                                          n-channels
+                                          height
+                                          width)]
      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
        (cpu-lrn-backward (device-array->view input)
                          (device-array->view output-gradient)
@@ -1209,7 +1210,11 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
       (= :batch-normalization layer-type)
       (->BatchNormalization backend)
       (= :local-response-normalization layer-type)
-      (->LocalResponseNormalization backend (:n layer-desc)
+      (->LocalResponseNormalization backend
+                                    (long (:width layer-desc))
+                                    (long (:height layer-desc))
+                                    (long (:n-channels layer-desc))
+                                    (:n layer-desc)
                                     (:k layer-desc)
                                     (:alpha layer-desc)
                                     (:beta layer-desc))
