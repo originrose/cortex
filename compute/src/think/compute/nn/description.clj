@@ -82,6 +82,11 @@
                               :variances (to-network-array backend variances)
                               :epsilon epsilon))
 
+(defmethod create-module :local-response-normalization
+  [{:keys [n k alpha beta output-width output-height output-channels] :as desc} backend]
+  (layers/local-response-normalization backend output-width output-height output-channels
+                                       :k k :n n :alpha alpha :beta beta))
+
 (declare create-network)
 
 (defmethod create-module :split
@@ -109,6 +114,20 @@
     :logistic
     compute-type))
 
+(defmulti simple-layer->input (fn [layer]
+                                (get-in layer [:layer-impl-desc
+                                               :layer-type])))
+
+(defmethod simple-layer->input :default
+  [layer]
+  (desc/input (:n-input layer)))
+
+
+(defmethod simple-layer->input :local-response-normalization
+  [layer]
+  (let [{:keys [width height n-channels]} (:layer-impl-desc layer)]
+    (desc/input width height n-channels )))
+
 
 (defmulti simple-layer->description (fn [layer]
                                       (get-in layer [:layer-impl-desc
@@ -120,12 +139,17 @@
   {:type (convert-layer-type (get-in layer [:layer-impl-desc
                                             :layer-type]))})
 
+(defmethod simple-layer->description :local-response-normalization
+  [layer]
+  (let [{:keys [k n alpha beta]} (:layer-impl-desc layer)]
+    (desc/local-response-normalization
+     :k k :n n :alpha alpha :beta beta)))
+
 
 (extend-protocol desc/PNetworkToDescription
   think.compute.nn.layers.SimpleLayer
-  (layer->input [layer] (desc/input (:n-input layer)))
-  (layer->description [layer]
-    (simple-layer->description layer))
+  (layer->input [layer] (simple-layer->input layer))
+  (layer->description [layer] (simple-layer->description layer))
 
   think.compute.nn.layers.Linear
   (layer->input [layer] (desc/input (cp/input-size layer)))
@@ -147,6 +171,7 @@
                                    (nn-backend/to-core-matrix (layers/get-backend layer)
                                                            (:bias layer))
                                    (:l2-max-constraint layer)))
+
   think.compute.nn.layers.Pooling
   (layer->input [layer] (desc/conv-config->input (:conv-config layer)))
   (layer->description [layer]

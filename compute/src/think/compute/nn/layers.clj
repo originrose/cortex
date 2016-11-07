@@ -117,7 +117,8 @@ implementation as possible."
    (if l2-max-constraint
      (assoc layer
             :weight-temp (nn-backend/new-array backend (math/shape-2d weights))
-            :weight-magnitude-temp (nn-backend/new-array backend [(first (math/shape-2d weights))])
+            :weight-magnitude-temp (nn-backend/new-array backend
+                                                         [(first (math/shape-2d weights))])
             :ones-vec (nn-backend/allocate-ones backend (second (math/shape-2d weights))))
      layer)))
 

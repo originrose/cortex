@@ -107,6 +107,14 @@ This is for cudnn compatibility.")))
    :epsilon epsilon})
 
 
+(defn local-response-normalization
+  "http://www.cs.toronto.edu/~fritz/absps/imagenet.pdf, section 3.3"
+  [& {:keys [k n alpha beta]
+      :or {k 2 n 5 alpha 1e-4 beta 0.75}}]
+  {:type :local-response-normalization
+   :k k :n n :alpha alpha :beta beta})
+
+
 (def example-mnist-description
   [(input 28 28 1)
    (convolutional 5 0 1 20)
@@ -201,6 +209,10 @@ This is for cudnn compatibility.")))
     (assoc item :input-size io-size :output-size io-size)))
 
 (defmethod build-desc :batch-normalization
+  [previous item]
+  (build-pass-through-desc previous item))
+
+(defmethod build-desc :local-response-normalization
   [previous item]
   (build-pass-through-desc previous item))
 
