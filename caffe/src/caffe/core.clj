@@ -4,7 +4,10 @@
             [think.resource.core :as resource]
             [clojure.java.io :as io]
             [instaparse.core :as insta]
-            [clojure.string :as string])
+            [clojure.string :as string]
+            [think.compute.datatype :as dtype]
+            [clojure.core.matrix :as m]
+            [clojure.core.matrix.macros :refer [c-for]])
   (:import [java.io StringReader]))
 
 (defn- parse-prototxt
@@ -85,11 +88,13 @@ whitespace = #'\\s*'") parse-str))
 (defmethod prototxt-layer->desc :Convolution
   [layer]
   (let [{:keys [kernel_size num_output pad stride group]
-         :or [pad 0 stride 1 group 1]}
+         :or {pad 0 stride 1 group 1} :as test-map}
         (-> (get layer :convolution_param)
-            read-string-vals)]
-    (->> (desc/convolutional kernel_size 0 stride num_output :group group)
+            read-string-vals)
+        assoc-group-fn #(assoc % :group group)]
+    (->> (desc/convolutional kernel_size 0 stride num_output)
          first
+         assoc-group-fn
          (add-layer-data-to-desc layer))))
 
 (defmethod prototxt-layer->desc :ReLU
@@ -149,16 +154,82 @@ whitespace = #'\\s*'") parse-str))
   {:type :error
    :layer layer})
 
+(defn- link-next-item
+  [current-item bottom-map]
+  (when-let [next-item (get bottom-map (:caffe-top current-item))]
+    (cons next-item (lazy-seq (link-next-item next-item bottom-map)))))
+
+(defn- ensure-doubles
+  ^doubles [data]
+  (if (not= :double (dtype/get-datatype data))
+    (let [double-data (double-array (m/ecount data))]
+      (dtype/copy! data 0 double-data 0 (m/ecount data))
+      double-data)
+    data))
+
+
+(defn- to-core-matrix
+  [data ideal-shape]
+  (let [^doubles data (ensure-doubles data)]
+    ;;https://github.com/mikera/core.matrix/issues/299
+    ;;The simple case of using m/reshape has serious performance issues.
+    (case (count ideal-shape)
+      1 data
+      2 (let [[n-rows n-cols] ideal-shape
+              ^"[[D" retval (make-array Double/TYPE n-rows n-cols)]
+          (c-for [row 0 (< row n-rows) (inc row)]
+                 (dtype/copy! data (* row n-cols) (aget retval row) 0 n-cols))
+          retval))))
+
+
+(defn- dim-shape->core-m-shape
+  [weight-shape]
+  (condp = (count weight-shape)
+    1 weight-shape
+    2 weight-shape
+    4 [(first weight-shape) (reduce * (drop 1 weight-shape))]
+    (throw (Exception. (format "Unexpected weight shape: %s" weight-shape)))))
+
 
 (defn caffe-h5->model
   [fname]
   (resource/with-resource-context
     (let [file-node (hdf5/open-file fname)
           file-children (hdf5/child-map file-node)
-          prototxt (->> (:model_prototxt file-children)
+         prototxt (->> (:model_prototxt file-children)
                         (hdf5/->clj)
                         :data
                         first
                         parse-prototxt
-                        (reduce recurse-parse-prototxt {}))]
-      (mapv prototxt-layer->desc (:layer prototxt)))))
+                        (reduce recurse-parse-prototxt {}))
+          layer-list (mapv prototxt-layer->desc (:layer prototxt))
+          layer-map (into {} (map-indexed (fn [idx desc]
+                                            [(:id desc) (assoc desc :layer-index idx)])
+                                          layer-list))
+          weight-children (hdf5/child-map (:model_weights file-children))
+          layer-map (reduce
+                     (fn [layer-map [layer-id weights-data]]
+                       (if-let [target-desc (get layer-map layer-id)]
+                         (let [weight-children (hdf5/child-map weights-data)
+                               weight-id (keyword (str (name layer-id) "_W"))
+                               bias-id (keyword (str (name layer-id) "_b"))
+                               weights (hdf5/->clj (get weight-children weight-id))
+                               bias (hdf5/->clj (get weight-children bias-id))]
+                           (assoc layer-map layer-id
+                                  (assoc target-desc
+                                         :weights (to-core-matrix
+                                                   (ensure-doubles (:data weights))
+                                                   (dim-shape->core-m-shape
+                                                    (:dimensions weights)))
+                                         :bias (to-core-matrix
+                                                (ensure-doubles (:data bias))
+                                                (dim-shape->core-m-shape
+                                                 (:dimensions bias))))))
+                         (do
+                           (println "Failed to find node for" layer-id)
+                           layer-map)))
+                     layer-map
+                     weight-children)
+          layer-output-map (group-by :caffe-top layer-list)]
+      (vec (sort-by :layer-index (map second layer-map)))
+      layer-output-map)))

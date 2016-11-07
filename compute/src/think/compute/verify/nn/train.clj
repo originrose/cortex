@@ -128,6 +128,10 @@
   (let [[network dataset] (mnist/train-mnist-network backend {:max-sample-count 100})
         score (nn-eval/evaluate-softmax network dataset [:data])
         network-desc (desc/network->description network)
+        _ (comment
+            (clojure.pprint/pprint
+             (mapv #(dissoc % :weights :bias :scale :variances :means)
+                   (flatten network-desc))))
         new-network (compute-desc/build-and-create-network network-desc backend 10)
         new-score (nn-eval/evaluate-softmax new-network dataset [:data])]
     (is (utils/about-there? score new-score))))
