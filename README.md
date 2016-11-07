@@ -61,6 +61,46 @@ Please see the various unit tests and examples for training a model.  Specifical
 
  * Get the project and run lein test in both cortex and compute.  The various unit tests train various models.
 
+### GPU Compute Install Instructions
+
+#### Ubuntu
+
+Basic steps include, at minimum: Installing nvidia-cuda-toolkit (sudo apt-get install nvidia-cuda-toolkit)
+and installing cudnn available from here: https://developer.nvidia.com/cudnn publicly.
+
+The .zip contains some libraries that you will need to make available to the loader. I simply copied the library files to /usr/lib, though I'm sure there's a better way of doing this.
+
+Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 7.5, if you're running 8.0 you will need to use the following branch (basically specifies a different dep for the jni bindings -- o/w code is identical):
+
+https://github.com/thinktopic/cortex/tree/cuda-8.0
+
+
+#### Mac OS
+My install steps on Mac OSX were:
+
+Followed the instructions for gpu setup from Tensor Flow
+Brew install coreutils and CUDA toolkit
+
+    $ brew install coreutils
+    $ brew tap caskroom/cask
+    $ brew cask install cuda
+
+Add CUDA Tool kit to bash profile
+
+    export CUDA_HOME=/usr/local/cuda
+    export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$CUDA_HOME/lib"
+    export PATH="$CUDA_HOME/bin:$PATH"
+
+Download the CUDA Deep Neural Network libraries
+
+Once downloaded and unzipping, moving the files:
+
+    $ sudo mv include/cudnn.h /Developer/NVIDIA/CUDA-8.0/include/
+    $ sudo mv lib/libcudnn* /Developer/NVIDIA/CUDA-8.0/lib
+    $ sudo ln -s /Developer/NVIDIA/CUDA-8.0/lib/libcudnn* /usr/local/cuda/lib/
+
+
+
  
 ### See also:
 

@@ -218,6 +218,12 @@ buffers the param offset is required as the accumulation buffers are only one bu
 
 (defn evaluate-softmax
   [guesses answers]
+  (if (or (not (pos? (count guesses)))
+          (not (pos? (count answers)))
+          (not= (count guesses) (count answers)))
+    (throw (Exception. (format "evaluate-softmax: guesses [%d] and answers [%d] count must both be positive and equal."
+                               (count guesses)
+                               (count answers)))))
   (let [results-answer-seq (mapv vector
                                  (softmax-results-to-unit-vectors guesses)
                                  answers)

@@ -44,14 +44,15 @@ implementation as possible."
 
 
 ;;tanh relu logistic softmax
-(defrecord SimpleLayer [backend n-input layer-type]
+(defrecord SimpleLayer [backend n-input layer-impl-desc]
   cp/PLayerSetup
   (setup [layer batch-size]
     (assoc layer
            :output (nn-backend/new-array backend [n-input] batch-size)
            :input-gradient (nn-backend/new-array backend [n-input] batch-size)
-           :layer-impl (nn-backend/create-layer backend {:layer-type layer-type
-                                                  :batch-size batch-size :output-size n-input})
+           :layer-impl (nn-backend/create-layer backend (assoc layer-impl-desc
+                                                               :output-size n-input
+                                                               :batch-size batch-size))
            :batch-size batch-size))
 
   PBatchSize
@@ -86,7 +87,7 @@ implementation as possible."
 
 (defn activation
   [backend n-input act-type]
-  (->SimpleLayer backend n-input act-type))
+  (->SimpleLayer backend n-input {:layer-type act-type}))
 
 (defn relu
   [backend n-input] (activation backend n-input :relu))
@@ -108,7 +109,7 @@ implementation as possible."
 
 (defn softmax
   [backend n-input]
-  (->SimpleLayer backend n-input :softmax))
+  (->SimpleLayer backend n-input {:layer-type :softmax}))
 
 (defn allocate-l2-temp-data
   [{:keys [weights l2-max-constraint backend] :as layer}]
@@ -116,7 +117,8 @@ implementation as possible."
    (if l2-max-constraint
      (assoc layer
             :weight-temp (nn-backend/new-array backend (math/shape-2d weights))
-            :weight-magnitude-temp (nn-backend/new-array backend [(first (math/shape-2d weights))])
+            :weight-magnitude-temp (nn-backend/new-array backend
+                                                         [(first (math/shape-2d weights))])
             :ones-vec (nn-backend/allocate-ones backend (second (math/shape-2d weights))))
      layer)))
 
@@ -643,6 +645,20 @@ This is for cudnn compatibility.")))
                           running-means running-variances
                           batch-means batch-variances
                           epsilon)))
+
+
+;;For thorough explanation please see:
+;; http://www.cs.toronto.edu/~fritz/absps/imagenet.pdf, section 3.3
+(defn local-response-normalization
+  [backend width height n-channels
+   & {:keys [k n alpha beta]
+      :or {k 2 n 5 alpha 1e-4 beta 0.75}}]
+  (->SimpleLayer backend (* (long width) (long height) (long n-channels))
+                 {:layer-type :local-response-normalization
+                  :k k :n n :alpha alpha :beta beta
+                  :width width
+                  :height height
+                  :n-channels n-channels}))
 
 
 (def recurrent-types

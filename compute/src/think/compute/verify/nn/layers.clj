@@ -2,11 +2,13 @@
   (:require [clojure.test :refer :all]
             [think.compute.nn.backend :as nn-backend]
             [think.compute.nn.layers :as layers]
+            [think.compute.math :as math]
             [cortex.nn.protocols :as cp]
             [clojure.core.matrix :as m]
             [think.compute.verify.utils :as utils]
             [cortex.nn.impl.layers.convolution :as conv]
-            [cortex.util :as cu]))
+            [cortex.util :as cu]
+            [think.resource.core :as resource]))
 
 
 (defn test-relu-activation
@@ -294,7 +296,8 @@
         pool-layer (layers/->Pooling backend pool-layer-config)
         pool-layer (cp/setup pool-layer batch-size)
         input (nn-backend/array backend (flatten (repeat batch-size (range 1 17))) batch-size)
-        output-gradient (nn-backend/array backend (flatten (repeat batch-size [1 2 3 4])) batch-size)
+        output-gradient (nn-backend/array backend (flatten (repeat batch-size [1 2 3 4]))
+                                          batch-size)
         pool-layer (cp/forward pool-layer input)
         pool-layer (cp/backward pool-layer input output-gradient)
         output (cp/output pool-layer)
@@ -324,7 +327,8 @@
   (let [batch-size 5
         item-count 20
         input (nn-backend/array backend (repeat (* batch-size item-count) 1.0) batch-size)
-        output-gradient (nn-backend/array backend (repeat (* batch-size item-count) 2.0) batch-size)
+        output-gradient (nn-backend/array backend (repeat (* batch-size item-count) 2.0)
+                                          batch-size)
         dropout-layer (layers/bernoulli-dropout backend item-count 0.8)
         dropout-layer (cp/setup dropout-layer batch-size)
         repeat-count 30
@@ -354,7 +358,8 @@
   (let [batch-size 5
         item-count 100
         input (nn-backend/array backend (repeat (* batch-size item-count) 1.0) batch-size)
-        output-gradient (nn-backend/array backend (repeat (* batch-size item-count) 2.0) batch-size)
+        output-gradient (nn-backend/array backend (repeat (* batch-size item-count) 2.0)
+                                          batch-size)
         dropout-layer (layers/gaussian-dropout backend item-count 0.5)
         dropout-layer (cp/setup dropout-layer batch-size)
         dropout-layer (cp/prepare-forward dropout-layer)
@@ -465,3 +470,64 @@
       (is (utils/about-there? 21.05 (/ (m/esum running-inv-vars)
                                       input-size)
                               1e-2)))))
+
+(defn do-lrn-forward
+  [backend num-input-channels lrn-n]
+  (resource/with-resource-context
+   (let [batch-size 2
+         input-dim 2
+         input-num-pixels (* input-dim input-dim)
+         n-input (* num-input-channels input-num-pixels)
+         input-data (flatten (repeat batch-size (range n-input)))
+         input (math/with-tensor
+                 (nn-backend/array backend input-data batch-size)
+                 (math/map->Tensor {:batch-size batch-size
+                                    :channel-count num-input-channels
+                                    :width input-dim
+                                    :height input-dim} ))
+         layer (cp/setup (layers/local-response-normalization
+                          backend
+                          input-dim input-dim num-input-channels
+                          :k 1 :n lrn-n :alpha 1.0 :beta 1.0)
+                         batch-size)
+         layer (cp/forward layer input)
+         output (nn-backend/to-double-array backend (cp/output layer))
+         output-gradient (math/with-tensor
+                           (nn-backend/array backend (repeat (* batch-size n-input) 1.0))
+                           (math/map->Tensor {:batch-size batch-size
+                                              :channel-count num-input-channels
+                                              :width input-dim
+                                              :height input-dim}))
+         layer (cp/backward layer input output-gradient)
+         input-gradient (nn-backend/to-double-array backend (cp/input-gradient layer))]
+     {:input-data input-data
+      :output (vec output)
+      :input-gradient (vec input-gradient)})))
+
+(defn lrn-forward
+  [backend]
+  (let [lrn-data (do-lrn-forward backend 3 1)]
+    (is (m/equals (:output lrn-data)
+                  (mapv #(/ (double %) (+ 1 (* % %))) (:input-data lrn-data))
+                  1e-4)))
+  (let [lrn-data (do-lrn-forward backend 3 2)]
+    (is (m/equals (:output lrn-data)
+                  (mapv double
+                        (flatten
+                         (repeat 2
+                                 [0.0 0.07142857142857142 0.09523809523809523 0.1
+                                  0.0975609756097561 0.09259259259259259 0.08695652173913043
+                                  0.08139534883720931 0.24242424242424243 0.21686746987951808
+                                  0.19607843137254902 0.17886178861788618])))
+                  1e-4)))
+  (let [lrn-data (do-lrn-forward backend 3 3)]
+    (is (m/equals (:output lrn-data)
+                  (mapv double
+                        (flatten
+                         (repeat 2
+                                 [0.0 0.10344827586206898 0.13953488372093023
+                                  0.14754098360655737 0.14457831325301207 0.13636363636363638
+                                  0.1258741258741259 0.11538461538461539 0.28915662650602414
+                                  0.24770642201834867 0.21582733812949642
+                                  0.19075144508670522 ])))
+                  1e-4))))

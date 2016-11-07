@@ -139,6 +139,17 @@
    :batch-size batch-size
    :output-size output-size})
 
+(defn lrn-desc
+  [n k alpha beta width height n-channels]
+  {:layer-type :local-response-normalization
+   :n n
+   :k k
+   :alpha alpha
+   :beta beta
+   :width width
+   :heigth height
+   :n-channels n-channels})
+
 (defn recurrent-desc
   [recurrent-type recurrent-direction
    n-input n-output batch-size

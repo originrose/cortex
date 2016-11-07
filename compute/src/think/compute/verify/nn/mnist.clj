@@ -38,6 +38,8 @@
    (desc/convolutional 5 0 1 20)
    (desc/max-pooling 2 0 2)
    (desc/dropout 0.9)
+   (desc/relu)
+   (desc/local-response-normalization)
    (desc/convolutional 5 0 1 50)
    (desc/max-pooling 2 0 2)
    (desc/batch-normalization 0.9)

@@ -1,0 +1,52 @@
+┌────────────────────────────────────────────────────────────────────┐
+│ SageMath version 7.3, Release Date: 2016-08-04                     │
+│ Type "notebook()" for the browser-based notebook interface.        │
+│ Type "help()" for help.                                            │
+└────────────────────────────────────────────────────────────────────┘
+
+sage: function('g')
+g
+sage: N = 4
+sage: A = vector(SR, var(''.join(['a_%d '%x for x in range(N)])))
+sage: var('k n alpha beta')
+(k, n, alpha, beta)
+sage: B = vector(SR, ((A[i]/pow((k + alpha * sum(A[j]^2 for j in range(max(0,i-1), min(N,i+2)))), beta)) for i in range(N)))
+sage: B
+(a_0/((a_0^2 + a_1^2)*alpha + k)^beta, a_1/((a_0^2 + a_1^2 + a_2^2)*alpha + k)^beta, a_2/((a_1^2 + a_2^2 + a_3^2)*alpha + k)^beta, a_3/((a_2^2 + a_3^2)*alpha + k)^beta)
+sage: eqn = g(*B)
+
+sum_0 = ((a_0^2 + a_1^2)*alpha + k)
+sum_1 = ((a_0^2 + a_1^2 + a_2^2)*alpha + k)
+sum_2 = ((a_1^2 + a_2^2 + a_3^2)*alpha + k)
+sum_3 = ((a_2^2 + a_3^2)*alpha + k)
+
+#Keep in mind that output for o_0 = a_0/(sum_0^beta)
+
+diff_sum_0 = (-2*sum_0^(beta - 1)*a_0*alpha*beta/(sum_0^beta)^2)
+diff_sum_1 = (-2*sum_1^(beta - 1)*a_1*alpha*beta/(sum_1^beta)^2)
+diff_sum_2 = (-2*sum_2^(beta - 1)*a_2*alpha*beta/(sum_2^beta)^2)
+diff_sum_3 = (-2*sum_3^(beta - 1)*a_3*alpha*beta/(sum_3^beta)^2)
+
+sage: diff(eqn,a_0)
+(a_0*diff_sum_0)*D[0] +
+(a_0*diff_sum_1)*D[1] +
+- D[0]/sum_0^beta
+
+sage: diff(eqn,a_1)
+(a_1*diff_sum_0)*D[0] +
+(a_1*diff_sum_1)*D[1] +
+(a_1*diff_sum_2)*D[2] +
+- D[1]/sum_1^beta
+
+
+sage: diff(eqn,a_2)
+(a_2*diff_sum_1)*D[1] +
+(a_2*diff_sum_2)*D[2] +
+(a_2*diff_sum_3)*D[3] +
+- D[2]/sum_2^beta
+
+
+sage: diff(eqn,a_3)
+(a_3*diff_sum_2)*D[2]
+(a_3*diff_sum_3)*D[3]
+- D[3]/sum_3^beta
