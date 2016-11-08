@@ -31,4 +31,4 @@ before_script:
   - echo "before_script"
 
 script:
-- cd $TEST_DIR && ./build-and-deploy.sh
+- cd $TEST_DIR && GIT_BRANCH=`git rev-parse --abbrev-ref HEAD` ./build-and-deploy.sh

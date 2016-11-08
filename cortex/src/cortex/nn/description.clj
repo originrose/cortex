@@ -26,8 +26,8 @@
     "Define a softmax which may be multi-channelled.  The data is expected
   to be planar such that channel one has n-outputs followed in memory by
 channel 2 with n-outputs"
-  ([] {:type :softmax :output-channels 1})
-  ([channels] {:type :softmax :output-channels channels}))
+  ([] [{:type :softmax :output-channels 1}])
+  ([channels] [{:type :softmax :output-channels channels}]))
 
 (defn linear->softmax [num-classes & {:keys [channels]
                                       :or {channels 1}}]
@@ -49,7 +49,8 @@ channel 2 with n-outputs"
   "Dropout supports both bernoulli and gaussian distributed data.  Bernoulli is typical dropout
 while guassian is (1,1) centered noise that is multiplied by the inputs."
   [probability & {:keys [distribution]
-                  :or {distribution :bernoulli}}] {:type :dropout :probability probability :distribution distribution})
+                  :or {distribution :bernoulli}}]
+  [{:type :dropout :probability probability :distribution distribution}])
 
 (defn convolutional-expanded
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
@@ -102,17 +103,17 @@ and we don't want to divide by zero."
   (when (< (double epsilon) 1e-5)
     (throw (Exception. "batch-normalization minimum epsilon is 1e-5.
 This is for cudnn compatibility.")))
-  {:type :batch-normalization
-   :average-factor ave-factor
-   :epsilon epsilon})
+  [{:type :batch-normalization
+    :average-factor ave-factor
+    :epsilon epsilon}])
 
 
 (defn local-response-normalization
   "http://www.cs.toronto.edu/~fritz/absps/imagenet.pdf, section 3.3"
   [& {:keys [k n alpha beta]
       :or {k 2 n 5 alpha 1e-4 beta 0.75}}]
-  {:type :local-response-normalization
-   :k k :n n :alpha alpha :beta beta})
+  [{:type :local-response-normalization
+    :k k :n n :alpha alpha :beta beta}])
 
 
 (def example-mnist-description
