@@ -14,8 +14,9 @@
 
 (defn- parse-prototxt
   [parse-str]
-  ((insta/parser
-    "<model> = parameter (parameter)* <whitespace>
+  (let [retval
+        ((insta/parser
+          "<model> = parameter (parameter)* <whitespace>
 <parameter> = <whitespace> (param-with-value | complex-parameter)
 param-with-value = word <(':')?> <whitespace> value
 begin-bracket = '{'
@@ -25,7 +26,8 @@ complex-parameter = <whitespace> word <(':')?> <whitespace> <begin-bracket>
 <value> = (word | <quote> word <quote>)
 quote = '\"'
 <word> = #'[\\w\\.]+'
-whitespace = #'\\s*'") parse-str))
+whitespace = #'\\s*'") parse-str)]
+    retval))
 
 (defn- add-value-to-map
   [retval k v]
@@ -85,7 +87,10 @@ whitespace = #'\\s*'") parse-str))
 
 (defn read-string-vals
   [item-map]
-  (into {} (map (fn [[k v]] [k (read-string v)])
+  (into {} (map (fn [[k v]]
+                  [k (if (string? v)
+                       (read-string v)
+                       v)])
                 item-map)))
 
 (defmethod prototxt-layer->desc :Convolution
@@ -275,4 +280,5 @@ whitespace = #'\\s*'") parse-str))
 (defn test-caffe-file
   [fname]
   (let [import-result (caffe-h5->model fname)]
+    (println (format "Verifying %d layers" (count (:model import-result))))
     (verify-import/verify-model import-result)))
