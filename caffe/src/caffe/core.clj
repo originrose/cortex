@@ -63,7 +63,8 @@ whitespace = #'\\s*'") parse-str))
   (let [retval
         (assoc desc
                :id (keyword (:name layer))
-               :caffe-top (keyword (:top layer)))]
+               :caffe-top (keyword (:top layer))
+               :caffe-layer layer)]
     (if (contains? layer :bottom)
       (assoc retval :caffe-bottom (keyword (:bottom layer)))
       retval)))
@@ -94,7 +95,7 @@ whitespace = #'\\s*'") parse-str))
         (-> (get layer :convolution_param)
             read-string-vals)
         assoc-group-fn #(assoc % :group group)]
-    (->> (desc/convolutional kernel_size 0 stride num_output)
+    (->> (desc/convolutional kernel_size pad stride num_output)
          first
          assoc-group-fn
          (add-layer-data-to-desc layer))))
@@ -111,19 +112,19 @@ whitespace = #'\\s*'") parse-str))
          :or {pad 0 stride 1}}
         (-> (get layer :pooling_param)
             read-string-vals)]
-    (->> (desc/max-pooling kernel_size 0 stride)
+    (->> (desc/max-pooling kernel_size pad stride)
          first
          (add-layer-data-to-desc layer))))
 
 
 (defmethod prototxt-layer->desc :LRN
   [layer]
-  (let [{:keys [alpha beta local_size k]
-         :or {alpha 0.0001 beta 0.75 local_size 5 k 2}}
+  (let [{:keys [alpha beta local_size]
+         :or {alpha 0.0001 beta 0.75 local_size 5}}
         (-> (get layer :lrn_param)
             read-string-vals)]
     (->> (desc/local-response-normalization
-          :alpha alpha :beta beta :n local_size :k k)
+          :alpha alpha :beta beta :n local_size :k 1)
          first
          (add-layer-data-to-desc layer))))
 
@@ -171,17 +172,26 @@ whitespace = #'\\s*'") parse-str))
 
 
 (defn- to-core-matrix
-  [data ideal-shape]
-  (let [^doubles data (ensure-doubles data)]
-    ;;https://github.com/mikera/core.matrix/issues/299
-    ;;The simple case of using m/reshape has serious performance issues.
-    (case (count ideal-shape)
-      1 data
-      2 (let [[n-rows n-cols] ideal-shape
-              ^"[[D" retval (make-array Double/TYPE n-rows n-cols)]
-          (c-for [row 0 (< row n-rows) (inc row)]
-                 (dtype/copy! data (* row n-cols) (aget retval row) 0 n-cols))
-          retval))))
+  ([data ideal-shape ^long group]
+   (let [^doubles data (ensure-doubles data)]
+     ;;https://github.com/mikera/core.matrix/issues/299
+     ;;The simple case of using m/reshape has serious performance issues.
+     ;;In addition, we have to worry about 'group' which is a specific thing to
+     ;;caffe networks:
+     ;;http://caffe.berkeleyvision.org/tutorial/layers.html
+     ;;My solution is to expand the weights such that they have zeros over the input they should not
+     ;;care about.
+     (case (count ideal-shape)
+       1 data
+       2 (let [[n-rows n-cols] ideal-shape
+               group-rows (long (quot ^long n-rows group))
+               ^"[[D" retval (make-array Double/TYPE n-rows (* n-cols group))]
+           (c-for [row 0 (< row n-rows) (inc row)]
+                  (let [group-copy-offset (* n-cols (quot row group-rows))]
+                    (dtype/copy! data (* row n-cols) (aget retval row) group-copy-offset n-cols)))
+           retval))))
+  ([data ideal-shape]
+   (to-core-matrix data ideal-shape 1)))
 
 
 (defn- dim-shape->core-m-shape
@@ -222,7 +232,8 @@ whitespace = #'\\s*'") parse-str))
                                          :weights (to-core-matrix
                                                    (ensure-doubles (:data weights))
                                                    (dim-shape->core-m-shape
-                                                    (:dimensions weights)))
+                                                    (:dimensions weights))
+                                                   (long (or (:group target-desc) 1)))
                                          :bias (to-core-matrix
                                                 (ensure-doubles (:data bias))
                                                 (dim-shape->core-m-shape
@@ -249,8 +260,14 @@ whitespace = #'\\s*'") parse-str))
           input (layer-id->output input-id)
           layer-outputs (mapv (fn [desc]
                                 (layer-id->output (:id desc)))
-                              (drop 1 model))]
-      {:model model
+                              (drop 1 model))
+          model (mapv (fn [desc]
+                        (if-let [output-vec (layer-id->output (:id desc))]
+                          (assoc desc :caffe-output-size (count output-vec))
+                          desc))
+                      model)]
+      {:prototxt prototxt
+       :model model
        :input input
        :layer-outputs layer-outputs})))
 

@@ -22,15 +22,20 @@
            network (cp/multi-calc network net-input)
            ;;The assumption here is that we have a single linear network; this will not work for
            ;;branching networks.
-           output-buffers (mapv (comp #(backend/to-double-array backend %) cp/output) (:layers network))]
+           output-buffers (mapv (fn [previous-layer layer]
+                                  [(when previous-layer
+                                     (when-let [item-input (cp/output previous-layer)]
+                                       (backend/to-double-array backend item-input)))
+                                   (backend/to-double-array backend (cp/output layer))])
+                                (concat [nil] (:layers network)) (:layers network))]
        (vec (remove nil?
-                    (map (fn [keras-output net-output net-layer desc-layer]
+                    (map (fn [keras-output [net-input net-output] net-layer desc-layer]
                            (when keras-output
                              (when-not (m/equals keras-output net-output 0.001)
-                               {:layer-id (:id desc-layer)
-                                :keras-output keras-output
-                                :network-output net-output
-                                :layer-type (:type desc-layer)})))
+                               {:cortex-input net-input
+                                :import-output keras-output
+                                :cortex-output net-output
+                                :description desc-layer})))
                          layer-output-vec output-buffers (:layers network) (drop 1 full-cortex-desc)))))))
   ([backend-fn {:keys [model input layer-outputs]}]
    (verify-model backend-fn model input layer-outputs))
