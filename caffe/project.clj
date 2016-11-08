@@ -1,4 +1,4 @@
-(defproject caffe "0.1.0-SNAPSHOT"
+(defproject thinktopic/cortex-caffe "0.1.0-SNAPSHOT"
   :description "Caffe support for cortex."
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
