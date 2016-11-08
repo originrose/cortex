@@ -7,8 +7,10 @@
             [clojure.string :as string]
             [think.compute.datatype :as dtype]
             [clojure.core.matrix :as m]
-            [clojure.core.matrix.macros :refer [c-for]])
+            [clojure.core.matrix.macros :refer [c-for]]
+            [think.compute.verify.import :as verify-import])
   (:import [java.io StringReader]))
+
 
 (defn- parse-prototxt
   [parse-str]
@@ -230,6 +232,30 @@ whitespace = #'\\s*'") parse-str))
                            layer-map)))
                      layer-map
                      weight-children)
-          layer-output-map (group-by :caffe-top layer-list)]
-      (vec (sort-by :layer-index (map second layer-map)))
-      layer-output-map)))
+          ;;caffe layers flow bottom to top (despite being listed top to bottom)
+          ;;so a layer takes bottom and produces top.
+          layer-output-map (group-by :caffe-top layer-list)
+          layer-outputs (hdf5/child-map (:layer_outputs file-children))
+          layer-id->output (reduce (fn [retval [layer-id node]]
+                                     (if-let [output-group (get layer-output-map layer-id)]
+                                       (assoc retval (:id (last output-group)) (ensure-doubles (:data (hdf5/->clj node))))
+                                       (do
+                                         (println "Failed to find layer for output:" layer-id)
+                                         retval)))
+                                   {}
+                                   layer-outputs)
+          model (vec (sort-by :layer-index (map second layer-map)))
+          input-id (:id (first model))
+          input (layer-id->output input-id)
+          layer-outputs (mapv (fn [desc]
+                                (layer-id->output (:id desc)))
+                              (drop 1 model))]
+      {:model model
+       :input input
+       :layer-outputs layer-outputs})))
+
+
+(defn test-caffe-file
+  [fname]
+  (let [import-result (caffe-h5->model fname)]
+    (verify-import/verify-model import-result)))
