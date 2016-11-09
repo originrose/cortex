@@ -1,7 +1,6 @@
 (ns caffe.core-test
   (:require [clojure.test :refer :all]
-            [caffe.core :refer :all]))
+            [caffe.core :as caffe]))
 
-(deftest a-test
-  (testing "FIXME, I fail."
-    (is (= 0 1))))
+(deftest mnist-test
+  (is (= 0 (count (caffe/test-caffe-file "models/mnist.h5")))))

@@ -201,9 +201,10 @@
   (layer->input [layer] (desc/input (cp/input-size layer)))
   (layer->description [layer]
     (let [core-mat (fn [data] (nn-backend/to-core-matrix (layers/get-backend layer) data))]
-     (merge (desc/batch-normalization (:average-factor layer)
-                                      :epsilon (:epsilon layer))
-            {:scale (core-mat (:scale layer))
-             :bias (core-mat (:bias layer))
-             :means (core-mat (:running-means layer))
-             :variances (core-mat (:running-variances layer))}))))
+      (merge (first
+              (desc/batch-normalization (:average-factor layer)
+                                        :epsilon (:epsilon layer)))
+             {:scale (core-mat (:scale layer))
+              :bias (core-mat (:bias layer))
+              :means (core-mat (:running-means layer))
+              :variances (core-mat (:running-variances layer))}))))

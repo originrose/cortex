@@ -34,7 +34,7 @@ def export_model(model_def, model_weights):
     with open (model_def, "r" ) as myfile:
         model_text = myfile.read()
 
-    f['model_prototxt'] = net.to_proto()
+    f['model_prototxt'] = model_text
 
     layer_weights = f.create_group('model_weights')
 
