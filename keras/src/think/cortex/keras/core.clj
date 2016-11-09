@@ -49,7 +49,8 @@
   (let [[kernel-x kernel-y] (get config :pool_size)
         [stride-x stride-y] (get config :strides)]
     (update-in
-     (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
+     (first
+      (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y))
      [0] #(assoc % :id (keyword (:name config))))))
 
 
@@ -60,7 +61,8 @@
 
 (defmethod model-item->desc :Dropout
   [{:keys [config]}]
-  (assoc (desc/dropout (- 1.0 (:p config)))
+  (assoc (first
+          (desc/dropout (- 1.0 (:p config))))
          :id (keyword (:name config))))
 
 (defmethod model-item->desc :Flatten
