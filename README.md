@@ -65,8 +65,10 @@ Please see the various unit tests and examples for training a model.  Specifical
 
 #### Ubuntu
 
-Basic steps include, at minimum: Installing nvidia-cuda-toolkit (sudo apt-get install nvidia-cuda-toolkit)
+Basic steps include, at minimum: Installing nvidia-cuda-toolkit.
 and installing cudnn available from here: https://developer.nvidia.com/cudnn publicly.
+
+    $ sudo apt-get install nvidia-cuda-toolkit nvidia-361 libcuda1-361
 
 The .zip contains some libraries that you will need to make available to the loader. I simply copied the library files to /usr/lib, though I'm sure there's a better way of doing this.
 

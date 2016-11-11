@@ -2,7 +2,6 @@
   (:require [think.compute.nn.layers :as layers]
             [cortex.nn.description :as desc]
             [think.compute.nn.backend :as nn-backend]
-            [cortex.nn.caffe :as caffe]
             [cortex.nn.protocols :as cp]))
 
 
@@ -102,11 +101,6 @@
 (defn build-and-create-network
   [input-desc-seq backend batch-size]
   (create-network (desc/build-full-network-description input-desc-seq) backend batch-size))
-
-(defn caffe->gpu-network
-  [proto-model trained-model backend batch-size]
-  (build-and-create-network (caffe/caffe->description proto-model trained-model)
-                            backend batch-size))
 
 (defn convert-layer-type
   [compute-type]
