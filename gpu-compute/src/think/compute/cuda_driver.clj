@@ -92,8 +92,6 @@
        (throw (Exception. (format "cuRAND error: %s" (curand-error-to-string retval#)))))
      retval#))
 
-(defonce init-result (cuda-call (cuda/cuInit 0)))
-
 
 (defn zero-term-array-to-string
   [^"[B" byte-ary]
