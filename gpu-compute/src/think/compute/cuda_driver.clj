@@ -162,6 +162,7 @@
 (defn- local-create-context
   [device-id]
   (let [retval (cuda$CUctx_st.)]
+    (cuda-call (cuda/cuInit 0))
     (let [device-id (or device-id (first-valid-device))]
       (cuda-call (cuda/cuCtxCreate retval 0 device-id))
       retval)))
