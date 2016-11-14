@@ -134,6 +134,7 @@ takes [train-config results] and returns [train-config results]"
         optimiser (opt/setup-optimiser optimiser backend (layers/parameter-count net))]
     {:network net :optimiser optimiser :loss-fn loss-fns :batching-system batching-system}))
 
+
 (defn train
   "Epoch train filter takes an epoch-index and a train config and produces a new
   train config; providing an opportunity for side effects (e.g., printing)."

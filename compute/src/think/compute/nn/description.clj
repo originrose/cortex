@@ -177,8 +177,8 @@
     (if (= (get-in layer [:dropout-options :distribution]) :bernoulli)
       (desc/dropout (get-in layer [:dropout-options :probability])
                     :distribution :bernoulli)
-      (desc/dropout (- 1.0 (get-in layer [:dropout-options :variance])
-                       :distribution :gaussian))))
+      (desc/dropout (- 1.0 (get-in layer [:dropout-options :variance]))
+                    :distribution :gaussian)))
 
   ;;Be extremely careful about laziness in here because the underlying gpu resources
   ;;could be released before the lazy seq has been realized.
