@@ -67,5 +67,5 @@
 (defn -main
   [& args]
   (do
-    (println "Training convent on MNIST from scratch.")
+    (println "Training convnet on MNIST from scratch.")
     (train-and-evaluate)))
