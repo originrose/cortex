@@ -1,12 +1,7 @@
 (ns think.cortex.keras.core-test
   (:require [clojure.test :refer :all]
             [think.cortex.keras.core :as keras]
-            [think.compute.verify.import :as compute-verify]
-            [think.compute.datatype :as dtype]
-            [clojure.java.io :as io]
-            [clojure.core.matrix.macros :refer [c-for]]
-            [mikera.image.core :as imagez])
-  (:import [java.nio ByteBuffer]))
+            [think.compute.verify.import :as compute-verify]))
 
 
 (deftest verify-mnist
