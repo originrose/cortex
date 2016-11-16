@@ -20,13 +20,20 @@ implementation as possible."
 (defprotocol PComputeParameters
   (parameters [layer])
   (gradients [layer])
+  (learning-attenuation [layer])
   (post-update [layer]))
 
+
+(defn layer->learning-attenuations
+  [layer]
+  (vec (repeat (count (parameters layer))
+               (get layer :learning-attenuation 1.0))))
 
 (extend-protocol PComputeParameters
   Object
   (parameters [layer] [])
   (gradients [layer] [])
+  (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer]))
 
 (defprotocol PBatchSize
@@ -207,6 +214,7 @@ implementation as possible."
   PComputeParameters
   (parameters [layer] [(:weights layer) (:bias layer)])
   (gradients [layer] [(:weight-gradient layer) (:bias-gradient layer)])
+  (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer]
     (apply-l2-max-constraint layer)))
 
@@ -270,6 +278,7 @@ implementation as possible."
   PComputeParameters
   (parameters [layer] [weights bias])
   (gradients [layer] [(:weight-gradient layer) (:bias-gradient layer)])
+  (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer]
     (apply-l2-max-constraint layer)))
 
@@ -477,6 +486,7 @@ implementation as possible."
   PComputeParameters
   (parameters [layer] (mapcat parameters layers))
   (gradients [layer] (mapcat gradients layers))
+  (learning-attenuation [layer] (mapcat learning-attenuation layers))
   (post-update [this-layer] (doseq [layer layers] (post-update layer))))
 
 
@@ -546,6 +556,7 @@ implementation as possible."
   PComputeParameters
   (parameters [layer] (mapcat parameters layers))
   (gradients [layer] (mapcat gradients layers))
+  (learning-attenuation [layer] (mapcat learning-attenuation layers))
   (post-update [this-layer] (doseq [layer layers] (post-update layer))))
 
 
@@ -592,6 +603,7 @@ implementation as possible."
   PComputeParameters
   (parameters [layer] [bias scale])
   (gradients [layer] [(:bias-gradient layer) (:scale-gradient layer)])
+  (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer])
 
   cp/PModule
@@ -728,6 +740,7 @@ This is for cudnn compatibility.")))
      (if initial-cell-state
        [weight-and-bias-gradients hidden-state-gradient cell-state-gradient]
        [weight-and-bias-gradients hidden-state-gradient])))
+  (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer])
 
   PLayerPrepareSerialize

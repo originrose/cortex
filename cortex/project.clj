@@ -8,7 +8,7 @@
                  [org.clojure/test.check "0.9.0"]
                  [thinktopic/matrix.fressian "0.3.1"]
                  [net.mikera/vectorz-clj "0.45.0"]
-                 [net.mikera/core.matrix "0.54.0"]
+                 [net.mikera/core.matrix "0.56.0"]
                  [net.mikera/clojure-utils "0.7.0"]
                  [core.blas "1.0.2"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]

@@ -10,18 +10,17 @@
   []
   (cpu-net/create-cpu-backend test-utils/*datatype*))
 
-
 (def-double-float-test train-step
   (verify-train/test-train-step (create-backend)))
-
 
 (def-double-float-test optimise
   (verify-train/test-optimise (create-backend)))
 
-
 (def-double-float-test corn
   (verify-train/test-corn (create-backend)))
 
-
 (deftest layer->description
   (verify-train/layer->description (create-backend)))
+
+(deftest simple-learning-attenuation
+  (verify-train/test-simple-learning-attenuation (create-backend)))

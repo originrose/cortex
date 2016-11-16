@@ -1,5 +1,6 @@
 (ns think.compute.verify.nn.train
   (:require [clojure.test :refer :all]
+            [think.compute.math :as math]
             [think.compute.verify.utils :as utils]
             [think.compute.nn.backend :as nn-backend]
             [think.compute.nn.train :as train]
@@ -135,3 +136,51 @@
         new-network (compute-desc/build-and-create-network network-desc backend 10)
         new-score (nn-eval/evaluate-softmax new-network dataset [:data])]
     (is (utils/about-there? score new-score))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; y = mx + b test
+(defn net->m-and-b
+  [backend net]
+  (->> net
+       (layers/parameters)
+       (map (partial nn-backend/to-double-array backend))
+       (map vec)
+       (flatten)))
+
+(defn learn-m-and-b
+  [backend description m b]
+  (let [net (compute-desc/build-and-create-network description backend 1)
+        n 200
+        inputs (for [_ (range n)] (- (rand 200) 100))
+        outputs (for [x inputs] (+ b (* m x)))
+        data (mapv vector inputs)
+        labels (mapv vector outputs)
+        dataset (ds/create-in-memory-dataset
+                 {:data {:data data :shape 1}
+                  :labels {:data labels :shape 1}}
+                 (ds/create-index-sets n :training-split 1.0))]
+    (train/train net (opt/adam) dataset [:data] [[:labels (opt/mse-loss)]] 100
+                 :epoch-train-filter nil)
+    net))
+
+(defn test-simple-learning-attenuation
+  [backend]
+  (let [m 2
+        b 3
+        description [(desc/input 1)
+                     (desc/linear 1)]
+        net (learn-m-and-b backend description m b)]
+    (let [[learned-m learned-b] (net->m-and-b backend net)]
+      (is (> 0.01 (Math/abs (- m learned-m))))
+      (is (> 0.01 (Math/abs (- b learned-b)))))
+    (let [m -3
+          b -2
+          frozen-description (->> net
+                                  (desc/network->description)
+                                  (mapv #(assoc % :learning-attenuation 0.0)))
+          net (learn-m-and-b backend frozen-description m b)]
+      (let [[learned-m learned-b] (net->m-and-b backend net)]
+        (is (< 0.01 (Math/abs (- m learned-m))))
+        (is (< 0.01 (Math/abs (- b learned-b))))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
