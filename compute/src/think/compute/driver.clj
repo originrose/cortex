@@ -7,7 +7,7 @@
   Stream - Stream of execution occuring on the device.
   Event - Synchronization primitive.  Events are created un-triggered and get triggered their associated
   stream gets to the point where the event was created."
-  (:require [think.compute.datatype :as dtype]
+  (:require [think.datatype.core :as dtype]
             [clojure.core.matrix :as m]
             [think.resource.core :as resource]))
 

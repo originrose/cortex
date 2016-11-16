@@ -1,7 +1,7 @@
 (ns think.compute.batching-system
   (:require [think.compute.driver :as drv]
             [think.compute.math :as math]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [cortex.dataset :as ds]
             [clojure.set :as c-set]))
 

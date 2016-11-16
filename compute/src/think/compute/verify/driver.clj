@@ -2,7 +2,7 @@
   (:require [clojure.test :refer :all]
             [think.compute.driver :as drv]
             [think.compute.math :as math]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [clojure.core.matrix :as m]))
 
 
