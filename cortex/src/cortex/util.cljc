@@ -622,7 +622,10 @@
                                                          n-input
                                                          rand-gaussian)))
                                                   mean variance))))))
-  ([^long n-output ^long n-input] (weight-matrix n-output n-input :xavier)))
+  ([^long n-output ^long n-input]
+   (if (= 1 n-output n-input)
+     (b/array [[0]])
+     (weight-matrix n-output n-input :xavier))))
 
 
 (defn identity-matrix
