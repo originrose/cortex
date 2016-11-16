@@ -3,7 +3,7 @@
             [think.compute.driver :as drv]
             [think.compute.math :as math]
             [think.compute.cpu-driver :as cpu-drv]
-            [think.compute.datatype :refer [v-aget v-aset v-alength] :as dtype]
+            [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
             [think.compute.optimise :as opt]
             [think.compute.nn.layers :as layers]
             [clojure.core.matrix :as m]
@@ -17,7 +17,7 @@
            [cortex.nn.impl.layers.convolution ConvLayerConfig]
            [java.util Arrays]
            [java.util.concurrent ForkJoinPool Callable Future]
-           [think.compute ArrayView DoubleArrayView FloatArrayView]))
+           [think.datatype ArrayView DoubleArrayView FloatArrayView]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)

@@ -1,7 +1,7 @@
 (ns think.compute.cpu-driver-test
   (:require [think.compute.cpu-driver :as cpu]
             [think.compute.driver :as drv]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.resource.core :as resource]
             [clojure.test :refer :all]
             [think.compute.verify.utils :refer [def-all-dtype-test

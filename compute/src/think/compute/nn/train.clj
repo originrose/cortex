@@ -6,7 +6,7 @@
             [think.compute.optimise :as opt]
             [think.compute.math :as math]
             [think.compute.batching-system :as batch]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.resource.core :as resource]
             [cortex.nn.protocols :as cp]
             [cortex.nn.description :as desc]
