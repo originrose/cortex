@@ -672,14 +672,14 @@
 
 
 (defn get-or-new-array
-  "Gets an array from the associative dtata structure item, or returns a new empty array 
+  "Gets an array from the associative dtata structure item, or returns a new empty array
    of the specified shape"
   [item kywd shape]
   (or (get item kywd)
       (b/new-array shape)))
 
 (defn get-or-array
-  "Gets an array from the associative dtata structure item, or returns a new mutable array 
+  "Gets an array from the associative dtata structure item, or returns a new mutable array
    containing a clone of data"
   [item kywd data]
   (or (get item kywd)
@@ -734,13 +734,11 @@
 
 (defn print-confusion-matrix
   [conf-mat]
-  (let [ks (sort (keys conf-mat))
-        label-len (inc (int (apply max (map count ks))))
-        prefix (apply str (repeat label-len " "))
-        s-fmt (str "%" label-len "s")]
-    (apply println prefix ks)
-    (doseq [k ks]
-      (apply println (format s-fmt k) (map #(get-in conf-mat [k %]) ks)))))
+  (let [conf-rows (mapv (fn [[k v]]
+                          (merge v {:label k}))
+                        conf-mat)
+        label-row (vec (concat [:label] (keys conf-mat)))]
+    (pp/print-table label-row conf-rows)))
 
 ;;;; Time
 
