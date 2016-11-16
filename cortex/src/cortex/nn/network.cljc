@@ -119,7 +119,7 @@
                                 opt-network
                                 batch-index-seq)]
                     (when test-data
-                      (println "epoch mse-loss:" (evaluate-mse network test-data test-labels)))
+                      (println "epoch" @epoch-count " mse-loss:" (evaluate-mse network test-data test-labels)))
                     [optimizer network]))
                 [optimizer network]
                 epoch-batches)]
