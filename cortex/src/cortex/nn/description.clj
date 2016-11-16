@@ -334,6 +334,48 @@ This is for cudnn compatibility.")))
     (recurse-build-desc (first input-desc-seq) (rest input-desc-seq))))
 
 
+(defn get-convolutional-param-size
+  [desc retval datatype-size]
+  (let [filter-bias-size (+ (* (:kernel-width desc)
+                               (:kernel-height desc)
+                               (:input-channels desc)
+                               (:num-kernels desc))
+                            (:num-kernels desc))]
+    (assoc retval :parameters-size (* filter-bias-size datatype-size))))
+
+
+(defn get-linear-param-size
+  [desc retval datatype-size]
+  (let [filter-bias-size (+ (* (:output-size desc)
+                               (:input-size desc))
+                            (:output-size desc))]
+    (assoc retval :parameters-size (* filter-bias-size datatype-size))))
+
+
+(defn get-network-sizes
+  "Call *after* build-full-network-description"
+  [full-network-desc batch-size datatype-size]
+  (mapv (fn [desc]
+          (let [retval
+                {:type (:type desc)
+                 :output-size-in-bytes (* (:output-size desc) datatype-size)
+                 :batched-output-size
+                 (* (:output-size desc) batch-size datatype-size)}]
+            (condp = (:type desc)
+              :convolutional (get-convolutional-param-size desc retval datatype-size)
+              :linear (get-linear-param-size desc retval datatype-size)
+              retval)))
+        (flatten full-network-desc)))
+
+(defn summarize-network-sizes
+  [network-sizes]
+  (let [rough-buffer-size-in-bytes (reduce + (mapv :batched-output-size network-sizes))
+        rough-parameter-size-in-bytes (reduce + (remove nil?
+                                                         (mapv :parameters-size network-sizes)))]
+    {:buffer-size-in-bytes rough-buffer-size-in-bytes
+     :parameter-size-in-bytes rough-parameter-size-in-bytes}))
+
+
 (defn create-network
   "Create the live network modules from the built description"
   [built-descriptions]

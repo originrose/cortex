@@ -1,7 +1,7 @@
 (ns think.compute.cpu-driver
   (:require [think.compute.driver :as drv]
             [think.compute.math :as c-math]
-            [think.compute.datatype :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
+            [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
             [clojure.core.async :as async]
             [think.resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
@@ -11,7 +11,7 @@
             FloatBuffer DoubleBuffer Buffer]
            [com.github.fommil.netlib BLAS]
            [java.util Random]
-           [think.compute ArrayView]))
+           [think.datatype ArrayView]))
 
 
 (set! *warn-on-reflection* true)
@@ -42,8 +42,8 @@
 
 
 (defn create-main-thread-cpu-stream
-  "Create a cpu stream that will execute everything immediately inline.  Use with care; the synchonization
-primitives will just hang with this stream."
+  "Create a cpu stream that will execute everything immediately inline.
+Use with care; the synchonization primitives will just hang with this stream."
   ^CPUStream []
   (->CPUStream nil nil nil))
 

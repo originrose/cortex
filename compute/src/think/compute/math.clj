@@ -6,7 +6,7 @@ in here should be 100% portable across different compute drivers."
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
             [think.compute.driver :as drv]
-            [think.compute.datatype :as dtype]))
+            [think.datatype.core :as dtype]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)

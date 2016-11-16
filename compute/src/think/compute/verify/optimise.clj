@@ -1,7 +1,7 @@
 (ns think.compute.verify.optimise
   (:require [clojure.test :refer :all]
             [think.compute.nn.backend :as nn-backend]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.compute.optimise :as opt]
             [think.compute.verify.utils :refer [def-double-float-test] :as utils]
             [clojure.core.matrix :as m]))
