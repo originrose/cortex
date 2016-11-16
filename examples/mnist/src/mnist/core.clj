@@ -3,7 +3,6 @@
             [cortex.optimise :as opt]
             [cortex.nn.network :as net]
             [cortex.nn.description :as desc]
-            [cortex.nn.caffe :as caffe]
             [clojure.java.io :as io])
   (:gen-class))
 
@@ -34,7 +33,6 @@
         built-network (desc/build-full-network-description network-desc)]
     (desc/create-network built-network)))
 
-
 (defn create-optimizer
   [network]
   (opt/adam))
@@ -47,7 +45,6 @@
                @training-data
                @training-labels batch-size n-epochs
                @test-data @test-labels)))
-
 
 (defn evaluate
   [network]
@@ -67,25 +64,8 @@
     (println (format "Network score: %g" fraction-correct))
     (println (format "Network mse-score %g" (evaluate-mse network)))))
 
-
-(defn load-caffe-mnist
-  []
-  (let [proto-model (caffe/load-text-caffe-file (io/resource "lenet.prototxt"))
-        trained-model (caffe/load-binary-caffe-file (io/resource "lenet_iter_10000.caffemodel"))]
-    (caffe/instantiate-model proto-model trained-model)))
-
-
-(defn evaluate-caffe-mnist
-  []
-  (let [network (load-caffe-mnist)
-        fraction-correct (evaluate network)]
-    (println (format "Network score: %g" fraction-correct))
-    (println (format "Network mse-score %g" (evaluate-mse network)))))
-
 (defn -main
   [& args]
   (do
-    (println "Training convent on MNIST from scratch.")
-    (train-and-evaluate)
-    (println "Loading LeNet Caffe model for inference.")
-    (evaluate-caffe-mnist)))
+    (println "Training convnet on MNIST from scratch.")
+    (train-and-evaluate)))
