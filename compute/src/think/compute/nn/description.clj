@@ -93,9 +93,19 @@
   (let [sub-networks (mapv create-network branches)]
     (layers/split backend sub-networks input-size)))
 
+(defn description->module
+  [backend desc]
+  (let [new-module (create-module desc backend)
+        extra-keys (clojure.set/difference (set (keys desc)) (set (keys new-module)))]
+    (when new-module
+      (reduce (fn [eax k]
+                (assoc eax k (get desc k)))
+              new-module
+              extra-keys))))
+
 (defn create-network
   [built-descriptions backend batch-size]
-  (let [modules (filterv identity (map #(create-module % backend) built-descriptions))]
+  (let [modules (filterv identity (map (partial description->module backend) built-descriptions))]
     (cp/setup (layers/layer-list modules) batch-size)))
 
 (defn build-and-create-network
