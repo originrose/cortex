@@ -5,7 +5,7 @@
             [think.compute.nn.backend :as nn-backend]
             [think.compute.math :as math]
             [think.compute.nn.layers :as layers]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.compute.driver :as drv]
             [think.compute.nn.train :as train]
             [clojure.core.matrix.macros :refer [c-for]]))

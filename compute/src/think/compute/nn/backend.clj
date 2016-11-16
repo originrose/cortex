@@ -13,7 +13,7 @@
 
   (:require [think.compute.math :as math]
             [think.compute.driver :as drv]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [cortex.nn.impl.layers.convolution])
   (:import [cortex.nn.impl.layers.convolution ConvLayerConfig]))
 

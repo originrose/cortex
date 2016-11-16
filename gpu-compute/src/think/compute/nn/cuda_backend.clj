@@ -1,7 +1,7 @@
 (ns think.compute.nn.cuda-backend
   (:require [think.compute.cuda-driver :refer [->ptr value->ptr] :as cuda-drv]
             [think.compute.javacpp-datatype :as jcpp-dtype]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.compute.driver :as drv]
             [think.compute.optimise :as opt]
             [think.compute.nn.backend :as nn-backend]
