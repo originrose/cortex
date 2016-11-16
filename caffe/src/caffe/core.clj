@@ -5,7 +5,7 @@
             [clojure.java.io :as io]
             [instaparse.core :as insta]
             [clojure.string :as string]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.macros :refer [c-for]]
             [think.compute.verify.import :as verify-import])

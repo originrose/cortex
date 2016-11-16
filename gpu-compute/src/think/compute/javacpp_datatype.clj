@@ -1,5 +1,5 @@
 (ns think.compute.javacpp-datatype
-  (:require [think.compute.datatype :as dtype]
+  (:require [think.datatype.core :as dtype]
             [clojure.core.matrix.protocols :as mp])
   (:import [org.bytedeco.javacpp
             BytePointer IntPointer LongPointer DoublePointer

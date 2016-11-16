@@ -1,12 +1,11 @@
 (ns think.compute.array-view-math
-  (:require [think.compute.datatype :as dtype]
-            [think.compute.math-util :refer :all]
+  (:require [think.compute.math-util :refer :all]
             [clojure.core.matrix.macros :refer [c-for]]
-            [think.compute.datatype :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
+            [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
             [think.resource.core :as resource])
   (:import [com.github.fommil.netlib BLAS]
            [java.util Random]
-           [think.compute DoubleArrayView FloatArrayView ArrayView
+           [think.datatype DoubleArrayView FloatArrayView ArrayView
             LongArrayView IntArrayView ShortArrayView ByteArrayView]))
 
 
