@@ -166,7 +166,7 @@ or a more complex shape definition a layout, num-channels, width and height")
       (when-not (= (m/ecount (first data))
                    (shape-ecount shape))
         (throw (Exception. (format "shape ecount (%s) doesn't match (first data) ecount (%s) for key %s."
-                                   (shape-ecount shape) (m/ecount data) k))))))
+                                   (shape-ecount shape) (m/ecount (first data)) k))))))
   (->InMemoryDataset data-shape-map index-sets))
 
 
