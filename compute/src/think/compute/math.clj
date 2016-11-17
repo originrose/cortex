@@ -100,6 +100,10 @@ a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
      2 (create-tensor batch-size 1 (quot ^long (first shape)
                                          batch-size)
                       (second shape))
+     3 (create-tensor batch-size (quot ^long (first shape)
+                                       batch-size)
+                      (second shape)
+                      (nth shape 2))
      (throw (Exception. "Unexpected shape")))))
 
 
