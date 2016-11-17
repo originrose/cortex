@@ -115,8 +115,9 @@ implementation as possible."
 
 
 (defn softmax
-  [backend n-input]
-  (->SimpleLayer backend n-input {:layer-type :softmax}))
+  [backend n-input & {:keys [channels]
+                      :or {channels 1}}]
+  (->SimpleLayer backend n-input {:layer-type :softmax :channels channels}))
 
 (defn allocate-l2-temp-data
   [{:keys [weights l2-max-constraint backend] :as layer}]

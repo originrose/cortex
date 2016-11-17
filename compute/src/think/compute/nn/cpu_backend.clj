@@ -40,7 +40,7 @@
   (cpu-activation-forward [input-buf act-type output-buf])
   (cpu-activation-backward [input-buf act-type output-buf
                             output-gradient input-gradient])
-  (cpu-softmax-forward [input-buf output-buf n-input])
+  (cpu-softmax-forward [input-buf output-buf n-input n-channels])
   (cpu-adadelta-step! [gradient parameters gradient-alpha param-offset
                        decay epsilon grad-accum dx-accum])
   (cpu-adam-step! [gradient parameters gradient-alpha param-offset alpha beta1 beta2 epsilon
@@ -185,24 +185,46 @@
        sum-val#)))
 
 
+(defmacro cpu-view-softmax
+  [src dest cast-fn]
+  `(let [num-items# (.length ~src)
+         max-val# (~cast-fn (array-max ~src num-items# 0 ~cast-fn))]
+     ;;Subtract max for numerical stability
+     (c-for [idx# 0 (< idx# num-items#) (inc idx#)]
+            (v-aset ~dest idx# (Math/exp (- (v-aget ~src idx#) max-val#))))
+     ;;perform normalization with array sum.
+     (let [sum-val# (~cast-fn (array-sum ~dest num-items# 0))]
+       (c-for [idx# 0 (< idx# num-items#) (inc idx#)]
+              (.diveq ~dest idx# sum-val#)))))
+
+
+
 (defmacro cpu-softmax-forward-impl
-  [n-input input-buf output-buf cast-fn]
-  `(let [~n-input (long ~n-input)
+  [n-input input-buf output-buf n-channels cast-fn]
+  `(let [n-input# (long ~n-input)
          src# (ArrayView/toView ~input-buf)
          dest# (ArrayView/toView ~output-buf)
-         batch-size# (quot (v-alength src#) ~n-input)]
+         batch-size# (quot (v-alength src#) n-input#)
+         n-channels# (long ~n-channels)]
      (c-for [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
-            (let [start-offset# (* batch-idx# ~n-input)
-                  max-val# (~cast-fn (array-max src# ~n-input start-offset# ~cast-fn))]
-              ;;Subtract max for numerical stability
-              (c-for [idx# 0 (< idx# ~n-input) (inc idx#)]
-                     (v-aset dest# (+ idx# start-offset#)
-                             (Math/exp (- (v-aget src# (+ idx# start-offset#)) max-val#))))
-              (let [sum-val# (~cast-fn (array-sum dest# ~n-input start-offset#))]
-                (c-for [idx# 0 (< idx# ~n-input) (inc idx#)]
-                       (v-aset dest# (+ idx# start-offset#)
-                               (/ (v-aget dest# (+ idx# start-offset#))
-                                  sum-val#))))))))
+            (if (= n-channels# 1)
+              (let [start-offset# (* batch-idx# n-input#)
+                    max-val# (~cast-fn (array-max src# n-input# start-offset# ~cast-fn))
+                    src# (.toView src# start-offset# n-input#)
+                    dest# (.toView dest# start-offset# n-input#)]
+                (cpu-view-softmax src# dest# ~cast-fn))
+              (let [start-offset# (* batch-idx# n-input#)
+                    n-pixels# (quot n-input# n-channels#)]
+                (parallel-for
+                 pixel# n-pixels#
+                 (cpu-view-softmax (.toView src# (+ start-offset#
+                                                    (* pixel# n-channels#))
+                                            n-channels#)
+                                   (.toView dest# (+ start-offset#
+                                                     (* pixel# n-channels#))
+                                            n-channels#)
+                                   ~cast-fn)))))))
+
 
 
 (defmacro cpu-planar-input->convolution!-impl
@@ -722,8 +744,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                             ^DoubleArrayView output-gradient
                             ^DoubleArrayView input-gradient]
     (cpu-act-backward-impl act-type input output output-gradient input-gradient double))
-  (cpu-softmax-forward [input-buf ^DoubleArrayView output-buf ^long n-input]
-    (cpu-softmax-forward-impl n-input input-buf output-buf double))
+  (cpu-softmax-forward [input-buf ^DoubleArrayView output-buf ^long n-input ^long n-channels]
+    (cpu-softmax-forward-impl n-input input-buf output-buf n-channels double))
   (cpu-adadelta-step! [gradient ^DoubleArrayView parameters gradient-alpha
                        param-offset decay epsilon ^DoubleArrayView grad-accum
                        ^DoubleArrayView dx-accum]
@@ -793,8 +815,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                             ^FloatArrayView output-gradient
                             ^FloatArrayView input-gradient]
     (cpu-act-backward-impl act-type input output output-gradient input-gradient float))
-  (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input]
-    (cpu-softmax-forward-impl n-input input-buf output-buf float))
+  (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input ^long n-channels]
+    (cpu-softmax-forward-impl n-input input-buf output-buf n-channels float))
   (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha
                        param-offset decay epsilon
                        ^FloatArrayView grad-accum ^FloatArrayView dx-accum]
@@ -873,13 +895,13 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                (device-array->view output-gradient)
                                (device-array->view input-gradient)))))
 
-(defrecord SoftmaxLayer [cpu-stream n-input])
+(defrecord SoftmaxLayer [cpu-stream n-input channels])
 (extend-type SoftmaxLayer
   nn-backend/PBackendLayer
   (forward! [layer ^DeviceArray input ^DeviceArray output]
     (cpu-drv/with-stream-dispatch (.cpu-stream layer)
       (cpu-softmax-forward (device-array->view input) (device-array->view output)
-                           (.n-input layer))))
+                           (.n-input layer) (.channels layer))))
   (backward! [layer ^DeviceArray input ^DeviceArray output
               ^DeviceArray input-gradient ^DeviceArray output-gradient]
     (layers/softmax-backward! (.cpu-stream layer) input-gradient output-gradient)))
@@ -1202,7 +1224,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
       (contains? #{:sigmoid :relu :tanh} layer-type)
       (->ActivationLayer layer-type (.stream backend))
       (= :softmax layer-type)
-      (->SoftmaxLayer (.stream backend) (:output-size layer-desc))
+      (->SoftmaxLayer (.stream backend) (:output-size layer-desc) (get layer-desc :channels 1))
       (= :convolution layer-type)
       (create-conv-layer backend (:conv-config layer-desc) (:batch-size layer-desc))
       (= :max-pooling layer-type)
