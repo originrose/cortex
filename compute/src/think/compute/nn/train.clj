@@ -6,7 +6,7 @@
             [think.compute.optimise :as opt]
             [think.compute.math :as math]
             [think.compute.batching-system :as batch]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.resource.core :as resource]
             [cortex.nn.protocols :as cp]
             [cortex.nn.description :as desc]
@@ -35,14 +35,16 @@
   (let [backend (layers/get-backend network)
         gradients (layers/gradients network)
         parameters (layers/parameters network)
+        learning-attenuation (layers/learning-attenuation network)
         batch-size (long (layers/batch-size network))
         alpha (/ 1.0 batch-size)
         optimiser (opt/batch-update optimiser)]
-    (reduce (fn [offset [gradients parameters]]
-              (opt/compute-parameters! optimiser alpha offset gradients parameters)
+    (reduce (fn [offset [gradients parameters learning-attenuation]]
+              (opt/compute-parameters! optimiser (* learning-attenuation alpha)
+                                       offset gradients parameters)
               (+ ^long offset ^long (math/ecount parameters)))
             0
-            (partition 2 (interleave gradients parameters)))
+            (partition 3 (interleave gradients parameters learning-attenuation)))
     (doseq [grad gradients]
       (drv/memset (drv/get-stream backend) (math/device-buffer grad) 0 0 (math/ecount grad)))
     (layers/post-update network)
@@ -133,6 +135,7 @@ takes [train-config results] and returns [train-config results]"
                        output-labels-and-loss (cp/multi-output-size net))
         optimiser (opt/setup-optimiser optimiser backend (layers/parameter-count net))]
     {:network net :optimiser optimiser :loss-fn loss-fns :batching-system batching-system}))
+
 
 (defn train
   "Epoch train filter takes an epoch-index and a train config and produces a new

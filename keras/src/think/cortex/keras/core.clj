@@ -6,7 +6,7 @@
             [clojure.java.io :as io]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.macros :refer [c-for]]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [clojure.string :as string]))
 
 

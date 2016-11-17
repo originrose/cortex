@@ -2,7 +2,7 @@
     (:require [clojure.test :refer :all]
             [think.compute.batching-system :as batching-system]
             [cortex.dataset :as ds]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.compute.driver :as drv]
             [think.compute.math :as math]))
 

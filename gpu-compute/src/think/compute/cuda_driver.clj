@@ -1,6 +1,6 @@
 (ns think.compute.cuda-driver
   (:require [think.compute.driver :as drv]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [clojure.java.io :as io]
             [think.resource.core :as resource]
             [think.compute.javacpp-datatype :as jcpp-dtype]

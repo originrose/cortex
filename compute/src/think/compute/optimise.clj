@@ -2,7 +2,7 @@
   "Generic optimization backend to allow optimization paths backed by various drivers.  This includes
 optimisers specifically and loss functions."
   (:require [think.compute.math :as math]
-            [think.compute.datatype :as dtype]
+            [think.datatype.core :as dtype]
             [think.compute.driver :as drv]
             [cortex.optimise :as opt]
             [cortex.nn.protocols :as cp]

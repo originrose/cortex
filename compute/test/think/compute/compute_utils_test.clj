@@ -4,7 +4,7 @@
             [think.compute.driver :as drv]
             [think.compute.math :as math]
             [think.compute.compute-utils :as cu]
-            [think.compute.datatype :as dtype]))
+            [think.datatype.core :as dtype]))
 
 
 (deftest compute-map
