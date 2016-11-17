@@ -45,6 +45,9 @@
 (def-double-float-test softmax-batch
   (verify-layers/softmax-batch (create-backend)))
 
+(def-double-float-test softmax-batch-channels
+  (verify-layers/softmax-batch-channels (create-backend)))
+
 (def-double-float-test conv-layer
   (verify-layers/basic-conv-layer (create-backend)))
 

@@ -252,6 +252,41 @@
              (seq input-gradient))))))
 
 
+
+(defn softmax-batch-channels
+  [backend]
+  (let [batch-count 10
+        channels 4
+        n-input-pixels 10
+        input (nn-backend/array backend
+                                (vec (repeat batch-count
+                                             (take n-input-pixels
+                                                   (repeat [1 2 3 4]))))
+                             batch-count)
+        layer (layers/softmax backend (* channels n-input-pixels) :channels channels)
+        layer (cp/setup layer batch-count)
+        layer (cp/calc layer input)
+        output (cp/output layer)
+        output-data (nn-backend/to-double-array backend output)]
+    (is (utils/about-there?
+         (flatten (repeat batch-count
+                          (take n-input-pixels
+                                (repeat [0.03205860328008499
+                                         0.08714431874203257
+                                         0.23688281808991013
+                                         0.6439142598879724]))))
+         output-data
+         1e-4))
+    (let [output-gradient (nn-backend/array backend
+                                            (repeat (* batch-count
+                                                       channels n-input-pixels) 1))
+          layer (cp/backward layer input output-gradient)
+          input-gradient (nn-backend/to-double-array backend (cp/input-gradient layer))]
+      (is (= (map double (repeat (* channels n-input-pixels batch-count) 1))
+             (seq input-gradient))))))
+
+
+
 (defn create-conv-layer
   [backend input-dim num-channels k-dim pad stride n-kernels]
   (let [conv-config (conv/create-conv-layer-config input-dim input-dim

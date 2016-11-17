@@ -46,9 +46,8 @@
   (let [output-size (long (:output-size desc))
         n-channels (long (get desc :output-channels 1))
         n-input (quot output-size n-channels)]
-    (when-not (= n-channels 1)
-      (throw (Exception. "Multi-channel softmax not supported at this time.")))
-   (layers/softmax backend n-input)))
+    (layers/softmax backend n-input :channels n-channels)))
+
 
 (defmethod create-module :convolutional
   [{:keys [input-width input-height input-channels
@@ -142,6 +141,12 @@
   [layer]
   {:type (convert-layer-type (get-in layer [:layer-impl-desc
                                             :layer-type]))})
+
+
+(defmethod simple-layer->description :softmax
+  [layer]
+  {:type :softmax :output-channels (get-in layer [:layer-impl-desc :channels] 1)})
+
 
 (defmethod simple-layer->description :local-response-normalization
   [layer]
