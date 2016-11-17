@@ -24,6 +24,10 @@ before_install:
 - unzip vault.zip
 - export PATH=$PATH:$PWD
 - mkdir -p ~/.lein && cp profiles.clj ~/.lein/profiles.clj
+- mkdir -p compute/checkouts && ln -s `pwd`/cortex compute/checkouts/cortex
+- mkdir -p keras/checkouts && ln -s `pwd`/cortex keras/checkouts/cortex && ln -s `pwd`/compute keras/checkouts/compute
+- mkdir -p caffe/checkouts && ln -s `pwd`/cortex caffe/checkouts/cortex && ln -s `pwd`/compute caffe/checkouts/compute
+
 
 install:
   - echo "install"
