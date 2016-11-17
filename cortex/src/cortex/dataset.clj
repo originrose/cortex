@@ -1,5 +1,6 @@
 (ns cortex.dataset
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m]
+            [think.parallel.core :as parallel]))
 
 
 (def planar-image-layout [:channels :height :width])
@@ -200,3 +201,51 @@ as what you used in the run call."
   [dataset name batch-type batch-size]
   (let [batch-data (get-batches dataset batch-size batch-type [name])]
     (mapcat first batch-data)))
+
+
+
+
+(defrecord InfiniteDataset [shape-map cv-map holdout-map training-map-fn]
+  PDataset
+  (shapes [ds] shape-map)
+  (get-batches [ds batch-size batch-type shape-name-seq]
+    (let [data-map (condp = batch-type
+                     :cross-validation cv-map
+                     :holdout holdout-map
+                     :training (training-map-fn))]
+      (mapv #(partition batch-size (get data-map %))
+            shape-name-seq))))
+
+
+
+(defn create-infinite-dataset
+  "Create an infinite dataset.  Note that the shape-pair-seq is expected to be pairs that are in the same
+order as elements in the dataset.
+
+(def test-ds (create-infinite-dataset [[:index 1] [:label 1]] (partition 2 (interleave (range) (flatten (repeat [:a :b :c :d])))) 20))"
+  ([shape-pair-seq cv-seq holdout-seq infinite-data-sequence epoch-element-count]
+   (let [shape-map (into {} shape-pair-seq)
+         ;;Given an infinite sequence of data partition by element count
+         ;;and then place into maps with names relating to the shapes of data.
+         sequence->map-fn (fn [epoch-data]
+                            (->> shape-pair-seq
+                                 (map-indexed (fn [idx [name shape]]
+                                                [name
+                                                 (map #(nth % idx) epoch-data)]))
+                                 (into {})))
+         ;;Transform into infinite sequence of epoch-maps
+         training-sequence (->> (partition epoch-element-count infinite-data-sequence)
+                                (map shuffle)
+                                (map sequence->map-fn))
+         training-fn (parallel/create-next-item-fn training-sequence)
+         cv-set (sequence->map-fn cv-seq)
+         holdout-set (sequence->map-fn holdout-seq)]
+     (->InfiniteDataset shape-map cv-set holdout-set training-fn)))
+  ([shape-pair-seq infinite-data-sequence ^long epoch-element-count]
+   (let [cv-holdout-seq (take epoch-element-count infinite-data-sequence)
+         num-cv-items (quot epoch-element-count 2)]
+    (create-infinite-dataset shape-pair-seq
+                             (take num-cv-items cv-holdout-seq)
+                             (drop num-cv-items cv-holdout-seq)
+                             (drop epoch-element-count infinite-data-sequence)
+                             epoch-element-count))))
