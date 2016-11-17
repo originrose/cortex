@@ -160,7 +160,7 @@
                  {:data {:data data :shape 1}
                   :labels {:data labels :shape 1}}
                  (ds/create-index-sets n :training-split 1.0))]
-    (train/train net (opt/adam) dataset [:data] [[:labels (opt/mse-loss)]] 100
+    (train/train net (opt/adam) dataset [:data] [[:labels (opt/mse-loss)]] 200
                  :epoch-train-filter nil)
     net))
 
