@@ -595,5 +595,6 @@ produce a new array of double values in the order desired"
                                                 model->simple-description)
                                  built-desc (desc/build-full-network-description model-desc)
                                  outputs    (layer-output-by-id (hdf5/open-file output-file))
+                                 desc-seq   (mapv vector model-desc built-desc)
                                  by-layer   (associate-layer-outputs desc-seq outputs)]
                              (check-output-dims by-layer))}))))))
