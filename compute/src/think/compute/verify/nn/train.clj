@@ -184,3 +184,46 @@
         (is (< 0.01 (Math/abs (- m learned-m))))
         (is (< 0.01 (Math/abs (- b learned-b))))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; softmax test
+(defn- mode
+  [l]
+  (ffirst (sort-by (comp count second) > (group-by identity l))))
+
+(defn- count->bit-vector
+  "Create a bit-vector of length = max-count with the 1 at position c"
+  [max-count c]
+  (let [c (min (dec max-count) c)]
+    (-> (take max-count (repeatedly (constantly 0)))
+        (vec)
+        (assoc c 1))))
+
+(defn test-softmax-channels
+  [backend]
+  (let [input-dim 4
+        output-dim 2
+        classes 3
+        description [(desc/input input-dim)
+                     (desc/linear->softmax (* output-dim classes) :classes classes)]
+        batch-size 5
+        net (compute-desc/build-and-create-network description backend batch-size)
+        n 1000
+        data (vec (repeatedly n (fn [] (repeatedly 4 #(rand (double classes))))))
+        labels (mapv #(mapcat (comp (partial count->bit-vector classes) int mode)
+                              (partition 2 %))
+                     data)
+        train-dataset (ds/create-in-memory-dataset
+                       {:data {:data data :shape input-dim}
+                        :labels {:data labels :shape (* output-dim classes)}}
+                       (ds/create-index-sets n :training-split 1.0))
+        epoch-count 100
+        _ (train/train net (opt/adam) train-dataset [:data] [[:labels (opt/softmax-loss)]] epoch-count
+                       #_:epoch-train-filter #_nil)
+        holdout-dataset (ds/create-in-memory-dataset
+                         {:data {:data [[0.1 0.1 2.9 2.9]] :shape input-dim}}
+                         (ds/create-index-sets 1 :training-split 1.0))
+        holdout-net (compute-desc/build-and-create-network (desc/network->description net) backend 1)
+        result (train/run holdout-net holdout-dataset [:data])]
+    (clojure.pprint/pprint result)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

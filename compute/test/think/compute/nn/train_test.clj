@@ -24,3 +24,6 @@
 
 (deftest simple-learning-attenuation
   (verify-train/test-simple-learning-attenuation (create-backend)))
+
+(deftest softmax-channels
+  (verify-train/test-softmax-channels (create-backend)))
