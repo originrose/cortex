@@ -75,10 +75,11 @@
         activation (keyword (get config :activation "linear"))
         id (keyword (:name config))
         retval (-> (first (desc/linear output-size))
-                   (assoc :id id))
-        ]
+                   (assoc :id id))]
     (if-not (= activation :linear)
-      [(assoc retval :embedded-activation true) {:type activation :id (keyword (str (:name config) "-activation") :embedded id)}]
+      [(assoc retval :embedded-activation true)
+       {:type activation
+        :id (keyword (str (:name config) "-activation") :embedded id)}]
       [retval])))
 
 (defn model->simple-description
@@ -102,7 +103,11 @@
     ;;TODO models with a single channel input and figure out planar vs. interleaved
     (vec
      (flatten (concat (desc/input width height n-channels)
-                      (mapv model-item->desc model-vector))))))
+                      (try
+                        (mapv model-item->desc model-vector)
+                        (catch Exception e
+                          (do (println "caught exception: " (.getMessage ^Exception e)
+                                        "processing: " model-vector)))))))))
 
 (defn hdf5-child-map
   [node]
