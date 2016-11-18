@@ -21,6 +21,16 @@
   (json/parse-string (slurp fname) keyword))
 
 
+(defn match-padding
+  "Maps from Keras padding descriptors to Cortex pad-x and pad-y values."
+  [config]
+  (cond
+    (:padding config)                 (:padding config)
+    (= (:border_mode config) "same")  [(mod (:nb_col config) 2)
+                                       (mod (:nb_row config) 2)]
+    ;; else covers "valid" padding
+    :else                             [0 0]))
+
 (defmulti model-item->desc
   "Multimethod that dispatches on keyword version of Keras model item key
   to generate the corresponding Cortex description for the item/layer."
@@ -31,7 +41,7 @@
 (defmethod model-item->desc :Convolution2D
   [{:keys [config]}]
   (let [[stride-x stride-y] (get config :subsample [1 1])
-        [pad-x pad-y] (get config :padding [0 0])
+        [pad-x pad-y] (match-padding config)
         kernel-x (long (get config :nb_col))
         kernel-y (long (get config :nb_row))
         kernel-count (long (get config :nb_filter))
