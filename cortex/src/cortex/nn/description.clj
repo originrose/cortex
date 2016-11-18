@@ -29,10 +29,14 @@ channel 2 with n-outputs"
   ([] [{:type :softmax :output-channels 1}])
   ([channels] [{:type :softmax :output-channels channels}]))
 
-(defn linear->softmax [num-classes & {:keys [channels]
-                                      :or {channels 1}}]
+(defn linear->softmax [num-classes & {:keys [output-channels]
+                                      :or {output-channels 1}
+                                      :as opts}]
+  (when-not (every? #{:output-channels} (keys opts))
+    (throw (ex-info "Invalid keyword option to linear->softmax"
+                    opts)))
   [{:type :linear :output-size num-classes}
-   {:type :softmax :output-channels channels}])
+   {:type :softmax :output-channels output-channels}])
 
 (defn relu [] [{:type :relu}])
 (defn linear->relu [num-output & opts]

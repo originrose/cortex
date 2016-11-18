@@ -136,7 +136,13 @@ buffers the param offset is required as the accumulation buffers are only one bu
 
 (defn mse-loss [] (opt/mse-loss))
 (defn cross-entropy-loss [] (opt/cross-entropy-loss))
-(defn softmax-loss [] (opt/softmax-loss))
+(defn softmax-loss [& {:keys [output-channels]
+                       :or {output-channels 1} :as opts}]
+  (when-not (every? #{:output-channels} (keys opts))
+    (throw (ex-info "Invalid keyword option to softmax-loss"
+                    opts)))
+  (assoc (opt/softmax-loss)
+         :output-channels output-channels))
 
 
 (defn calculate-cross-entropy-gradient

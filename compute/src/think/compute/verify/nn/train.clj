@@ -205,7 +205,8 @@
         output-dim 2
         classes 3
         description [(desc/input input-dim)
-                     (desc/linear->softmax (* output-dim classes) :classes classes)]
+                     (desc/linear->softmax
+                      (* output-dim classes) :output-channels classes)]
         batch-size 5
         net (compute-desc/build-and-create-network description backend batch-size)
         n 1000
@@ -218,7 +219,7 @@
                         :labels {:data labels :shape (* output-dim classes)}}
                        (ds/create-index-sets n :training-split 1.0))
         epoch-count 100
-        _ (train/train net (opt/adam) train-dataset [:data] [[:labels (opt/softmax-loss)]] epoch-count
+        _ (train/train net (opt/adam) train-dataset [:data] [[:labels (opt/softmax-loss :output-channels classes)]] epoch-count
                        #_:epoch-train-filter #_nil)
         holdout-dataset (ds/create-in-memory-dataset
                          {:data {:data [[0.1 0.1 2.9 2.9]] :shape input-dim}}
