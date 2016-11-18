@@ -24,17 +24,20 @@
 (set! *unchecked-math* :warn-on-boxed)
 
 
-(defn infinite-balanced-file-label-pairs
+(defn balanced-file-label-pairs
   "Given a directory with subdirs named after labels, produce an
 infinite interleaved sequence of [sub-dir-name sub-dir-file]
 to create balanced training classes using partition along with interleave."
-  [dirname]
+  [dirname & {:keys [infinite?]
+              :or {infinite? true}}]
   (let [sub-dirs (.listFiles ^File (io/file dirname))]
     (->> sub-dirs
          (map (fn [^File sub-dir]
                 (map vector
-                     (mapcat shuffle
-                             (repeatedly #(seq (.listFiles sub-dir))))
+                     (if infinite?
+                       (mapcat shuffle
+                               (repeatedly #(seq (.listFiles sub-dir))))
+                       (seq (.listFiles sub-dir)))
                      (repeat (.getName sub-dir)))))
          (apply interleave))))
 
@@ -57,15 +60,15 @@ random regardless of this function's specific behavior for any specific src item
                                                                  (* 2 (.availableProcessors (Runtime/getRuntime)))
                                                                  item->patch-seq-fn
                                                                  src-item-seq)]
-    :observations (mapcat identity sequence)
-    :shutdown-fn shutdown-fn))
+    {:observations (mapcat identity sequence)
+     :shutdown-fn shutdown-fn}))
 
 
 (defn create-label->vec-fn
   [class-names]
   (let [num-classes (count class-names)
         src-vec (vec (repeat num-classes 0))
-        class-name->index (into {} (map-indexed (comp vector reverse list) class-names))]
+        class-name->index (into {} (map-indexed (comp vec reverse list) class-names))]
     (fn [label]
       (assoc src-vec (class-name->index label) 1))))
 
@@ -80,8 +83,10 @@ random regardless of this function's specific behavior for any specific src item
          cv-seq (seq-transform-fn cv-data-label-pairs)
          holdout-seq (seq-transform-fn holdout-data-label-pairs)
          training-seq (seq-transform-fn infinite-training-data-label-pairs-seq)
-         dataset (ds/create-infinite-dataset [[:data data-shape] [:labels (count class-names)]]
-                                             cv-seq holdout-seq training-seq epoch-element-count)]
+         dataset (ds/create-infinite-dataset [[:data data-shape]
+                                              [:labels (count class-names)]]
+                                             cv-seq holdout-seq training-seq
+                                             epoch-element-count)]
      (assoc dataset :class-names class-names)))
   ([class-names data-shape infinite-data-label-pair-seq epoch-element-count]
    (let [cv-count (quot (long epoch-element-count) 2)
@@ -102,7 +107,7 @@ file-lable->obs-lable-seq-fn."
   [dirname data-shape file-label->obs-label-seq-fn & {:keys [queue-size epoch-element-count]
                                                       :or {queue-size 1000
                                                 epoch-element-count 10000}}]
-  (let [file-pairs (infinite-balanced-file-label-pairs dirname)
+  (let [file-pairs (balanced-file-label-pairs dirname)
         observations (infinite-semi-balanced-observation-label-pairs file-pairs
                                                                      file-label->obs-label-seq-fn)
         class-names (mapv #(.getName ^File %) (.listFiles ^File (io/file dirname)))]

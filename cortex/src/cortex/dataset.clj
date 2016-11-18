@@ -205,16 +205,19 @@ as what you used in the run call."
 
 
 
-(defrecord InfiniteDataset [shape-map cv-map holdout-map training-map-fn]
+(defrecord InfiniteDataset [shape-map cv-seq holdout-seq training-seq-fn sequence->map-fn]
   PDataset
   (shapes [ds] shape-map)
   (get-batches [ds batch-size batch-type shape-name-seq]
-    (let [data-map (condp = batch-type
-                     :cross-validation cv-map
-                     :holdout holdout-map
-                     :training (training-map-fn))]
-      (mapv #(partition batch-size (get data-map %))
-            shape-name-seq))))
+    (let [data-seq (condp = batch-type
+                     :cross-validation cv-seq
+                     :holdout holdout-seq
+                     :training (training-seq-fn))]
+      (->> data-seq
+           (partition batch-size)
+           (map (fn [batch-data]
+                  (let [sequence-map (sequence->map-fn batch-data)]
+                    (mapv sequence-map shape-name-seq))))))))
 
 
 
@@ -235,12 +238,9 @@ order as elements in the dataset.
                                  (into {})))
          ;;Transform into infinite sequence of epoch-maps
          training-sequence (->> (partition epoch-element-count infinite-data-sequence)
-                                (map shuffle)
-                                (map sequence->map-fn))
-         training-fn (parallel/create-next-item-fn training-sequence)
-         cv-set (sequence->map-fn cv-seq)
-         holdout-set (sequence->map-fn holdout-seq)]
-     (->InfiniteDataset shape-map cv-set holdout-set training-fn)))
+                                (map shuffle))
+         training-fn (parallel/create-next-item-fn training-sequence)]
+     (->InfiniteDataset shape-map cv-seq holdout-seq training-fn sequence->map-fn)))
   ([shape-pair-seq infinite-data-sequence ^long epoch-element-count]
    (let [cv-holdout-seq (take epoch-element-count infinite-data-sequence)
          num-cv-items (quot epoch-element-count 2)]
