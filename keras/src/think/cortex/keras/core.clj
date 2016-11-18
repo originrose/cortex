@@ -107,8 +107,10 @@
                               (try
                                 (model-item->desc mod-item)
                                 (catch Exception e
-                                  (do (println "caught exception: " (.getMessage ^Exception e)
-                                               "processing: " mod-item)))))
+                                  (throw
+                                    (ex-info "Layer not yet supported."
+                                       {:cause (.getMessage ^Exception e)
+                                        :layer mod-item})))))
                             model-vector))))))
 
 (defn hdf5-child-map
