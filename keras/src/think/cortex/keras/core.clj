@@ -79,7 +79,8 @@
     (if-not (= activation :linear)
       [(assoc retval :embedded-activation true)
        {:type activation
-        :id (keyword (str (:name config) "-activation") :embedded id)}]
+        :id (keyword (str (:name config) "-activation"))
+        :embedded id}]
       [retval])))
 
 (defn model->simple-description
