@@ -297,9 +297,9 @@ produce a new array of double values in the order desired"
                                       (= (hdf5/get-name node)
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
-        _ (when-not weight-entry
-            (throw (Exception. "Weight file does not appear to contain model_weights.")))
-        node-map (hdf5-child-map weight-entry)]
+        node-map (if weight-entry
+                   (hdf5-child-map weight-entry)
+                   (hdf5-child-map weight-file))]
     (mapv (fn [[desc built-desc]]
             (let [weight-node (get node-map (:id desc))]
               (if (and weight-node (seq (hdf5/get-children weight-node)))
