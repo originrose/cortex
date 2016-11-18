@@ -446,20 +446,31 @@ produce a new array of double values in the order desired"
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.
   Output may be nil for a given desc."
-  [desc-seq output-seq]
-  (loop [desc (first desc-seq)
-         desc-seq (rest desc-seq)
-         output-seq output-seq
-         retval []]
-    (if desc
-      (let [[retval output-seq] (if (:embedded-activation desc)
-                                  [(conj retval [desc nil]) output-seq]
-                                  [(conj retval [desc (if (contains? desc :embedded)
-                                                        (assoc (first output-seq) :layer-type :Activation)
-                                                        (first output-seq))])
-                                   (rest output-seq)])]
-        (recur (first desc-seq) (rest desc-seq) output-seq retval))
-      retval)))
+  [desc-seq output-map]
+  (mapv (fn [[_ lyr-map]]
+          (if-let [matching-output (-> lyr-map :id output-map)]
+            (if-not (:embedded-activation lyr-map)
+              [lyr-map matching-output]
+              [lyr-map nil])
+            (cond
+              (:embedded lyr-map) [lyr-map (get output-map (:embedded lyr-map))]
+              (= :input (:type lyr-map))     [lyr-map nil]
+              :else (throw (ex-info "No matching output for layer!"
+                      {:cause :missing-output
+                       :layer lyr-map})))))
+        desc-seq))
+
+(defn- check-output-dims
+  [desc-outputs]
+  (->> desc-outputs
+       (filter second)
+       (map (fn [[lyr output]]
+              (when (not= (:output-size lyr)
+                          (first (m/shape output)))
+                   {:id          (:id lyr)
+                    :model-dims  (:output-size lyr)
+                    :output-dims (m/shape output)})))
+       (filter (complement nil?))))
 
 
 (defn- reshape-layer-outputs
@@ -529,3 +540,16 @@ produce a new array of double values in the order desired"
       {:model weight-desc
        :input input
        :layer-outputs (mapv :data layer-outputs)})))
+
+
+(defn load-sidecar-files
+  [json-file weights-h5-file output-file]
+  (resource/with-resource-context
+    (let [model-desc (model->description json-file weights-h5-file)
+          printer    (fn [item]
+                       (clojure.pprint/pprint item)
+                       item)
+          outputs    (-> output-file
+                         hdf5-child-map)]
+      outputs)))
+
