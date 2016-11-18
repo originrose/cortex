@@ -387,9 +387,9 @@ produce a new array of double values in the order desired"
   throws an exception if unable to parse."
   [out-name]
   (let [parts (string/split out-name #"_")]
-    (if (= (count parts) 2)
+    (if (= (count parts) 4)
       {:index (Long/parseLong (parts 1))
-       :layer-type (keyword (parts 0))}
+       :layer-type (keyword (parts 3))}
       (throw (ex-info "Expected format 'layertype_index' where index is an unsigned integer."
                 {:cause      :bad-layer-name
                  :layer-name out-name
@@ -470,6 +470,27 @@ produce a new array of double values in the order desired"
                        :layer lyr-map})))))
         desc-seq))
 
+
+(defn- ordered-layer-outputs
+  "Output a layer output per desc associated with that desc.
+  Output may be nil for a given desc."
+  [desc-seq output-seq]
+  (loop [desc (first desc-seq)
+         desc-seq (rest desc-seq)
+         output-seq output-seq
+         retval []]
+    (if desc
+      (let [[retval output-seq] (if (:embedded-activation desc)
+                                  [(conj retval [desc nil]) output-seq]
+                                  [(conj retval [desc (if (contains? desc :embedded)
+                                                        (assoc (first output-seq) :layer-type :Activation)
+                                                        (first output-seq))])
+                                   (rest output-seq)])]
+        (recur (first desc-seq) (rest desc-seq) output-seq retval))
+      retval)))
+
+
+
 (defn- check-output-dims
   "Given a mapping of vector tuples of built layer descriptions and output weights,
   as from `associate-layer-outputs`, returns information on all layers whose dims
@@ -536,7 +557,7 @@ produce a new array of double values in the order desired"
                       (double-array (vec (repeat (reduce * input-shape) 1.0))))
           input (to-core-matrix file-data input-shape)
           layer-outputs (->> (layer-output->ordered-data (:layer_outputs file-child-map))
-                             (associate-layer-outputs (drop 1 built-description))
+                             (ordered-layer-outputs (drop 1 built-description))
                              (mapv reshape-layer-outputs))
 
           type-map (vec (map vector
