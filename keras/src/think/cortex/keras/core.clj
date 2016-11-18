@@ -51,12 +51,11 @@
 
 (defmethod model-item->desc :MaxPooling2D
   [{:keys [config]}]
-  (let [[kernel-x kernel-y] (get config :pool_size)
-        [stride-x stride-y] (get config :strides)]
-    (update-in
-     (first
-      (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y))
-     [0] #(assoc % :id (keyword (:name config))))))
+  (let [[kernel-x kernel-y] (:pool_size config)
+        [stride-x stride-y] (:strides config)
+        [layer]             (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
+        layer-id            (-> config :name keyword)]
+    (assoc layer :id layer-id)))
 
 
 (defmethod model-item->desc :Activation
