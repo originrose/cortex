@@ -385,6 +385,17 @@ produce a new array of double values in the order desired"
                  :layer-name out-name
                  :parsed-as  parts})))))
 
+(defn layer-output-by-id
+  "Given an output file (hdf5 opened already) we return a map from keyword layer-id to
+  a core matrix object that contains the values of the outputs at that layer from the
+  test image during keras export process."
+  [output-file]
+  (let [by-id (-> output-file hdf5-child-map :layer_outputs hdf5-child-map)]
+    (apply merge (for [[lyr-id hdf5-node] by-id]
+                   (let [raw-data (-> hdf5-node hdf5/->clj :data)
+                         as-mat   (to-core-matrix raw-data [(m/ecount raw-data)]) ]
+                     {lyr-id as-mat})))))
+
 (defn layer-output->ordered-data
   [layer-outputs]
   (->> (hdf5-child-map layer-outputs)
