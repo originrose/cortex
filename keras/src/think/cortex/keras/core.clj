@@ -15,18 +15,33 @@
 
 
 (defn read-model
+  "Reads a JSON keras model into a Clojure map. Just a literal representation
+  with no additional munging at this point."
   [fname]
   (json/parse-string (slurp fname) keyword))
 
 
-(defmulti model-item->desc (fn [item]
-                             (keyword (:class_name item))))
+(defn match-padding
+  "Maps from Keras padding descriptors to Cortex pad-x and pad-y values."
+  [config]
+  (cond
+    (:padding config)                 (:padding config)
+    (= (:border_mode config) "same")  [(mod (:nb_col config) 2)
+                                       (mod (:nb_row config) 2)]
+    ;; else covers "valid" padding
+    :else                             [0 0]))
+
+(defmulti model-item->desc
+  "Multimethod that dispatches on keyword version of Keras model item key
+  to generate the corresponding Cortex description for the item/layer."
+  (fn [item]
+    (keyword (:class_name item))))
 
 
 (defmethod model-item->desc :Convolution2D
   [{:keys [config]}]
   (let [[stride-x stride-y] (get config :subsample [1 1])
-        [pad-x pad-y] (get config :padding [0 0])
+        [pad-x pad-y] (match-padding config)
         kernel-x (long (get config :nb_col))
         kernel-y (long (get config :nb_row))
         kernel-count (long (get config :nb_filter))
@@ -46,12 +61,11 @@
 
 (defmethod model-item->desc :MaxPooling2D
   [{:keys [config]}]
-  (let [[kernel-x kernel-y] (get config :pool_size)
-        [stride-x stride-y] (get config :strides)]
-    (update-in
-     (first
-      (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y))
-     [0] #(assoc % :id (keyword (:name config))))))
+  (let [[kernel-x kernel-y] (:pool_size config)
+        [stride-x stride-y] (:strides config)
+        [layer]             (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
+        layer-id            (-> config :name keyword)]
+    (assoc layer :id layer-id)))
 
 
 (defmethod model-item->desc :Activation
@@ -60,12 +74,14 @@
 
 
 (defmethod model-item->desc :Dropout
+  ;; Cortex uses keep probability, Keras uses drop probability.
   [{:keys [config]}]
   (assoc (first
           (desc/dropout (- 1.0 (:p config))))
          :id (keyword (:name config))))
 
 (defmethod model-item->desc :Flatten
+  ;; Cortex doesn't require a flatten in its model description.
   [_]
   [])
 
@@ -75,13 +91,17 @@
         activation (keyword (get config :activation "linear"))
         id (keyword (:name config))
         retval (-> (first (desc/linear output-size))
-                   (assoc :id id))
-        ]
+                   (assoc :id id))]
     (if-not (= activation :linear)
-      [(assoc retval :embedded-activation true) {:type activation :id (keyword (str (:name config) "-activation") :embedded id)}]
+      [(assoc retval :embedded-activation true)
+       {:type activation
+        :id (keyword (str (:name config) "-activation"))
+        :embedded id}]
       [retval])))
 
 (defn model->simple-description
+  "Returns a simple (unbuilt) model description given the hashmap literal
+  representation of a Keras JSON model description."
   [model]
   (let [model  (if (= (:class_name model) "Sequential")
                  (:config model)
@@ -102,7 +122,15 @@
     ;;TODO models with a single channel input and figure out planar vs. interleaved
     (vec
      (flatten (concat (desc/input width height n-channels)
-                      (mapv model-item->desc model-vector))))))
+                      (mapv (fn [mod-item]
+                              (try
+                                (model-item->desc mod-item)
+                                (catch Exception e
+                                  (throw
+                                    (ex-info "Layer not yet supported."
+                                       {:cause (.getMessage ^Exception e)
+                                        :layer mod-item})))))
+                            model-vector))))))
 
 (defn hdf5-child-map
   [node]
@@ -287,9 +315,9 @@ produce a new array of double values in the order desired"
                                       (= (hdf5/get-name node)
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
-        _ (when-not weight-entry
-            (throw (Exception. "Weight file does not appear to contain model_weights.")))
-        node-map (hdf5-child-map weight-entry)]
+        node-map (if weight-entry
+                   (hdf5-child-map weight-entry)
+                   (hdf5-child-map weight-file))]
     (mapv (fn [[desc built-desc]]
             (let [weight-node (get node-map (:id desc))]
               (if (and weight-node (seq (hdf5/get-children weight-node)))
@@ -317,6 +345,12 @@ produce a new array of double values in the order desired"
                                              ;;We want: n-filters n-channels height width
                                              (do
                                                (println "Reshaping weights for" (:id desc))
+                                               (when-not (= (apply * (:dimensions weight-clj))
+                                                            (apply * keras-dims))
+                                                 (throw (ex-info "Dimensions for weights and model are not compatible!"
+                                                          {:cause       :wrong-dims
+                                                           :cortex-dims weight-clj
+                                                           :keras-dims  keras-dims})))
                                                (if (= 4 (count keras-dims))
                                                  (reshape-data weight-raw-data keras-dims [3 2 0 1])
                                                  ;;Simple transpose for linear layers as keras stores data in column major format.
@@ -330,6 +364,9 @@ produce a new array of double values in the order desired"
 
 
 (defn load-weights-for-description
+  "Given a `desc-seq`, which consists of pairs of layers from the unbuilt and built
+  versions of the model description, and the name of the hdf5 file which stores the
+  weights, loads the weights for the model."
   [desc-seq weights-fname]
   (resource/with-resource-context
     (load-weights desc-seq (hdf5/open-file weights-fname))))
@@ -338,18 +375,36 @@ produce a new array of double values in the order desired"
 (defn model->description
   "Given a json model and weight hdf5 file load model into a cortex description layer."
   [model-json-fname weight-hdf5-fname]
-  (-> (read-model model-json-fname)
-      model->simple-description
-      (load-weights-for-description weight-hdf5-fname)))
+  (let [model-desc (-> (read-model model-json-fname)
+                       model->simple-description)
+        built-desc (desc/build-full-network-description model-desc)
+        desc-seq   (mapv vector model-desc built-desc)]
+    (load-weights-for-description desc-seq weight-hdf5-fname)))
 
 (defn tokenize-output-name
+  "Parses the layer type and position per layer in the outputs file based on Keras
+  naming conventions, returns as a map with `:index` and `:layer-type` keys or
+  throws an exception if unable to parse."
   [out-name]
-  (let [parts
-        (string/split out-name #"_")]
+  (let [parts (string/split out-name #"_")]
     (if (= (count parts) 4)
       {:index (Long/parseLong (parts 1))
        :layer-type (keyword (parts 3))}
-      (throw (Exception. (format "fixme: %s" out-name))))))
+      (throw (ex-info "Expected format 'layertype_index' where index is an unsigned integer."
+                {:cause      :bad-layer-name
+                 :layer-name out-name
+                 :parsed-as  parts})))))
+
+(defn layer-output-by-id
+  "Given an output file (hdf5 opened already) we return a map from keyword layer-id to
+  a core matrix object that contains the values of the outputs at that layer from the
+  test image during keras export process."
+  [output-file]
+  (let [by-id (-> output-file hdf5-child-map :layer_outputs hdf5-child-map)]
+    (apply merge (for [[lyr-id hdf5-node] by-id]
+                   (let [raw-data (-> hdf5-node hdf5/->clj :data)
+                         as-mat   (to-core-matrix raw-data [(m/ecount raw-data)]) ]
+                     {lyr-id as-mat})))))
 
 (defn layer-output->ordered-data
   [layer-outputs]
@@ -400,7 +455,25 @@ produce a new array of double values in the order desired"
 
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.
-Output may be nil for a given desc."
+  Output may be nil for a given desc."
+  [desc-seq output-map]
+  (mapv (fn [[_ lyr-map]]
+          (if-let [matching-output (-> lyr-map :id output-map)]
+            (if-not (:embedded-activation lyr-map)
+              [lyr-map matching-output]
+              [lyr-map nil])
+            (cond
+              (:embedded lyr-map) [lyr-map (get output-map (:embedded lyr-map))]
+              (= :input (:type lyr-map))     [lyr-map nil]
+              :else (throw (ex-info "No matching output for layer!"
+                      {:cause :missing-output
+                       :layer lyr-map})))))
+        desc-seq))
+
+
+(defn- ordered-layer-outputs
+  "Output a layer output per desc associated with that desc.
+  Output may be nil for a given desc."
   [desc-seq output-seq]
   (loop [desc (first desc-seq)
          desc-seq (rest desc-seq)
@@ -417,6 +490,23 @@ Output may be nil for a given desc."
       retval)))
 
 
+
+(defn- check-output-dims
+  "Given a mapping of vector tuples of built layer descriptions and output weights,
+  as from `associate-layer-outputs`, returns information on all layers whose dims
+  do not match."
+  [desc-outputs]
+  (->> desc-outputs
+       (filter second)
+       (map (fn [[lyr output]]
+              (when (not= (:output-size lyr)
+                          (first (m/shape output)))
+                   {:id          (:id lyr)
+                    :model-dims  (:output-size lyr)
+                    :output-dims (m/shape output)})))
+       (filter (complement nil?))))
+
+
 (defn- reshape-layer-outputs
   [[built-desc {:keys [data layer-type] :as layer-output}]]
   (when layer-output
@@ -431,6 +521,8 @@ Output may be nil for a given desc."
 
 
 (defn load-combined-hdf5-file
+  "This function is currently broken, but kept as reference for adapting a full loading
+  process."
   [fname]
   (resource/with-resource-context
     (let [model-file (hdf5/open-file fname)
@@ -465,7 +557,7 @@ Output may be nil for a given desc."
                       (double-array (vec (repeat (reduce * input-shape) 1.0))))
           input (to-core-matrix file-data input-shape)
           layer-outputs (->> (layer-output->ordered-data (:layer_outputs file-child-map))
-                             (associate-layer-outputs (drop 1 built-description))
+                             (ordered-layer-outputs (drop 1 built-description))
                              (mapv reshape-layer-outputs))
 
           type-map (vec (map vector
@@ -484,3 +576,25 @@ Output may be nil for a given desc."
       {:model weight-desc
        :input input
        :layer-outputs (mapv :data layer-outputs)})))
+
+
+(defn load-sidecar-model
+  "Given a json file, weights h5 file, and output file (generated by Python
+  export utils provided by cortex-keras), attempt to load model and, if
+  failing, throw an ex-info that includes a report of model<->weight mismatched
+  dimensions."
+  [json-file weights-h5-file output-file]
+  (resource/with-resource-context
+    (try
+      (model->description json-file weights-h5-file)
+      (catch Exception e
+        (throw (ex-info "Cannot create model, returning diagnostics."
+                  {:cause  :model-weight-mismatch
+                   :report (let [model-desc (-> json-file
+                                                read-model
+                                                model->simple-description)
+                                 built-desc (desc/build-full-network-description model-desc)
+                                 outputs    (layer-output-by-id (hdf5/open-file output-file))
+                                 desc-seq   (mapv vector model-desc built-desc)
+                                 by-layer   (associate-layer-outputs desc-seq outputs)]
+                             (check-output-dims by-layer))}))))))
