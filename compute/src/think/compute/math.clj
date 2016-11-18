@@ -369,9 +369,10 @@ being smaller than X so it can act as an accumulator for X."
    (let [x-elems (long (ecount x))
          y-elems (long (ecount y))
          res-elems (long (ecount result))]
-     (when (or (not= 0 (rem (max x-elems y-elems) (min x-elems y-elems)))
-               (not= 0 (rem (max x-elems res-elems) (min x-elems res-elems))))
-       (throw (Exception. "Vector lengths are not correct")))
+     (if-not (zero? (rem (max x-elems y-elems) (min x-elems y-elems)))
+       (throw (Exception. (format "Sum: Lengths of x (%s) and y (%s) are not commensurate" x-elems y-elems))))
+     (if-not (zero? (rem (max x-elems res-elems) (min x-elems res-elems)))
+       (throw (Exception. (format "Sum: Lengths of x (%s) and res (%s) are not commensurate" x-elems res-elems))))
      (sum-impl stream alpha (device-buffer x) beta (device-buffer y) (device-buffer result))))
   ([stream alpha x beta y]
    (sum stream alpha x beta y y)))
