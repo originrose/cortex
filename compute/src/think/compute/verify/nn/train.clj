@@ -172,8 +172,8 @@
                      (desc/linear 1)]
         net (learn-m-and-b backend description m b)]
     (let [[learned-m learned-b] (net->m-and-b backend net)]
-      (is (> 0.01 (Math/abs (- m learned-m))))
-      (is (> 0.01 (Math/abs (- b learned-b)))))
+      (is (> 0.1 (Math/abs (- m learned-m))))
+      (is (> 0.1 (Math/abs (- b learned-b)))))
     (let [m -3
           b -2
           frozen-description (->> net
@@ -181,8 +181,8 @@
                                   (mapv #(assoc % :learning-attenuation 0.0)))
           net (learn-m-and-b backend frozen-description m b)]
       (let [[learned-m learned-b] (net->m-and-b backend net)]
-        (is (< 0.01 (Math/abs (- m learned-m))))
-        (is (< 0.01 (Math/abs (- b learned-b))))))))
+        (is (< 0.1 (Math/abs (- m learned-m))))
+        (is (< 0.1 (Math/abs (- b learned-b))))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -220,11 +220,15 @@
                        (ds/create-index-sets n :training-split 1.0))
         epoch-count 100
         _ (train/train net (opt/adam) train-dataset [:data] [[:labels (opt/softmax-loss :output-channels classes)]] epoch-count
-                       #_:epoch-train-filter #_nil)
+                       :epoch-train-filter nil)
         holdout-dataset (ds/create-in-memory-dataset
                          {:data {:data [[0.1 0.1 2.9 2.9]] :shape input-dim}}
                          (ds/create-index-sets 1 :training-split 1.0))
         holdout-net (compute-desc/build-and-create-network (desc/network->description net) backend 1)
-        result (train/run holdout-net holdout-dataset [:data])]
-    (clojure.pprint/pprint result)))
+        result (ffirst (train/run holdout-net holdout-dataset [:data]))
+        [a b c d e f] result]
+    (is (> a b))
+    (is (> a c))
+    (is (> f d))
+    (is (> f e))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
