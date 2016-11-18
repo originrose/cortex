@@ -336,6 +336,12 @@ produce a new array of double values in the order desired"
                                              ;;We want: n-filters n-channels height width
                                              (do
                                                (println "Reshaping weights for" (:id desc))
+                                               (when-not (= (apply * (:dimensions weight-clj))
+                                                            (apply * keras-dims))
+                                                 (throw (ex-info "Dimensions for weights and model are not compatible!"
+                                                          {:cause       :wrong-dims
+                                                           :cortex-dims weight-clj
+                                                           :keras-dims  keras-dims})))
                                                (if (= 4 (count keras-dims))
                                                  (reshape-data weight-raw-data keras-dims [3 2 0 1])
                                                  ;;Simple transpose for linear layers as keras stores data in column major format.
