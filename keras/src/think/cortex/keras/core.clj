@@ -15,12 +15,17 @@
 
 
 (defn read-model
+  "Reads a JSON keras model into a Clojure map. Just a literal representation
+  with no additional munging at this point."
   [fname]
   (json/parse-string (slurp fname) keyword))
 
 
-(defmulti model-item->desc (fn [item]
-                             (keyword (:class_name item))))
+(defmulti model-item->desc
+  "Multimethod that dispatched on keyword version of Keras model item key
+  to generate the corresponding Cortex description for the item/layer."
+  (fn [item]
+    (keyword (:class_name item))))
 
 
 (defmethod model-item->desc :Convolution2D
@@ -60,12 +65,14 @@
 
 
 (defmethod model-item->desc :Dropout
+  ;; Cortex uses keep probability, Keras uses drop probability.
   [{:keys [config]}]
   (assoc (first
           (desc/dropout (- 1.0 (:p config))))
          :id (keyword (:name config))))
 
 (defmethod model-item->desc :Flatten
+  ;; Cortex doesn't require a flatten in its model description.
   [_]
   [])
 
@@ -84,6 +91,8 @@
       [retval])))
 
 (defn model->simple-description
+  "Returns a simple (unbuilt) model description given the hashmap literal
+  representation of a Keras JSON model description."
   [model]
   (let [model  (if (= (:class_name model) "Sequential")
                  (:config model)
@@ -340,6 +349,9 @@ produce a new array of double values in the order desired"
 
 
 (defn load-weights-for-description
+  "Given a `desc-seq`, which consists of pairs of layers from the unbuilt and built
+  versions of the model description, and the name of the hdf5 file which stores the
+  weights, loads the weights for the model."
   [desc-seq weights-fname]
   (resource/with-resource-context
     (load-weights desc-seq (hdf5/open-file weights-fname))))
@@ -412,7 +424,7 @@ produce a new array of double values in the order desired"
 
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.
-Output may be nil for a given desc."
+  Output may be nil for a given desc."
   [desc-seq output-seq]
   (loop [desc (first desc-seq)
          desc-seq (rest desc-seq)
