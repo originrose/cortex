@@ -348,9 +348,11 @@ produce a new array of double values in the order desired"
 (defn model->description
   "Given a json model and weight hdf5 file load model into a cortex description layer."
   [model-json-fname weight-hdf5-fname]
-  (-> (read-model model-json-fname)
-      model->simple-description
-      (load-weights-for-description weight-hdf5-fname)))
+  (let [model-desc (-> (read-model model-json-fname)
+                       model->simple-description)
+        built-desc (desc/build-full-network-description model-desc)
+        desc-seq   (mapv vector model-desc built-desc)]
+    (load-weights-for-description desc-seq weight-hdf5-fname)))
 
 (defn tokenize-output-name
   [out-name]
