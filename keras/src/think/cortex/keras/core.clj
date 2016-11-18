@@ -22,7 +22,7 @@
 
 
 (defmulti model-item->desc
-  "Multimethod that dispatched on keyword version of Keras model item key
+  "Multimethod that dispatches on keyword version of Keras model item key
   to generate the corresponding Cortex description for the item/layer."
   (fn [item]
     (keyword (:class_name item))))
@@ -373,13 +373,18 @@ produce a new array of double values in the order desired"
     (load-weights-for-description desc-seq weight-hdf5-fname)))
 
 (defn tokenize-output-name
+  "Parses the layer type and position per layer in the outputs file based on Keras
+  naming conventions, returns as a map with `:index` and `:layer-type` keys or
+  throws an exception if unable to parse."
   [out-name]
-  (let [parts
-        (string/split out-name #"_")]
-    (if (= (count parts) 4)
+  (let [parts (string/split out-name #"_")]
+    (if (= (count parts) 2)
       {:index (Long/parseLong (parts 1))
-       :layer-type (keyword (parts 3))}
-      (throw (Exception. (format "fixme: %s" out-name))))))
+       :layer-type (keyword (parts 0))}
+      (throw (ex-info "Expected format 'layertype_index' where index is an unsigned integer."
+                {:cause      :bad-layer-name
+                 :layer-name out-name
+                 :parsed-as  parts})))))
 
 (defn layer-output->ordered-data
   [layer-outputs]
