@@ -103,11 +103,13 @@
     ;;TODO models with a single channel input and figure out planar vs. interleaved
     (vec
      (flatten (concat (desc/input width height n-channels)
-                      (try
-                        (mapv model-item->desc model-vector)
-                        (catch Exception e
-                          (do (println "caught exception: " (.getMessage ^Exception e)
-                                        "processing: " model-vector)))))))))
+                      (mapv (fn [mod-item]
+                              (try
+                                (model-item->desc mod-item)
+                                (catch Exception e
+                                  (do (println "caught exception: " (.getMessage ^Exception e)
+                                               "processing: " mod-item)))))
+                            model-vector))))))
 
 (defn hdf5-child-map
   [node]
