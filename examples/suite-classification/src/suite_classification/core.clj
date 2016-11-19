@@ -89,8 +89,6 @@
    (desc/relu)
    (desc/linear->relu 1000)
    (desc/dropout 0.5)
-   (desc/linear->relu 1000)
-   (desc/dropout 0.5)
    (desc/linear->softmax mnist-num-classes)])
 
 (def max-image-rotation-degrees 45)
@@ -201,4 +199,4 @@ to avoid overfitting the network to the training data."
                (create-basic-mnist-description)
                :best-network-fn (classification/create-confusion-app-best-network-fn
                                  dataset mnist-observation->image)
-               :epoch-count 5)])))
+               :epoch-count 40)])))
