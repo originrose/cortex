@@ -22,5 +22,8 @@
 (deftest layer->description
   (verify-train/layer->description (create-backend)))
 
-(deftest simple-learning-attenuation
+(def-double-float-test simple-learning-attenuation
   (verify-train/test-simple-learning-attenuation (create-backend)))
+
+(def-double-float-test softmax-channels
+  (verify-train/test-softmax-channels (create-backend)))

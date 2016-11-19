@@ -43,9 +43,8 @@
 
 (defmethod create-module :softmax
   [desc backend]
-  (let [output-size (long (:output-size desc))
-        n-channels (long (get desc :output-channels 1))
-        n-input (quot output-size n-channels)]
+  (let [n-input (long (:output-size desc))
+        n-channels (long (get desc :output-channels 1))]
     (layers/softmax backend n-input :channels n-channels)))
 
 

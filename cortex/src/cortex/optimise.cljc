@@ -158,7 +158,7 @@ Returns new parameters"
 ;;
 ;; should be invariant to scaling etc.
 
-(defn accumulate! 
+(defn accumulate!
   [^double decay target source]
   (m/scale-add! target (- 1.0 decay) source decay))
 
@@ -167,7 +167,7 @@ Returns new parameters"
   [x min max]
   `(let [x# (double ~x)
          min# (double ~min)
-         max# (double ~max)] (if (< x# min#) min# 
+         max# (double ~max)] (if (< x# min#) min#
                                (if (> x# max#) max#
                                  x#))))
 
@@ -188,52 +188,52 @@ Returns new parameters"
           gdiff  (util/get-or-new-array this :gdiff elem-shape)
           dx     (util/get-or-new-array this :dx elem-shape)
           params (util/get-or-array this :parameters parameters)
-          
+
           _ (m/assign! params parameters) ;; take efficient copy of current params
-          
+
           _ (m/assign! tmp params) ;; tmp = x
-          _ (accumulate! decay ex tmp) 
+          _ (accumulate! decay ex tmp)
           _ (m/mul! tmp params) ;; tmp = x^2
-          _ (accumulate! decay exx tmp) 
+          _ (accumulate! decay exx tmp)
           _ (m/assign! tmp gradient) ;; tmp = g
-          _ (accumulate! decay eg tmp) 
+          _ (accumulate! decay eg tmp)
           _ (m/mul! tmp params) ;; tmp = x.g
-          _ (accumulate! decay exg tmp) 
-          
+          _ (accumulate! decay exg tmp)
+
           _ (m/assign! tmp ex)
           _ (m/mul! tmp eg) ;; tmp = ex.eg
           _ (m/sub! tmp exg) ;; tmp = ex.eg - exg
           _ (m/assign! gdiff tmp) ;; dg = ex.eg - exg
-          _ (m/assign! tmp ex) 
+          _ (m/assign! tmp ex)
           _ (m/mul! tmp ex) ;; tmp = ex.ex
           _ (m/sub! tmp exx) ;; tmp = ex.ex - exx
           _ (m/div! gdiff tmp) ;; gdiff = (ex.eg - exg) / (ex.ex - exx)  (i.e. the gradient estimate)
-          
-          _ (m/emap! (fn [^double x] (if (< x 0.0) (Math/sqrt (- x)) 0.0)) 
+
+          _ (m/emap! (fn [^double x] (if (< x 0.0) (Math/sqrt (- x)) 0.0))
                      tmp) ;; tmp = sqrt (exx - ex.ex), i.e. s.d. of x
-          
+
           _ (m/abs! gdiff) ;; gdiff = |(ex.eg - exg) / (ex.ex - exx)| (i.e. the absolute value of gradient)
           _ (m/assign! dx gdiff) ;; dx = gdiff
-          _ (m/emap! (fn [^double dg ^double g] 
+          _ (m/emap! (fn [^double dg ^double g]
                        (let [dg (if (or (Double/isInfinite dg) (Double/isNaN dg)) 1.0 dg)
                              res (if (== 0 dg) ;; zero gradient implies infinite step size! so we want to take maximum step in direction of -g
-                                   (if (< 0 g) Double/POSITIVE_INFINITY 
-                                     (if (> 0 g) 
+                                   (if (< 0 g) Double/POSITIVE_INFINITY
+                                     (if (> 0 g)
                                        Double/NEGATIVE_INFINITY
                                        0.0))
                                    (- (/ (* g step-ratio) dg)))]
                          res))
-                     dx gradient) ;; dx = proposed step size 
-          _ (m/emap! (fn [^double dx ^double xsd] 
-                       ;; i.e. dx = limit step sizes to step-limit times s.d. of x 
+                     dx gradient) ;; dx = proposed step size
+          _ (m/emap! (fn [^double dx ^double xsd]
+                       ;; i.e. dx = limit step sizes to step-limit times s.d. of x
                        ;; this handles the case of zero gradient (which would otherwise result in infinite steps)
                        (clamp-double dx (* xsd (- step-limit)) (* xsd step-limit)))
-                     dx tmp) 
-          
+                     dx tmp)
+
           _ (m/add! params dx)
           ]
       (assoc this
-             :ex ex             
+             :ex ex
              :eg eg
              :exx exx
              :exg exg
@@ -420,7 +420,7 @@ Returns new parameters"
   (loss-gradient [this v target]
     (let [target (process-nulls v target)
           r (m/sub v target)]
-      (m/signum! r) 
+      (m/signum! r)
       (m/scale! r (/ 1.0 (double (m/ecount v)))))))
 
 (defn mae-loss
@@ -458,7 +458,19 @@ Returns new parameters"
 (defrecord SoftmaxCrossEntropyLoss []
   cp/PLossFunction
   (loss [this v target]
-    (log-likelihood-softmax-loss v target))
+    (let [output-channels (long (get this :output-channels 1))]
+      (if (= output-channels 1)
+        (log-likelihood-softmax-loss v target)
+        (let [n-pixels (quot (long (m/ecount v)) output-channels)]
+          (loop [pix 0
+                 sum 0.0]
+            (if (< pix n-pixels)
+              (recur (inc pix)
+                     (double (+ sum
+                                (log-likelihood-softmax-loss
+                                 (m/subvector v (* pix output-channels) output-channels)
+                                 (m/subvector target (* pix output-channels) output-channels)))))
+              (double (/ sum n-pixels))))))))
 
   (loss-gradient [this v target]
     (m/sub v target)))
