@@ -209,6 +209,11 @@ as what you used in the run call."
   PDataset
   (shapes [ds] shape-map)
   (get-batches [ds batch-size batch-type shape-name-seq]
+    ;;check that every label in the shape-name-seq actually exists in the shape map
+    (when-not (every? shape-map shape-name-seq)
+      (throw (ex-info "get-batch queried for bad stream name:"
+                      {:dataset-stream-names (vec (sort (keys shape-map)))
+                       :get-batches-stream-names (vec (sort shape-name-seq))})))
     (let [data-seq (condp = batch-type
                      :cross-validation cv-seq
                      :holdout holdout-seq
@@ -222,10 +227,12 @@ as what you used in the run call."
 
 
 (defn create-infinite-dataset
-  "Create an infinite dataset.  Note that the shape-pair-seq is expected to be pairs that are in the same
-order as elements in the dataset.
+  "Create an infinite dataset.  Note that the shape-pair-seq is expected
+to be pairs that are in the same order as elements in the dataset.
 
-(def test-ds (create-infinite-dataset [[:index 1] [:label 1]] (partition 2 (interleave (range) (flatten (repeat [:a :b :c :d])))) 20))"
+(def test-ds (create-infinite-dataset [[:index 1] [:label 1]]
+                                      (partition 2 (interleave (range)
+                                                     (flatten (repeat [:a :b :c :d])))) 20))"
   ([shape-pair-seq cv-seq holdout-seq infinite-data-sequence epoch-element-count]
    (let [shape-map (into {} shape-pair-seq)
          ;;Given an infinite sequence of data partition by element count

@@ -102,13 +102,18 @@ takes [train-config results] and returns [train-config results]"
   [train-config cpu-labels batch-type]
   (let [[train-config guesses] (run-and-reshape train-config batch-type)
         {:keys [batching-system loss-fn]} train-config]
-    [train-config (mapv opt/average-loss loss-fn guesses cpu-labels)]))
+    {:train-config train-config
+     :avg-loss (mapv opt/average-loss loss-fn guesses cpu-labels)
+     :inferences guesses
+     :labels cpu-labels}))
 
 
 (defn println-report-epoch
   [epoch-idx {:keys [batching-system dataset] :as train-config}]
   (if-let [eval-labels (batch/get-cpu-labels batching-system :cross-validation)]
-    (let [[train-config avg-loss] (evaluate-training-network train-config eval-labels :cross-validation)]
+    (let [{:keys [train-config avg-loss]} (evaluate-training-network train-config
+                                                                     eval-labels
+                                                                     :cross-validation)]
       (println (format "Epoch loss: %s" avg-loss))
       train-config)
     (do

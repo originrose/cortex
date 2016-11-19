@@ -13,7 +13,8 @@
             [cortex.util :as util]
             [clojure.core.matrix :as m])
   (:import [java.io File InputStream OutputStream ByteArrayOutputStream]
-           [javax.swing JComponent JLabel JPanel BoxLayout JScrollPane SwingConstants]
+           [javax.swing JComponent JLabel JPanel BoxLayout JScrollPane SwingConstants
+            BorderFactory]
            [java.awt Graphics2D Color GridLayout BorderLayout Component Rectangle]
            [java.awt.event ActionEvent ActionListener MouseListener MouseEvent]
            [java.awt.image BufferedImage]
@@ -71,6 +72,13 @@ random regardless of this function's specific behavior for any specific src item
         class-name->index (into {} (map-indexed (comp vec reverse list) class-names))]
     (fn [label]
       (assoc src-vec (class-name->index label) 1))))
+
+
+(defn create-vec->label-fn
+  [class-names]
+  (let [index->class-name (into {} (map-indexed vector class-names))]
+    (fn [label-vec]
+      (get index->class-name (opt/max-index label-vec)))))
 
 
 (defn create-classification-dataset
@@ -162,23 +170,35 @@ file-lable->obs-lable-seq-fn."
 
 
 (defn consider-trained-network
-  [best-network-atom network-filename ^double network-loss network]
+  [best-network-atom network-filename best-network-function network-loss network]
   (let [current-best-loss (double
                            (get @best-network-atom :cv-loss Double/MAX_VALUE))]
-    (when (< network-loss current-best-loss)
+    (when (< (double network-loss) current-best-loss)
       (println (format "Saving network with best loss: %s" network-loss))
       (reset! best-network-atom  {:cv-loss network-loss
                                   :network-description (desc/network->description network)})
-      (write-nippy-file network-filename @best-network-atom))))
+      (write-nippy-file network-filename @best-network-atom)
+      (when best-network-function
+        (best-network-function)))))
 
 
 (defn per-epoch-eval-training-network
-  [best-network-atom network-filename epoch-idx {:keys [batching-system dataset network] :as train-config}]
+  [best-network-atom network-filename best-network-function
+   epoch-idx {:keys [batching-system dataset network] :as train-config}]
   (let [eval-labels (batch/get-cpu-labels batching-system :cross-validation)
-        [train-config avg-loss] (train/evaluate-training-network train-config eval-labels :cross-validation)
-        avg-loss (double (first avg-loss))]
+        {:keys [train-config avg-loss inferences labels]}
+        (train/evaluate-training-network
+         train-config eval-labels :cross-validation)
+        avg-loss (double (first avg-loss))
+        best-network-function
+        (when best-network-function
+          #(best-network-function {:inferences inferences
+                                   :labels labels
+                                   :batch-type :cross-validation}))]
     (println (format "Loss for epoch %s: %s" epoch-idx avg-loss))
-    (consider-trained-network best-network-atom network-filename avg-loss network))
+    (consider-trained-network best-network-atom network-filename
+                              best-network-function
+                              avg-loss network))
   train-config)
 
 
@@ -196,7 +216,8 @@ lazy sequence of maps of the form of:
 This system expects a dataset with online data augmentation so that it is effectively infinite
 although the cv-set and holdout-set do not change.  The best network is saved to:
 trained-network.nippy"
-  [dataset initial-network-description & {:keys [train-batch-size epoch-count network-filename]
+  [dataset initial-network-description & {:keys [train-batch-size epoch-count
+                                                 network-filename best-network-fn]
                                           :or {train-batch-size 128
                                                epoch-count 10
                                                network-filename "trained-network.nippy"}}]
@@ -210,8 +231,11 @@ trained-network.nippy"
              best-network-atom (atom network-desc-loss-map)
              network-description (:network-description network-desc-loss-map)
              network (build-gpu-network network-description train-batch-size)]
-         (train/train network (opt/adam) dataset [:data] [[:labels (opt/softmax-loss)]] epoch-count
-                      :epoch-train-filter (partial per-epoch-eval-training-network best-network-atom network-filename))
+         (train/train network (opt/adam) dataset [:data]
+                      [[:labels (opt/softmax-loss)]] epoch-count
+                      :epoch-train-filter (partial per-epoch-eval-training-network
+                                                   best-network-atom network-filename
+                                                   best-network-fn))
          @best-network-atom)))))
 
 
@@ -288,58 +312,133 @@ a vector of class names that are used to derive labels for the network inference
   (JLabel. (str data) SwingConstants/CENTER))
 
 
-(defn confusion-matrix-app
-  [{:keys [dataset labels inferences data] :as network-eval} observation->image-fn ]
-  (let [outer-grid (JPanel.)
-        outer-layout (GridLayout. 0 2)
-        _ (.setLayout outer-grid outer-layout)
-        topmost-pane (JPanel.)
-        _ (.setLayout topmost-pane (BorderLayout.))
-        display-panel (JPanel.)
-        display-layout (GridLayout. 5 5)
-        _ (.setLayout display-panel display-layout)
-        conf-matrix (network-eval->rich-confusion-matrix network-eval)
-        conf-panel (JPanel.)
-        num-classes (count conf-matrix)
-        conf-layout (GridLayout. (+ 1 num-classes) (+ 1 num-classes))
-        _ (.setLayout conf-panel conf-layout)
-        class-names (get dataset :class-names)
-        label-seq (vec (concat ["label"] class-names))]
+(defn grid-layout-panel
+  ^JPanel [^long grid-rows ^long grid-cols]
+  (let [retval (JPanel.)]
+    (.setLayout retval (GridLayout. grid-rows grid-cols))
+    retval))
 
-    (doseq [label label-seq]
-      (.add conf-panel (->label label)))
-    (doseq [label class-names]
-      (.add conf-panel (->label (str label)))
-      (doseq [compare-label class-names]
-        (let [{:keys [inferences observations]} (get-in conf-matrix [label compare-label])
-              observation-count (count observations)
-              target-label (->label (str observation-count))]
-          (add-click-handler target-label
-                             (fn [& args]
-                               (.removeAll display-panel)
-                               (try
-                                 (let [inference-observation-pairs (->> (interleave (map m/emax inferences)
-                                                                                    observations)
-                                                                        (partition 2)
-                                                                        (map vec)
-                                                                        (sort-by first >)
-                                                                        (take 25)
-                                                                        (pmap (fn [[inference observation]]
-                                                                                [inference (observation->image-fn observation)])))]
-                                   (doseq [[inference observation] inference-observation-pairs]
-                                     (let [icon-panel (JPanel.)
-                                           icon-layout (GridLayout. 2 1)]
-                                       (.setLayout icon-panel icon-layout)
-                                       (.add icon-panel (JIcon. ^BufferedImage observation))
-                                       (.add icon-panel (->label (str inference)))
-                                       (.add display-panel icon-panel))))
-                                 (catch Throwable e
-                                   (clojure.pprint/pprint e)
-                                   nil))
-                               (.revalidate display-panel)
-                               (.repaint display-panel)))
-          (.add conf-panel target-label))))
-    (.add outer-grid conf-panel)
+
+(defn border-layout-panel
+  ^JPanel []
+  (let [retval (JPanel.)]
+    (.setLayout retval (BorderLayout.))
+    retval))
+
+
+(defn display-panel-in-scroll-view
+  [^JPanel panel ^String title]
+  (let [topmost-pane (JPanel.)
+        _ (.setLayout topmost-pane (BorderLayout.))]
+    (.add topmost-pane (JScrollPane. panel) BorderLayout/CENTER)
+    (Frames/display topmost-pane title)))
+
+
+(defn batch-sequence->panel
+  ^JPanel [vec->label-fn observation->img-fn dataset batch-type]
+  (let [batch-sequence (ds/get-batches dataset 25 batch-type [:data :labels])
+        batch-data (first batch-sequence)
+        interleaved-data (partition 2 (apply interleave batch-data))]
+    (let [^JPanel top-panel (border-layout-panel)
+          ^JPanel outer-grid (grid-layout-panel 5 5)]
+      (.add top-panel (->label (name batch-type)) BorderLayout/NORTH)
+      (.add top-panel outer-grid BorderLayout/CENTER)
+      (.setBorder top-panel (BorderFactory/createLineBorder Color/BLACK 2))
+      (doseq [[data label-vec] interleaved-data]
+        (let [^JPanel item-panel (grid-layout-panel 3 1)]
+          (.add item-panel (JIcon. ^BufferedImage (observation->img-fn data)))
+          (.add item-panel (->label (vec->label-fn label-vec)))
+          (.setBorder item-panel (BorderFactory/createEmptyBorder 4 4 4 4))
+          (.add outer-grid item-panel)))
+      top-panel)))
+
+
+(defn view-sample-batches
+  [classification-dataset observation->img-fn]
+  (let [vec->label (create-vec->label-fn (:class-names classification-dataset))
+        ^JPanel outer-panel (grid-layout-panel 1 2)
+        batch-fn (partial batch-sequence->panel vec->label observation->img-fn
+                          classification-dataset)]
+    (doseq [batch-type [:cross-validation :holdout :training]]
+      (.add outer-panel ^JPanel (batch-fn batch-type)))
+    (display-panel-in-scroll-view outer-panel "Sample Batches")))
+
+
+(defn confusion-matrix-app
+  [{:keys [dataset] :as network-eval} observation->image-fn]
+  (let [^JPanel outer-grid (grid-layout-panel 0 2)
+        ^JPanel display-panel (grid-layout-panel 5 5)
+        class-names (:class-names dataset)
+        num-classes (count class-names)
+        ^JPanel conf-panel (grid-layout-panel (+ 1 num-classes) (+ 1 num-classes))
+        ^JPanel conv-label-panel (border-layout-panel)
+        label-seq (vec (concat ["label"] class-names))
+        retval
+        (fn [network-eval]
+          (let [conf-matrix (network-eval->rich-confusion-matrix network-eval)]
+            (.removeAll conf-panel)
+            (.removeAll display-panel)
+            (doseq [label label-seq]
+              (.add conf-panel (->label label)))
+            (doseq [label class-names]
+              (.add conf-panel (->label (str label)))
+              (doseq [compare-label class-names]
+                (let [{:keys [inferences observations]} (get-in conf-matrix [label compare-label])
+                      observation-count (count observations)
+                      target-label (->label (str observation-count))]
+                  (add-click-handler target-label
+                                     (fn [& args]
+                                       (.removeAll display-panel)
+                                       (try
+                                         (let [inference-observation-pairs
+                                               (->> (interleave (map m/emax inferences)
+                                                                observations)
+                                                    (partition 2)
+                                                    (map vec)
+                                                    (sort-by first >)
+                                                    (take 25)
+                                                    (pmap (fn [[inference observation]]
+                                                            [inference (observation->image-fn
+                                                                        observation)])))]
+                                           (doseq [[inference observation] inference-observation-pairs]
+                                             (let [^JPanel icon-panel (grid-layout-panel 2 1)]
+                                               (.add icon-panel (JIcon. ^BufferedImage observation))
+                                               (.add icon-panel (->label (format "%1.4f" inference)))
+                                               (.add display-panel icon-panel))))
+                                         (catch Throwable e
+                                           (clojure.pprint/pprint e)
+                                           nil))
+                                       (.revalidate display-panel)
+                                       (.repaint display-panel)))
+                  (.add conf-panel target-label)
+                  (.revalidate conf-panel)
+                  (.repaint conf-panel)
+                  (.revalidate outer-grid)
+                  (.repaint outer-grid))))))]
+    (.add conv-label-panel (->label "actual") BorderLayout/WEST)
+    (.add conv-label-panel (->label "predicted") BorderLayout/NORTH)
+    (.add conv-label-panel conf-panel BorderLayout/CENTER)
+    (.add outer-grid conv-label-panel)
     (.add outer-grid display-panel)
-    (.add topmost-pane (JScrollPane. outer-grid) BorderLayout/CENTER)
-    (Frames/display topmost-pane "Confusion matrix")))
+    (retval network-eval)
+    (display-panel-in-scroll-view outer-grid "Confusion matrix")
+    retval))
+
+
+(defn create-confusion-app-best-network-fn
+  [dataset observation->image-fn
+   & {:keys [batch-type batch-size]
+      :or {batch-type :cross-validation
+           batch-size 128}}]
+  (let [data (ds/get-data-sequence-from-dataset
+              dataset :data batch-type batch-size)
+        confusion-atom (atom nil)]
+    (fn [{:keys [inferences labels]}]
+      (let [network-eval {:dataset dataset
+                          :labels (first labels)
+                          :inferences (first inferences)
+                          :data data}]
+        (if-not @confusion-atom
+          (reset! confusion-atom (confusion-matrix-app network-eval
+                                                       observation->image-fn))
+          (@confusion-atom network-eval))))))
