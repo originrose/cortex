@@ -5,6 +5,7 @@
             [think.image.core]
             [think.image.image :as image]
             [think.image.patch :as patch]
+            [think.image.data-augmentation :as image-aug]
             [think.compute.optimise :as opt]
             [cortex.nn.description :as desc]
             [think.image.image-util :as image-util]
@@ -65,25 +66,40 @@
   []
   [(desc/input mnist-image-size mnist-image-size mnist-num-channels)
    (desc/convolutional 5 0 1 20)
-   (desc/max-pooling 2 0 2)
-   (desc/dropout 0.9)
    (desc/relu)
-   (desc/local-response-normalization)
-   (desc/convolutional 5 0 1 50)
    (desc/max-pooling 2 0 2)
+   (desc/convolutional 1 0 1 20)
+   (desc/dropout 0.9)
+   (desc/convolutional 5 0 1 50)
+   (desc/relu)
+   (desc/max-pooling 2 0 2)
+   (desc/convolutional 1 0 1 50)
    (desc/batch-normalization 0.9)
    (desc/linear->relu 500)
    (desc/linear->softmax mnist-num-classes)])
 
+(def max-image-rotation-degrees 45)
+
+(defn img-aug-pipeline
+  [img]
+  (-> img
+      (image-aug/rotate (- (rand-int (* 2 max-image-rotation-degrees))
+                           max-image-rotation-degrees)
+                        false)
+      (image-aug/inject-noise (* 0.25 (rand)))))
+
 
 (defn mnist-png->observation
   "Create an observation from input.  "
-  [png-file datatype]
+  [png-file datatype augment?]
   (let [img (imagez/load-image png-file)]
    ;;image->patch always returns [r-data g-data g-data]
    ;;since we know these are grayscale *and* we setup the network for 1 channel we just take r-data
    (first
-    (patch/image->patch img (image-util/image->rect img) datatype))))
+    (patch/image->patch (if augment?
+                          (img-aug-pipeline img)
+                          img)
+                        (image-util/image->rect img) datatype))))
 
 
 (defn mnist-observation->image
@@ -93,12 +109,12 @@
 
 
 (defn observation-label-pairs
-  "Infinite will also mean to augment the hell out of it."
+  "Infinite will also mean to augment it."
   [dirname infinite? datatype]
   (-> (classification/balanced-file-label-pairs dirname :infinite? infinite?)
       (classification/infinite-semi-balanced-observation-label-pairs
        (fn [[file label]]
-         [[(mnist-png->observation file datatype) label]])
+         [[(mnist-png->observation file datatype infinite?) label]])
        :queue-size 60000) ;;Queue up an entire epoch of data if possible.
       :observations))
 
