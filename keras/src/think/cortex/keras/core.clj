@@ -633,4 +633,6 @@ produce a new array of double values in the order desired"
           verify-seq  (desc/build-and-verify-trained-network weight-desc)
           with-output (associate-layer-outputs desc-seq outputs)
           lyr-outputs (mapv reshape-layer-output with-output)]
-      lyr-outputs)))
+      {:model weight-desc
+       :input input
+       :layer-outputs lyr-outputs})))
