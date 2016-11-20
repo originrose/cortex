@@ -639,6 +639,9 @@ produce a new array of double values in the order desired"
        :layer-outputs lyr-outputs})))
 
 (defn load-sidecar-and-verify
+  "Loads a Keras model with json-file, h5 weights file, and h5 output generated
+  by provided Python export scripts if it passes verification. If it does not,
+  throws ex-info with a report containing layers which did not pass verification."
   [model-json-file weights-h5-file output-h5-file]
   (let [model-desc  (-> model-json-file
                         read-model
@@ -648,6 +651,10 @@ produce a new array of double values in the order desired"
         weight-desc (load-sidecar-model model-json-file weights-h5-file output-h5-file)
         with-output (load-sidecar-with-outputs weight-desc
                                                desc-seq
-                                               output-h5-file)]
-    (empty? (:cpu (compute-verify/verify-model with-output)))))
-
+                                               output-h5-file)
+        verified    (compute-verify/verify-model with-output)]
+    (if (empty? (:cpu verified))
+      (:model with-output)
+      (throw (ex-info "Model did not pass verification."
+                {:cause  :incorrect-output
+                 :report verified})))))
