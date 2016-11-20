@@ -232,8 +232,13 @@ to be pairs that are in the same order as elements in the dataset.
 
 (def test-ds (create-infinite-dataset [[:index 1] [:label 1]]
                                       (partition 2 (interleave (range)
-                                                     (flatten (repeat [:a :b :c :d])))) 20))"
-  ([shape-pair-seq cv-seq holdout-seq infinite-data-sequence epoch-element-count]
+                                                     (flatten (repeat [:a :b :c :d])))) 20))
+It is an option to repeat the epochs and if you are using heavy augmentation this can
+save CPU time at the cost of potentially allowing the network to fit to the augmented
+data."
+  ([shape-pair-seq cv-seq holdout-seq infinite-data-sequence epoch-element-count
+    & {:keys [epoch-repeat-count]
+       :or {epoch-repeat-count 1}}]
    (let [shape-map (into {} shape-pair-seq)
          ;;Given an infinite sequence of data partition by element count
          ;;and then place into maps with names relating to the shapes of data.
@@ -245,14 +250,7 @@ to be pairs that are in the same order as elements in the dataset.
                                  (into {})))
          ;;Transform into infinite sequence of epoch-maps
          training-sequence (->> (partition epoch-element-count infinite-data-sequence)
+                                (mapcat #(repeat epoch-repeat-count %))
                                 (map shuffle))
          training-fn (parallel/create-next-item-fn training-sequence)]
-     (->InfiniteDataset shape-map cv-seq holdout-seq training-fn sequence->map-fn)))
-  ([shape-pair-seq infinite-data-sequence ^long epoch-element-count]
-   (let [cv-holdout-seq (take epoch-element-count infinite-data-sequence)
-         num-cv-items (quot epoch-element-count 2)]
-    (create-infinite-dataset shape-pair-seq
-                             (take num-cv-items cv-holdout-seq)
-                             (drop num-cv-items cv-holdout-seq)
-                             (drop epoch-element-count infinite-data-sequence)
-                             epoch-element-count))))
+     (->InfiniteDataset shape-map cv-seq holdout-seq training-fn sequence->map-fn))))

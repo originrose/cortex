@@ -83,7 +83,9 @@ random regardless of this function's specific behavior for any specific src item
 
 (defn create-classification-dataset
   ([class-names data-shape cv-data-label-pairs holdout-data-label-pairs
-    infinite-training-data-label-pairs-seq epoch-element-count]
+    infinite-training-data-label-pairs-seq epoch-element-count
+    & {:keys [epoch-repeat-count]
+       :or {epoch-repeat-count 1}}]
    (let [label->vec (create-label->vec-fn class-names)
          seq-transform-fn #(map (fn [[data label]]
                                   [data (label->vec label)])
@@ -94,15 +96,9 @@ random regardless of this function's specific behavior for any specific src item
          dataset (ds/create-infinite-dataset [[:data data-shape]
                                               [:labels (count class-names)]]
                                              cv-seq holdout-seq training-seq
-                                             epoch-element-count)]
-     (assoc dataset :class-names class-names)))
-  ([class-names data-shape infinite-data-label-pair-seq epoch-element-count]
-   (let [cv-count (quot (long epoch-element-count) 2)
-         cv-holdout-set (take epoch-element-count infinite-data-label-pair-seq)]
-     (create-classification-dataset class-names data-shape (take cv-count cv-holdout-set)
-                                    (drop cv-count cv-holdout-set)
-                                    (drop epoch-element-count infinite-data-label-pair-seq)
-                                    epoch-element-count))))
+                                             epoch-element-count
+                                             :epoch-repeat-count epoch-repeat-count)]
+     (assoc dataset :class-names class-names))))
 
 
 (defn create-classification-dataset-from-labeled-image-subdirs

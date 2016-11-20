@@ -88,10 +88,10 @@
    (desc/convolutional 1 0 1 50)
    (desc/relu)
    (desc/linear->relu 1000)
-   (desc/dropout 0.5)
    (desc/linear->softmax mnist-num-classes)])
 
-(def max-image-rotation-degrees 45)
+
+(def max-image-rotation-degrees 25)
 
 (defn img-aug-pipeline
   [img]
@@ -171,7 +171,8 @@ to avoid overfitting the network to the training data."
                                                      training-seq
                                                      ;;60000 images per epoch if we have that
                                                      ;;many available.
-                                                     60000)))))
+                                                     60000
+                                                     :epoch-repeat-count 1)))))
 
 
 

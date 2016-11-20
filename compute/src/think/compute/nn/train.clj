@@ -162,8 +162,9 @@ takes [train-config results] and returns [train-config results]"
 
 
 (defn train-description
-  "Same as train but takes and returns a description instead of a live network.  Also takes a function
-that produces a network backend.  This leaks no gpu resources to the user."
+  "Same as train but takes and returns a description instead of a live network.
+Also takes a function that produces a network backend.  This avoids leaking leaks gpu
+resources to the user."
   [net-desc backend-fn optimiser dataset input-labels output-labels-and-loss epoch-count batch-size
    & {:keys [epoch-train-filter]
       :or {epoch-train-filter println-report-epoch}}]
