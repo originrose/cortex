@@ -205,25 +205,40 @@ as what you used in the run call."
 
 
 
-(defrecord InfiniteDataset [shape-map cv-map holdout-map training-map-fn]
+(defrecord InfiniteDataset [shape-map cv-seq holdout-seq training-seq-fn sequence->map-fn]
   PDataset
   (shapes [ds] shape-map)
   (get-batches [ds batch-size batch-type shape-name-seq]
-    (let [data-map (condp = batch-type
-                     :cross-validation cv-map
-                     :holdout holdout-map
-                     :training (training-map-fn))]
-      (mapv #(partition batch-size (get data-map %))
-            shape-name-seq))))
+    ;;check that every label in the shape-name-seq actually exists in the shape map
+    (when-not (every? shape-map shape-name-seq)
+      (throw (ex-info "get-batch queried for bad stream name:"
+                      {:dataset-stream-names (vec (sort (keys shape-map)))
+                       :get-batches-stream-names (vec (sort shape-name-seq))})))
+    (let [data-seq (condp = batch-type
+                     :cross-validation cv-seq
+                     :holdout holdout-seq
+                     :training (training-seq-fn))]
+      (->> data-seq
+           (partition batch-size)
+           (map (fn [batch-data]
+                  (let [sequence-map (sequence->map-fn batch-data)]
+                    (mapv sequence-map shape-name-seq))))))))
 
 
 
 (defn create-infinite-dataset
-  "Create an infinite dataset.  Note that the shape-pair-seq is expected to be pairs that are in the same
-order as elements in the dataset.
+  "Create an infinite dataset.  Note that the shape-pair-seq is expected
+to be pairs that are in the same order as elements in the dataset.
 
-(def test-ds (create-infinite-dataset [[:index 1] [:label 1]] (partition 2 (interleave (range) (flatten (repeat [:a :b :c :d])))) 20))"
-  ([shape-pair-seq cv-seq holdout-seq infinite-data-sequence epoch-element-count]
+(def test-ds (create-infinite-dataset [[:index 1] [:label 1]]
+                                      (partition 2 (interleave (range)
+                                                     (flatten (repeat [:a :b :c :d])))) 20))
+It is an option to repeat the epochs and if you are using heavy augmentation this can
+save CPU time at the cost of potentially allowing the network to fit to the augmented
+data."
+  ([shape-pair-seq cv-seq holdout-seq infinite-data-sequence epoch-element-count
+    & {:keys [epoch-repeat-count]
+       :or {epoch-repeat-count 1}}]
    (let [shape-map (into {} shape-pair-seq)
          ;;Given an infinite sequence of data partition by element count
          ;;and then place into maps with names relating to the shapes of data.
@@ -235,17 +250,7 @@ order as elements in the dataset.
                                  (into {})))
          ;;Transform into infinite sequence of epoch-maps
          training-sequence (->> (partition epoch-element-count infinite-data-sequence)
-                                (map shuffle)
-                                (map sequence->map-fn))
-         training-fn (parallel/create-next-item-fn training-sequence)
-         cv-set (sequence->map-fn cv-seq)
-         holdout-set (sequence->map-fn holdout-seq)]
-     (->InfiniteDataset shape-map cv-set holdout-set training-fn)))
-  ([shape-pair-seq infinite-data-sequence ^long epoch-element-count]
-   (let [cv-holdout-seq (take epoch-element-count infinite-data-sequence)
-         num-cv-items (quot epoch-element-count 2)]
-    (create-infinite-dataset shape-pair-seq
-                             (take num-cv-items cv-holdout-seq)
-                             (drop num-cv-items cv-holdout-seq)
-                             (drop epoch-element-count infinite-data-sequence)
-                             epoch-element-count))))
+                                (mapcat #(repeat epoch-repeat-count %))
+                                (map shuffle))
+         training-fn (parallel/create-next-item-fn training-sequence)]
+     (->InfiniteDataset shape-map cv-seq holdout-seq training-fn sequence->map-fn))))

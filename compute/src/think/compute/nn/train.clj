@@ -102,13 +102,18 @@ takes [train-config results] and returns [train-config results]"
   [train-config cpu-labels batch-type]
   (let [[train-config guesses] (run-and-reshape train-config batch-type)
         {:keys [batching-system loss-fn]} train-config]
-    [train-config (mapv opt/average-loss loss-fn guesses cpu-labels)]))
+    {:train-config train-config
+     :avg-loss (mapv opt/average-loss loss-fn guesses cpu-labels)
+     :inferences guesses
+     :labels cpu-labels}))
 
 
 (defn println-report-epoch
   [epoch-idx {:keys [batching-system dataset] :as train-config}]
   (if-let [eval-labels (batch/get-cpu-labels batching-system :cross-validation)]
-    (let [[train-config avg-loss] (evaluate-training-network train-config eval-labels :cross-validation)]
+    (let [{:keys [train-config avg-loss]} (evaluate-training-network train-config
+                                                                     eval-labels
+                                                                     :cross-validation)]
       (println (format "Epoch loss: %s" avg-loss))
       train-config)
     (do
@@ -157,8 +162,9 @@ takes [train-config results] and returns [train-config results]"
 
 
 (defn train-description
-  "Same as train but takes and returns a description instead of a live network.  Also takes a function
-that produces a network backend.  This leaks no gpu resources to the user."
+  "Same as train but takes and returns a description instead of a live network.
+Also takes a function that produces a network backend.  This avoids leaking leaks gpu
+resources to the user."
   [net-desc backend-fn optimiser dataset input-labels output-labels-and-loss epoch-count batch-size
    & {:keys [epoch-train-filter]
       :or {epoch-train-filter println-report-epoch}}]
