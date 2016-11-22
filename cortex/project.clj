@@ -10,7 +10,6 @@
                  [net.mikera/vectorz-clj "0.45.0"]
                  [net.mikera/core.matrix "0.57.0"]
                  [net.mikera/clojure-utils "0.7.1"]
-                 [core.blas "1.0.2"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
                  [thinktopic/think.parallel "0.1.0"]]
 

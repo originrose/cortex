@@ -8,7 +8,7 @@
             [cortex.nn.backends :as b]
             [cortex.nn.protocols :as cp]
             [criterium.core :as q]
-            [core.blas.protocols :as blas]
+            [clojure.core.matrix.blas :as blas]
             [clojure.core.matrix.protocols :as mp]
             [clojure.test :refer [deftest is are]]
             [clojure.pprint])

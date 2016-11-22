@@ -2,12 +2,11 @@
   (:require [cortex.nn.protocols :as cp]
             [cortex.util :as util :refer [error EMPTY-VECTOR]]
             [clojure.core.matrix :as m]
-            [core.blas.protocols :as blas]
+            [clojure.core.matrix.blas :as blas]
             [clojure.core.matrix.protocols :as mp]
             [cortex.nn.backends :as b]
             [cortex.nn.impl.layers :as layers]
             [cortex.util :as util]
-            #?(:clj [cortex.nn.impl.vectorz-blas])
             #?(:clj [cortex.nn.registry :refer [register-module]]
                :cljs [cortex.nn.registry :refer-macros [register-module]])
             #?(:clj [clojure.core.matrix.macros :refer [c-for]]
@@ -240,13 +239,9 @@ of the output of a conv-net ignoring channels."
       (throw (Exception.
               (format "Misconfigured convolution layer: weights %s bias %s num-kernels %d"
                       (m/shape weights) (m/shape bias) num-kernels))))
-    (if (blas/supports-blas? weights)
-      (do
-        (blas/gemm! output true false 1.0 bias ones 0.0)
-        (blas/gemm! output false true 1.0 weights conv-matrix 1.0))
-      (do
-        (m/assign! output (m/inner-product weights (m/transpose conv-matrix)))
-        (m/add! output (m/inner-product (m/transpose bias) ones))))
+    (do
+      (blas/gemm! true false 1.0 bias ones 0.0 output)
+      (blas/gemm! false true 1.0 weights conv-matrix 1.0 output))
     (assoc layer
            :conv-matrix conv-matrix
            :output output
@@ -275,16 +270,10 @@ of the output of a conv-net ignoring channels."
                            (b/new-array (m/shape input)))]
     (m/assign! (m/as-vector output-gradient-matrix) output-gradient)
     ;;conv-matrix is assumed to hold the actual input
-    (if (blas/supports-blas? weights)
-      (do
-        (blas/gemm! bias-gradient false true 1.0 ones output-gradient-matrix 1.0)
-        (blas/gemm! weight-gradient false false 1.0 output-gradient-matrix conv-matrix 1.0)
-        (blas/gemm! conv-matrix true false 1.0 output-gradient-matrix weights 0.0))
-      (do
-        (let [output-gradient-transpose (m/transpose output-gradient-matrix)]
-          (m/add! bias-gradient (m/inner-product ones output-gradient-transpose))
-          (m/add! weight-gradient (m/inner-product output-gradient-matrix conv-matrix))
-          (m/assign! conv-matrix (m/inner-product output-gradient-transpose weights)))))
+    (do
+      (blas/gemm! false true 1.0 ones output-gradient-matrix 1.0 bias-gradient)
+      (blas/gemm! false false 1.0 output-gradient-matrix conv-matrix 1.0 weight-gradient)
+      (blas/gemm! true false 1.0 output-gradient-matrix weights 0.0 conv-matrix))
     (convolution->planar-output! conv-matrix input-gradient config)
     (assoc layer
            :weight-gradient weight-gradient

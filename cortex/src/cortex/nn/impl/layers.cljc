@@ -2,11 +2,10 @@
   (:require [cortex.nn.protocols :as cp]
             [cortex.util :as util :refer [error EMPTY-VECTOR]]
             [clojure.core.matrix :as m]
-            [core.blas.protocols :as blas]
+            [clojure.core.matrix.blas :as blas]
             [clojure.core.matrix.protocols :as mp]
             [cortex.nn.backends :as b]
             [cortex.util :as util]
-            #?(:clj [cortex.nn.impl.vectorz-blas])
             #?(:clj [cortex.nn.registry :refer [register-module]]
                :cljs [cortex.nn.registry :refer-macros [register-module]]))
   #?(:clj (:import [java.util PriorityQueue]
@@ -302,20 +301,10 @@
         weights (:weights this)
         this (if (:output this) this (assoc this :output (b/new-array (m/shape bias)))) ;; ensure in-place output array
         output (:output this)]
-    (if (and
-          (blas/supports-blas? input)
-          (blas/supports-blas? weights)
-          (blas/supports-blas? bias)
-          (> (long (m/ecount weights)) (blas-gemv-cutoff)))
-      (do
-        (m/assign! output bias)
-        (blas/gemv! output false 1.0 weights input 1.0)
-        this)
-      (do
-        (m/set-inner-product! output weights input)
-        (m/add! output bias)
-        this))))
-
+    (do
+      (m/assign! output bias)
+      (blas/gemv! false 1.0 weights input 1.0 output)
+      this)))
 
 (defn linear-backward!
   "Linear backward pass.  Returns module updated with a new input gradient."
@@ -327,15 +316,10 @@
         elem-count (long (m/ecount weights))]
     (m/add-outer-product! weight-gradient output-gradient input)
     (m/add! bias-gradient output-gradient)
-    (if (and (blas/supports-blas? weights)
-             (blas/supports-blas? output-gradient))
-     (let [input-gradient (or (:input-gradient this)
-                              (m/mutable (b/new-array (m/shape input))))]
-       (blas/gemv! input-gradient true 1.0 weights output-gradient 0.0)
-       (assoc this :input-gradient input-gradient))
-     (do
-       (m/set-inner-product! (:input-gradient this) (m/transpose weights) output-gradient)
-       this))))
+    (let [input-gradient (or (:input-gradient this)
+                             (m/mutable (b/new-array (m/shape input))))]
+      (blas/gemv! true 1.0 weights output-gradient 0.0 input-gradient)
+      (assoc this :input-gradient input-gradient))))
 
 ;; LINEAR
 ;; function that implements a linear transformation (matrix weights + vector bias)
