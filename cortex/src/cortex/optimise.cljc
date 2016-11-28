@@ -438,14 +438,16 @@ Returns new parameters"
   cp/PLossFunction
   (loss [this v target]
     ;;np.sum(np.nan_to_num(-y*np.log(a)-(1-y)*np.log(1-a)))
-    (let [a (m/mul (m/negate target) (m/log (m/add SMALL-NUM v)))
+    (let [target (process-nulls v target)
+          a (m/mul (m/negate target) (m/log (m/add SMALL-NUM v)))
           b (m/mul (m/sub 1.0 target) (m/log (m/sub (+ 1.0 (double SMALL-NUM)) v)))
           c (/ (double (m/esum (m/sub a b)))
                (double (m/ecount v)))]
       c))
 
   (loss-gradient [this v target]
-    (m/sub v target)))
+    (let [target (process-nulls v target)]
+      (m/sub v target))))
 
 (defn cross-entropy-loss [] (->CrossEntropyLoss))
 
