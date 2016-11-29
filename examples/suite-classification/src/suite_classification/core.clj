@@ -88,6 +88,7 @@
    (desc/convolutional 1 0 1 50)
    (desc/relu)
    (desc/linear->relu 1000)
+   (desc/dropout 0.5)
    (desc/linear->softmax mnist-num-classes)])
 
 
@@ -127,52 +128,38 @@
   "Create a possibly infinite sequence of [observation label].
 Asking for an infinite sequence implies some level of data augmentation
 to avoid overfitting the network to the training data."
-  [dirname infinite? datatype]
-  (-> (classification/balanced-file-label-pairs dirname :infinite? infinite?)
-      (classification/infinite-semi-balanced-observation-label-pairs
-       (fn [[file label]]
-         (let [img (imagez/load-image file)
-               augment? infinite?
-               png->obs #(mnist-png->observation datatype augment? img)
-               ;;When augmenting we can return any number of items from one image.
-               ;;You want to be sure that at your epoch size you get a very random, fairly
-               ;;balanced set of observations->labels.  Furthermore you want to be sure
-               ;;that at the batch size you have rough balance when possible.
-               ;;The infinite-dataset implementation will shuffle each epoch of data when
-               ;;training so it isn't necessary to randomize these patches at this level.
-               repeat-count (if augment?
-                              *num-augmented-images-per-image*
-                              1)]
-           ;;Laziness is not your friend here.  The classification system is setup
-           ;;to call this on another CPU thread while training *so* if you are lazy here
-           ;;then this sequence will get realized on the main training thread thus blocking
-           ;;the training process unnecessarily.
-           (mapv vector
-                 (repeatedly repeat-count png->obs)
-                 (repeat label))))
-       :queue-size 2000) ;;Queue up an part of an epoch but more risks oom situations
-      :observations))
+  [augment? datatype seq-arg]
+  (let [img (imagez/load-image (first seq-arg))
+        png->obs #(mnist-png->observation datatype augment? img)
+        ;;When augmenting we can return any number of items from one image.
+        ;;You want to be sure that at your epoch size you get a very random, fairly
+        ;;balanced set of observations->labels.  Furthermore you want to be sure
+        ;;that at the batch size you have rough balance when possible.
+        ;;The infinite-dataset implementation will shuffle each epoch of data when
+        ;;training so it isn't necessary to randomize these patches at this level.
+        repeat-count (if augment?
+                       *num-augmented-images-per-image*
+                       1)]
+    ;;Laziness is not your friend here.  The classification system is setup
+    ;;to call this on another CPU thread while training *so* if you are lazy here
+    ;;then this sequence will get realized on the main training thread thus blocking
+    ;;the training process unnecessarily.
+    (mapv vector
+          (repeatedly repeat-count png->obs)
+          (repeat (second seq-arg)))))
 
 
-(defonce create-dataset
-  (memoize
-   (fn []
-     (build-image-data)
-     (let [cv-seq (observation-label-pairs "mnist/testing" false mnist-datatype)
-           training-seq (observation-label-pairs "mnist/training" true mnist-datatype)]
-       (classification/create-classification-dataset (mapv str (range 10))
-                                                     (ds/create-image-shape mnist-num-channels
-                                                                            mnist-image-size
-                                                                            mnist-image-size)
-                                                     ;;using cross validation as holdout
-                                                     cv-seq cv-seq
-                                                     ;;inifinte sequence of augmented training
-                                                     ;;data
-                                                     training-seq
-                                                     ;;60000 images per epoch if we have that
-                                                     ;;many available.
-                                                     60000
-                                                     :epoch-repeat-count 1)))))
+(defn create-dataset
+  []
+  (println "checking that we have produced all images")
+  (build-image-data)
+  (println "building dataset")
+  (classification/create-classification-dataset-from-labeled-data-subdirs
+   "mnist/training" "mnist/testing"
+   (ds/create-image-shape mnist-num-channels mnist-image-size mnist-image-size)
+   (partial observation-label-pairs true mnist-datatype)
+   (partial observation-label-pairs false mnist-datatype)
+   :epoch-element-count 60000))
 
 
 
@@ -192,8 +179,7 @@ to avoid overfitting the network to the training data."
 
 (defn train-forever
   []
-  (let [dataset (create-dataset)
-        last-app (atom nil)]
+  (let [dataset (create-dataset)]
     (classification/view-sample-batches dataset mnist-observation->image)
     (doseq [_ (classification/create-train-network-sequence
                dataset
