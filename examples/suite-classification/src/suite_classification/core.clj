@@ -200,10 +200,11 @@ to avoid overfitting the network to the training data."
 (defn label-one
   "Take an arbitrary image and label it."
   []
-  (let [file-label-pairs (classification/balanced-file-label-pairs "mnist/testing")
+  (let [file-label-pairs (shuffle (classification/directory->file-label-seq "mnist/testing" false))
         [test-file test-label] (first file-label-pairs)
-        observation (mnist-png->observation mnist-datatype false test-file)]
+        test-img (imagez/load-image test-file)
+        observation (mnist-png->observation mnist-datatype false test-img)]
+    (imagez/show test-img)
     (classification/classify-one-image (:network-description (classification/read-nippy-file "trained-network.nippy"))
                                        observation (ds/create-image-shape mnist-num-classes mnist-image-size mnist-image-size)
-                                       mnist-datatype (classification))
-    ))
+                                       mnist-datatype (classification/get-class-names-from-directory "mnist/testing"))))

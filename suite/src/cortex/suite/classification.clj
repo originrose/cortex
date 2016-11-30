@@ -519,8 +519,11 @@ a vector of class names that are used to derive labels for the network inference
           backend (when-not backend
                     (cpu-backend/create-cpu-backend datatype))
           network (compute-desc/build-and-create-network network-description backend 1)
-          result (ffirst (train/run network (ds/->InMemoryDataset {:data [observation]
-                                                                   :shape observation-dataset-shape}
-                                                                  [0])))]
-      {:probability-map (into {} (map vector (partition 2 (interleave class-names result))))
-       :classification (get class-names (opt/max-index result))})))
+          result (ffirst (train/run
+                           network
+                           (ds/->InMemoryDataset {:data {:data [observation]
+                                                         :shape observation-dataset-shape}}
+                                                 [0])
+                           [:data]))]
+      {:probability-map (into {} (map vec (partition 2 (interleave class-names result))))
+       :classification (get class-names (opt/max-index (vec result)))})))
