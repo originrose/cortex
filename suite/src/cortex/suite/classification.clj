@@ -91,7 +91,9 @@ is infinite."
                                   [data (label->vec label)])
                                 %)
          cv-epoch-seq (map seq-transform-fn cv-epoch-seq)
-         holdout-epoch-seq (map seq-transform-fn holdout-epoch-seq)
+         holdout-epoch-seq (if (identical? cv-epoch-seq holdout-epoch-seq)
+                             cv-epoch-seq
+                             (map seq-transform-fn holdout-epoch-seq))
          training-epoch-seq (map seq-transform-fn training-epoch-seq)
          dataset (ds/create-infinite-dataset [[:data data-shape]
                                               [:labels (count class-names)]]
