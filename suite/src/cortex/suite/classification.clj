@@ -7,6 +7,7 @@
             [think.compute.batching-system :as batch]
             [think.compute.nn.train :as train]
             [think.compute.nn.cuda-backend :as gpu-compute]
+            [think.compute.nn.cpu-backend :as cpu-backend]
             [think.compute.nn.description :as compute-desc]
             [think.compute.optimise :as opt]
             [think.resource.core :as resource]
@@ -438,3 +439,26 @@ a vector of class names that are used to derive labels for the network inference
           (reset! confusion-atom (confusion-matrix-app network-eval
                                                        observation->image-fn))
           (@confusion-atom network-eval))))))
+
+
+
+(defn classify-one-image
+  "data-shape is
+(ds/create-image-shape num-channels img-width img-height)"
+  [network-description observation observation-dataset-shape
+   datatype class-names & {:keys [cuda-backend?]}]
+  (resource/with-resource-context
+    (let [backend (when cuda-backend?
+                    (try
+                      (gpu-compute/create-backend datatype)
+                      (catch Throwable e
+                        (println e)
+                        nil)))
+          backend (when-not backend
+                    (cpu-backend/create-cpu-backend datatype))
+          network (compute-desc/build-and-create-network network-description backend 1)
+          result (ffirst (train/run network (ds/->InMemoryDataset {:data [observation]
+                                                                   :shape observation-dataset-shape}
+                                                                  [0])))]
+      {:probability-map (into {} (map vector (partition 2 (interleave class-names result))))
+       :classification (get class-names (opt/max-index result))})))

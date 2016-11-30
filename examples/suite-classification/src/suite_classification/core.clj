@@ -201,3 +201,16 @@ to avoid overfitting the network to the training data."
                :best-network-fn (classification/create-confusion-app-best-network-fn
                                  dataset mnist-observation->image)
                :epoch-count 40)])))
+
+
+
+(defn label-one
+  "Take an arbitrary image and label it."
+  []
+  (let [file-label-pairs (classification/balanced-file-label-pairs "mnist/testing")
+        [test-file test-label] (first file-label-pairs)
+        observation (mnist-png->observation mnist-datatype false test-file)]
+    (classification/classify-one-image (:network-description (classification/read-nippy-file "trained-network.nippy"))
+                                       observation (ds/create-image-shape mnist-num-classes mnist-image-size mnist-image-size)
+                                       mnist-datatype (classification))
+    ))
