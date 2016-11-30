@@ -11,7 +11,8 @@
                  [net.mikera/core.matrix "0.57.0"]
                  [net.mikera/clojure-utils "0.7.1"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
-                 [thinktopic/think.parallel "0.1.0"]]
+                 [thinktopic/think.parallel "0.3.4"]
+                 [thinktopic/resource "1.1.0"]]
 
   :java-source-paths ["java"]
 

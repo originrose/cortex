@@ -63,13 +63,14 @@
        (clojure.string/join)
        (parse-int2)))
 
-(deftest scrabble-test []
+(deftest scrabble-test
+  []
   (let [training-data (into [] (for [k (keys scrabble-values)] (char->bit-array k)))
         training-labels (into [] (for [v (vals scrabble-values)] (num->bit-array v)))
         input-width (last (mat/shape training-data))
         output-width (last (mat/shape training-labels))
         hidden-layer-size 4
-        n-epochs 200
+        n-epochs 400
         batch-size 1
         loss-fn (opt/mse-loss)
         network (core/stack-module [(layers/linear-layer input-width hidden-layer-size)
@@ -80,4 +81,3 @@
 
       (is (= (classify trained-network \j) 8))
       (is (= (classify trained-network \k) 5))))
- 

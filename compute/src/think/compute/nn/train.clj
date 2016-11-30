@@ -61,59 +61,88 @@
           (batch/get-batches batching-system :training true)))
 
 
+(defn host-buffer->double-array
+  [host-buffer]
+  (let [retval (double-array (m/ecount host-buffer))]
+    (dtype/copy! host-buffer 0 retval 0 (m/ecount host-buffer))
+    retval))
+
+
+(defn- recur-run-config
+  [{:keys [network batching-system] :as train-config} batch-sequence]
+  (when-let [next-batch (first batch-sequence)]
+    (let [backend (layers/get-backend network)
+          {:keys [input-buffers output-host-buffers]} next-batch
+          ;;Note no prepare-calc call
+          network (cp/multi-calc network input-buffers)
+          train-config (assoc train-config :network network)
+          n-output-vec (cp/multi-output-size (:network train-config))
+          splitter (fn [buffer-seq]
+                     (map (fn [^long n-output output-buffer]
+                            ;;separate into one output per batch
+                            (let [n-batches (long (quot (long (m/ecount output-buffer))
+                                                        (long n-output)))]
+                              ;;!!!!This absolutely *cannot* be lazy!!!
+                              (mapv (fn [^long batch-idx]
+                                      (let [output-data (double-array n-output)]
+                                        (dtype/copy! output-buffer (* batch-idx n-output)
+                                                     output-data 0 n-output)
+                                        output-data))
+                                    (range n-batches))))
+                          n-output-vec buffer-seq))]
+      (cons {:train-config train-config
+             :inferences (splitter (map #(nn-backend/to-double-array backend %)
+                                        (cp/multi-output network)))
+             :labels (splitter output-host-buffers)}
+            (lazy-seq (recur-run-config train-config (rest batch-sequence)))))))
+
+
 (defn- run-config
-  "Returns [train-config results]"
+  "Returns a map of {train-config inferences labels} from the outputs
+of the network for each"
   [{:keys [network batching-system] :as train-config} batch-type]
-  (let [backend (layers/get-backend network)]
-    (reduce (fn [[{:keys [network] :as train-config} results] {:keys [input-buffers]}]
-              (let [;;Note lack of prepare-forward; there is no prepare-calc call
-                    network (cp/multi-calc network input-buffers)]
-                [(assoc train-config
-                        :network network)
-                 (conj results (mapv #(nn-backend/to-double-array backend %)
-                                     (cp/multi-output network)))]))
-            [train-config []]
-            (batch/get-batches batching-system batch-type false))))
-
-
-
-(defn- reshape-run-config-output
-  "Given batched blocks of output (one block per batch) transpose it
-to a vector of unbatched output per network-output
-takes [train-config results] and returns [train-config results]"
-  [[train-config results]]
-  (let [n-output-vec (cp/multi-output-size (:network train-config))]
-    [train-config
-     (vec (map-indexed (fn [idx n-output]
-                         (vec (mapcat #(map vec (partition n-output (seq %)))
-                                      (map #(nth % idx) results))))
-                       n-output-vec))]))
-
-
-(defn- run-and-reshape
-  [train-config batch-type]
-  (-> train-config
-      (run-config batch-type)
-      reshape-run-config-output))
+  (let [eval-sequence
+        (lazy-seq (recur-run-config train-config
+                                    ;;false here because we don't need the result uploaded to the cpu
+                                    (batch/get-batches batching-system batch-type false)))
+        n-outputs (count (cp/multi-output-size network))
+        coalesced-data (reduce (fn [coalesced-data {:keys [train-config inferences labels]}]
+                                 (let [new-labels (when (seq labels)
+                                                    (conj (:labels coalesced-data) (vec labels)))]
+                                   (assoc coalesced-data
+                                          :train-config train-config
+                                          :inferences (conj (:inferences coalesced-data) (vec inferences))
+                                          :labels new-labels)))
+                               {:inferences []
+                                :labels []}
+                               eval-sequence)
+        coalesced->vec (fn [data-seq]
+                         (when (seq data-seq)
+                           (mapv (fn [idx]
+                                   (mapcat #(nth % idx) data-seq))
+                                 (range n-outputs))))]
+    {:train-config (:train-config coalesced-data)
+     :inferences (coalesced->vec (:inferences coalesced-data))
+     :labels (coalesced->vec (:labels coalesced-data))
+     }))
 
 
 (defn evaluate-training-network
   "Run the network and return the average loss across all cv-input"
-  [train-config cpu-labels batch-type]
-  (let [[train-config guesses] (run-and-reshape train-config batch-type)
-        {:keys [batching-system loss-fn]} train-config]
-    {:train-config train-config
-     :avg-loss (mapv opt/average-loss loss-fn guesses cpu-labels)
-     :inferences guesses
-     :labels cpu-labels}))
+  [train-config batch-type]
+  (let [{:keys [train-config inferences labels] :as run-config-output}
+        (run-config train-config batch-type)
+        {:keys [loss-fn]} train-config]
+    ;;when there were any batches to begin with
+    (when (count (first inferences))
+      (assoc run-config-output
+             :avg-loss (mapv opt/average-loss loss-fn inferences labels)))))
 
 
 (defn println-report-epoch
   [epoch-idx {:keys [batching-system dataset] :as train-config}]
-  (if-let [eval-labels (batch/get-cpu-labels batching-system :cross-validation)]
-    (let [{:keys [train-config avg-loss]} (evaluate-training-network train-config
-                                                                     eval-labels
-                                                                     :cross-validation)]
+  (if-let [evaluated-network-data (evaluate-training-network train-config :cross-validation)]
+    (let [{:keys [train-config avg-loss]} evaluated-network-data]
       (println (format "Epoch loss: %s" avg-loss))
       train-config)
     (do
@@ -174,18 +203,25 @@ resources to the user."
           desc/network->description))))
 
 
+(defn infer-network
+  [net dataset input-labels output-labels & {:keys [batch-type]
+                                             :or {batch-type :holdout}}]
+  (resource/with-resource-context
+    (let [backend (layers/get-backend net)
+          batch-size (layers/batch-size net)
+          batching-system (-> (batch/create-dataset-batching-system input-labels output-labels batch-size
+                                                                    dataset (drv/get-driver backend) (drv/get-stream backend)
+                                                                    (dtype/get-datatype backend))
+                              batch/setup)]
+      (select-keys (run-config {:network net :batching-system batching-system} batch-type)
+                   [:inferences :labels]))))
+
+
 (defn run
   "Run a network products a vector of output sequences, one sequence for each output of the network."
   [net dataset input-labels & {:keys [batch-type]
                                :or {batch-type :holdout}}]
-  (resource/with-resource-context
-    (let [backend (layers/get-backend net)
-          batch-size (layers/batch-size net)
-          batching-system (-> (batch/create-dataset-batching-system input-labels [] batch-size
-                                                                    dataset (drv/get-driver backend) (drv/get-stream backend)
-                                                                    (dtype/get-datatype backend))
-                              batch/setup)]
-      (second (run-and-reshape {:network net :batching-system batching-system} batch-type)))))
+  (:inferences (infer-network net dataset input-labels [] :batch-type batch-type)))
 
 
 (defn run-description
