@@ -1,6 +1,7 @@
 (ns cortex.dataset
   (:require [clojure.core.matrix :as m]
-            [think.parallel.core :as parallel]))
+            [think.parallel.core :as parallel]
+            [think.resource.core :as resource]))
 
 
 (def planar-image-layout [:channels :height :width])
@@ -205,7 +206,10 @@ as what you used in the run call."
 
 
 
-(defrecord InfiniteDataset [shape-map cv-seq holdout-seq training-seq-fn sequence->map-fn]
+(defrecord InfiniteDataset [shape-map cv-seq-fn holdout-seq-fn
+                            training-seq-fn
+                            sequence->map-fn
+                            shutdown-fn]
   PDataset
   (shapes [ds] shape-map)
   (get-batches [ds batch-size batch-type shape-name-seq]
@@ -215,14 +219,18 @@ as what you used in the run call."
                       {:dataset-stream-names (vec (sort (keys shape-map)))
                        :get-batches-stream-names (vec (sort shape-name-seq))})))
     (let [data-seq (condp = batch-type
-                     :cross-validation cv-seq
-                     :holdout holdout-seq
+                     :cross-validation (cv-seq-fn)
+                     :holdout (holdout-seq-fn)
                      :training (training-seq-fn))]
       (->> data-seq
            (partition batch-size)
            (map (fn [batch-data]
                   (let [sequence-map (sequence->map-fn batch-data)]
-                    (mapv sequence-map shape-name-seq))))))))
+                    (mapv sequence-map shape-name-seq)))))))
+  resource/PResource
+  (release-resource [ds]
+    (when shutdown-fn
+      (shutdown-fn))))
 
 
 
@@ -236,9 +244,11 @@ to be pairs that are in the same order as elements in the dataset.
 It is an option to repeat the epochs and if you are using heavy augmentation this can
 save CPU time at the cost of potentially allowing the network to fit to the augmented
 data."
-  ([shape-pair-seq cv-seq holdout-seq infinite-data-sequence epoch-element-count
-    & {:keys [epoch-repeat-count]
-       :or {epoch-repeat-count 1}}]
+  ([shape-pair-seq
+    cv-epoch-seq
+    holdout-epoch-seq
+    training-epoch-seq
+    & {:keys [shutdown-fn]}]
    (let [shape-map (into {} shape-pair-seq)
          ;;Given an infinite sequence of data partition by element count
          ;;and then place into maps with names relating to the shapes of data.
@@ -248,9 +258,13 @@ data."
                                                 [name
                                                  (map #(nth % idx) epoch-data)]))
                                  (into {})))
-         ;;Transform into infinite sequence of epoch-maps
-         training-sequence (->> (partition epoch-element-count infinite-data-sequence)
-                                (mapcat #(repeat epoch-repeat-count %))
-                                (map shuffle))
-         training-fn (parallel/create-next-item-fn training-sequence)]
-     (->InfiniteDataset shape-map cv-seq holdout-seq training-fn sequence->map-fn))))
+         cv-fn (parallel/create-next-item-fn cv-epoch-seq)
+         holdout-fn (if (identical? cv-epoch-seq holdout-epoch-seq)
+                      cv-fn
+                      (parallel/create-next-item-fn holdout-epoch-seq))]
+     (->InfiniteDataset shape-map
+                        cv-fn
+                        holdout-fn
+                        (parallel/create-next-item-fn training-epoch-seq)
+                        sequence->map-fn
+                        shutdown-fn))))

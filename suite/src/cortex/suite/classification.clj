@@ -26,42 +26,40 @@
 (set! *unchecked-math* :warn-on-boxed)
 
 
-(defn balanced-file-label-pairs
+(defn directory->file-label-seq
   "Given a directory with subdirs named after labels, produce an
 infinite interleaved sequence of [sub-dir-name sub-dir-file]
-to create balanced training classes using partition along with interleave."
-  [dirname & {:keys [infinite?]
-              :or {infinite? true}}]
-  (let [sub-dirs (.listFiles ^File (io/file dirname))]
-    (->> sub-dirs
-         (map (fn [^File sub-dir]
-                (map vector
-                     (if infinite?
-                       (mapcat shuffle
-                               (repeatedly #(seq (.listFiles sub-dir))))
-                       (seq (.listFiles sub-dir)))
-                     (repeat (.getName sub-dir)))))
-         (apply interleave))))
+to create balanced training classes using partition along with interleave.
+Class balance is only guaranteed if the sequence is infinite or if
+each directory has the same number of files."
+  [dirname infinite?]
+  (let [sub-dirs (.listFiles ^File (io/file dirname))
+        file-sequences  (->> sub-dirs
+                             (map (fn [^File sub-dir]
+                                    (map vector
+                                     (if infinite?
+                                       (mapcat shuffle
+                                               (repeatedly #(seq (.listFiles sub-dir))))
+                                       (seq (.listFiles sub-dir)))
+                                     (repeat (.getName sub-dir))))))]
+    (if infinite?
+      (apply interleave file-sequences)
+      (mapcat identity file-sequences))))
 
 
-(defn infinite-semi-balanced-observation-label-pairs
-  "Create a balanced infinite sequence of labels and patches.
-Assumptions are that the src-item-seq is balanced by class
-and that the transformation from src item to a list of [label, patch]
-maintaines that class balance meaning applying that either produces
-roughly uniform sequences of label->patch.  The transformation from
-src item -> patch will be done in a threaded pool and fed into a queue
-with the result further slighly interleaved.
-
-The final results will be pulled out of the sequence and shuffled so assuming
-your epoch element count is large enough the result will still be balanced and
-random regardless of this function's specific behavior for any specific src item."
-  [src-item-seq item->patch-seq-fn & {:keys [queue-size]
-                                      :or {queue-size 1000}}]
-  (let [{:keys [sequence shutdown-fn]} (parallel/queued-sequence queue-size
-                                                                 (* 2 (.availableProcessors (Runtime/getRuntime)))
-                                                                 item->patch-seq-fn
-                                                                 src-item-seq)]
+(defn src-seq->obs-seq
+  "Perform a transformation from a src sequence to a obs-sequence
+assuming the src->obs transformation itself produces potentially a sequence
+of observations for a single src item.  Perform this transformation
+in an offline thread pool storing allowing up to queue-size transformed
+sequences in memory.  Return a combination of observations and
+a shutdown function to be used in the case where the input sequence
+is infinite."
+  [src-item-seq src-item->obs-seq-fn & {:keys [queue-size]
+                                          :or {queue-size 100}}]
+  (let [{:keys [sequence shutdown-fn]} (parallel/queued-sequence src-item->obs-seq-fn
+                                                                 [src-item-seq]
+                                                                 :queue-size queue-size)]
     {:observations (mapcat identity sequence)
      :shutdown-fn shutdown-fn}))
 
@@ -83,40 +81,101 @@ random regardless of this function's specific behavior for any specific src item
 
 
 (defn create-classification-dataset
-  ([class-names data-shape cv-data-label-pairs holdout-data-label-pairs
-    infinite-training-data-label-pairs-seq epoch-element-count
-    & {:keys [epoch-repeat-count]
-       :or {epoch-repeat-count 1}}]
+  ([class-names data-shape
+    cv-epoch-seq
+    holdout-epoch-seq
+    training-epoch-seq
+    & {:keys [shutdown-fn]}]
    (let [label->vec (create-label->vec-fn class-names)
          seq-transform-fn #(map (fn [[data label]]
                                   [data (label->vec label)])
                                 %)
-         cv-seq (seq-transform-fn cv-data-label-pairs)
-         holdout-seq (seq-transform-fn holdout-data-label-pairs)
-         training-seq (seq-transform-fn infinite-training-data-label-pairs-seq)
+         cv-epoch-seq (map seq-transform-fn cv-epoch-seq)
+         holdout-epoch-seq (map seq-transform-fn holdout-epoch-seq)
+         training-epoch-seq (map seq-transform-fn training-epoch-seq)
          dataset (ds/create-infinite-dataset [[:data data-shape]
                                               [:labels (count class-names)]]
-                                             cv-seq holdout-seq training-seq
-                                             epoch-element-count
-                                             :epoch-repeat-count epoch-repeat-count)]
+                                             cv-epoch-seq
+                                             holdout-epoch-seq
+                                             training-epoch-seq
+                                             :shutdown-fn
+                                             shutdown-fn)]
      (assoc dataset :class-names class-names))))
 
 
-(defn create-classification-dataset-from-labeled-image-subdirs
+(defn get-class-names-from-directory
+  [dirname]
+  (vec (map #(.getName ^File %) (.listFiles (io/file dirname)))))
+
+
+(defn labelled-subdirs->obs-label-seq
+  "Given labelled subdirs produce a possibly infinite (balanced) sequence
+of data or a finite potentially unbalanced sequence of data.
+Returns map of {:observations :shutdown-fn}."
+  [dirname infinite? queue-size file-label->obs-label-seq-fn]
+  (-> (directory->file-label-seq dirname infinite?)
+      (src-seq->obs-seq file-label->obs-label-seq-fn :queue-size queue-size)))
+
+
+(defn create-classification-dataset-from-labeled-data-subdirs
   "Given a directory name and a function that can transform
 a single [^File file ^String sub-dir-name] into a sequence of
 [observation label] pairs produce a classification dataset.
 Queue size should be the number of obs-label-seqs it will take
 to add up to epoch-element-count.  This is a property of
-file-lable->obs-lable-seq-fn."
-  [dirname data-shape file-label->obs-label-seq-fn & {:keys [queue-size epoch-element-count]
-                                                      :or {queue-size 1000
-                                                epoch-element-count 10000}}]
-  (let [file-pairs (balanced-file-label-pairs dirname)
-        observations (infinite-semi-balanced-observation-label-pairs file-pairs
-                                                                     file-label->obs-label-seq-fn)
-        class-names (mapv #(.getName ^File %) (.listFiles ^File (io/file dirname)))]
-    (create-classification-dataset class-names data-shape observations epoch-element-count)))
+file-lable->obs-label-seq-fn.
+
+If your file->observation-seq function produces many identically labelled
+observations per file you need to shuffle your training epochs in order to
+keep your batches balanced.  This has somewhat severe performance implications
+because it forces the realization of the entire training epoch of data before
+the system can start training on it (as opposed to generating the epoch of data
+as it is training)."
+  [train-dirname test-dirname
+   data-shape
+   ;;training probably means augmentation
+   train-file-label->obs-label-seq-fn
+   ;;test means no augmentation
+   test-file-label->obs-label-seq-fn
+   & {:keys [queue-size epoch-element-count shuffle-training-epochs?]
+      :or {queue-size 100
+           epoch-element-count 10000}}]
+
+  (let [class-names (get-class-names-from-directory test-dirname)
+        _ (when-not (= class-names (get-class-names-from-directory train-dirname))
+            (throw (ex-info "Class names for test and train do not match"
+                            {:train-class-names (get-class-names-from-directory train-dirname)
+                             :test-class-names class-names})))
+        cv-epoch-seq (map :observations
+                          (repeatedly #(labelled-subdirs->obs-label-seq
+                                        test-dirname
+                                        false
+                                        queue-size
+                                        test-file-label->obs-label-seq-fn)))
+        ;;It may be tempting to share sequences with the cv seq because they are the same thing.
+        ;;but this will result in 'holding onto head' in the case where you are training and thus
+        ;;realizing the cv-seq but *not* realizing the holdout seq.
+        holdout-epoch-seq (map :observations
+                               (repeatedly #(labelled-subdirs->obs-label-seq
+                                             test-dirname
+                                             false
+                                             queue-size
+                                             test-file-label->obs-label-seq-fn)))
+        {:keys [observations shutdown-fn]} (labelled-subdirs->obs-label-seq
+                                            train-dirname true queue-size
+                                            train-file-label->obs-label-seq-fn)
+        ;;An entire epoch of training data has to fit in memory for us to maintain that
+        ;;one file can produce n identically labelled items
+        training-epoch-seq (->> (partition epoch-element-count observations)
+                                (map (if shuffle-training-epochs?
+                                       shuffle
+                                       identity)))]
+    (create-classification-dataset class-names data-shape
+                                   cv-epoch-seq
+                                   holdout-epoch-seq
+                                   training-epoch-seq
+                                   :shutdown-fn
+                                   shutdown-fn)))
 
 
 (defn image-network-description
@@ -182,10 +241,8 @@ file-lable->obs-lable-seq-fn."
 (defn per-epoch-eval-training-network
   [best-network-atom network-filename best-network-function
    epoch-idx {:keys [batching-system dataset network] :as train-config}]
-  (let [eval-labels (batch/get-cpu-labels batching-system :cross-validation)
-        {:keys [train-config avg-loss inferences labels]}
-        (train/evaluate-training-network
-         train-config eval-labels :cross-validation)
+  (let [{:keys [train-config avg-loss inferences labels]}
+        (train/evaluate-training-network train-config :cross-validation)
         avg-loss (double (first avg-loss))
         best-network-function
         (when best-network-function
@@ -277,7 +334,7 @@ a vector of class names that are used to derive labels for the network inference
 (defn network-eval->rich-confusion-matrix
   [{:keys [dataset labels inferences data] :as network-eval}]
   (let [class-names (get-in network-eval [:dataset :class-names])
-        vec->label #(class-names (opt/max-index %))
+        vec->label #(class-names (opt/max-index (vec %)))
         inference-answer-patch-pairs (partition 3 (interleave inferences
                                                               (map vec->label labels)
                                                               data))
@@ -334,10 +391,15 @@ a vector of class names that are used to derive labels for the network inference
 (defn batch-sequence->panel
   ^JPanel [vec->label-fn observation->img-fn dataset batch-type]
   (let [batch-sequence (ds/get-batches dataset 25 batch-type [:data :labels])
-        batch-data (first batch-sequence)
-        interleaved-data (partition 2 (apply interleave batch-data))]
+        epoch-data (mapcat #(partition 2 (apply interleave %)) batch-sequence)
+        interleaved-data (take 100 (if-not (= batch-type :training)
+                                     ;;cv and holdout data may not be shuffled enough
+                                     ;;to get a representative set.  We expect training
+                                     ;;data to be pretty balanced, however.
+                                     (shuffle epoch-data)
+                                     epoch-data))]
     (let [^JPanel top-panel (border-layout-panel)
-          ^JPanel outer-grid (grid-layout-panel 5 5)]
+          ^JPanel outer-grid (grid-layout-panel 0 5)]
       (.add top-panel (->label (name batch-type)) BorderLayout/NORTH)
       (.add top-panel outer-grid BorderLayout/CENTER)
       (.setBorder top-panel (BorderFactory/createLineBorder Color/BLACK 2))
