@@ -145,12 +145,21 @@ as it is training)."
             (throw (ex-info "Class names for test and train do not match"
                             {:train-class-names (get-class-names-from-directory train-dirname)
                              :test-class-names class-names})))
-        cv-holdout-epoch-seq (map :observations
-                                  (repeatedly #(labelled-subdirs->obs-label-seq
-                                                test-dirname
-                                                false
-                                                queue-size
-                                                test-file-label->obs-label-seq-fn)))
+        cv-epoch-seq (map :observations
+                          (repeatedly #(labelled-subdirs->obs-label-seq
+                                        test-dirname
+                                        false
+                                        queue-size
+                                        test-file-label->obs-label-seq-fn)))
+        ;;It may be tempting to share sequences with the cv seq because they are the same thing.
+        ;;but this will result in 'holding onto head' in the case where you are training and thus
+        ;;realizing the cv-seq but *not* realizing the holdout seq.
+        holdout-epoch-seq (map :observations
+                               (repeatedly #(labelled-subdirs->obs-label-seq
+                                             test-dirname
+                                             false
+                                             queue-size
+                                             test-file-label->obs-label-seq-fn)))
         {:keys [observations shutdown-fn]} (labelled-subdirs->obs-label-seq
                                             train-dirname true queue-size
                                             train-file-label->obs-label-seq-fn)
@@ -161,8 +170,8 @@ as it is training)."
                                        shuffle
                                        identity)))]
     (create-classification-dataset class-names data-shape
-                                   cv-holdout-epoch-seq
-                                   cv-holdout-epoch-seq
+                                   cv-epoch-seq
+                                   holdout-epoch-seq
                                    training-epoch-seq
                                    :shutdown-fn
                                    shutdown-fn)))
@@ -324,7 +333,7 @@ a vector of class names that are used to derive labels for the network inference
 (defn network-eval->rich-confusion-matrix
   [{:keys [dataset labels inferences data] :as network-eval}]
   (let [class-names (get-in network-eval [:dataset :class-names])
-        vec->label #(class-names (opt/max-index %))
+        vec->label #(class-names (opt/max-index (vec %)))
         inference-answer-patch-pairs (partition 3 (interleave inferences
                                                               (map vec->label labels)
                                                               data))
