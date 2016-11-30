@@ -231,10 +231,8 @@ as it is training)."
 (defn per-epoch-eval-training-network
   [best-network-atom network-filename best-network-function
    epoch-idx {:keys [batching-system dataset network] :as train-config}]
-  (let [eval-labels (batch/get-cpu-labels batching-system :cross-validation)
-        {:keys [train-config avg-loss inferences labels]}
-        (train/evaluate-training-network
-         train-config eval-labels :cross-validation)
+  (let [{:keys [train-config avg-loss inferences labels]}
+        (train/evaluate-training-network train-config :cross-validation)
         avg-loss (double (first avg-loss))
         best-network-function
         (when best-network-function
