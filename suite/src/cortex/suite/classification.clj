@@ -122,14 +122,21 @@ a single [^File file ^String sub-dir-name] into a sequence of
 [observation label] pairs produce a classification dataset.
 Queue size should be the number of obs-label-seqs it will take
 to add up to epoch-element-count.  This is a property of
-file-lable->obs-lable-seq-fn."
+file-lable->obs-label-seq-fn.
+
+If your file->observation-seq function produces many identically labelled
+observations per file you need to shuffle your training epochs in order to
+keep your batches balanced.  This has somewhat severe performance implications
+because it forces the realization of the entire training epoch of data before
+the system can start training on it (as opposed to generating the epoch of data
+as it is training)."
   [train-dirname test-dirname
    data-shape
    ;;training probably means augmentation
    train-file-label->obs-label-seq-fn
    ;;test means no augmentation
    test-file-label->obs-label-seq-fn
-   & {:keys [queue-size epoch-element-count]
+   & {:keys [queue-size epoch-element-count shuffle-training-epochs?]
       :or {queue-size 100
            epoch-element-count 10000}}]
 
@@ -149,7 +156,10 @@ file-lable->obs-lable-seq-fn."
                                             train-file-label->obs-label-seq-fn)
         ;;An entire epoch of training data has to fit in memory for us to maintain that
         ;;one file can produce n identically labelled items
-        training-epoch-seq (map shuffle (partition epoch-element-count observations))]
+        training-epoch-seq (->> (partition epoch-element-count observations)
+                                (map (if shuffle-training-epochs?
+                                       shuffle
+                                       identity)))]
     (create-classification-dataset class-names data-shape
                                    cv-holdout-epoch-seq
                                    cv-holdout-epoch-seq

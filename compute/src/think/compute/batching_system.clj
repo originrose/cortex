@@ -25,8 +25,6 @@
   ;;There is an option to skip the upload steps to the output buffers which
   ;;aren't necessary if you aren't doing gradient descent (e.g. any inference).
   (get-batches [bs batch-type upload-output-buffers?])
-  ;;Get the output on the cpu
-  (get-cpu-labels [bs batch-type])
   ;;Get the dataset underling this batch system.
   (get-dataset [bs]))
 
@@ -80,12 +78,13 @@
 
 
 (defn upload-batch-data
-  [batch-data-seq {:keys [device-array host-buffer]} stream]
+  [batch-data-seq {:keys [device-array host-buffer]} stream upload-this-buffer?]
   (dtype/copy-raw->item! batch-data-seq host-buffer 0)
-  (drv/copy-host->device stream
-                         host-buffer 0
-                         (math/device-buffer device-array) 0
-                         (math/ecount device-array))
+  (when upload-this-buffer?
+   (drv/copy-host->device stream
+                          host-buffer 0
+                          (math/device-buffer device-array) 0
+                          (math/ecount device-array)))
   device-array)
 
 
@@ -99,9 +98,10 @@
     (let [dataset (.dataset bs)
           batch-size (.batch-size bs)
           buffer-map (:buffer-map bs)
-          names (distinct (if upload-output-buffers?
-                            (keys buffer-map)
-                            (.input-names bs)))
+          names (distinct (keys buffer-map))
+          upload-buffer-set (if upload-output-buffers?
+                              (set names)
+                              (set (.input-names bs)))
           index->names (into {} (map-indexed vector names))
           name->indexes (c-set/map-invert index->names)
           batches (ds/get-batches dataset batch-size batch-type names)
@@ -109,25 +109,19 @@
           stream (.stream bs)
           output-names (if upload-output-buffers?
                          (.output-names bs)
-                         [])]
+                         [])
+          upload-buffer-list (map #(contains? upload-buffer-set %) names)]
       (map (fn [batch-data]
              ;;Upload batch to gpu
-             (let [device-buffers (-> (map (fn [batch-datum buffer]
-                                             (upload-batch-data batch-datum buffer stream))
-                                           batch-data buffers)
-                                      vec)]
+             (let [device-buffers (-> (map (fn [batch-datum buffer upload-this-buffer?]
+                                             (upload-batch-data batch-datum buffer stream upload-this-buffer?))
+                                           batch-data buffers upload-buffer-list)
+                                      vec)
+                   host-buffers (mapv :host-buffer buffers)]
                {:input-buffers (mapv (comp device-buffers name->indexes) (.input-names bs))
-                :output-buffers (mapv (comp device-buffers name->indexes) output-names)}))
+                :input-host-buffers (mapv (comp host-buffers name->indexes) (.input-names bs))
+                :output-buffers (mapv (comp device-buffers name->indexes) output-names)
+                :output-host-buffers (mapv (comp host-buffers name->indexes) (.output-names bs))}))
            batches)))
 
-  (get-dataset [bs] (.dataset bs))
-  (get-cpu-labels [bs batch-type]
-    (let [dataset (.dataset bs)
-          names (distinct (.output-names bs))
-          name->indexes (into {} (map-indexed (comp vec reverse vector) names))
-          batch-size (.batch-size bs)
-          batches (ds/get-batches dataset batch-size batch-type names)]
-      (when (seq batches)
-        (mapv (fn [idx]
-                (mapcat #(nth % idx) batches))
-              (map name->indexes (.output-names bs)))))))
+  (get-dataset [bs] (.dataset bs)))

@@ -12,7 +12,10 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
             [cortex.suite.classification :as classification]
-            [cortex.dataset :as ds]))
+            [cortex.dataset :as ds]
+            [think.compute.nn.cpu-backend :as cpu-backend]
+            [think.compute.nn.description :as cpu-desc]
+            [think.compute.nn.train :as train]))
 
 
 (def mnist-image-size 28)
@@ -121,15 +124,18 @@
   (patch/patch->image [observation observation observation] mnist-image-size))
 
 
-(def ^:dynamic *num-augmented-images-per-image* 10)
+;;Bumping this up and producing several images per source image means that you may need
+;;to shuffle the training epoch data to keep your batches from being unbalanced...this has
+;;somewhat severe performance impacts.
+(def ^:dynamic *num-augmented-images-per-file* 1)
 
 
 (defn observation-label-pairs
   "Create a possibly infinite sequence of [observation label].
 Asking for an infinite sequence implies some level of data augmentation
 to avoid overfitting the network to the training data."
-  [augment? datatype seq-arg]
-  (let [img (imagez/load-image (first seq-arg))
+  [augment? datatype [file label]]
+  (let [img (imagez/load-image file)
         png->obs #(mnist-png->observation datatype augment? img)
         ;;When augmenting we can return any number of items from one image.
         ;;You want to be sure that at your epoch size you get a very random, fairly
@@ -138,7 +144,7 @@ to avoid overfitting the network to the training data."
         ;;The infinite-dataset implementation will shuffle each epoch of data when
         ;;training so it isn't necessary to randomize these patches at this level.
         repeat-count (if augment?
-                       *num-augmented-images-per-image*
+                       *num-augmented-images-per-file*
                        1)]
     ;;Laziness is not your friend here.  The classification system is setup
     ;;to call this on another CPU thread while training *so* if you are lazy here
@@ -146,7 +152,7 @@ to avoid overfitting the network to the training data."
     ;;the training process unnecessarily.
     (mapv vector
           (repeatedly repeat-count png->obs)
-          (repeat (second seq-arg)))))
+          (repeat label))))
 
 
 (defn create-dataset
@@ -159,7 +165,8 @@ to avoid overfitting the network to the training data."
    (ds/create-image-shape mnist-num-channels mnist-image-size mnist-image-size)
    (partial observation-label-pairs true mnist-datatype)
    (partial observation-label-pairs false mnist-datatype)
-   :epoch-element-count 60000))
+   :epoch-element-count 60000
+   :shuffle-training-epochs? (> *num-augmented-images-per-file* 2)))
 
 
 
