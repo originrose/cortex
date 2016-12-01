@@ -15,7 +15,8 @@
             [cortex.dataset :as ds]
             [think.compute.nn.cpu-backend :as cpu-backend]
             [think.compute.nn.description :as cpu-desc]
-            [think.compute.nn.train :as train]))
+            [think.compute.nn.train :as train]
+            [cortex.suite.inference :as infer]))
 
 
 (def mnist-image-size 28)
@@ -205,6 +206,6 @@ to avoid overfitting the network to the training data."
         test-img (imagez/load-image test-file)
         observation (mnist-png->observation mnist-datatype false test-img)]
     (imagez/show test-img)
-    (classification/classify-one-image (:network-description (classification/read-nippy-file "trained-network.nippy"))
-                                       observation (ds/create-image-shape mnist-num-classes mnist-image-size mnist-image-size)
-                                       mnist-datatype (classification/get-class-names-from-directory "mnist/testing"))))
+    (infer/classify-one-observation (:network-description (classification/read-nippy-file "trained-network.nippy"))
+                                    observation (ds/create-image-shape mnist-num-classes mnist-image-size mnist-image-size)
+                                    mnist-datatype (classification/get-class-names-from-directory "mnist/testing"))))
