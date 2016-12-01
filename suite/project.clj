@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex.suite "0.1.0-SNAPSHOT"
+(defproject thinktopic/cortex.suite 0.3.0
   :description "Full pipelines for building various models bringing together multiple cortex and clojure libraries."
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
