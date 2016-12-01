@@ -1,4 +1,4 @@
-(defproject thinktopic/compute 0.3.0
+(defproject thinktopic/compute "0.3.0"
   :description "Compute abstraction and cpu implementation.  Meant to abstract things like openCL and CUDA usage."
   :url "http://thinktopic.com"
   :license {:name "Eclipse Public License"
@@ -7,6 +7,6 @@
                  [org.clojure/core.async "0.2.391"]
                  [thinktopic/datatype "0.1.0"]
                  [thinktopic/cortex "0.3.0"]
-                 [thinktopic/cortex-datasets "0.3.0-SNAPSHOT"]]
+                 [thinktopic/cortex-datasets "0.3.0"]]
   :java-source-paths ["java"]
   )

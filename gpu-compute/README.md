@@ -2,6 +2,12 @@
 
 A gpu backend for cortex's compute abstraction.
 
+Support for CUDA version 8 is provided this dependency (in your project.clj):
+
+```
+[org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
+```
+
 ## License
 
 Copyright © 2016 Thinktopic.com, LLC
