@@ -434,53 +434,86 @@ a vector of class names that are used to derive labels for the network inference
         ^JPanel display-panel (grid-layout-panel 5 5)
         class-names (:class-names dataset)
         num-classes (count class-names)
-        ^JPanel conf-panel (grid-layout-panel (+ 1 num-classes) (+ 1 num-classes))
+        ^JPanel conf-panel (grid-layout-panel (+ 2 num-classes) (+ 2 num-classes))
         ^JPanel conv-label-panel (border-layout-panel)
         label-seq (vec (concat ["label"] class-names))
+        row-end-label "correct/predicted"
+        col-end-label "correct/actual"
         retval
         (fn [network-eval]
           (let [conf-matrix (network-eval->rich-confusion-matrix network-eval)]
             (.removeAll conf-panel)
             (.removeAll display-panel)
-            (doseq [label label-seq]
+            (doseq [label (concat label-seq
+                                  [row-end-label])]
               (.add conf-panel (->label label)))
-            (doseq [label class-names]
-              (.add conf-panel (->label (str label)))
-              (doseq [compare-label class-names]
-                (let [{:keys [inferences observations]} (get-in conf-matrix [label compare-label])
-                      observation-count (count observations)
-                      target-label (->label (str observation-count))]
-                  (add-click-handler target-label
-                                     (fn [& args]
-                                       (.removeAll display-panel)
-                                       (try
-                                         (let [inference-observation-pairs
-                                               (->> (interleave (map m/emax inferences)
-                                                                observations)
-                                                    (partition 2)
-                                                    (map vec)
-                                                    (sort-by first >)
-                                                    (take 25)
-                                                    (pmap (fn [[inference observation]]
-                                                            [inference (observation->image-fn
-                                                                        observation)])))]
-                                           (doseq [[inference observation] inference-observation-pairs]
-                                             (let [^JPanel icon-panel (grid-layout-panel 2 1)]
-                                               (.add icon-panel (JIcon. ^BufferedImage observation))
-                                               (.add icon-panel (->label (format "%1.4f" inference)))
-                                               (.add display-panel icon-panel))))
-                                         (catch Throwable e
-                                           (clojure.pprint/pprint e)
-                                           nil))
-                                       (.revalidate display-panel)
-                                       (.repaint display-panel)))
-                  (.add conf-panel target-label)
-                  (.revalidate conf-panel)
-                  (.repaint conf-panel)
-                  (.revalidate outer-grid)
-                  (.repaint outer-grid))))))]
-    (.add conv-label-panel (->label "actual") BorderLayout/WEST)
-    (.add conv-label-panel (->label "predicted") BorderLayout/NORTH)
+            (doseq [col-label (concat class-names
+                                      [col-end-label])]
+              (.add conf-panel (->label (str col-label)))
+              (doseq [row-label (concat class-names
+                                        [row-end-label])]
+                (cond (and (= col-label col-end-label)
+                           (= row-label row-end-label))
+                      (let [total-correct (long (->> class-names
+                                                     (map #(get-in conf-matrix [% %]))
+                                                     (map #(count (get % :inferences)))
+                                                     (reduce +)))
+                            total-items (count (:inferences network-eval))]
+                        (.add conf-panel (->label (format "%1.2f" (double (/ total-correct total-items))))))
+                      (= col-label col-end-label)
+                      (let [entire-row (->> class-names
+                                            (map #(get-in conf-matrix [row-label %]))
+                                            (map #(count (get % :inferences))))
+                            actual-item (long (->> (get-in conf-matrix [row-label row-label])
+                                                   (#(get % :inferences))
+                                                   count))]
+                        (.add conf-panel (->label (format "%1.2f" (double (/ actual-item
+                                                                             (double (reduce + entire-row))))))))
+                      (= row-label row-end-label)
+                      (let [entire-row (->> class-names
+                                            (map #(get-in conf-matrix [% col-label]))
+                                            (map #(count (get % :inferences))))
+                            actual-item (long
+                                         (->> (get-in conf-matrix [col-label col-label])
+                                              (#(get % :inferences))
+                                              count))]
+                        (.add conf-panel (->label (format "%1.2f" (double (/ actual-item
+                                                                             (double (reduce + entire-row))))))))
+                      :else
+                      (let [{:keys [inferences observations]} (get-in conf-matrix [row-label col-label])
+                            observation-count (count observations)
+                            target-label (->label (str observation-count))]
+                        (add-click-handler target-label
+                                           (fn [& args]
+                                             (.removeAll display-panel)
+                                             (try
+                                               (let [inference-observation-pairs
+                                                     (->> (interleave (map m/emax inferences)
+                                                                      observations)
+                                                          (partition 2)
+                                                          (map vec)
+                                                          (sort-by first >)
+                                                          (take 25)
+                                                          (pmap (fn [[inference observation]]
+                                                                  [inference (observation->image-fn
+                                                                              observation)])))]
+                                                 (doseq [[inference observation] inference-observation-pairs]
+                                                   (let [^JPanel icon-panel (grid-layout-panel 2 1)]
+                                                     (.add icon-panel (JIcon. ^BufferedImage observation))
+                                                     (.add icon-panel (->label (format "%1.4f" inference)))
+                                                     (.add display-panel icon-panel))))
+                                               (catch Throwable e
+                                                 (clojure.pprint/pprint e)
+                                                 nil))
+                                             (.revalidate display-panel)
+                                             (.repaint display-panel)))
+                        (.add conf-panel target-label)))))
+            (.revalidate conf-panel)
+            (.repaint conf-panel)
+            (.revalidate outer-grid)
+            (.repaint outer-grid)))]
+    (.add conv-label-panel (->label "predicted") BorderLayout/WEST)
+    (.add conv-label-panel (->label "actual") BorderLayout/NORTH)
     (.add conv-label-panel conf-panel BorderLayout/CENTER)
     (.add outer-grid conv-label-panel)
     (.add outer-grid display-panel)
