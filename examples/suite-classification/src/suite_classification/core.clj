@@ -16,7 +16,10 @@
             [think.compute.nn.cpu-backend :as cpu-backend]
             [think.compute.nn.description :as cpu-desc]
             [think.compute.nn.train :as train]
-            [cortex.suite.inference :as infer]))
+            [cortex.suite.inference :as infer]
+            [cortex.suite.io :as suite-io]
+            [cortex.suite.train :as suite-train]
+            [think.gate.core :as gate]))
 
 
 (def mnist-image-size 28)
@@ -173,39 +176,49 @@ to avoid overfitting the network to the training data."
 
 (defn load-trained-network-desc
   []
-  (:network-description (classification/read-nippy-file "trained-network.nippy")))
+  (:network-description (suite-io/read-nippy-file "trained-network.nippy")))
 
-
-(defn network-confusion
-  ([dataset]
-   (classification/confusion-matrix-app (classification/evaluate-network
-                                         dataset
-                                         (load-trained-network-desc))
-                                        mnist-observation->image))
-  ([] (network-confusion (create-dataset))))
+(defn display-dataset-and-model
+  [dataset initial-description]
+  (let [data-display-atom (atom {})
+        confusion-matrix-atom (atom {})]
+    (classification/reset-dataset-display data-display-atom dataset mnist-observation->image)
+    (when-let [loaded-data (suite-train/load-network "trained-network.nippy"
+                                                     initial-description)]
+      (classification/reset-confusion-matrix confusion-matrix-atom mnist-observation->image
+                                             (suite-train/evaluate-network
+                                              dataset
+                                              (:network-description loaded-data)
+                                              :batch-type :cross-validation)))
+    (gate/open (atom
+                (classification/create-routing-map confusion-matrix-atom
+                                                   data-display-atom))
+               :clj-css-path "src/css")
+    confusion-matrix-atom))
 
 
 (defn train-forever
   []
-  (let [dataset (create-dataset)]
-    (classification/view-sample-batches dataset mnist-observation->image)
-    (doseq [_ (classification/create-train-network-sequence
-               dataset
-               (create-basic-mnist-description)
-               :best-network-fn (classification/create-confusion-app-best-network-fn
-                                 dataset mnist-observation->image)
-               :epoch-count 40)])))
-
+  (let [dataset (create-dataset)
+        initial-description (create-basic-mnist-description)
+        confusion-matrix-atom (display-dataset-and-model dataset initial-description)]
+    (classification/train-forever dataset mnist-observation->image
+                                  initial-description
+                                  :confusion-matrix-atom confusion-matrix-atom)))
 
 
 (defn label-one
   "Take an arbitrary image and label it."
   []
-  (let [file-label-pairs (shuffle (classification/directory->file-label-seq "mnist/testing" false))
+  (let [file-label-pairs (shuffle (classification/directory->file-label-seq "mnist/testing"
+                                                                            false))
         [test-file test-label] (first file-label-pairs)
         test-img (imagez/load-image test-file)
         observation (mnist-png->observation mnist-datatype false test-img)]
     (imagez/show test-img)
-    (infer/classify-one-observation (:network-description (classification/read-nippy-file "trained-network.nippy"))
-                                    observation (ds/create-image-shape mnist-num-classes mnist-image-size mnist-image-size)
+    (infer/classify-one-observation (:network-description
+                                     (suite-io/read-nippy-file "trained-network.nippy"))
+                                    observation (ds/create-image-shape mnist-num-classes
+                                                                       mnist-image-size
+                                                                       mnist-image-size)
                                     mnist-datatype (classification/get-class-names-from-directory "mnist/testing"))))

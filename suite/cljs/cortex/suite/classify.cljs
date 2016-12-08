@@ -14,29 +14,28 @@
   (let [num-classes (count class-names)]
     [:table.confusion-matrix
      [:tbody
-      [:tr [:td.class-header {:col-span (str (+ num-classes 3))
-                              :style {:text-align :center}}
-            "predicted"]]
-      [:tr [:td.class-header {:row-span (str (+ num-classes 3))} "actual"]]
+      [:tr [:td.class-header {:col-span (str (+ num-classes 3))}
+            "actual"]]
+      [:tr [:td.class-header {:row-span (str (+ num-classes 3))} "predicted"]]
       [:tr (doall (map (fn [cls-name]
                          ^{:key cls-name}
-                         [:td.item-header {:style {:text-align :center}} cls-name])
-                       (concat [""] class-names ["correct/actual"])))]
+                         [:td.item-header cls-name])
+                       (concat [""] class-names ["correct/predicted"])))]
       (doall (map (fn [row-idx]
                     ^{:key row-idx}
-                    [:tr [:td.item-header {:style {:text-align :center}} (get class-names row-idx)]
+                    [:tr [:td.item-header (get class-names row-idx)]
                      (doall (map (fn [col-idx]
                                    ^{:key col-idx}
-                                   [:td.item-value {:style {:text-align :center}
-                                                    :on-click (fn [_]
-                                                                (value-click-handler row-idx col-idx))}
+                                   [:td.item-value {:on-click (fn [_]
+                                                                (value-click-handler row-idx
+                                                                                     col-idx))}
                                     (get-in matrix [row-idx col-idx])])
                                  (range num-classes)))
                      (let [row-total (reduce + (map #(get-in matrix [row-idx %]) (range num-classes)))
                            class-correct (get-in matrix [row-idx row-idx])]
                        [:td.end-row (.toFixed (/ class-correct row-total) 3)])])
                   (range num-classes)))
-      [:tr [:td.item-header "correct/predicted"]
+      [:tr [:td.item-header "correct/actual"]
        (doall (map (fn [col-idx]
                      (let [col-total (reduce + (map #(get-in matrix [% col-idx]) (range num-classes)))
                            class-correct (get-in matrix [col-idx col-idx])]
@@ -58,8 +57,9 @@
               [:tr (doall (map (fn [[idx confidence]]
                                  ^{:key idx}
                                  [:td.detail
-                                  [:img {:src (str "confusion-image?row=" row "&col=" col "&index=" idx)}]
-                                  [:div.detail-confidence {:style {:text-align :center}}
+                                  [:img {:src (str "confusion-image?row=" row
+                                                   "&col=" col "&index=" idx)}]
+                                  [:div.detail-confidence
                                    (.toFixed confidence 3)]])
                                detail-seq))])
             (partition 10 10 [] (map-indexed vector confidence-seq))))]])
@@ -70,11 +70,8 @@
   [:div.dataset
    (doall (map (fn [[batch-type {:keys [labels]}]]
                  ^{:key batch-type}
-                 [:div.batch-column {:style {:display "inline-block"
-                                             :border "solid #228 2px"
-                                             :box-sizing "border-box"
-                                             :vertical-align "top"}}
-                  [:div.batch-name {:style {:text-align "center"}} (name batch-type)]
+                 [:div.batch-column
+                  [:div.batch-name (name batch-type)]
                   [:table
                    [:tbody
                     (doall (map-indexed
@@ -83,8 +80,10 @@
                               [:tr (doall (map (fn [[label-idx label]]
                                                  ^{:key label-idx}
                                                  [:td.dataset-entry
-                                                  [:img {:src (str "dataset-image?batch-type=" batch-type "&index=" label-idx)}]
-                                                  [:div.dataset-label {:style {:text-align "center"}}] label])
+                                                  [:img {:src (str "dataset-image?batch-type="
+                                                                   batch-type
+                                                                   "&index=" label-idx)}]
+                                                  [:div.dataset-label  label]])
                                                label-seq))])
                             (partition 5 5 [] (map-indexed vector labels))))]]])
                dataset))])
@@ -116,9 +115,8 @@
          [display-dataset (dataset-data :dataset)]
          [:div "loading dataset"])
        (if-let [confusion-matrix (get @confusion-atom :confusion-matrix)]
-         [:div.confusion {:style {:border "solid #228 2px"
-                                  :box-sizing "border-box"}}
-          [:div.confusion-matrix {:style {:display "inline-block"}}
+         [:div.confusion
+          [:div.confusion-matrix
            [confusion-matrix-component confusion-matrix
             (fn [row-idx col-idx]
               (go (swap! confusion-atom assoc :detail
@@ -127,6 +125,6 @@
                           :confidence (<! (model/put "confusion-detail" {:row row-idx
                                                                          :col col-idx}))})))]]
           (when-let [{:keys [row col confidence]} (get @confusion-atom :detail)]
-            [:div.confusion-detail {:style {:display "inline-block"}}
+            [:div.confusion-detail
              [confusion-detail-component row col confidence]])]
          [:div "loading matrix"])])))
