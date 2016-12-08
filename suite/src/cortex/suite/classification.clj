@@ -12,7 +12,8 @@
             [think.compute.optimise :as opt]
             [think.resource.core :as resource]
             [cortex.util :as util]
-            [clojure.core.matrix :as m])
+            [clojure.core.matrix :as m]
+            [clojure.edn])
   (:import [java.io File InputStream OutputStream ByteArrayOutputStream]
            [javax.swing JComponent JLabel JPanel BoxLayout JScrollPane SwingConstants
             BorderFactory]
@@ -539,3 +540,157 @@ a vector of class names that are used to derive labels for the network inference
           (reset! confusion-atom (confusion-matrix-app network-eval
                                                        observation->image-fn))
           (@confusion-atom network-eval))))))
+
+
+
+;;web integration
+
+
+
+
+
+(defonce confusion-matrix (atom {}))
+
+
+
+(defn rich-confusion-matrix->network-confusion-matrix
+  [rich-confusion-matrix observation->img-fn]
+  (let [class-names (vec (sort (keys rich-confusion-matrix)))]
+    {:class-names class-names
+     :matrix (mapv (fn [row-name]
+                     (mapv (fn [col-name]
+                             (let [{:keys [inferences observations]} (get-in rich-confusion-matrix [row-name col-name])
+                                   inference-obs-pairs (sort-by first > (partition 2 (interleave (map m/emax inferences) observations)))
+                                   num-pairs (count inference-obs-pairs)
+                                   detailed-pairs (take 100 inference-obs-pairs)]
+                               {:count num-pairs
+                                :inferences (map first detailed-pairs)
+                                :images (map observation->img-fn (map second detailed-pairs))}))
+                           class-names))
+                   class-names)}))
+
+
+(defn reset-confusion-matrix
+  [network-eval observation->img-fn]
+  (swap! confusion-matrix
+         (fn [{:keys [update-index]}]
+           (merge
+            {:update-index (inc (long (or update-index 0)))}
+            (rich-confusion-matrix->network-confusion-matrix
+             (network-eval->rich-confusion-matrix network-eval)
+             observation->img-fn))))
+  nil)
+
+
+(defn network-confusion-matrix->simple-confusion-matrix
+  [{:keys [matrix] :as network-confusion-matrix}]
+  (update-in network-confusion-matrix [:matrix]
+             (fn [matrix] (mapv #(mapv :count %) matrix))))
+
+
+(defn get-confusion-matrix
+  [& args]
+  (network-confusion-matrix->simple-confusion-matrix @confusion-matrix))
+
+
+(defn get-confusion-detail
+  [{:keys [row col] :as params}]
+  (->> (get-in @confusion-matrix [:matrix row col])
+       :inferences))
+
+
+(defn get-confusion-image
+  [params]
+  (let [{:keys [row col index]} (->> params
+                                     (map (fn [[k v]]
+                                            [k (if (string? v)
+                                                 (clojure.edn/read-string v)
+                                                 v)]))
+                                     (into {}))]
+    (nth (get-in @confusion-matrix [:matrix row col :images])
+         index)))
+
+
+
+(defonce dataset-display (atom {}))
+
+(defn reset-dataset-display
+  [dataset observation->img-fn]
+  (let [vec->label (create-vec->label-fn (:class-names dataset))
+        batch-defs [{:batch-type :holdout
+                     :postprocess shuffle}
+                    {:batch-type :cross-validation
+                     :postprocess shuffle}
+                    {:batch-type :training
+                     :postprocess identity}]]
+    (swap! dataset-display (fn [{:keys [update-index]}]
+                             {:update-index (inc (long (or update-index 0)))
+                              :dataset (->> (mapv (fn [{:keys [batch-type postprocess]}]
+                                                    (let [image-label-pairs
+                                                          (->> (ds/get-batches dataset 50 batch-type [:data :labels])
+                                                               (mapcat #(apply interleave %))
+                                                               (partition 2)
+                                                               postprocess
+                                                               (take 100))]
+                                                      [batch-type {:batch-type batch-type
+                                                                   :images (pmap (fn [[observation label]]
+                                                                                   (observation->img-fn observation))
+                                                                                 image-label-pairs)
+                                                                   :labels (map (fn [[observation label]]
+                                                                                  (vec->label label))
+                                                                                image-label-pairs)}]))
+                                                  batch-defs)
+                                            (into {}))}))
+    nil))
+
+
+(defn get-dataset-data
+  [& args]
+  (update-in @dataset-display [:dataset]
+             (fn [dataset-map]
+               (map (fn [[k v]]
+                      [k (dissoc v :images)])
+                    dataset-map))))
+
+
+(defn get-dataset-image
+  [{:keys [batch-type index]}]
+  (let [img
+        (nth
+         (get-in @dataset-display [:dataset (clojure.edn/read-string batch-type) :images])
+         (clojure.edn/read-string index))]
+    img))
+
+
+(def routing-map
+  {"confusion-matrix" #'get-confusion-matrix
+   "confusion-detail" #'get-confusion-detail
+   "confusion-image" #'get-confusion-image
+   "dataset-data" #'get-dataset-data
+   "dataset-image" #'get-dataset-image})
+
+
+(defn web-best-network-function
+  [dataset cv-data observation->img-fn {:keys [inferences labels]}]
+  (let [network-eval {:dataset dataset
+                      :labels (first labels)
+                      :inferences (first inferences)
+                      :data cv-data}]
+    (reset-confusion-matrix network-eval observation->img-fn)))
+
+
+(defn web-train-forever
+  [dataset observation->image-fn initial-description]
+  (let [batch-size 128
+        cross-validation-data (ds/get-data-sequence-from-dataset
+                               dataset :data :cross-validation batch-size)]
+    (reset-dataset-display dataset observation->image-fn)
+    (when (.exists (io/file "trained-network-nippy"))
+      (reset-confusion-matrix (evaluate-network dataset (:network-description (read-nippy-file "trained-network.nippy")))
+                              observation->image-fn))
+    (doseq [_ (create-train-network-sequence
+               dataset
+               initial-description
+               :best-network-fn (partial web-best-network-function dataset cross-validation-data observation->image-fn)
+               :epoch-count 40
+               :train-batch-size batch-size)])))

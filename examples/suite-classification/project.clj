@@ -23,7 +23,7 @@
               [{:id "dev"
                 :figwheel true
                 :source-paths ["cljs"]
-                :compiler {:main "cortex.suite.classify"
+                :compiler {:main "suite-classification.classify"
                            :asset-path "out"
                            :output-to "resources/public/js/app.js"
                            :output-dir "resources/public/out"}}]}
