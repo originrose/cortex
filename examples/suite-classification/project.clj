@@ -13,6 +13,7 @@
                  ;;[org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ]
 
+  :figwheel {:css-dirs ["resources/public/css"]}
 
 
   :source-paths ["src"]
