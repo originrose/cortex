@@ -16,14 +16,15 @@
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ]
 
+
   :plugins [[lein-cljsbuild "1.1.5"]
             [lein-garden "0.3.0"]]
+
 
   :garden {:builds [{:id "dev"
                      :source-paths ["src"]
                      :stylesheet css.styles/styles
                      :compiler {:output-to "resources/public/css/app.css"}}]}
-
 
 
   :cljsbuild {:builds

@@ -207,9 +207,7 @@ to avoid overfitting the network to the training data."
                      :clj-css-path "src/css"
                      :live-updates? *running-from-repl*
                      :port 8091)]
-      (println open-message)
-      (println (io/resource "public/js/app.js"))
-      (println (io/resource "public/css/app.css")))
+      (println open-message))
     confusion-matrix-atom))
 
 
