@@ -1,5 +1,5 @@
 #!/bin/bash
 
-lein uberjar
+make
 
-java -jar target/suite-classification-0.1.0-SNAPSHOT-standalone.jar
+java -jar target/classify-example.jar

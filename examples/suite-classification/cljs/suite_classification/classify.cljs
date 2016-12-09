@@ -8,5 +8,4 @@
   (apply classify/classify-component args))
 
 
-
 (gate/start-frontend)
