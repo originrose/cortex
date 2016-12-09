@@ -20,7 +20,7 @@
     (double (opt/evaluate-softmax run-results answer-seq))))
 
 
-(defn evaulate-softmax-description
+(defn evaluate-softmax-description
   [net-desc backend-fn dataset input-labels & {:keys [output-index dataset-label-name batch-type batch-size]
                                                :or {output-index 0
                                                     dataset-label-name :labels

@@ -18,3 +18,8 @@ checkouts
 .lein-*
 .nrepl-port
 models
+figwheel_server.log
+mnist
+resources
+trained-network.nippy
+trained-networks

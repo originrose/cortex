@@ -10,6 +10,7 @@
             [think.resource.core :as resource]
             [cortex.nn.protocols :as cp]
             [cortex.nn.description :as desc]
+            [cortex.dataset :as ds]
             [think.compute.nn.description :as compute-desc]
             [clojure.core.matrix :as m]))
 
@@ -72,7 +73,7 @@
   [{:keys [network batching-system] :as train-config} batch-sequence]
   (when-let [next-batch (first batch-sequence)]
     (let [backend (layers/get-backend network)
-          {:keys [input-buffers output-host-buffers]} next-batch
+          {:keys [input-buffers]} next-batch
           ;;Note no prepare-calc call
           network (cp/multi-calc network input-buffers)
           train-config (assoc train-config :network network)
@@ -92,8 +93,7 @@
                           n-output-vec buffer-seq))]
       (cons {:train-config train-config
              :inferences (splitter (map #(nn-backend/to-double-array backend %)
-                                        (cp/multi-output network)))
-             :labels (splitter output-host-buffers)}
+                                        (cp/multi-output network)))}
             (lazy-seq (recur-run-config train-config (rest batch-sequence)))))))
 
 
@@ -103,34 +103,25 @@ of the network for each"
   [{:keys [network batching-system] :as train-config} batch-type]
   (let [eval-sequence
         (lazy-seq (recur-run-config train-config
-                                    ;;false here because we don't need the result uploaded to the cpu
+                                    ;;false here because we don't need the result
+                                    ;;uploaded to the gpu
                                     (batch/get-batches batching-system batch-type false)))
         n-outputs (count (cp/multi-output-size network))
         coalesced-data (reduce (fn [coalesced-data {:keys [train-config inferences labels]}]
-                                 (let [new-labels (when (seq labels)
-                                                    (conj (:labels coalesced-data) (vec labels)))]
-                                   (assoc coalesced-data
-                                          :train-config train-config
-                                          :inferences (conj (:inferences coalesced-data) (vec inferences))
-                                          :labels new-labels)))
-                               {:inferences []
-                                :labels []}
-                               eval-sequence)
-        coalesced->vec (fn [data-seq]
-                         (when (seq data-seq)
-                           (mapv (fn [idx]
-                                   (mapcat #(nth % idx) data-seq))
-                                 (range n-outputs))))]
+                                 (assoc coalesced-data
+                                        :train-config train-config
+                                        :inferences (conj (:inferences coalesced-data)
+                                                          (vec inferences))))
+                               {:inferences []}
+                               eval-sequence)]
     {:train-config (:train-config coalesced-data)
-     :inferences (coalesced->vec (:inferences coalesced-data))
-     :labels (coalesced->vec (:labels coalesced-data))
-     }))
+     :inferences (ds/batches->columns (:inferences coalesced-data))}))
 
 
 (defn evaluate-training-network
   "Run the network and return the average loss across all cv-input"
-  [train-config batch-type]
-  (let [{:keys [train-config inferences labels] :as run-config-output}
+  [labels train-config batch-type]
+  (let [{:keys [train-config inferences] :as run-config-output}
         (run-config train-config batch-type)
         {:keys [loss-fn]} train-config]
     ;;when there were any batches to begin with
@@ -140,8 +131,9 @@ of the network for each"
 
 
 (defn println-report-epoch
-  [epoch-idx {:keys [batching-system dataset] :as train-config}]
-  (if-let [evaluated-network-data (evaluate-training-network train-config :cross-validation)]
+  [labels epoch-idx {:keys [batching-system dataset] :as train-config}]
+  (if-let [evaluated-network-data (evaluate-training-network labels train-config
+                                                             :cross-validation)]
     (let [{:keys [train-config avg-loss]} evaluated-network-data]
       (println (format "Epoch loss: %s" avg-loss))
       train-config)
@@ -160,9 +152,10 @@ of the network for each"
   [net optimiser dataset input-labels output-labels-and-loss]
   (let [backend (layers/get-backend net)
         batch-size (layers/batch-size net)
-        batching-system (-> (batch/create-dataset-batching-system input-labels (mapv first output-labels-and-loss) batch-size
-                                                                  dataset (drv/get-driver backend) (drv/get-stream backend)
-                                                                  (dtype/get-datatype backend))
+        batching-system (-> (batch/create-dataset-batching-system
+                             input-labels (mapv first output-labels-and-loss) batch-size
+                             dataset (drv/get-driver backend) (drv/get-stream backend)
+                             (dtype/get-datatype backend))
                             batch/setup)
         loss-fns (mapv (fn [[label loss] output-size]
                          (opt/setup-loss loss backend batch-size output-size))
@@ -171,36 +164,41 @@ of the network for each"
     {:network net :optimiser optimiser :loss-fn loss-fns :batching-system batching-system}))
 
 
+(defn create-train-epoch-sequence
+  "Create an infinite sequence of train-configs where each next config
+is trained one more epoch than the config before it.
+Drops the initial config (which could be completely untrained).  Note that
+this could allocate a significant amount of resources so you cannot pass this
+sequence as is around a program."
+  [net optimiser dataset input-labels output-labels-and-loss]
+  (->> (build-train-config net optimiser dataset input-labels output-labels-and-loss)
+       train-epoch-seq
+       (drop 1)))
+
+
 (defn train
   "Epoch train filter takes an epoch-index and a train config and produces a new
   train config; providing an opportunity for side effects (e.g., printing)."
   [net optimiser dataset input-labels output-labels-and-loss epoch-count
    & {:keys [epoch-train-filter]
-      :or {epoch-train-filter println-report-epoch}}]
+      :or {epoch-train-filter :unset}}]
   (resource/with-resource-context
     (let [epoch-filter (if epoch-train-filter
-                         epoch-train-filter
-                         (fn [idx train-cfg] train-cfg))]
-      (->> (build-train-config net optimiser dataset input-labels output-labels-and-loss)
-           train-epoch-seq
-           (drop 1)
+                         (if (= epoch-train-filter :unset)
+                           (let [output-labels (mapv first output-labels-and-loss)
+                                 dataset-labels (ds/batches->columns
+                                                 (ds/get-batches dataset (layers/batch-size net)
+                                                               :cross-validation output-labels))]
+                             (partial println-report-epoch dataset-labels))
+                           epoch-train-filter)
+                         (fn [idx train-config]
+                           train-config))]
+      (->> (create-train-epoch-sequence net optimiser dataset input-labels
+                                        output-labels-and-loss)
            (map-indexed epoch-filter)
            (take epoch-count)
            last
            :network))))
-
-
-(defn train-description
-  "Same as train but takes and returns a description instead of a live network.
-Also takes a function that produces a network backend.  This avoids leaking leaks gpu
-resources to the user."
-  [net-desc backend-fn optimiser dataset input-labels output-labels-and-loss epoch-count batch-size
-   & {:keys [epoch-train-filter]
-      :or {epoch-train-filter println-report-epoch}}]
-  (resource/with-resource-context
-    (let [network (compute-desc/build-and-create-network net-desc (backend-fn) batch-size)]
-      (-> (train network optimiser dataset input-labels output-labels-and-loss epoch-count)
-          desc/network->description))))
 
 
 (defn infer-network
@@ -209,8 +207,10 @@ resources to the user."
   (resource/with-resource-context
     (let [backend (layers/get-backend net)
           batch-size (layers/batch-size net)
-          batching-system (-> (batch/create-dataset-batching-system input-labels output-labels batch-size
-                                                                    dataset (drv/get-driver backend) (drv/get-stream backend)
+          batching-system (-> (batch/create-dataset-batching-system input-labels output-labels
+                                                                    batch-size dataset
+                                                                    (drv/get-driver backend)
+                                                                    (drv/get-stream backend)
                                                                     (dtype/get-datatype backend))
                               batch/setup)]
       (select-keys (run-config {:network net :batching-system batching-system} batch-type)
@@ -218,17 +218,8 @@ resources to the user."
 
 
 (defn run
-  "Run a network products a vector of output sequences, one sequence for each output of the network."
+  "Run a network products a vector of output sequences, one sequence for
+each output of the network."
   [net dataset input-labels & {:keys [batch-type]
                                :or {batch-type :holdout}}]
   (:inferences (infer-network net dataset input-labels [] :batch-type batch-type)))
-
-
-(defn run-description
-  "Run a network from a description, producing a vector of output sequences, one sequences for each
-output of the network."
-  [net-desc backend-fn dataset input-labels batch-size & {:keys [batch-type]
-                                                          :or {batch-type :holdout}}]
-  (resource/with-resource-context
-    (let [network (compute-desc/build-and-create-network net-desc (backend-fn) batch-size)]
-      (run network dataset input-labels :batch-type batch-type))))

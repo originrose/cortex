@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/gpu-compute "0.3.1-SNAPSHOT"]
                  [thinktopic/think.image "0.4.2"]
-                 [com.taoensso/nippy "2.12.2"]])
+                 [com.taoensso/nippy "2.12.2"]]
+  :resource-paths ["cljs"])
