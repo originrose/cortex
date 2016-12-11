@@ -9,7 +9,8 @@ implementation as possible."
             [think.compute.driver :as drv]
             [clojure.core.matrix :as m]
             [cortex.util :as util]
-            [cortex.nn.impl.layers.convolution :as conv])
+            [cortex.nn.impl.layers.convolution :as conv]
+            [cortex.nn.description :as desc])
   (:import [cortex.nn.impl.layers.convolution ConvLayerConfig]))
 
 
@@ -48,6 +49,71 @@ implementation as possible."
   (->> (parameters layer)
        (map math/ecount)
        (reduce +)))
+
+(defprotocol PLayerToDescription
+  (->input [layer])
+  (->description [layer]))
+
+
+;;Passthrough layer that is used to normalize description->network
+;;and network->description algorithms.
+(defrecord InputLayer [backend input-description]
+  cp/PLayerSetup
+  (setup [layer batch-size]
+    (assoc layer :batch-size batch-size))
+
+  PBatchSize
+  (batch-size [layer] (:batch-size layer))
+
+  PBackend
+  (get-backend [layer] backend)
+
+  cp/PLayerSize
+  (input-size [layer] (:output-size input-description))
+  (output-size [layer] (:output-size input-description))
+
+  cp/PModule
+  (calc [layer input] (assoc layer :output input))
+  (output [layer] (:output layer))
+
+  cp/PNeuralTraining
+  (forward [layer input] (cp/calc layer input))
+  (backward [layer input output-gradient] (assoc layer :input-gradient output-gradient))
+  (input-gradient [layer] (:input-gradient layer))
+
+  PLayerToDescription
+  (->input [layer] [input-description])
+  (->description [layer] [input-description]))
+
+
+(defn convert-layer-type
+  [compute-type]
+  (if (= compute-type :sigmoid)
+    :logistic
+    compute-type))
+
+
+(defmulti simple-layer->description (fn [layer]
+                                      (get-in layer [:layer-impl-desc
+                                                     :layer-type])))
+
+
+(defmethod simple-layer->description :default
+  [layer]
+  {:type (convert-layer-type (get-in layer [:layer-impl-desc
+                                            :layer-type]))})
+
+
+(defmethod simple-layer->description :softmax
+  [layer]
+  {:type :softmax :output-channels (get-in layer [:layer-impl-desc :channels] 1)})
+
+
+(defmethod simple-layer->description :local-response-normalization
+  [layer]
+  (let [{:keys [k n alpha beta]} (:layer-impl-desc layer)]
+    (desc/local-response-normalization
+     :k k :n n :alpha alpha :beta beta)))
 
 
 ;;tanh relu logistic softmax
@@ -89,7 +155,11 @@ implementation as possible."
                        (:input-gradient layer)
                        output-gradient)
     layer)
-  (input-gradient [layer] (:input-gradient layer)))
+  (input-gradient [layer] (:input-gradient layer))
+
+  PLayerToDescription
+  (->input [layer])
+  (->description [layer] (simple-layer->description layer)))
 
 
 (defn activation
@@ -217,7 +287,20 @@ implementation as possible."
   (gradients [layer] [(:weight-gradient layer) (:bias-gradient layer)])
   (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer]
-    (apply-l2-max-constraint layer)))
+    (apply-l2-max-constraint layer))
+
+  PLayerToDescription
+  (->input [layer] (desc/input (cp/input-size layer)))
+  (->description
+      [layer]
+    (desc/linear (cp/output-size layer)
+                 :weights (nn-backend/to-core-matrix
+                           (get-backend layer)
+                           (:weights layer))
+                 :bias (nn-backend/to-core-matrix
+                        (get-backend layer)
+                        (:bias layer))
+                 :l2-max-constraint (:l2-max-constraint layer))))
 
 
 (defn linear
@@ -281,7 +364,18 @@ implementation as possible."
   (gradients [layer] [(:weight-gradient layer) (:bias-gradient layer)])
   (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer]
-    (apply-l2-max-constraint layer)))
+    (apply-l2-max-constraint layer))
+
+    PLayerToDescription
+  (->input [layer] (desc/conv-config->input conv-config))
+  (->description
+      [layer]
+    (desc/conv-config->description conv-config :convolutional
+                                   (nn-backend/to-core-matrix (get-backend layer)
+                                                              (:weights layer))
+                                   (nn-backend/to-core-matrix (get-backend layer)
+                                                              (:bias layer))
+                                   (:l2-max-constraint layer))))
 
 
 
@@ -310,7 +404,8 @@ implementation as possible."
   (setup [layer batch-size]
     (assoc layer
            :pooling-impl (nn-backend/create-layer backend
-                                                  (nn-backend/max-pool-desc conv-config batch-size))
+                                                  (nn-backend/max-pool-desc conv-config
+                                                                            batch-size))
            :output (nn-backend/new-array backend [(cp/output-size layer)] batch-size)
            :input-gradient (nn-backend/new-array backend [(cp/input-size layer)] batch-size)
            :batch-size batch-size))
@@ -341,7 +436,11 @@ implementation as possible."
     (nn-backend/backward! (:pooling-impl layer) input (:output layer)
                           (:input-gradient layer) output-gradient)
     layer)
-  (input-gradient [layer] (:input-gradient layer)))
+  (input-gradient [layer] (:input-gradient layer))
+
+  PLayerToDescription
+  (->input [layer] (desc/conv-config->input conv-config))
+  (->description [layer] (desc/conv-config->description (:conv-config layer) :max-pooling)))
 
 (defn max-pooling
   [backend
@@ -413,7 +512,17 @@ implementation as possible."
                    (math/device-buffer (:input-gradient layer)) 1)
     layer)
 
-  (input-gradient [layer] (:input-gradient layer)))
+  (input-gradient [layer] (:input-gradient layer))
+
+  PLayerToDescription
+  (->input [layer] (desc/input (cp/input-size layer)))
+  (->description
+      [layer]
+    (if (= (get-in layer [:dropout-options :distribution]) :bernoulli)
+      (desc/dropout (get-in layer [:dropout-options :probability])
+                    :distribution :bernoulli)
+      (desc/dropout (- 1.0 (double (get-in layer [:dropout-options :variance])))
+                    :distribution :gaussian))))
 
 
 (defn bernoulli-dropout
@@ -433,13 +542,13 @@ implementation as possible."
 (defn- layer-list-forward
   "Combining forward and calc into same general implementation"
   [this-layer input-vec forward-fn]
-    (assoc this-layer :layers
-           (first (reduce (fn [[layers input-vec] layer]
-                            (let [new-layer (forward-fn layer input-vec)
-                                  new-input (cp/multi-output new-layer)]
-                              [(conj layers new-layer) new-input]))
-                          [[] input-vec]
-                          (:layers this-layer)))))
+  (assoc this-layer :layers
+         (first (reduce (fn [[layers input-vec] layer]
+                          (let [new-layer (forward-fn layer input-vec)
+                                new-input (cp/multi-output new-layer)]
+                            [(conj layers new-layer) new-input]))
+                        [[] input-vec]
+                        (:layers this-layer)))))
 
 ;;Aggregation - linear list of layers
 (defrecord LayerList [layers]
@@ -558,7 +667,14 @@ implementation as possible."
   (parameters [layer] (mapcat parameters layers))
   (gradients [layer] (mapcat gradients layers))
   (learning-attenuation [layer] (mapcat learning-attenuation layers))
-  (post-update [this-layer] (doseq [layer layers] (post-update layer))))
+  (post-update [this-layer] (doseq [layer layers] (post-update layer)))
+
+
+  PLayerToDescription
+  (->input [layer] (desc/input (cp/input-size layer)))
+  (->description
+      [layer]
+    (desc/split (mapv desc/layer->description (:layers layer)))))
 
 
 (defn split
@@ -631,15 +747,29 @@ implementation as possible."
                                   (:input-gradient layer) output-gradient
                                   epsilon)
     layer)
-  (input-gradient [layer] (:input-gradient layer)))
+  (input-gradient [layer] (:input-gradient layer))
+
+  PLayerToDescription
+  (->input [layer] (desc/input (cp/input-size layer)))
+  (->description
+      [layer]
+    (let [core-mat (fn [data] (nn-backend/to-core-matrix (get-backend layer) data))]
+      (merge (first
+              (desc/batch-normalization (:average-factor layer)
+                                        :epsilon (:epsilon layer)))
+             {:scale (core-mat (:scale layer))
+              :bias (core-mat (:bias layer))
+              :means (core-mat (:running-means layer))
+              :variances (core-mat (:running-variances layer))}))))
 
 
 (defn batch-normalization
   "Create a batch normalization layer.  Average factor exponential falloff
   used for the running means and variances.
   https://arxiv.org/pdf/1502.03167v3.pdf.
-  This layer type is unlikely to work with small batch sizes;  as it does do some numerical analysis
-  and gaussian normalization of the batch a small batch may throw off optimization later."
+  This layer type is unlikely to work with small batch sizes;  as it does do
+  some numerical analysis and gaussian normalization of the batch a small batch
+  may throw off optimization later."
   [backend n-input average-factor
    & {:keys [scale bias means variances epsilon]
       :or {epsilon 1e-4}}]
@@ -695,7 +825,10 @@ This is for cudnn compatibility.")))
   (prepare-layer-for-serialization [layer]))
 
 
-(defrecord RecurrentLayer [backend ^long n-input ^long n-output
+;;This layer is nonfunctional until someone makes it work.  There is a
+;;cudnn implementation but no cpu implementation.
+(defrecord RecurrentLayer
+    [backend ^long n-input ^long n-output
                            recurrent-type ;;one of the recurrent types above
                            recurrent-direction ;;on of the recurrent directions above
                            weights-and-biases ;;Map of data
