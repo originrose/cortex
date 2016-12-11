@@ -8,7 +8,7 @@
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)
                  ;;you need to get simple servers up and running easily.
-                 [thinktopic/think.gate "0.1.1-SNAPSHOT"]
+                 [thinktopic/think.gate "0.1.1"]
                  ;;If you need cuda 8...
                  ;;[org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ]
