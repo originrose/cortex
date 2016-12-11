@@ -16,11 +16,12 @@
 
 
 (def broken-description [(desc/input 128 128 3)
+                         (desc/dropout 0.9 :distribution :gaussian)
                          (desc/convolutional 4 0 2 64)
                          (desc/max-pooling 2 0 2)
                          (desc/convolutional 4 0 2 128)
                          (desc/max-pooling 2 0 2)
-                         ;; (desc/batch-normalization 0.9)
+                         (desc/batch-normalization 0.9)
                          (desc/linear->relu 500)
                          (desc/linear->softmax 5)])
 
@@ -30,4 +31,7 @@
   (let [net (compute-desc/build-and-create-network broken-description backend 1)
         outputs (mapv (comp :tensor cp/output) (:layers net))
         input-data (nn-backend/new-array backend [3 128 128])
-        net (cp/multi-forward net [input-data])]))
+        net (cp/multi-forward net [input-data])
+        saved-net (desc/network->description net)
+        new-net (compute-desc/build-and-create-network saved-net backend 1)
+        new-net (cp/multi-forward net [input-data])]))

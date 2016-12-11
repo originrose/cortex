@@ -7,7 +7,7 @@
 
 (defmulti create-module (fn [desc backend] (:type desc)))
 
-(defmethod create-module :input [desc backend] nil)
+(defmethod create-module :input [desc backend] (layers/->InputLayer backend desc))
 
 (defn to-network-array
   [backend item]
@@ -61,6 +61,7 @@
                         :bias (to-network-array backend bias)
                         :l2-max-constraint l2-max-constraint))
 
+
 (defmethod create-module :max-pooling
   [{:keys [input-width input-height input-channels
            kernel-width kernel-height pad-x pad-y
@@ -70,6 +71,7 @@
                       kernel-width kernel-height pad-x pad-y
                       stride-x stride-y))
 
+
 (defmethod create-module :batch-normalization
   [{:keys [output-size average-factor epsilon means variances scale bias]} backend]
   (layers/batch-normalization backend output-size average-factor
@@ -78,6 +80,7 @@
                               :means (to-network-array backend means)
                               :variances (to-network-array backend variances)
                               :epsilon epsilon))
+
 
 (defmethod create-module :local-response-normalization
   [{:keys [n k alpha beta output-width output-height output-channels] :as desc} backend]
@@ -91,128 +94,111 @@
   (let [sub-networks (mapv create-network branches)]
     (layers/split backend sub-networks input-size)))
 
+
+(defn save-desc
+  "Save the description with the layer so that we save any extra information
+in the description that we don't know about.  At this time it seems best to think
+of the entire system as a way of adding annotations to descriptions and in this light
+it seems clear that if there is any other information on the description it should
+be preserved."
+  [desc layer]
+  (when layer
+    (let [layer (if-let [atten (get desc :learning-attenuation)]
+                  (assoc layer :learning-attenuation atten)
+                  layer)]
+      (assoc layer :source-description desc))))
+
+
 (defn description->module
   [backend desc]
-  (let [new-module (create-module desc backend)
-        extra-keys (clojure.set/difference (set (keys desc)) (set (keys new-module)))]
-    (when new-module
-      (reduce (fn [eax k]
-                (assoc eax k (get desc k)))
-              new-module
-              extra-keys))))
+  (->> (create-module desc backend)
+       (save-desc desc)))
+
 
 (defn create-network
   [built-descriptions backend batch-size]
-  (let [modules (filterv identity (map (partial description->module backend) built-descriptions))]
+  (let [modules (->> (map (partial description->module backend) built-descriptions)
+                     (filterv identity))]
     (cp/setup (layers/layer-list modules) batch-size)))
+
 
 (defn build-and-create-network
   [input-desc-seq backend batch-size]
   (create-network (desc/build-full-network-description input-desc-seq) backend batch-size))
 
-(defn convert-layer-type
-  [compute-type]
-  (if (= compute-type :sigmoid)
-    :logistic
-    compute-type))
 
-(defmulti simple-layer->input (fn [layer]
-                                (get-in layer [:layer-impl-desc
-                                               :layer-type])))
+(defn merge-with-original-desc
+  [new-desc-seq layer-desc]
+  (if (vector? new-desc-seq)
+    (update-in new-desc-seq [0] #(merge layer-desc %))
+    (merge layer-desc new-desc-seq)))
 
-(defmethod simple-layer->input :default
+
+(defn get-layer-input
   [layer]
-  (desc/input (:n-input layer)))
+  (get layer :input-description))
 
 
-(defmethod simple-layer->input :local-response-normalization
+(defn get-layer-source
   [layer]
-  (let [{:keys [width height n-channels]} (:layer-impl-desc layer)]
-    (desc/input width height n-channels )))
+  (get layer :source-description))
 
 
-(defmulti simple-layer->description (fn [layer]
-                                      (get-in layer [:layer-impl-desc
-                                                     :layer-type])))
+(defn merge-with-layer-input
+  [new-desc-seq layer]
+  (merge-with-original-desc new-desc-seq (get-layer-input layer)))
 
 
-(defmethod simple-layer->description :default
+(defn merge-with-layer-source
+  [new-desc-seq layer]
+  (merge-with-original-desc new-desc-seq (get-layer-source layer)))
+
+
+(defn compute-layer->description
   [layer]
-  {:type (convert-layer-type (get-in layer [:layer-impl-desc
-                                            :layer-type]))})
-
-
-(defmethod simple-layer->description :softmax
-  [layer]
-  {:type :softmax :output-channels (get-in layer [:layer-impl-desc :channels] 1)})
-
-
-(defmethod simple-layer->description :local-response-normalization
-  [layer]
-  (let [{:keys [k n alpha beta]} (:layer-impl-desc layer)]
-    (desc/local-response-normalization
-     :k k :n n :alpha alpha :beta beta)))
+  (-> (layers/->description layer)
+      (merge-with-layer-source layer)))
 
 
 (extend-protocol desc/PNetworkToDescription
+  think.compute.nn.layers.InputLayer
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer])
+
   think.compute.nn.layers.SimpleLayer
-  (layer->input [layer] (simple-layer->input layer))
-  (layer->description [layer] (simple-layer->description layer))
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer] (compute-layer->description layer))
 
   think.compute.nn.layers.Linear
-  (layer->input [layer] (desc/input (cp/input-size layer)))
-  (layer->description [layer] (desc/linear (cp/output-size layer)
-                                           :weights (nn-backend/to-core-matrix
-                                                     (layers/get-backend layer)
-                                                     (:weights layer))
-                                           :bias (nn-backend/to-core-matrix
-                                                  (layers/get-backend layer)
-                                                  (:bias layer))
-                                           :l2-max-constraint (:l2-max-constraint layer)))
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer] (compute-layer->description layer))
 
   think.compute.nn.layers.Convolutional
-  (layer->input [layer] (desc/conv-config->input (:conv-config layer)))
-  (layer->description [layer]
-    (desc/conv-config->description (:conv-config layer) :convolutional
-                                   (nn-backend/to-core-matrix (layers/get-backend layer)
-                                                           (:weights layer))
-                                   (nn-backend/to-core-matrix (layers/get-backend layer)
-                                                           (:bias layer))
-                                   (:l2-max-constraint layer)))
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer] (compute-layer->description layer))
 
   think.compute.nn.layers.Pooling
-  (layer->input [layer] (desc/conv-config->input (:conv-config layer)))
-  (layer->description [layer]
-    (desc/conv-config->description (:conv-config layer) :max-pooling))
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer] (compute-layer->description layer))
 
   think.compute.nn.layers.Dropout
-  (layer->input [layer] (desc/input (cp/input-size layer)))
-  (layer->description [layer]
-    (if (= (get-in layer [:dropout-options :distribution]) :bernoulli)
-      (desc/dropout (get-in layer [:dropout-options :probability])
-                    :distribution :bernoulli)
-      (desc/dropout (- 1.0 (get-in layer [:dropout-options :variance]))
-                    :distribution :gaussian)))
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer] (compute-layer->description layer))
 
   ;;Be extremely careful about laziness in here because the underlying gpu resources
   ;;could be released before the lazy seq has been realized.
   think.compute.nn.layers.LayerList
   (layer->input [layer] (desc/layer->input (first (:layers layer))))
-  (layer->description [layer]
-    (mapv desc/layer->description (:layers layer)))
+  (layer->description [layer] (->>
+                               (mapv desc/layer->description (:layers layer))
+                               ;;Filter out input descriptor
+                               (remove nil?)
+                               vec))
 
   think.compute.nn.layers.Split
-  (layer->input [layer] (desc/input (cp/input-size layer)))
-  (layer->description [layer] (desc/split (mapv desc/layer->description (:layers layer))))
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer] (compute-layer->description layer))
 
   think.compute.nn.layers.BatchNormalization
-  (layer->input [layer] (desc/input (cp/input-size layer)))
-  (layer->description [layer]
-    (let [core-mat (fn [data] (nn-backend/to-core-matrix (layers/get-backend layer) data))]
-      (merge (first
-              (desc/batch-normalization (:average-factor layer)
-                                        :epsilon (:epsilon layer)))
-             {:scale (core-mat (:scale layer))
-              :bias (core-mat (:bias layer))
-              :means (core-mat (:running-means layer))
-              :variances (core-mat (:running-variances layer))}))))
+  (layer->input [layer] (layers/->input layer))
+  (layer->description [layer] (compute-layer->description layer)))
