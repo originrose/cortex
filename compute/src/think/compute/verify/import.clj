@@ -20,6 +20,8 @@
            ;;The assumption here is the network takes a single input and produces a single output
            net-input [(backend/array backend input)]
            network (cp/multi-calc network net-input)
+           ;;Drop the input layer from the network
+           network-working-layers (drop 1 (:layers network))
            ;;The assumption here is that we have a single linear network; this will not work for
            ;;branching networks.
            output-buffers (mapv (fn [previous-layer layer]
@@ -27,7 +29,7 @@
                                      (when-let [item-input (cp/output previous-layer)]
                                        (backend/to-double-array backend item-input)))
                                    (backend/to-double-array backend (cp/output layer))])
-                                (concat [nil] (:layers network)) (:layers network))]
+                                (concat [nil] network-working-layers) network-working-layers)]
        (vec (remove nil?
                     (map (fn [keras-output [net-input net-output] net-layer desc-layer]
                            (when keras-output

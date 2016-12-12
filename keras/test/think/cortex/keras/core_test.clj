@@ -7,4 +7,4 @@
 (deftest verify-mnist
   (let [test-model (keras/load-combined-hdf5-file "models/mnist_combined.h5")
         verification-failure (compute-verify/verify-model test-model)]
-    (is (empty? (:cpu verification-failure)))))
+    (is (empty? verification-failure))))
