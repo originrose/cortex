@@ -6,11 +6,6 @@
             [clojure.core.matrix :as m]))
 
 
-;;There is one nontrivial feature in this library that enables the caffe integration
-;;and this is interleaving weights when we have multiple channels and the input
-;;format is planar.  Caffe and torch both work as planar which we believe is less
-;;efficient during the convolution steps and these steps are the most costly in
-;;the nn.
 (defn input
   ([output-size] [{:type :input :output-size output-size}])
   ([width height channels] [{:type :input :output-size (* width height channels)
@@ -18,9 +13,25 @@
                              :output-height height
                              :output-channels channels}]))
 
-(defn linear [num-output & {:keys [weights bias l2-max-constraint]}]
-  [{:type :linear :output-size num-output
-    :weights weights :bias bias :l2-max-constraint l2-max-constraint}])
+
+(defn apply-weight-bias-options
+  [desc args]
+  (println args)
+  (let [{:keys [weights bias l2-max-constraint
+                l1-regularization l2-regularization]}
+        (->> (partition 2 args)
+             (map vec)
+             (into {}))]
+    (when (and (not (empty? args))
+               (not (rem 2 (count args))))
+      (throw (ex-info "Extra arguments are not divisible by 2"
+                      {:arguments args})))
+    (assoc desc :weights weights :bias bias :l2-max-constraint l2-max-constraint
+           :l1-regularization l1-regularization :l2-regularization l2-regularization)))
+
+
+(defn linear [num-output & args]
+  [(apply-weight-bias-options {:type :linear :output-size num-output} args)])
 
 (defn softmax
     "Define a softmax which may be multi-channelled.  The data is expected
@@ -32,20 +43,18 @@ channel 2 with n-outputs"
 (defn linear->softmax [num-classes & {:keys [output-channels]
                                       :or {output-channels 1}
                                       :as opts}]
-  (when-not (every? #{:output-channels} (keys opts))
-    (throw (ex-info "Invalid keyword option to linear->softmax"
-                    opts)))
-  [{:type :linear :output-size num-classes}
-   {:type :softmax :output-channels output-channels}])
+  (vec
+   (concat (apply linear num-classes (flatten (seq opts)))
+           (softmax output-channels))))
 
 (defn relu [] [{:type :relu}])
 (defn linear->relu [num-output & opts]
-  [(first (apply linear num-output opts))
+  [(first (apply linear num-output (seq opts)))
    {:type :relu}])
 
 (defn logistic [] {:type :logistic})
 (defn linear->logistic [num-output & opts]
-  [(first (apply linear num-output opts))
+  [(first (apply linear num-output (seq opts)))
    {:type :logistic}])
 
 
@@ -58,7 +67,7 @@ while guassian is (1,1) centered noise that is multiplied by the inputs."
 
 (defn convolutional-expanded
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
-    & {:keys [weights bias l2-max-constraint]} ]
+    & args]
    (when (or (= 0 stride-x)
              (= 0 stride-y))
      (throw (Exception. "Convolutional layers must of stride >= 1")))
@@ -67,15 +76,14 @@ while guassian is (1,1) centered noise that is multiplied by the inputs."
      (throw (Exception. "Convolutional layers must of kernel dimensions >= 1")))
    (when (= 0 num-kernels)
      (throw (Exception. "Convolutional layers must of num-kernels >= 1")))
-   [{:type :convolutional :kernel-width kernel-width :kernel-height kernel-height
-     :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
-     :num-kernels num-kernels :weights weights :bias bias
-     :l2-max-constraint l2-max-constraint}]))
+   [(apply-weight-bias-options
+     {:type :convolutional :kernel-width kernel-width :kernel-height kernel-height
+      :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
+      :num-kernels num-kernels} args)]))
 
 (defn convolutional
- ([kernel-dim pad stride num-kernels & {:keys [weights bias l2-max-constraint]}]
-  (convolutional-expanded kernel-dim kernel-dim pad pad stride stride num-kernels
-                          :weights weights :bias bias :l2-max-constraint l2-max-constraint)))
+ ([kernel-dim pad stride num-kernels & args]
+  (apply convolutional-expanded kernel-dim kernel-dim pad pad stride stride num-kernels args)))
 
 (defn max-pooling
   ([kernel-width kernel-height pad-x pad-y stride-x stride-y]
