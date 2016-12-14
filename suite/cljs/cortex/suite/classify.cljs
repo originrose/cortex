@@ -9,21 +9,22 @@
 (enable-console-print!)
 
 
+
 (defn confusion-matrix-component
   [{:keys [class-names matrix]} value-click-handler]
   (let [num-classes (count class-names)]
     [:table.confusion-matrix
      [:tbody
-      [:tr [:td.class-header {:col-span (str (+ num-classes 3))}
-            "actual"]]
-      [:tr [:td.class-header {:row-span (str (+ num-classes 3))} "predicted"]]
+      [:tr [:td.class-header.top {:col-span (str (+ num-classes 3))}
+            "predicted"]]
+      [:tr [:td.class-header.left {:row-span (str (+ num-classes 3))} "actual"]]
       [:tr (doall (map (fn [cls-name]
                          ^{:key cls-name}
-                         [:td.item-header cls-name])
-                       (concat [""] class-names ["correct/predicted"])))]
+                         [:td.item-header.top-row cls-name])
+                       (concat [""] class-names ["correct/actual"])))]
       (doall (map (fn [row-idx]
                     ^{:key row-idx}
-                    [:tr [:td.item-header (get class-names row-idx)]
+                    [:tr [:td.item-header.left-row (get class-names row-idx)]
                      (doall (map (fn [col-idx]
                                    ^{:key col-idx}
                                    [:td.item-value {:on-click (fn [_]
@@ -33,18 +34,18 @@
                                  (range num-classes)))
                      (let [row-total (reduce + (map #(get-in matrix [row-idx %]) (range num-classes)))
                            class-correct (get-in matrix [row-idx row-idx])]
-                       [:td.end-row (.toFixed (/ class-correct row-total) 3)])])
+                       [:td.end-column (.toFixed (/ class-correct row-total) 3)])])
                   (range num-classes)))
-      [:tr [:td.item-header "correct/actual"]
+      [:tr [:td.bottom-row.last "correct/" [:br] "predicted"]
        (doall (map (fn [col-idx]
                      (let [col-total (reduce + (map #(get-in matrix [% col-idx]) (range num-classes)))
                            class-correct (get-in matrix [col-idx col-idx])]
                        ^{:key col-idx}
-                       [:td.end-row (.toFixed (/ class-correct col-total) 3)]))
+                       [:td.bottom-row (.toFixed (/ class-correct col-total) 3)]))
                    (range num-classes)))
        (let [complete-total (reduce + (flatten matrix))
              diagonal-total (reduce + (map #(get-in matrix [% %]) (range num-classes)))]
-         [:td.total-total (.toFixed (/ diagonal-total complete-total) 3)])]]]))
+         [:td.bottom-row (.toFixed (/ diagonal-total complete-total) 3)])]]]))
 
 
 (defn confusion-detail-component
@@ -111,9 +112,7 @@
     (js/setInterval #(confusion-matrix-update confusion-atom dataset-atom) 1000)
     (fn [& args]
       [:div.classification
-       (if-let [dataset-data @dataset-atom]
-         [display-dataset (dataset-data :dataset)]
-         [:div "loading dataset"])
+       [:div.title "CONFUSION MATRIX"]
        (if-let [confusion-matrix (get @confusion-atom :confusion-matrix)]
          [:div.confusion
           [:div.confusion-matrix
@@ -127,4 +126,8 @@
           (when-let [{:keys [row col confidence]} (get @confusion-atom :detail)]
             [:div.confusion-detail
              [confusion-detail-component row col confidence]])]
-         [:div "loading matrix"])])))
+         [:div "loading matrix"])
+       [:div.title "DATASET"]
+       (if-let [dataset-data @dataset-atom]
+         [display-dataset (dataset-data :dataset)]
+         [:div "loading dataset"])])))
