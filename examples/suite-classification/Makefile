@@ -5,15 +5,22 @@ APPCSS := resources/public/css/app.css
 
 #JAVA := $(shell find java -name "*.java*")
 
+
 all: uberjar
+
 
 uberjar: target/classify-example.jar
 
-resources/public/css/app.css: project.clj $(SRC)
+
+$(APPCSS): project.clj $(SRC)
+	rm $(APPCSS)
 	lein garden once
 
-resources/public/js/app.js: project.clj $(CLJS)
+
+$(APPJS): project.clj $(CLJS)
+	rm $(APPJS)
 	lein cljsbuild once
+
 
 target/classify-example.jar: project.clj $(CLJS) $(SRC) $(JAVA) $(APPCSS) $(APPJS)
 	lein uberjar
