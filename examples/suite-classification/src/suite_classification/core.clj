@@ -19,6 +19,15 @@
             [think.gate.core :as gate]))
 
 
+
+;;We have to setup the web server slightly different when running
+;;from the repl; we enable live updates using figwheel and such.  When
+;;running from an uberjar we just launch the server and expect the
+;;particular resources to be available.  We ensure this with a makefile.
+(def ^:dynamic *running-from-repl* true)
+
+
+
 (def mnist-image-size 28)
 (def mnist-num-classes 10)
 (def mnist-num-channels 1)
@@ -175,23 +184,31 @@ to avoid overfitting the network to the training data."
   []
   (:network-description (suite-io/read-nippy-file "trained-network.nippy")))
 
+
 (defn display-dataset-and-model
-  [dataset initial-description]
-  (let [data-display-atom (atom {})
-        confusion-matrix-atom (atom {})]
-    (classification/reset-dataset-display data-display-atom dataset mnist-observation->image)
-    (when-let [loaded-data (suite-train/load-network "trained-network.nippy"
-                                                     initial-description)]
-      (classification/reset-confusion-matrix confusion-matrix-atom mnist-observation->image
-                                             (suite-train/evaluate-network
-                                              dataset
-                                              (:network-description loaded-data)
-                                              :batch-type :cross-validation)))
-    (gate/open (atom
-                (classification/create-routing-map confusion-matrix-atom
-                                                   data-display-atom))
-               :clj-css-path "src/css")
-    confusion-matrix-atom))
+  ([dataset initial-description]
+   (let [data-display-atom (atom {})
+         confusion-matrix-atom (atom {})]
+     (classification/reset-dataset-display data-display-atom dataset mnist-observation->image)
+     (when-let [loaded-data (suite-train/load-network "trained-network.nippy"
+                                                      initial-description)]
+       (classification/reset-confusion-matrix confusion-matrix-atom mnist-observation->image
+                                              (suite-train/evaluate-network
+                                                dataset
+                                                (:network-description loaded-data)
+                                                :batch-type :cross-validation)))
+     (let [open-message
+           (gate/open (atom
+                        (classification/create-routing-map confusion-matrix-atom
+                                                           data-display-atom))
+                      :clj-css-path "src/css"
+                      :live-updates? *running-from-repl*
+                      :port 8091)]
+       (println open-message))
+     confusion-matrix-atom))
+  ([]
+   (display-dataset-and-model (create-dataset) (create-basic-mnist-description))
+   nil))
 
 
 (defn train-forever
@@ -202,6 +219,12 @@ to avoid overfitting the network to the training data."
     (classification/train-forever dataset mnist-observation->image
                                   initial-description
                                   :confusion-matrix-atom confusion-matrix-atom)))
+
+
+(defn train-forever-uberjar
+  []
+  (with-bindings {#'*running-from-repl* false}
+    (train-forever)))
 
 
 (defn label-one

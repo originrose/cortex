@@ -4,4 +4,4 @@
 (defn -main
   [& args]
   (require 'suite-classification.core)
-  ((resolve 'suite-classification.core/train-forever)))
+  ((resolve 'suite-classification.core/train-forever-uberjar)))

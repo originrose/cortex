@@ -8,21 +8,24 @@
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)
                  ;;you need to get simple servers up and running easily.
-                 [thinktopic/think.gate "0.1.1"]
+                 [thinktopic/think.gate "0.1.2"]
+                 ;;This had better precisely match the version of figwheel that think.gate uses
+                 ;;Tried with 1.9.XXX and had odd unexplainable failures.
+                 [org.clojure/clojurescript "1.8.51"] ;;Match figwheel
                  ;;If you need cuda 8...
-                 ;;[org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
+                 [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ]
 
-  :figwheel {:css-dirs ["resources/public/css"]}
+
+  :plugins [[lein-cljsbuild "1.1.5"]
+            [lein-garden "0.3.0"]]
 
 
-  :source-paths ["src"]
+  :garden {:builds [{:id "dev"
+                     :source-paths ["src"]
+                     :stylesheet css.styles/styles
+                     :compiler {:output-to "resources/public/css/app.css"}}]}
 
-  :clean-targets ^{:protect false} ["pom.xml"
-                                    "target"
-                                    "resources/public/out"
-                                    "resources/public/js/app.js"
-                                    "figwheel_server.log"]
 
   :cljsbuild {:builds
               [{:id "dev"
@@ -33,5 +36,10 @@
                            :output-to "resources/public/js/app.js"
                            :output-dir "resources/public/out"}}]}
 
+
+  :figwheel {:css-dirs ["resources/public/css"]}
+
+
   :main suite-classification.main
-  :aot [suite-classification.main])
+  :aot [suite-classification.main]
+  :uberjar-name "classify-example.jar")
