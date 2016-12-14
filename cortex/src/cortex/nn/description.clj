@@ -16,7 +16,6 @@
 
 (defn apply-weight-bias-options
   [desc args]
-  (println args)
   (let [{:keys [weights bias l2-max-constraint
                 l1-regularization l2-regularization]}
         (->> (partition 2 args)
