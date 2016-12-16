@@ -30,12 +30,14 @@ implementation as possible."
   (vec (repeat (count (parameters layer))
                (get layer :learning-attenuation 1.0))))
 
+
 (extend-protocol PComputeParameters
   Object
   (parameters [layer] [])
   (gradients [layer] [])
   (learning-attenuation [layer] (layer->learning-attenuations layer))
   (post-update [layer]))
+
 
 (defprotocol PBatchSize
   (batch-size [item]))
