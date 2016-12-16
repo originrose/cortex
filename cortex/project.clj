@@ -50,6 +50,8 @@
 
   :resource-paths ["resources"]
 
+  :plugins [[lein-codox "0.10.2"]]
+  
   :jvm-opts  ["-Xmx8g"
               "-XX:+UseConcMarkSweepGC"
               "-XX:-OmitStackTraceInFastThrow"]

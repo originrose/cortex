@@ -9,7 +9,8 @@
                  [cheshire "5.6.3"]
                  [thinktopic/compute "0.3.1-SNAPSHOT"]
                  [net.mikera/imagez "0.10.0"]]
-  :plugins [[s3-wagon-private "1.1.2"]]
+  :plugins [[s3-wagon-private "1.1.2"]
+            [lein-codox "0.10.2"]]
   :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
                                 :passphrase :env
                                 :username :env
