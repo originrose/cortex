@@ -1,9 +1,5 @@
 (ns cortex.nn.description
-  (:require [cortex.nn.layers :as layers]
-            [cortex.nn.impl.layers :as impl]
-            [cortex.nn.impl.layers.convolution :as conv]
-            [cortex.nn.core :as core]
-            [clojure.core.matrix :as m]
+  (:require [clojure.core.matrix :as m]
             [clojure.set :as c-set])
   (:import [java.util UUID]))
 
@@ -83,49 +79,91 @@ channel 2 with n-outputs"
 
 
 (defn dropout
-  "Dropout supports both bernoulli and gaussian distributed data.  Bernoulli is typical dropout
-while guassian is (1,1) centered noise that is multiplied by the inputs."
-  [probability & {:keys [distribution]
-                  :or {distribution :bernoulli}}]
-  [{:type :dropout :probability probability :distribution distribution}])
+  "Bernoulli dropout where random (flat distribution) activations are zeroed out.
+Probability is the probability that an activation will survive so a probability of
+1 means no dropout while a probability of will zero out the activation vector."
+  [probability & args]
+  [(merge-args
+    {:type :dropout :distribution :bernoulli :probability probability}
+    args)])
 
-(defn convolutional-expanded
-  ([kernel-width kernel-height pad-x pad-y stride-x stride-y num-kernels
-    & args]
-   (when (or (= 0 stride-x)
-             (= 0 stride-y))
-     (throw (Exception. "Convolutional layers must of stride >= 1")))
-   (when (or (= 0 kernel-width)
-             (= 0 kernel-height))
-     (throw (Exception. "Convolutional layers must of kernel dimensions >= 1")))
-   (when (= 0 num-kernels)
-     (throw (Exception. "Convolutional layers must of num-kernels >= 1")))
-   [(merge-args
-     {:type :convolutional :kernel-width kernel-width :kernel-height kernel-height
-      :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
-      :num-kernels num-kernels} args)]))
+
+(defn multiplicative-dropout
+  "Gaussian dropout where the activation vector is multiplied by a gaussian
+vector centered around (1,variance).  Note that this means the variance
+argument has an opposite effect of traditional dropout's probability in that
+a variance of 1 is actually quite a lot of variance and a variance of 0 means
+no change to the input."
+  [variance & args]
+  [(merge-args
+    {:type :dropout :distribution :gaussian :variance variance}
+    args)])
+
+(def default-layer-type-dimension-op
+  {:convolutional :floor
+   :max-pooling :ceil})
+
+
+(defn get-padded-strided-dimension
+  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
+of the output of a conv-net ignoring channels.  Caffe does this slightly different
+for pooling verse convolutional layers.  Furthermore kaffe does this differently
+than caffe so this exact calculation has been the source of a few compatibility issues."
+  [input-dim pad kernel-size stride dimension-op]
+  (let [partial-result (/ (- (+ (double input-dim)
+                                (* 2 (double pad)))
+                             (double kernel-size))
+                          (double stride))
+        partial-result (double (condp = dimension-op
+                                 :floor (Math/floor partial-result)
+                                 :ceil (Math/ceil partial-result)))]
+    (long (+ partial-result 1))))
+
+
+(defn convolutional-type-layer
+  [layer-type kernel-width kernel-height pad-x pad-y
+   stride-x stride-y num-kernels dimension-op
+   & args]
+  (when (or (= 0 stride-x)
+            (= 0 stride-y))
+    (throw (Exception. "Convolutional layers must of stride >= 1")))
+  (when (or (= 0 kernel-width)
+            (= 0 kernel-height))
+    (throw (Exception. "Convolutional layers must of kernel dimensions >= 1")))
+  (merge-args {:type layer-type :kernel-width kernel-width :kernel-height kernel-height
+               :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
+               :num-kernels num-kernels :dimension-op dimension-op}
+              args))
+
+
+(defn convolutional-output-width
+  ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
+  (long (get-padded-strided-dimension input-width kernel-width
+                                      pad-x stride-x dimension-op)))
+
+
+(defn convolutional-output-height
+  ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
+  (long (get-padded-strided-dimension input-height kernel-height
+                                      pad-y stride-y dimension-op)))
 
 
 (defn convolutional
- ([kernel-dim pad stride num-kernels & args]
-  (apply convolutional-expanded kernel-dim kernel-dim pad pad stride stride num-kernels args)))
+  "Create a convolutional layer.  The dimension operation used for height/width
+calculations must be "
+  [kernel-dim pad stride num-kernels & args]
+  ;;We have to force the dimension operation to be floor for convolutional operations
+  ;;due to cudnn compatibility constraints
+  [(assoc
+    (apply convolutional-type-layer :convolutional kernel-dim kernel-dim
+           pad pad stride stride num-kernels :floor args)
+    :dimension-op :floor)])
 
 
-(defn max-pooling-expanded
-  ([kernel-width kernel-height pad-x pad-y stride-x stride-y & args]
-   (when (or (= 0 stride-x)
-             (= 0 stride-y))
-     (throw (Exception. "Convolutional layers must of stride >= 1")))
-   (when (or (= 0 kernel-width)
-             (= 0 kernel-height))
-     (throw (Exception. "Convolutional layers must of kernel dimensions >= 1")))
-   [(merge-args
-     {:type :max-pooling :kernel-width kernel-width :kernel-height kernel-height
-      :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y}
-     args)]))
 (defn max-pooling
   ([kernel-dim pad stride & args]
-   (apply max-pooling-expanded kernel-dim kernel-dim pad pad stride stride args)))
+   [(apply convolutional-type-layer :max-pooling kernel-dim kernel-dim pad pad
+           stride stride 0 :ceil args)]))
 
 
 (defn batch-normalization
@@ -267,20 +305,24 @@ network graph description."
   [previous item]
   (build-pass-through-desc previous item))
 
+
 (defmethod build-desc :convolutional
   [previous item]
-  ;;unpack the item
   (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
                 num-kernels]} item
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (conv/get-padded-strided-dimension :convolutional
-                                                        input-width pad-x
-                                                        kernel-width stride-x)
-        output-height (conv/get-padded-strided-dimension :convolutional
-                                                         input-height pad-y
-                                                         kernel-height stride-y)
+        ;;Convolutional layers have to be calculated this way for cudnn compability
+        ;;so there is no option to do the calculation with a ceil operation.  Should one
+        ;;do that then the current cudnn operations will read outside of the provided
+        ;;buffer bounds on at least their forward pass
+        output-width (get-padded-strided-dimension-convolutional
+                      input-width pad-x
+                      kernel-width stride-x)
+        output-height (get-padded-strided-dimension-convolutional
+                       input-height pad-y
+                       kernel-height stride-y)
         output-channels num-kernels
         output-size (* output-width output-height output-channels)
         input-data-format (get previous :output-data-format :planar)
@@ -296,16 +338,16 @@ network graph description."
 
 (defmethod build-desc :max-pooling
   [previous item]
-  (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y]} item
+  (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
+                dimension-op]
+         :or [dimension-op :ceil]} item
         input-width (:output-width previous)
         input-height (:output-height previous)
         input-channels (:output-channels previous)
-        output-width (conv/get-padded-strided-dimension :pooling
-                                                        input-width pad-x
-                                                        kernel-width stride-x)
-        output-height (conv/get-padded-strided-dimension :pooling
-                                                         input-height pad-y
-                                                         kernel-height stride-y)
+        output-width (long (get-padded-strided-dimension
+                            input-width pad-x kernel-width stride-x dimension-op))
+        output-height (long (get-padded-strided-dimension
+                             input-height pad-y kernel-height stride-y dimension-op))
         output-channels input-channels
         output-size (* output-width output-height output-channels)
         input-data-format (get previous :output-data-format :interleaved)]

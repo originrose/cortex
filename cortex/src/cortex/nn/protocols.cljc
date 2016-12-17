@@ -6,6 +6,7 @@
           (set! *warn-on-reflection* true)
           (set! *unchecked-math* :warn-on-boxed)))
 
+
 (defprotocol PModule
   "Protocol for a generic module. All cortex.nn modules must implement this."
   (calc [m input]
@@ -14,10 +15,6 @@
   (output [m]
     "Returns the calculated output of a module"))
 
-(defprotocol PModuleClone
-  "Protocol for cloning a module, including all mutable state."
-  (clone [m]
-    "Returns a cloned module"))
 
 (defprotocol PParameters
   "Protocol for a module that supports parameters. The default implementation returns
@@ -26,7 +23,7 @@ an empty parameter vector."
     "Gets the parameters for this module, as a vector.")
 
   (update-parameters [m parameters]
-    "Updates the parameters for this module to the given parameter values. 
+    "Updates the parameters for this module to the given parameter values.
      Clears the accumulated gradient and returns the updated module"))
 
 
@@ -35,6 +32,7 @@ an empty parameter vector."
 count on the parameter vector.."
   (parameter-count [m]
     "Gets the number of parameters for this module, as a long value."))
+
 
 (defprotocol PGradient
   "Protocol for a module that supports accumulated gradients for optimisation.
@@ -57,7 +55,7 @@ This vector should be exactly the
     available for later retrieval. Input and intermediate states will be stored for
     future backward pass usage.
 
-   During training prepare-forward must be called first to ensure that any necessary 
+   During training prepare-forward must be called first to ensure that any necessary
    pre-training calculations are performed. forward itself should be deterministic,
    but prepare-forward may modify stochastic state (e.g. dropout).")
 
@@ -92,6 +90,7 @@ This vector should be exactly the
     "Trains the module to produce the given input / output. Accumulates gradients as necessary.
   Intended for use with update-parameters after completion of a (mini-)batch."))
 
+
 (defprotocol PGradientOptimiser
   "A gradient optimiser is an abstraction for objects that update parameters based on
 gradient observations.
@@ -102,6 +101,7 @@ gradient observations.
 optimiser.
   Users can then call `parameters` on this object to get the updated parameters"))
 
+
 (defprotocol PIntrospection
   "Protocol for objects that can return information about their internal
   state."
@@ -110,30 +110,13 @@ optimiser.
   object's internal state. This map is not expected to contain
   information about parameters, value, or gradient, if applicable."))
 
+
 (defprotocol PLossFunction
   "A function that calculates loss of a vector output vs. a target value"
   (loss [this v target]
     "Computes the loss for a value v against a target")
   (loss-gradient [this v target]
     "Computes the gradient of the loss with respect to v"))
-
-(defprotocol PSerialize
-  "Default implementation simply calls into {} and adds type.  An override
-  is necessary if your class has complex object members instead of simple keys.
-  The map must have a key named :record-type that is the fully namespaced
-  qualified record class name (.getName (type item)).  The system will look
-  for a function map->TypeName in order to create an empty object."
-  (->map [this])
-  (map-> [this map-data]))
-
-(defprotocol PLayerSetup
-  "Setup with batch size before the layer begins to process anything"
-  (setup [layer items-per-batch]))
-
-(defprotocol PLayerSize
-  "The ecount of the input and output elements"
-  (input-size [layer])
-  (output-size [layer]))
 
 
 (defprotocol PMultiLayer
