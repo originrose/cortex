@@ -235,68 +235,75 @@ which is a graph of nodes,edges that describe the network."
                                                          id->node-map
                                                          %)))
                              id->node-map
-                             dfs-seq)]
-    (assoc desc-graph :nodes (vec (vals id->node-map)))))
+                             dfs-seq)
+        set->ordered-vec (fn [item-set ordered-item-seq]
+                           (->> (filter item-set ordered-item-seq)
+                                distinct
+                                vec))]
+
+    (assoc desc-graph
+           :nodes (vec (vals id->node-map))
+           :roots (set->ordered-vec roots (map first edges))
+           :leaves (set->ordered-vec leaves (map second edges)))))
 
 
-(defn build-full-network-description
+(defn build-layer-graph
   "build step verifies the network and fills in the implicit entries calculating
   things like the convolutional layer's output size.  Returns a map with at
   least :network-description as a key."
   [network-description-or-vec]
-  (update (layers/network-description-or-vec->network-description
-           network-description-or-vec)
-          :network-description
-          build-desc-seq-or-graph))
+  (let [network-description
+        (layers/network-description-or-vec->network-description
+         network-description-or-vec)
+         graph (-> network-description
+                   :layer-graph
+                   build-desc-seq-or-graph)]
+    (-> (assoc network-description :layer-graph graph))))
 
 
-(defmulti verify-description (fn [desc] (:type desc)))
+(defn get-graph-node-parameter-count
+  ^long [desc]
+  (long (->> (layers/get-parameter-descriptions desc)
+             (map (fn [{:keys [shape-fn]}]
+                    (->> (shape-fn desc)
+                         (reduce *))))
+             (reduce +))))
 
 
-(defn verify-weight-and-bias-shape
-  [{:keys [weights bias] :as desc} expected-w-n-rows expected-w-n-cols]
-  (when (and weights bias)
-   (let [[w-n-rows w-n-cols] (m/shape weights)
-         [b-n-rows] (m/shape bias)]
-     (when-not (and (= expected-w-n-rows w-n-rows)
-                    (= expected-w-n-cols w-n-cols)
-                    (= b-n-rows expected-w-n-rows))
-       {:verification-fail-reasons
-        [(format "weight-shape %s does not match expected shape %s
-bias shape %s does not match expected shape %s"
-                 [w-n-rows w-n-cols]
-                 [expected-w-n-rows expected-w-n-cols]
-                 [b-n-rows] [expected-w-n-rows])]
-        :desc desc}))))
+(defn get-layer-graph-parameter-count
+  ^long [{:keys [nodes]}]
+  (reduce + (map get-graph-node-parameter-count nodes)))
 
 
-(defmethod verify-description :convolutional
-  [{:keys [weights bias input-channels kernel-width kernel-height
-           output-width output-height output-channels
-           input-width input-height] :as desc}]
-  (let [weight-n-rows (long output-channels)
-        weight-n-cols (* (long input-channels) (long kernel-width) (long kernel-height))]
-    (verify-weight-and-bias-shape desc weight-n-rows weight-n-cols)))
+(defn verify-graph-node
+  [node]
+  (let [parameter-descriptions (layers/get-parameter-descriptions node)]
+    (->>
+     (map (fn [{:keys [key shape-fn]}]
+            (let [node-shape (shape-fn node)
+                  parameter-data (get node key)]
+              (when-let [buffer-data (get parameter-data :buffer)]
+                (when-not (= node-shape
+                             (m/shape buffer-data))
+                  {:node node
+                   :parameter key
+                   :desired-shape node-shape
+                   :actual-shape (m/shape buffer-data)}))))
+          parameter-descriptions)
+     (remove nil?))))
 
 
-(defmethod verify-description :linear
-  [desc]
-  (let [weight-n-rows (:output-size desc)
-        weight-n-cols (:input-size desc)]
-    (verify-weight-and-bias-shape desc weight-n-rows weight-n-cols)))
+(defn verify-layer-graph
+  [{:keys [nodes]}]
+  (mapcat verify-network-node nodes))
 
 
-(defmethod verify-description :default
-  [_] nil)
-
-
-(defn build-and-verify-trained-network
+(defn build-network
   "Build the network, ensure the weights and biases are in place and of the
 appropriate sizes.  Returns any descriptions that fail verification
 along with failure reasons."
   [network-desc]
-  (let [built-network (build-full-network-description network-desc)
-        verification-data (->> (get built-network :network-description)
-                               (map verify-description)
-                               (remove nil?))]
-    (assoc network-desc :verification-failures verification-data)))
+  (let [{:keys [layer-graph] :as built-network} (build-layer-graph network-desc)]
+    (assoc built-network
+           :verification-failures (seq (verify-layer-graph layer-graph))
+           :parameter-count (get-layer-graph-parameter-count layer-graph))))

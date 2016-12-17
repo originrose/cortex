@@ -34,8 +34,8 @@ keyword-value pairs and are assoc'd into the description map.")
   "Get a list of parameter descriptions.  Parameter descriptions are maps:
 :key        description key which holds the parameter.
 :type       one of the parameter buffer types.  Possibly unknown type.
-:count-fn   function which given the built description will return the
-            parameter count for this particular buffer."
+:shape-fn   function which given the built description will return the
+            core matrix parameter shape for this particular buffer."
   ;;Dispatch multimethod on type passed in directly as this is more
   ;;compile time information than runtime information.
   :type)
@@ -64,24 +64,24 @@ keyword-value pairs and are assoc'd into the description map.")
   [(merge-args {:type :linear :output-size num-output} args)])
 
 
-(defn linear-weight-parameter-count
+(defn linear-weight-parameter-shape
   [{:keys [input-size output-size]}]
-  (* (long input-size) (long output-size)))
+  [output-size input-size])
 
 
-(defn linear-bias-parameter-count
+(defn linear-bias-parameter-shape
   [{:keys [output-size]}]
-  output-size)
+  [output-size])
 
 
 (defmethod get-parameter-descriptions :linear
   [desc]
   [{:key :weights
     :type :weight
-    :count-fn linear-weight-parameter-count}
+    :shape-fn linear-weight-parameter-shape}
    {:key :bias
     :type :bias
-    :count-fn linear-bias-parameter-count}])
+    :shape-fn linear-bias-parameter-shape}])
 
 
 (defn softmax
@@ -155,7 +155,7 @@ no change to the input."
 (defn get-padded-strided-dimension
   "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
 of the output of a conv-net ignoring channels.  Caffe does this slightly different
-for pooling verse convolutional layers.  Furthermore kaffe does this differently
+for pooling verse convolutional layers.  Furthermore keras does this differently
 than caffe so this exact calculation has been the source of a few compatibility issues."
   [input-dim pad kernel-size stride dimension-op]
   (let [partial-result (/ (- (+ (double input-dim)
@@ -208,20 +208,19 @@ calculations must be "
     :dimension-op :floor)])
 
 
-(defn convolutional-weight-parameter-count
+(defn convolutional-weight-parameter-shape
   [{:keys [kernel-width kernel-height num-kernels input-channels]}]
-  (* kernel-width kernel-height num-kernels input-channels))
-
+  [num-kernels (* kernel-width kernel-height input-channels)])
 
 
 (defmethod get-parameter-descriptions :convolutional
   [desc]
   [{:type :weight
     :key :weights
-    :count-fn convolutional-weight-parameter-count}
+    :shape-fn convolutional-weight-parameter-shape}
    {:type :bias
     :key :bias
-    :count-fn linear-bias-parameter-count}])
+    :shape-fn linear-bias-parameter-shape}])
 
 
 (defn max-pooling
@@ -253,16 +252,16 @@ This is for cudnn compatibility.")))
   [desc]
   [{:key :scale
     :type :scale
-    :count-fn linear-bias-parameter-count}
+    :shape-fn linear-bias-parameter-shape}
    {:key :bias
     :type :bias
-    :count-fn linear-bias-parameter-count}
+    :shape-fn linear-bias-parameter-shape}
    {:key :means
     :type :mean
-    :count-fn linear-bias-parameter-count}
+    :shape-fn linear-bias-parameter-shape}
    {:key :variances
     :type :variance
-    :count-fn linear-bias-parameter-count}])
+    :shape-fn linear-bias-parameter-shape}])
 
 
 (defn local-response-normalization
@@ -281,7 +280,7 @@ This is for cudnn compatibility.")))
 network graph description."
   [layer-graph & args]
   (merge-args
-   {:network-description layer-graph}
+   {:layer-graph layer-graph}
    args))
 
 
@@ -289,7 +288,7 @@ network graph description."
   "Make anything into a network description."
   [network-desc-or-vec]
   (if-not (associative? network-desc-or-vec)
-    {:network-description network-desc-or-vec}
+    {:layer-graph network-desc-or-vec}
     network-desc-or-vec))
 
 

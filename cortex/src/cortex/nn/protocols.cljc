@@ -78,7 +78,7 @@ This vector should be exactly the
 
 
 
-;;Default implementation because most things do no need this implemented
+;;Default implementation because most things do not need this implemented
 (extend-protocol PNeuralTrainingOptional
   Object
   (prepare-forward [this] this))
@@ -143,6 +143,8 @@ optimiser.
   (multi-output-size [layer] [(output-size layer)])
   (multi-calc [m input-vec] (calc m (first input-vec)))
   (multi-forward [m input-vec] (forward m (first input-vec)))
-  (multi-backward [m input-vec output-gradient-vec] (backward m (first input-vec) (first output-gradient-vec)))
+  (multi-backward [m input-vec output-gradient-vec]
+    (backward m (first input-vec)
+              (first output-gradient-vec)))
   (multi-output [m] [(output m)])
   (multi-input-gradient [m] [(input-gradient m)]))
