@@ -1,0 +1,907 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Mathematica 10.3' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       158,          7]
+NotebookDataLength[     39238,        898]
+NotebookOptionsPosition[     38642,        873]
+NotebookOutlinePosition[     38998,        889]
+CellTagsIndexPosition[     38955,        886]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"f", "[", 
+   RowBox[{"x_", ",", "y_", ",", "z_"}], "]"}], ":=", 
+  RowBox[{
+   RowBox[{
+    RowBox[{"(", 
+     RowBox[{"x", "+", "y"}], ")"}], "^", "2"}], "+", 
+   RowBox[{
+    RowBox[{"(", 
+     RowBox[{"y", "+", "z"}], ")"}], "^", "2"}], "+", 
+   RowBox[{
+    RowBox[{"(", 
+     RowBox[{"z", "+", "x"}], ")"}], "^", "2"}]}]}]], "Input",
+ InitializationCell->True,
+ CellChangeTimes->{{3.666371697311879*^9, 3.666371712888568*^9}, {
+  3.666377410711957*^9, 3.666377413742132*^9}, {3.66637756273037*^9, 
+  3.666377563871976*^9}}],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"filename", "[", 
+   RowBox[{"i_", ",", "prefix_"}], "]"}], ":=", 
+  RowBox[{
+   RowBox[{"NotebookDirectory", "[", "]"}], "<>", "\"\<opt\>\"", "<>", 
+   RowBox[{"ToString", "[", "i", "]"}], "<>", "\"\<-\>\"", "<>", "prefix", 
+   "<>", "\"\<.txt\>\""}]}]], "Input",
+ InitializationCell->True,
+ CellChangeTimes->{{3.668441767990539*^9, 3.668441785653482*^9}, {
+  3.668441819571213*^9, 3.668441838562207*^9}}],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"parse", "[", "fname_", "]"}], ":=", 
+  RowBox[{
+   RowBox[{
+    RowBox[{"{", 
+     RowBox[{
+      RowBox[{"#", "[", 
+       RowBox[{"[", 
+        RowBox[{"1", ",", "1"}], "]"}], "]"}], ",", 
+      RowBox[{"#", "[", 
+       RowBox[{"[", 
+        RowBox[{"2", ";;", 
+         RowBox[{"Length", "[", "#", "]"}]}], "]"}], "]"}]}], "}"}], "&"}], 
+   "[", 
+   RowBox[{"Import", "[", 
+    RowBox[{
+     RowBox[{"OpenRead", "[", "fname", "]"}], ",", "\"\<Data\>\""}], "]"}], 
+   "]"}]}]], "Input",
+ InitializationCell->True,
+ CellChangeTimes->{{3.66844199995988*^9, 3.668442029482312*^9}, {
+  3.668442217559465*^9, 3.668442320757579*^9}}],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"datapl", "=", 
+   RowBox[{"{", "}"}]}], ";", 
+  RowBox[{"datagl", "=", 
+   RowBox[{"{", "}"}]}], ";", 
+  RowBox[{"datan", "=", 
+   RowBox[{"{", "}"}]}], ";", 
+  RowBox[{"i", "=", "1"}], ";", 
+  RowBox[{"While", "[", 
+   RowBox[{
+    RowBox[{
+     RowBox[{"FileExistsQ", "[", 
+      RowBox[{"filename", "[", 
+       RowBox[{"i", ",", "\"\<param\>\""}], "]"}], "]"}], "&&", 
+     RowBox[{"FileExistsQ", "[", 
+      RowBox[{"filename", "[", 
+       RowBox[{"i", ",", "\"\<grad\>\""}], "]"}], "]"}]}], ",", 
+    RowBox[{"Block", "[", 
+     RowBox[{
+      RowBox[{"{", 
+       RowBox[{"res", "=", 
+        RowBox[{"parse", "[", 
+         RowBox[{"filename", "[", 
+          RowBox[{"i", ",", "\"\<param\>\""}], "]"}], "]"}]}], "}"}], ",", 
+      RowBox[{
+       RowBox[{"datan", "=", 
+        RowBox[{"Append", "[", 
+         RowBox[{"datan", ",", 
+          RowBox[{"res", "[", 
+           RowBox[{"[", "1", "]"}], "]"}]}], "]"}]}], ";", 
+       RowBox[{"datapl", "=", 
+        RowBox[{"Append", "[", 
+         RowBox[{"datapl", ",", 
+          RowBox[{"res", "[", 
+           RowBox[{"[", "2", "]"}], "]"}]}], "]"}]}], ";", 
+       RowBox[{"datagl", "=", 
+        RowBox[{"Append", "[", 
+         RowBox[{"datagl", ",", 
+          RowBox[{
+           RowBox[{"parse", "[", 
+            RowBox[{"filename", "[", 
+             RowBox[{"i", ",", "\"\<grad\>\""}], "]"}], "]"}], "[", 
+           RowBox[{"[", "2", "]"}], "]"}]}], "]"}]}], ";", 
+       RowBox[{"i", "=", 
+        RowBox[{"i", "+", "1"}]}]}]}], "]"}]}], "]"}], 
+  RowBox[{"(*", " ", 
+   RowBox[{
+   "Evaluate", " ", "this", " ", "line", " ", "to", " ", "reload", " ", "the",
+     " ", "log", " ", "file"}], " ", "*)"}]}]], "Input",
+ InitializationCell->True,
+ CellChangeTimes->{{3.668441287059635*^9, 3.668441288764677*^9}, {
+  3.668441537737514*^9, 3.668441610461887*^9}, {3.6684416530994673`*^9, 
+  3.668441662098055*^9}, {3.6684417270772047`*^9, 3.668441752913666*^9}, {
+  3.668441844266922*^9, 3.668441859033595*^9}, {3.6684423323266907`*^9, 
+  3.6684423798435183`*^9}, {3.668442410377377*^9, 3.668442424105125*^9}, {
+  3.668442504607889*^9, 3.66844257694928*^9}, {3.66844956034379*^9, 
+  3.668449611217033*^9}}],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"With", "[", 
+   RowBox[{
+    RowBox[{"{", 
+     RowBox[{"$PerformanceGoal", "=", "\"\<Speed\>\""}], "}"}], ",", 
+    RowBox[{"Manipulate", "[", 
+     RowBox[{
+      RowBox[{
+       RowBox[{"If", "[", 
+        RowBox[{
+         RowBox[{"l", ">", 
+          RowBox[{"Length", "[", 
+           RowBox[{"datapl", "[", 
+            RowBox[{"[", "datai", "]"}], "]"}], "]"}]}], ",", 
+         RowBox[{"l", "=", 
+          RowBox[{"Length", "[", 
+           RowBox[{"datapl", "[", 
+            RowBox[{"[", "datai", "]"}], "]"}], "]"}]}]}], "]"}], ";", 
+       RowBox[{"If", "[", 
+        RowBox[{
+         RowBox[{
+          RowBox[{"i", "+", "l", "-", "1"}], ">", 
+          RowBox[{"Length", "[", 
+           RowBox[{"datapl", "[", 
+            RowBox[{"[", "datai", "]"}], "]"}], "]"}]}], ",", 
+         RowBox[{"i", "=", 
+          RowBox[{
+           RowBox[{"Length", "[", 
+            RowBox[{"datapl", "[", 
+             RowBox[{"[", "datai", "]"}], "]"}], "]"}], "-", "l", "+", 
+           "1"}]}]}], "]"}], ";", 
+       RowBox[{"With", "[", 
+        RowBox[{
+         RowBox[{"{", 
+          RowBox[{
+           RowBox[{"zoom", "=", 
+            RowBox[{"10", "^", "zoomexp"}]}], ",", 
+           RowBox[{"gscale", "=", 
+            RowBox[{"10", "^", "gscaleexp"}]}], ",", 
+           RowBox[{"vfieldsurf", "=", 
+            RowBox[{"10", "^", "vfieldsurfexp"}]}]}], "}"}], ",", 
+         RowBox[{"With", "[", 
+          RowBox[{
+           RowBox[{"{", 
+            RowBox[{
+             RowBox[{"xi", "=", 
+              RowBox[{"xs", "*", "zoom", 
+               RowBox[{"(", 
+                RowBox[{"xo", "-", "1"}], ")"}]}]}], ",", 
+             RowBox[{"yi", "=", 
+              RowBox[{"ys", "*", "zoom", 
+               RowBox[{"(", 
+                RowBox[{"yo", "-", "1"}], ")"}]}]}], ",", 
+             RowBox[{"zi", "=", 
+              RowBox[{"zs", "*", "zoom", 
+               RowBox[{"(", 
+                RowBox[{"zo", "-", "1"}], ")"}]}]}], ",", 
+             RowBox[{"xf", "=", 
+              RowBox[{"xs", "*", "zoom", 
+               RowBox[{"(", 
+                RowBox[{"xo", "+", "1"}], ")"}]}]}], ",", 
+             RowBox[{"yf", "=", 
+              RowBox[{"ys", "*", "zoom", 
+               RowBox[{"(", 
+                RowBox[{"yo", "+", "1"}], ")"}]}]}], ",", 
+             RowBox[{"zf", "=", 
+              RowBox[{"zs", "*", "zoom", 
+               RowBox[{"(", 
+                RowBox[{"zo", "+", "1"}], ")"}]}]}]}], "}"}], ",", 
+           RowBox[{"Show", "@@", 
+            RowBox[{"{", 
+             RowBox[{
+              RowBox[{"If", "[", 
+               RowBox[{
+                RowBox[{"param", "||", "grad"}], ",", 
+                RowBox[{"ListPointPlot3D", "[", 
+                 RowBox[{
+                  RowBox[{"{", 
+                   RowBox[{
+                    RowBox[{"If", "[", 
+                    RowBox[{"param", ",", 
+                    RowBox[{"datapl", "[", 
+                    RowBox[{"[", 
+                    RowBox[{"datai", ",", 
+                    RowBox[{"i", ";;", 
+                    RowBox[{"i", "+", "l", "-", "1"}]}]}], "]"}], "]"}], ",", 
+                    "Nothing"}], "]"}], ",", 
+                    RowBox[{"If", "[", 
+                    RowBox[{"grad", ",", 
+                    RowBox[{
+                    RowBox[{
+                    RowBox[{"{", 
+                    RowBox[{
+                    RowBox[{"If", "[", 
+                    RowBox[{"gradx", ",", "#1", ",", "0"}], "]"}], ",", 
+                    RowBox[{"If", "[", 
+                    RowBox[{"grady", ",", "#2", ",", "0"}], "]"}], ",", 
+                    RowBox[{"If", "[", 
+                    RowBox[{"gradz", ",", "#3", ",", "0"}], "]"}]}], "}"}], 
+                    "&"}], "@@@", 
+                    RowBox[{"(", 
+                    RowBox[{"gscale", "*", 
+                    RowBox[{"datagl", "[", 
+                    RowBox[{"[", 
+                    RowBox[{"datai", ",", 
+                    RowBox[{"i", ";;", 
+                    RowBox[{"i", "+", "l", "-", "1"}]}]}], "]"}], "]"}]}], 
+                    ")"}]}], ",", "Nothing"}], "]"}]}], "}"}], ",", 
+                  RowBox[{"ImageSize", "\[Rule]", "Large"}], ",", 
+                  RowBox[{"PlotRange", "\[Rule]", 
+                   RowBox[{"{", 
+                    RowBox[{
+                    RowBox[{"{", 
+                    RowBox[{"xi", ",", "xf"}], "}"}], ",", 
+                    RowBox[{"{", 
+                    RowBox[{"yi", ",", "yf"}], "}"}], ",", 
+                    RowBox[{"{", 
+                    RowBox[{"zi", ",", "zf"}], "}"}]}], "}"}]}], ",", 
+                  RowBox[{"PlotStyle", "\[Rule]", 
+                   RowBox[{"{", 
+                    RowBox[{
+                    RowBox[{"If", "[", 
+                    RowBox[{"param", ",", "Orange", ",", "Nothing"}], "]"}], 
+                    ",", 
+                    RowBox[{"If", "[", 
+                    RowBox[{"grad", ",", "Red", ",", "Nothing"}], "]"}]}], 
+                    "}"}]}]}], "]"}], ",", "Nothing"}], "]"}], ",", 
+              RowBox[{"If", "[", 
+               RowBox[{
+                RowBox[{
+                 RowBox[{"surf", "&&", 
+                  RowBox[{"surfo", ">", "0"}]}], "||", "mesh"}], ",", 
+                RowBox[{"ContourPlot3D", "[", 
+                 RowBox[{
+                  RowBox[{"f", "[", 
+                   RowBox[{"x", ",", "y", ",", "z"}], "]"}], ",", 
+                  RowBox[{"{", 
+                   RowBox[{"x", ",", "xi", ",", "xf"}], "}"}], ",", 
+                  RowBox[{"{", 
+                   RowBox[{"y", ",", "yi", ",", "yf"}], "}"}], ",", 
+                  RowBox[{"{", 
+                   RowBox[{"z", ",", "zi", ",", "zf"}], "}"}], ",", 
+                  RowBox[{"Contours", "\[Rule]", 
+                   RowBox[{"{", 
+                    RowBox[{
+                    "0.00025", ",", "0.0005", ",", "0.001", ",", "0.0015", 
+                    ",", "0.002", ",", "0.0025", ",", "0.005", ",", "0.01", 
+                    ",", "0.025", ",", "0.05", ",", "0.1", ",", "0.25", ",", 
+                    "0.5", ",", "1", ",", "2", ",", "3", ",", "4", ",", "5", 
+                    ",", "7", ",", "9", ",", "11", ",", "14", ",", "17", ",", 
+                    "20"}], "}"}]}], ",", 
+                  RowBox[{"ImageSize", "\[Rule]", "Large"}], ",", 
+                  RowBox[{"ColorFunction", "->", "\"\<Rainbow\>\""}], ",", 
+                  RowBox[{"Mesh", "\[Rule]", 
+                   RowBox[{"If", "[", 
+                    RowBox[{"mesh", ",", "Automatic", ",", "None"}], "]"}]}], 
+                  ",", 
+                  RowBox[{"ContourStyle", "\[Rule]", 
+                   RowBox[{"{", 
+                    RowBox[{"{", 
+                    RowBox[{"Opacity", "[", 
+                    RowBox[{"If", "[", 
+                    RowBox[{"surf", ",", "surfo", ",", "0"}], "]"}], "]"}], 
+                    "}"}], "}"}]}]}], "]"}], ",", "Nothing"}], "]"}], ",", 
+              RowBox[{"If", "[", 
+               RowBox[{"vfield", ",", 
+                RowBox[{"VectorPlot3D", "[", 
+                 RowBox[{
+                  RowBox[{
+                   RowBox[{"If", "[", 
+                    RowBox[{"propv", ",", "Identity", ",", "Normalize"}], 
+                    "]"}], "[", 
+                   RowBox[{"{", 
+                    RowBox[{
+                    RowBox[{"If", "[", 
+                    RowBox[{"gradx", ",", 
+                    RowBox[{
+                    RowBox[{"4", "x"}], "+", 
+                    RowBox[{"2", "y"}], "+", 
+                    RowBox[{"2", "z"}]}], ",", "0"}], "]"}], ",", 
+                    RowBox[{"If", "[", 
+                    RowBox[{"grady", ",", 
+                    RowBox[{
+                    RowBox[{"2", "x"}], "+", 
+                    RowBox[{"4", "y"}], "+", 
+                    RowBox[{"2", "z"}]}], ",", "0"}], "]"}], ",", 
+                    RowBox[{"If", "[", 
+                    RowBox[{"gradz", ",", 
+                    RowBox[{
+                    RowBox[{"2", "x"}], "+", 
+                    RowBox[{"2", "y"}], "+", 
+                    RowBox[{"4", "z"}]}], ",", "0"}], "]"}]}], "}"}], "]"}], 
+                  ",", 
+                  RowBox[{"{", 
+                   RowBox[{"x", ",", "xi", ",", "xf"}], "}"}], ",", 
+                  RowBox[{"{", 
+                   RowBox[{"y", ",", "yi", ",", "yf"}], "}"}], ",", 
+                  RowBox[{"{", 
+                   RowBox[{"z", ",", "zi", ",", "zf"}], "}"}], ",", 
+                  RowBox[{"VectorScale", "\[Rule]", 
+                   RowBox[{"If", "[", 
+                    RowBox[{"propv", ",", "Automatic", ",", "Tiny"}], "]"}]}],
+                   ",", 
+                  RowBox[{"VectorStyle", "\[Rule]", "\"\<Arrow3D\>\""}], ",", 
+                  
+                  RowBox[{"RegionFunction", "\[Rule]", 
+                   RowBox[{"Function", "[", 
+                    RowBox[{
+                    RowBox[{"{", 
+                    RowBox[{"x", ",", "y", ",", "z"}], "}"}], ",", 
+                    RowBox[{
+                    RowBox[{"Abs", "[", 
+                    RowBox[{
+                    RowBox[{"f", "[", 
+                    RowBox[{"x", ",", "y", ",", "z"}], "]"}], "-", 
+                    "vfieldsurf"}], "]"}], "\[LessEqual]", 
+                    RowBox[{"vfieldthickness", "*", "vfieldsurf"}]}]}], 
+                    "]"}]}], ",", 
+                  RowBox[{"VectorPoints", "\[Rule]", 
+                   RowBox[{"Round", "[", 
+                    RowBox[{"vpoints", "*", 
+                    RowBox[{"{", 
+                    RowBox[{"xs", ",", "ys", ",", "zs"}], "}"}]}], "]"}]}]}], 
+                 "]"}], ",", "Nothing"}], "]"}], ",", 
+              RowBox[{"If", "[", 
+               RowBox[{"planes", ",", 
+                RowBox[{"ParametricPlot3D", "[", 
+                 RowBox[{
+                  RowBox[{"{", 
+                   RowBox[{
+                    RowBox[{"{", 
+                    RowBox[{"0", ",", "t", ",", "u"}], "}"}], ",", 
+                    RowBox[{"{", 
+                    RowBox[{"t", ",", "0", ",", "u"}], "}"}], ",", 
+                    RowBox[{"{", 
+                    RowBox[{"t", ",", "u", ",", "0"}], "}"}]}], "}"}], ",", 
+                  RowBox[{"{", 
+                   RowBox[{"t", ",", 
+                    RowBox[{"Min", "[", 
+                    RowBox[{"xi", ",", "yi", ",", "zi"}], "]"}], ",", 
+                    RowBox[{"Max", "[", 
+                    RowBox[{"xf", ",", "yf", ",", "zf"}], "]"}]}], "}"}], ",", 
+                  RowBox[{"{", 
+                   RowBox[{"u", ",", 
+                    RowBox[{"Min", "[", 
+                    RowBox[{"xi", ",", "yi", ",", "zi"}], "]"}], ",", 
+                    RowBox[{"Max", "[", 
+                    RowBox[{"xf", ",", "yf", ",", "zf"}], "]"}]}], "}"}], ",", 
+                  RowBox[{"Mesh", "\[Rule]", "None"}], ",", 
+                  RowBox[{"PlotStyle", "\[Rule]", 
+                   RowBox[{"{", 
+                    RowBox[{"{", 
+                    RowBox[{"Black", ",", 
+                    RowBox[{"Opacity", "[", "0.1", "]"}]}], "}"}], "}"}]}]}], 
+                 "]"}], ",", "Nothing"}], "]"}], ",", 
+              RowBox[{"BoxRatios", "\[Rule]", "Automatic"}], ",", 
+              RowBox[{"AxesOrigin", "\[Rule]", 
+               RowBox[{"{", 
+                RowBox[{"0", ",", "0", ",", "0"}], "}"}]}], ",", 
+              RowBox[{"Antialiasing", "\[Rule]", "False"}]}], "}"}]}]}], 
+          "]"}]}], "]"}]}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"datai", ",", "1", ",", "\"\<Trajectory\>\""}], "}"}], ",", 
+        RowBox[{
+         RowBox[{
+          RowBox[{"Rule", "@@", "#"}], "&"}], "/@", 
+         RowBox[{"Transpose", "[", 
+          RowBox[{"{", 
+           RowBox[{
+            RowBox[{"Range", "[", 
+             RowBox[{"Length", "[", "datapl", "]"}], "]"}], ",", "datan"}], 
+           "}"}], "]"}]}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"l", ",", "100", ",", "\"\<Length\>\""}], "}"}], ",", "1", 
+        ",", 
+        RowBox[{"Length", "[", 
+         RowBox[{"datapl", "[", 
+          RowBox[{"[", "datai", "]"}], "]"}], "]"}], ",", "1", ",", 
+        RowBox[{"ImageSize", "\[Rule]", "900"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"i", ",", "1", ",", "\"\<Position\>\""}], "}"}], ",", "1", 
+        ",", 
+        RowBox[{
+         RowBox[{"Length", "[", 
+          RowBox[{"datapl", "[", 
+           RowBox[{"[", "datai", "]"}], "]"}], "]"}], "-", "l", "+", "1"}], 
+        ",", "1", ",", 
+        RowBox[{"ImageSize", "\[Rule]", "900"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"zpower", ",", "3", ",", "\"\<Zoom Power\>\""}], "}"}], ",", 
+        "3", ",", "30", ",", "1", ",", 
+        RowBox[{"ImageSize", "\[Rule]", "900"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"zoomexp", ",", "0", ",", "\"\<Zoom\>\""}], "}"}], ",", 
+        RowBox[{"-", "zpower"}], ",", "1", ",", 
+        RowBox[{"ImageSize", "\[Rule]", "900"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"xs", ",", "1", ",", "\"\<X Scale\>\""}], "}"}], ",", "1", 
+        ",", "3", ",", "0.5"}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"ys", ",", "2", ",", "\"\<Y Scale\>\""}], "}"}], ",", "1", 
+        ",", "3", ",", "0.5"}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"zs", ",", "3", ",", "\"\<Z Scale\>\""}], "}"}], ",", "1", 
+        ",", "3", ",", "0.5"}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"xo", ",", "0", ",", "\"\<X Offset\>\""}], "}"}], ",", 
+        RowBox[{"-", "3"}], ",", "3", ",", "0.5"}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"yo", ",", "0", ",", "\"\<Y Offset\>\""}], "}"}], ",", 
+        RowBox[{"-", "3"}], ",", "3", ",", "0.5"}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"zo", ",", "0", ",", "\"\<Z Offset\>\""}], "}"}], ",", 
+        RowBox[{"-", "3"}], ",", "3", ",", "0.5"}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"gscaleexp", ",", "0", ",", "\"\<Gradient Scale\>\""}], 
+         "}"}], ",", 
+        RowBox[{"-", "2"}], ",", "2", ",", 
+        RowBox[{"ImageSize", "\[Rule]", "900"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"surfo", ",", "0.2", ",", "\"\<Level Surface Opacity\>\""}], 
+         "}"}], ",", "0", ",", "1", ",", 
+        RowBox[{"ImageSize", "\[Rule]", "900"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{
+         "vfieldsurfexp", ",", "1", ",", "\"\<Vector Field Surface\>\""}], 
+         "}"}], ",", 
+        RowBox[{"-", "4"}], ",", "2", ",", 
+        RowBox[{"ImageSize", "\[Rule]", "900"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{
+         "vfieldthickness", ",", "0.2", ",", 
+          "\"\<Vector Field Thickness\>\""}], "}"}], ",", "0", ",", "1"}], 
+       "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"vpoints", ",", "10", ",", "\"\<Vector Field Density\>\""}], 
+         "}"}], ",", "3", ",", "15", ",", "1"}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"surf", ",", "False", ",", "\"\<Level Surfaces\>\""}], "}"}],
+         ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"mesh", ",", "False", ",", "\"\<Level Surface Mesh\>\""}], 
+         "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"vfield", ",", "False", ",", "\"\<Vector Field\>\""}], "}"}],
+         ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{
+         "propv", ",", "False", ",", "\"\<Proportional Vector Lengths\>\""}], 
+         "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"planes", ",", "True", ",", "\"\<Coordinate Planes\>\""}], 
+         "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"param", ",", "True", ",", "\"\<Parameter\>\""}], "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"grad", ",", "True", ",", "\"\<Gradient\>\""}], "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"gradx", ",", "True", ",", "\"\<Gradient X Component\>\""}], 
+         "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"grady", ",", "True", ",", "\"\<Gradient Y Component\>\""}], 
+         "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}], ",", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"{", 
+         RowBox[{"gradz", ",", "True", ",", "\"\<Gradient Z Component\>\""}], 
+         "}"}], ",", 
+        RowBox[{"{", 
+         RowBox[{"True", ",", "False"}], "}"}]}], "}"}]}], "]"}]}], "]"}], 
+  RowBox[{"(*", " ", 
+   RowBox[{
+   "Evaluate", " ", "this", " ", "line", " ", "to", " ", "reset", " ", "the", 
+    " ", "applet"}], " ", "*)"}]}]], "Input",
+ CellChangeTimes->{{3.6663789040402946`*^9, 3.6663790036952057`*^9}, {
+   3.666379110194113*^9, 3.66637911175307*^9}, {3.6663794468973303`*^9, 
+   3.666379453305345*^9}, {3.6664553977905483`*^9, 3.666455415940527*^9}, {
+   3.66645546320676*^9, 3.666455471574718*^9}, {3.666455537983303*^9, 
+   3.6664556878662443`*^9}, {3.666455837269745*^9, 3.666455837819153*^9}, {
+   3.6664558739430532`*^9, 3.6664558748942633`*^9}, {3.6664560841207123`*^9, 
+   3.666456085679332*^9}, {3.666456186839796*^9, 3.666456226637916*^9}, {
+   3.666456283979601*^9, 3.666456335192422*^9}, {3.666456671424472*^9, 
+   3.6664566829168453`*^9}, {3.666456815951889*^9, 3.666456832487957*^9}, {
+   3.666456896899428*^9, 3.666456897017995*^9}, {3.666456940778618*^9, 
+   3.666456972742324*^9}, {3.666457014752483*^9, 3.666457040485065*^9}, {
+   3.6665365250988483`*^9, 3.6665365433130283`*^9}, {3.666536732889639*^9, 
+   3.6665367385868587`*^9}, {3.666536830111167*^9, 3.666536835766487*^9}, {
+   3.666537132908876*^9, 3.666537183913059*^9}, {3.666537316611867*^9, 
+   3.6665373335320253`*^9}, 3.666537729812553*^9, {3.666537811306851*^9, 
+   3.6665378464978523`*^9}, {3.6665453183675327`*^9, 3.666545395264063*^9}, {
+   3.666545434548111*^9, 3.6665454352101393`*^9}, {3.666711489803173*^9, 
+   3.6667114969844418`*^9}, {3.666711629576466*^9, 3.666711631399269*^9}, {
+   3.668441389427973*^9, 3.668441428119203*^9}, 3.6684414623916483`*^9, {
+   3.66844270882544*^9, 3.6684427105681562`*^9}, {3.6684496489237413`*^9, 
+   3.668449657728237*^9}, 3.66861070752713*^9}],
+
+Cell[BoxData[
+ TagBox[
+  StyleBox[
+   DynamicModuleBox[{$CellContext`datai$$ = 1, $CellContext`grad$$ = 
+    True, $CellContext`gradx$$ = True, $CellContext`grady$$ = 
+    True, $CellContext`gradz$$ = True, $CellContext`gscaleexp$$ = 
+    0, $CellContext`i$$ = 1, $CellContext`l$$ = 100, $CellContext`mesh$$ = 
+    False, $CellContext`param$$ = True, $CellContext`planes$$ = 
+    True, $CellContext`propv$$ = False, $CellContext`surf$$ = 
+    False, $CellContext`surfo$$ = 0.2, $CellContext`vfield$$ = 
+    False, $CellContext`vfieldsurfexp$$ = 1, $CellContext`vfieldthickness$$ = 
+    0.2, $CellContext`vpoints$$ = 10, $CellContext`xo$$ = 
+    0, $CellContext`xs$$ = 1, $CellContext`yo$$ = 0, $CellContext`ys$$ = 
+    2, $CellContext`zo$$ = 0, $CellContext`zoomexp$$ = 
+    0, $CellContext`zpower$$ = 3, $CellContext`zs$$ = 3, Typeset`show$$ = 
+    True, Typeset`bookmarkList$$ = {}, Typeset`bookmarkMode$$ = "Menu", 
+    Typeset`animator$$, Typeset`animvar$$ = 1, Typeset`name$$ = 
+    "\"untitled\"", Typeset`specs$$ = {{{
+       Hold[$CellContext`datai$$], 1, "Trajectory"}, {
+      1 -> "ADADELTA Classic", 2 -> "ADADELTA Parameter", 3 -> 
+       "ADADELTA Global", 4 -> "Adam"}}, {{
+       Hold[$CellContext`l$$], 100, "Length"}, 1, 
+      Dynamic[
+       Length[
+        Part[$CellContext`datapl, $CellContext`datai$$]]], 1}, {{
+       Hold[$CellContext`i$$], 1, "Position"}, 1, 
+      Dynamic[Length[
+         Part[$CellContext`datapl, $CellContext`datai$$]] - $CellContext`l$$ + 
+       1], 1}, {{
+       Hold[$CellContext`zpower$$], 3, "Zoom Power"}, 3, 30, 1}, {{
+       Hold[$CellContext`zoomexp$$], 0, "Zoom"}, 
+      Dynamic[-$CellContext`zpower$$], 1}, {{
+       Hold[$CellContext`xs$$], 1, "X Scale"}, 1, 3, 0.5}, {{
+       Hold[$CellContext`ys$$], 2, "Y Scale"}, 1, 3, 0.5}, {{
+       Hold[$CellContext`zs$$], 3, "Z Scale"}, 1, 3, 0.5}, {{
+       Hold[$CellContext`xo$$], 0, "X Offset"}, -3, 3, 0.5}, {{
+       Hold[$CellContext`yo$$], 0, "Y Offset"}, -3, 3, 0.5}, {{
+       Hold[$CellContext`zo$$], 0, "Z Offset"}, -3, 3, 0.5}, {{
+       Hold[$CellContext`gscaleexp$$], 0, "Gradient Scale"}, -2, 2}, {{
+       Hold[$CellContext`surfo$$], 0.2, "Level Surface Opacity"}, 0, 1}, {{
+       Hold[$CellContext`vfieldsurfexp$$], 1, "Vector Field Surface"}, -4, 
+      2}, {{
+       Hold[$CellContext`vfieldthickness$$], 0.2, "Vector Field Thickness"}, 
+      0, 1}, {{
+       Hold[$CellContext`vpoints$$], 10, "Vector Field Density"}, 3, 15, 1}, {{
+       Hold[$CellContext`surf$$], False, "Level Surfaces"}, {True, False}}, {{
+      
+       Hold[$CellContext`mesh$$], False, "Level Surface Mesh"}, {
+      True, False}}, {{
+       Hold[$CellContext`vfield$$], False, "Vector Field"}, {True, False}}, {{
+      
+       Hold[$CellContext`propv$$], False, "Proportional Vector Lengths"}, {
+      True, False}}, {{
+       Hold[$CellContext`planes$$], True, "Coordinate Planes"}, {
+      True, False}}, {{
+       Hold[$CellContext`param$$], True, "Parameter"}, {True, False}}, {{
+       Hold[$CellContext`grad$$], True, "Gradient"}, {True, False}}, {{
+       Hold[$CellContext`gradx$$], True, "Gradient X Component"}, {
+      True, False}}, {{
+       Hold[$CellContext`grady$$], True, "Gradient Y Component"}, {
+      True, False}}, {{
+       Hold[$CellContext`gradz$$], True, "Gradient Z Component"}, {
+      True, False}}}, Typeset`size$$ = {388., {358., 362.}}, 
+    Typeset`update$$ = 0, Typeset`initDone$$, Typeset`skipInitDone$$ = 
+    True, $CellContext`datai$14348$$ = False, $CellContext`l$14349$$ = 
+    0, $CellContext`i$14350$$ = 0, $CellContext`zpower$14351$$ = 
+    0, $CellContext`zoomexp$14352$$ = 0, $CellContext`xs$14353$$ = 
+    0, $CellContext`ys$14354$$ = 0, $CellContext`zs$14355$$ = 
+    0, $CellContext`xo$14356$$ = 0, $CellContext`yo$14357$$ = 
+    0, $CellContext`zo$14358$$ = 0, $CellContext`surf$14359$$ = 
+    False, $CellContext`mesh$14360$$ = False, $CellContext`vfield$14361$$ = 
+    False}, 
+    DynamicBox[Manipulate`ManipulateBoxes[
+     1, StandardForm, 
+      "Variables" :> {$CellContext`datai$$ = 1, $CellContext`grad$$ = 
+        True, $CellContext`gradx$$ = True, $CellContext`grady$$ = 
+        True, $CellContext`gradz$$ = True, $CellContext`gscaleexp$$ = 
+        0, $CellContext`i$$ = 1, $CellContext`l$$ = 100, $CellContext`mesh$$ = 
+        False, $CellContext`param$$ = True, $CellContext`planes$$ = 
+        True, $CellContext`propv$$ = False, $CellContext`surf$$ = 
+        False, $CellContext`surfo$$ = 0.2, $CellContext`vfield$$ = 
+        False, $CellContext`vfieldsurfexp$$ = 
+        1, $CellContext`vfieldthickness$$ = 0.2, $CellContext`vpoints$$ = 
+        10, $CellContext`xo$$ = 0, $CellContext`xs$$ = 1, $CellContext`yo$$ = 
+        0, $CellContext`ys$$ = 2, $CellContext`zo$$ = 
+        0, $CellContext`zoomexp$$ = 0, $CellContext`zpower$$ = 
+        3, $CellContext`zs$$ = 3}, "ControllerVariables" :> {
+        Hold[$CellContext`datai$$, $CellContext`datai$14348$$, False], 
+        Hold[$CellContext`l$$, $CellContext`l$14349$$, 0], 
+        Hold[$CellContext`i$$, $CellContext`i$14350$$, 0], 
+        Hold[$CellContext`zpower$$, $CellContext`zpower$14351$$, 0], 
+        Hold[$CellContext`zoomexp$$, $CellContext`zoomexp$14352$$, 0], 
+        Hold[$CellContext`xs$$, $CellContext`xs$14353$$, 0], 
+        Hold[$CellContext`ys$$, $CellContext`ys$14354$$, 0], 
+        Hold[$CellContext`zs$$, $CellContext`zs$14355$$, 0], 
+        Hold[$CellContext`xo$$, $CellContext`xo$14356$$, 0], 
+        Hold[$CellContext`yo$$, $CellContext`yo$14357$$, 0], 
+        Hold[$CellContext`zo$$, $CellContext`zo$14358$$, 0], 
+        Hold[$CellContext`surf$$, $CellContext`surf$14359$$, False], 
+        Hold[$CellContext`mesh$$, $CellContext`mesh$14360$$, False], 
+        Hold[$CellContext`vfield$$, $CellContext`vfield$14361$$, False]}, 
+      "OtherVariables" :> {
+       Typeset`show$$, Typeset`bookmarkList$$, Typeset`bookmarkMode$$, 
+        Typeset`animator$$, Typeset`animvar$$, Typeset`name$$, 
+        Typeset`specs$$, Typeset`size$$, Typeset`update$$, Typeset`initDone$$,
+         Typeset`skipInitDone$$}, "Body" :> (If[$CellContext`l$$ > Length[
+           Part[$CellContext`datapl, $CellContext`datai$$]], $CellContext`l$$ = 
+         Length[
+           Part[$CellContext`datapl, $CellContext`datai$$]]]; 
+       If[$CellContext`i$$ + $CellContext`l$$ - 1 > Length[
+           Part[$CellContext`datapl, $CellContext`datai$$]], $CellContext`i$$ = 
+         Length[
+            
+            Part[$CellContext`datapl, $CellContext`datai$$]] - \
+$CellContext`l$$ + 1]; 
+       With[{$CellContext`zoom$ = 
+          10^$CellContext`zoomexp$$, $CellContext`gscale$ = 
+          10^$CellContext`gscaleexp$$, $CellContext`vfieldsurf$ = 
+          10^$CellContext`vfieldsurfexp$$}, 
+         With[{$CellContext`xi$ = $CellContext`xs$$ $CellContext`zoom$ \
+($CellContext`xo$$ - 
+             1), $CellContext`yi$ = $CellContext`ys$$ $CellContext`zoom$ \
+($CellContext`yo$$ - 
+             1), $CellContext`zi$ = $CellContext`zs$$ $CellContext`zoom$ \
+($CellContext`zo$$ - 
+             1), $CellContext`xf$ = $CellContext`xs$$ $CellContext`zoom$ \
+($CellContext`xo$$ + 
+             1), $CellContext`yf$ = $CellContext`ys$$ $CellContext`zoom$ \
+($CellContext`yo$$ + 
+             1), $CellContext`zf$ = $CellContext`zs$$ $CellContext`zoom$ \
+($CellContext`zo$$ + 1)}, 
+          Apply[Show, {
+            If[
+             Or[$CellContext`param$$, $CellContext`grad$$], 
+             ListPointPlot3D[{
+               If[$CellContext`param$$, 
+                Part[$CellContext`datapl, $CellContext`datai$$, 
+                 
+                 Span[$CellContext`i$$, $CellContext`i$$ + $CellContext`l$$ - 
+                  1]], Nothing], 
+               If[$CellContext`grad$$, 
+                Apply[{
+                  If[$CellContext`gradx$$, #, 0], 
+                  If[$CellContext`grady$$, #2, 0], 
+                  If[$CellContext`gradz$$, #3, 0]}& , $CellContext`gscale$ 
+                 Part[$CellContext`datagl, $CellContext`datai$$, 
+                   
+                   Span[$CellContext`i$$, $CellContext`i$$ + $CellContext`l$$ - 
+                    1]], {1}], Nothing]}, ImageSize -> Large, 
+              
+              PlotRange -> {{$CellContext`xi$, $CellContext`xf$}, \
+{$CellContext`yi$, $CellContext`yf$}, {$CellContext`zi$, $CellContext`zf$}}, 
+              PlotStyle -> {
+                If[$CellContext`param$$, Orange, Nothing], 
+                If[$CellContext`grad$$, Red, Nothing]}], Nothing], 
+            If[
+             Or[
+              
+              And[$CellContext`surf$$, $CellContext`surfo$$ > 
+               0], $CellContext`mesh$$], 
+             ContourPlot3D[
+              $CellContext`f[$CellContext`x, $CellContext`y, $CellContext`z], \
+{$CellContext`x, $CellContext`xi$, $CellContext`xf$}, {$CellContext`y, \
+$CellContext`yi$, $CellContext`yf$}, {$CellContext`z, $CellContext`zi$, \
+$CellContext`zf$}, 
+              Contours -> {
+               0.00025, 0.0005, 0.001, 0.0015, 0.002, 0.0025, 0.005, 0.01, 
+                0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 7, 9, 11, 14, 17, 
+                20}, ImageSize -> Large, ColorFunction -> "Rainbow", Mesh -> 
+              If[$CellContext`mesh$$, Automatic, None], ContourStyle -> {{
+                 Opacity[
+                  If[$CellContext`surf$$, $CellContext`surfo$$, 0]]}}], 
+             Nothing], 
+            If[$CellContext`vfield$$, 
+             VectorPlot3D[
+              If[$CellContext`propv$$, Identity, Normalize][{
+                
+                If[$CellContext`gradx$$, 4 $CellContext`x + 2 $CellContext`y + 
+                 2 $CellContext`z, 0], 
+                
+                If[$CellContext`grady$$, 2 $CellContext`x + 4 $CellContext`y + 
+                 2 $CellContext`z, 0], 
+                
+                If[$CellContext`gradz$$, 2 $CellContext`x + 2 $CellContext`y + 
+                 4 $CellContext`z, 
+                 0]}], {$CellContext`x, $CellContext`xi$, $CellContext`xf$}, \
+{$CellContext`y, $CellContext`yi$, $CellContext`yf$}, {$CellContext`z, \
+$CellContext`zi$, $CellContext`zf$}, VectorScale -> 
+              If[$CellContext`propv$$, Automatic, Tiny], VectorStyle -> 
+              "Arrow3D", RegionFunction -> 
+              Function[{$CellContext`x$, $CellContext`y$, $CellContext`z$}, 
+                Abs[$CellContext`f[$CellContext`x$, $CellContext`y$, \
+$CellContext`z$] - $CellContext`vfieldsurf$] <= \
+$CellContext`vfieldthickness$$ $CellContext`vfieldsurf$], VectorPoints -> 
+              Round[$CellContext`vpoints$$ {$CellContext`xs$$, \
+$CellContext`ys$$, $CellContext`zs$$}]], Nothing], 
+            If[$CellContext`planes$$, 
+             
+             ParametricPlot3D[{{
+               0, $CellContext`t, $CellContext`u}, {$CellContext`t, 
+                0, $CellContext`u}, {$CellContext`t, $CellContext`u, 
+                0}}, {$CellContext`t, 
+               Min[$CellContext`xi$, $CellContext`yi$, $CellContext`zi$], 
+               
+               Max[$CellContext`xf$, $CellContext`yf$, $CellContext`zf$]}, \
+{$CellContext`u, 
+               Min[$CellContext`xi$, $CellContext`yi$, $CellContext`zi$], 
+               Max[$CellContext`xf$, $CellContext`yf$, $CellContext`zf$]}, 
+              Mesh -> None, PlotStyle -> {{Black, 
+                 Opacity[0.1]}}], Nothing], BoxRatios -> Automatic, 
+            AxesOrigin -> {0, 0, 0}, Antialiasing -> False}]]]), 
+      "Specifications" :> {{{$CellContext`datai$$, 1, "Trajectory"}, {
+         1 -> "ADADELTA Classic", 2 -> "ADADELTA Parameter", 3 -> 
+          "ADADELTA Global", 4 -> "Adam"}}, {{$CellContext`l$$, 100, 
+          "Length"}, 1, 
+         Dynamic[
+          Length[
+           Part[$CellContext`datapl, $CellContext`datai$$]]], 1, ImageSize -> 
+         900}, {{$CellContext`i$$, 1, "Position"}, 1, 
+         Dynamic[Length[
+            
+            Part[$CellContext`datapl, $CellContext`datai$$]] - \
+$CellContext`l$$ + 1], 1, ImageSize -> 
+         900}, {{$CellContext`zpower$$, 3, "Zoom Power"}, 3, 30, 1, ImageSize -> 
+         900}, {{$CellContext`zoomexp$$, 0, "Zoom"}, 
+         Dynamic[-$CellContext`zpower$$], 1, ImageSize -> 
+         900}, {{$CellContext`xs$$, 1, "X Scale"}, 1, 3, 
+         0.5}, {{$CellContext`ys$$, 2, "Y Scale"}, 1, 3, 
+         0.5}, {{$CellContext`zs$$, 3, "Z Scale"}, 1, 3, 
+         0.5}, {{$CellContext`xo$$, 0, "X Offset"}, -3, 3, 
+         0.5}, {{$CellContext`yo$$, 0, "Y Offset"}, -3, 3, 
+         0.5}, {{$CellContext`zo$$, 0, "Z Offset"}, -3, 3, 
+         0.5}, {{$CellContext`gscaleexp$$, 0, "Gradient Scale"}, -2, 2, 
+         ImageSize -> 
+         900}, {{$CellContext`surfo$$, 0.2, "Level Surface Opacity"}, 0, 1, 
+         ImageSize -> 
+         900}, {{$CellContext`vfieldsurfexp$$, 1, "Vector Field Surface"}, -4,
+          2, ImageSize -> 
+         900}, {{$CellContext`vfieldthickness$$, 0.2, 
+          "Vector Field Thickness"}, 0, 
+         1}, {{$CellContext`vpoints$$, 10, "Vector Field Density"}, 3, 15, 
+         1}, {{$CellContext`surf$$, False, "Level Surfaces"}, {
+         True, False}}, {{$CellContext`mesh$$, False, "Level Surface Mesh"}, {
+         True, False}}, {{$CellContext`vfield$$, False, "Vector Field"}, {
+         True, False}}, {{$CellContext`propv$$, False, 
+          "Proportional Vector Lengths"}, {
+         True, False}}, {{$CellContext`planes$$, True, "Coordinate Planes"}, {
+         True, False}}, {{$CellContext`param$$, True, "Parameter"}, {
+         True, False}}, {{$CellContext`grad$$, True, "Gradient"}, {
+         True, False}}, {{$CellContext`gradx$$, True, 
+          "Gradient X Component"}, {
+         True, False}}, {{$CellContext`grady$$, True, 
+          "Gradient Y Component"}, {
+         True, False}}, {{$CellContext`gradz$$, True, 
+          "Gradient Z Component"}, {True, False}}}, "Options" :> {}, 
+      "DefaultOptions" :> {}],
+     ImageSizeCache->{1472., {386., 391.}},
+     SingleEvaluation->True],
+    Deinitialization:>None,
+    DynamicModuleValues:>{},
+    SynchronousInitialization->True,
+    UndoTrackedVariables:>{Typeset`show$$, Typeset`bookmarkMode$$},
+    UnsavedVariables:>{Typeset`initDone$$},
+    UntrackedVariables:>{Typeset`size$$}], "Manipulate",
+   Deployed->True,
+   StripOnInput->False],
+  Manipulate`InterpretManipulate[1]]], "Output",
+ CellChangeTimes->{
+  3.6684427434157143`*^9, 3.668442808737995*^9, 3.668449535518703*^9, 
+   3.6684496343483343`*^9, 3.668449686100848*^9, 3.668610716782412*^9, {
+   3.6686107666937428`*^9, 3.6686107944104223`*^9}}]
+}, Open  ]]
+},
+WindowSize->{1916, 1155},
+WindowMargins->{{0, Automatic}, {Automatic, 0}},
+FrontEndVersion->"10.3 for Mac OS X x86 (32-bit, 64-bit Kernel) (October 9, \
+2015)",
+StyleDefinitions->"Default.nb"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[558, 20, 563, 17, 28, "Input",
+ InitializationCell->True],
+Cell[1124, 39, 440, 10, 28, "Input",
+ InitializationCell->True],
+Cell[1567, 51, 665, 21, 28, "Input",
+ InitializationCell->True],
+Cell[2235, 74, 2209, 57, 97, "Input",
+ InitializationCell->True],
+Cell[CellGroupData[{
+Cell[4469, 135, 19658, 463, 318, "Input"],
+Cell[24130, 600, 14496, 270, 794, "Output"]
+}, Open  ]]
+}
+]
+*)
+
+(* End of internal cache information *)
