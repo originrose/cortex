@@ -1,6 +1,12 @@
 (ns cortex.nn.build
   "A built network is a map with at least the key :network-description
-which is a graph of nodes,edges that describe the network."
+which is a graph of nodes,edges that describe the network.
+The build step is responsible for
+* normalizing the network-description which could be a vector of descriptions
+* allocating any missing parameter buffers.  This entails initialization weights appropriate
+  to the following initialization function.
+* verifying the built network will actually have a chance at running by ensuring
+  the parameter buffers are the correct dimensions."
   (:require [cortex.nn.layers :as layers]
             [clojure.set :as c-set]
             [clojure.core.matrix :as m]
