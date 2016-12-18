@@ -36,8 +36,7 @@ keyword-value pairs and are assoc'd into the description map.")
 :type       one of the parameter buffer types.  Possibly unknown type.
 :shape-fn   function which given the built description will return the
             core matrix parameter shape for this particular buffer."
-  ;;Dispatch multimethod on type passed in directly as this is more
-  ;;compile time information than runtime information.
+  ;;dispatch on layer type
   :type)
 
 
@@ -293,56 +292,16 @@ network graph description."
 (defn network-description-or-vec->network-description
   "Make anything into a network description."
   [network-desc-or-vec]
-  (if-not (associative? network-desc-or-vec)
+  (if-not (map? network-desc-or-vec)
     {:layer-graph network-desc-or-vec}
     network-desc-or-vec))
 
 
 (def example-mnist-description
-  (network-description
-   [(input 28 28 1)
-    (convolutional 5 0 1 20)
-    (max-pooling 2 0 2)
-    (convolutional 5 0 1 50)
-    (max-pooling 2 0 2)
-    (linear->relu 500)
-    (linear->softmax 10)]))
-
-
-(defprotocol PNetworkToImplementation
-  "A network implementation is responsible for implementing the layers
-  and doing training and inferrence.  All functions are transformations
-from description->descriptions or map->map."
-  (network->implementation [impl network-desc]
-    "Implementation should allocate any required buffers annotate
-network-desc with any information.  The implementation should not
-run through the graph and allocate specific layer implementations
-at this point as the graph hasn't been analyzed.")
-  (implementation->network [impl network-desc]
-    "Implementations should remove themselves from the description and
-annotate the description with any extra keys required."))
-
-
-(defprotocol PLayerToImplementation
-  "Implementations of specific layers.  See PNetworkToImplementation documentation.
-The built network description is provided so that information calculated in network
-desc can inform the construction of the actual description."
-  (layer->implementation [impl network-desc layer-desc]
-    "Implementations should annotate description with necessary information to
-execute either training or inferrence")
-  (implementation->layer [impl network-desc layer-desc]
-    "Called post training so the implementation can remove itself and update
-any appropriate members of the description"))
-
-
-(extend-type Object
-  PNetworkToImplementation
-  (network->implementation [impl network-desc]
-    network-desc)
-  (implementation->network [impl network-desc]
-    network-desc)
-  PLayerToImplementation
-  (layer->implementation [impl network-desc desc]
-    desc)
-  (implementation->layer [impl network-desc desc]
-    desc))
+  [(input 28 28 1)
+   (convolutional 5 0 1 20)
+   (max-pooling 2 0 2)
+   (convolutional 5 0 1 50)
+   (max-pooling 2 0 2)
+   (linear->relu 500)
+   (linear->softmax 10)])

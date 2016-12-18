@@ -301,7 +301,7 @@ Returns pair of [parameter-buffer initialization-type]"
   [{:keys [type shape-fn key] :as param-desc} node-id id->node-map edges]
   (let [node (get id->node-map node-id)
         param-data (get node key)
-        initialization-type (or (when (associative? param-data)
+        initialization-type (or (when (map? param-data)
                                   (get param-data :initialization-type))
                                 (activation->weight-initialization
                                  (find-next-activation node-id id->node-map edges)))]
@@ -326,8 +326,8 @@ Returns pair of [parameter-buffer initialization-type]"
                           flatten
                           layer-list->graph)
                      desc-seq-or-graph)
-        {:keys [nodes edges buffer-map]
-         :or {buffer-map {}}} desc-graph
+        {:keys [nodes edges buffers]
+         :or {buffers {}}} desc-graph
         parents (set (map first edges))
         children (set (map second edges))
         [roots leaves] (edges->roots-and-leaves edges)
@@ -346,25 +346,25 @@ Returns pair of [parameter-buffer initialization-type]"
                                                          %)))
                              id->node-map
                              dfs-seq)
-        ;;Export parameters to buffer-maps
-        [buffer-map id->node-map]
+        ;;Export parameters to bufferss
+        [buffers id->node-map]
         (reduce
-         (fn [[buffer-map id->node-map] [id node]]
+         (fn [[buffers id->node-map] [id node]]
            (let [parameter-descs (layers/get-parameter-descriptions node)
                  full-parameters
                  (map (fn [{:keys [key] :as param-desc}]
                         (let [param-entry (get node key)
-                              buffer (if (associative? param-entry)
-                                       (get buffer-map (get param-entry
+                              buffer (if (map? param-entry)
+                                       (get buffers (get param-entry
                                                                :buffer-id))
                                        ;;If the parameter-entry is not associative
                                        ;;and is non-nil then we assume it is the desired
                                        ;;buffer.
                                        param-entry)
-                              buffer-id (or (when (associative? param-entry)
+                              buffer-id (or (when (map? param-entry)
                                               (get param-entry :buffer-id))
                                             (generate-param-id id key))
-                              param-entry (if (associative? param-entry)
+                              param-entry (if (map? param-entry)
                                             (assoc param-entry
                                                    :buffer-id buffer-id
                                                    :key key)
@@ -378,22 +378,22 @@ Returns pair of [parameter-buffer initialization-type]"
                                      :initialization init-type))
                             (assoc param-entry :buffer buffer))))
                       parameter-descs)
-                 buffer-map (reduce (fn [buffer-map {:keys [buffer-id buffer]}]
-                                         (assoc buffer-map buffer-id buffer))
-                                       buffer-map
+                 buffers (reduce (fn [buffers {:keys [buffer-id buffer]}]
+                                         (assoc buffers buffer-id buffer))
+                                       buffers
                                        full-parameters)
                  id->node-map (reduce (fn [id->node-map {:keys [key] :as param-entry}]
                                         (assoc-in id->node-map [id key]
                                                   (dissoc param-entry :buffer :key)))
                                       id->node-map
                                       full-parameters)]
-             [buffer-map id->node-map]))
-         [buffer-map id->node-map]
+             [buffers id->node-map]))
+         [buffers id->node-map]
          id->node-map)]
 
     {:id->node-map id->node-map
      :edges edges
-     :buffer-map buffer-map}))
+     :buffers buffers}))
 
 
 (defn- build-layer-graph
@@ -407,7 +407,7 @@ Returns pair of [parameter-buffer initialization-type]"
          graph (-> network-description
                    :layer-graph
                    build-desc-seq-or-graph)]
-    (-> (assoc network-description :layer-graph graph))))
+    (assoc network-description :layer-graph graph)))
 
 
 (defn- get-graph-node-parameter-count
@@ -420,8 +420,8 @@ Returns pair of [parameter-buffer initialization-type]"
 
 
 (defn- get-layer-graph-parameter-count
-  ^long [{:keys [nodes]}]
-  (reduce + (map get-graph-node-parameter-count nodes)))
+  ^long [{:keys [id->node-map]}]
+  (reduce + (map get-graph-node-parameter-count (vals id->node-map))))
 
 
 (defn- verify-graph-node

@@ -1,8 +1,10 @@
-(ns cortex.nn.description.traverse
-  (:require [cortex.nn.description.build :as build]))
+(ns cortex.nn.traverse
+  "Various graph traversal algorithms needed in order to implement
+either inference or gradient descent on a layer graph."
+  (:require [cortex.nn.build :as build]))
 
 
-(defn create-forward-traversal
+(defn- create-forward-traversal
   "A forward traversal is a linear dfs order sequence.
 There is an optional argument to remove nodes of a particular type from
 the traversal.
@@ -13,9 +15,10 @@ Each item in the sequence is a map of:
  :outgoing ()
 }"
   [{:keys [layer-graph] :as built-network} remove-type-set]
-  (let [{:keys [nodes edges]} layer-graph
+  (let [{:keys [id->node-map edges]} layer-graph
         remove-id-set (->> (filter #(contains? remove-type-set
-                                               (get % :type)) nodes)
+                                               (get % :type))
+                                   (vals id->node-map))
                            (map :id)
                            set)
         edges (if (empty? remove-id-set)
@@ -41,19 +44,11 @@ Each item in the sequence is a map of:
                             edges)
                        (remove nil?))))
         [roots leaves] (build/edges->roots-and-leaves edges)
-        parent->child-map (-> (->> (group-by first edges)
-                                   (map (fn [[k v]] [k (distinct (map second v))]))
-                                   (into {}))
-                              (assoc :roots roots))
-        child->parent-map (->> (group-by second edges)
-                               (map (fn [[k v]] [k (distinct (map first v))]))
-                               (into {}))]
+        parent->child-map (build/edges->parent->child-map edges)
+        child->parent-map (build/edges->child->parent-map edges)]
 
-    (->> (tree-seq #(contains? parent->child-map %)
-                   parent->child-map
-                   :roots)
+    (->> (build/edges->dfs-seq edges :roots parent->child-map)
          (drop 1)
-
          (map (fn [id]
                 {:incoming (get child->parent-map id)
                  :id id
@@ -61,7 +56,7 @@ Each item in the sequence is a map of:
 
 
 
-(defn reverse-forward-traversal
+(defn- reverse-forward-traversal
   "See create-forward-traversal.  Reverse of same sequence."
   [forward-traversal]
   (->> forward-traversal
@@ -119,8 +114,7 @@ exception the incoming and outgoing ids are buffer ids.
   [built-network & {:keys [remove-type-set]
                     :or {remove-type-set #{:input}}}]
   (let [forward-traversal (create-forward-traversal built-network remove-type-set)
-        {:keys [nodes]} (get built-network :layer-graph)
-        id->node-map (build/nodes->id->node-map nodes)
+        {:keys [id->node-map]} (get built-network :layer-graph)
         id->outgoing #(map (fn [{:keys [id] :as item}]
                              (assoc item :outgoing [id]))
                            %)
@@ -247,8 +241,8 @@ that uses the reasonably small buffers."
                                                              {}
                                                              []
                                                              {}
-                                                             (build/nodes->id->node-map
-                                                              (get layer-graph :nodes))
+                                                             (get layer-graph
+                                                                  :id->node-map)
                                                              0 0)]
       {:forward (map first forward-traverse-seq)
        :buffers (second (last forward-traverse-seq))})
