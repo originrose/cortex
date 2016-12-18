@@ -5,12 +5,10 @@
     [clojure.core.matrix.random :as rand-matrix]
     [clojure.string :as str]
     [cortex.nn.protocols :as cp]
-    [cortex.nn.backends :as b]
     [clojure.pprint :as pp]
     #?(:cljs [goog.string :refer [format]]))
-
-  #?(:clj (:import [mikera.vectorz Vectorz]))
-  #?(:clj (:import [java.io Writer]
+  #?(:clj (:import [mikera.vectorz Vectorz]
+                   [java.io Writer]
                    [java.util Random])))
 
 #?(:clj (do (set! *warn-on-reflection* true)

@@ -77,13 +77,6 @@ This vector should be exactly the
   (prepare-forward [this]))
 
 
-
-;;Default implementation because most things do not need this implemented
-(extend-protocol PNeuralTrainingOptional
-  Object
-  (prepare-forward [this] this))
-
-
 (defprotocol PTraining
   "Protocol for modules that can be trained input / output pairs."
   (train [this input output]
@@ -117,34 +110,3 @@ optimiser.
     "Computes the loss for a value v against a target")
   (loss-gradient [this v target]
     "Computes the gradient of the loss with respect to v"))
-
-
-(defprotocol PMultiLayer
-  "The generalized network takes vectors of input and products vectors of outputs.
-  This protocol is used for access and has implementations that specialize to the normal
-  (single input,output) layer types.  This shouldn't be confused with batching which
-  could possibly also produce vectors of input, this is designed for branching networks
-  which get disparate possibly differently shaped inputs and produce disparate and possibly
-  differently shaped outputs."
-  (multi-input-size [layer])
-  (multi-output-size [layer])
-  (multi-calc [m input-vec])
-  (multi-forward [m input-vec])
-  (multi-backward [m input-vec output-gradient-vec])
-  (multi-output [m] "Returns a vector of outputs for module")
-  (multi-input-gradient [this] "Returns vector of input gradients for the module"))
-
-
-;; Specialise the multi player such that normal layers (that take single input,outputs)
-;; do not have to change.
-(extend-protocol PMultiLayer
-  Object
-  (multi-input-size [layer] [(input-size layer)])
-  (multi-output-size [layer] [(output-size layer)])
-  (multi-calc [m input-vec] (calc m (first input-vec)))
-  (multi-forward [m input-vec] (forward m (first input-vec)))
-  (multi-backward [m input-vec output-gradient-vec]
-    (backward m (first input-vec)
-              (first output-gradient-vec)))
-  (multi-output [m] [(output m)])
-  (multi-input-gradient [m] [(input-gradient m)]))
