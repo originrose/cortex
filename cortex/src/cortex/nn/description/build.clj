@@ -295,7 +295,7 @@ which is a graph of nodes,edges that describe the network."
 
 (defn verify-layer-graph
   [{:keys [nodes]}]
-  (mapcat verify-network-node nodes))
+  (mapcat verify-graph-node nodes))
 
 
 (defn build-network
