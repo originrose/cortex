@@ -187,15 +187,38 @@ which is a graph of nodes,edges that describe the network."
 (defn build-graph-node
   [child->parent-map id->node-map {:keys [id] :as my-node}]
   (let [built-nodes (map #(build-desc (get id->node-map %) my-node)
-                         (get child->parent-map id))]
+                         (get child->parent-map id))
+        first-parent (first (get child->parent-map id))]
     (if (seq built-nodes)
       (do
         (when-not (every? #(= (first built-nodes) %) built-nodes)
           (throw (ex-info "node differences detected during graph build step:"
                           {:built-nodes built-nodes})))
-        (first built-nodes))
-      (do
-        my-node))))
+        (assoc
+         (first built-nodes)
+         :input-size (get-in id->node-map [first-parent :output-size])))
+      my-node)))
+
+(defn edges->roots-and-leaves
+  "Returns [roots leaves]"
+  [edges]
+  (let [parents (set (map first edges))
+        children (set (map second edges))
+        set->ordered-vec (fn [item-set ordered-item-seq]
+                           (->> (filter item-set ordered-item-seq)
+                                distinct
+                                vec))
+        root-set (c-set/difference parents children)
+        leaf-set (c-set/difference children parents)]
+    [(set->ordered-vec root-set (map first edges))
+     (set->ordered-vec leaf-set (map second edges))]))
+
+(defn nodes->id->node-map
+  [nodes]
+  (->> (map (fn [node]
+              [(:id node) node])
+            nodes)
+       (into {})))
 
 
 (defn build-desc-seq-or-graph
@@ -208,12 +231,8 @@ which is a graph of nodes,edges that describe the network."
         {:keys [nodes edges]} desc-graph
         parents (set (map first edges))
         children (set (map second edges))
-        roots (c-set/difference parents children)
-        leaves (c-set/difference children parents)
-        id->node-map (->> (map (fn [node]
-                                 [(:id node) node])
-                               nodes)
-                          (into {}))
+        [roots leaves] (edges->roots-and-leaves edges)
+        id->node-map (nodes->id->node-map nodes)
         ;;Setup forward traversal so we let parameters flow
         ;;from top to bottom.
         child->parent-map (-> (->> (group-by second edges)
@@ -235,16 +254,12 @@ which is a graph of nodes,edges that describe the network."
                                                          id->node-map
                                                          %)))
                              id->node-map
-                             dfs-seq)
-        set->ordered-vec (fn [item-set ordered-item-seq]
-                           (->> (filter item-set ordered-item-seq)
-                                distinct
-                                vec))]
+                             dfs-seq)]
 
     (assoc desc-graph
            :nodes (vec (vals id->node-map))
-           :roots (set->ordered-vec roots (map first edges))
-           :leaves (set->ordered-vec leaves (map second edges)))))
+           :roots roots
+           :leaves leaves)))
 
 
 (defn build-layer-graph

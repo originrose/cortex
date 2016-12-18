@@ -1,4 +1,5 @@
-(ns cortex.nn.description.traverse)
+(ns cortex.nn.description.traverse
+  (:require [cortex.nn.description.build :as build]))
 
 
 (defn create-forward-traversal
@@ -12,7 +13,7 @@ Each item in the sequence is a map of:
  :outgoing ()
 }"
   [{:keys [layer-graph] :as built-network} remove-type-set]
-  (let [{:keys [nodes edges roots]} layer-graph
+  (let [{:keys [nodes edges]} layer-graph
         remove-id-set (->> (filter #(contains? remove-type-set
                                                (get % :type)) nodes)
                            (map :id)
@@ -20,15 +21,26 @@ Each item in the sequence is a map of:
         edges (if (empty? remove-id-set)
                 edges
                 (let [alias-map (->> (map (fn [[top bottom]]
-                                            (when (contains? remove-id-set bottom)
-                                              [bottom top]))
+                                            (cond
+                                              (and (contains? remove-id-set top)
+                                                   (contains? remove-id-set bottom))
+                                              nil
+                                              (contains? remove-id-set top)
+                                              [top bottom]
+                                              (contains? remove-id-set bottom)
+                                              [bottom top]
+                                              :else
+                                              nil))
                                           edges)
                                      (into {}))]
                   (->> (map (fn [[top bottom]]
-                              (when-not (contains? remove-id-set bottom)
-                                [(get alias-map top top) bottom]))
+                              (if (contains? remove-id-set top)
+                                nil
+                                [(get alias-map top top)
+                                 (get alias-map bottom bottom)]))
                             edges)
                        (remove nil?))))
+        [roots leaves] (build/edges->roots-and-leaves edges)
         parent->child-map (-> (->> (group-by first edges)
                                    (map (fn [[k v]] [k (distinct (map second v))]))
                                    (into {}))
@@ -36,6 +48,7 @@ Each item in the sequence is a map of:
         child->parent-map (->> (group-by second edges)
                                (map (fn [[k v]] [k (distinct (map first v))]))
                                (into {}))]
+
     (->> (tree-seq #(contains? parent->child-map %)
                    parent->child-map
                    :roots)
@@ -58,15 +71,40 @@ Each item in the sequence is a map of:
                      :incoming outgoing
                      :outgoing incoming)))))
 
-;;These nodes do not alter data passing through them.
-(def identity-nodes {:input :output})
 
-
-(defn- create-id->node-map
-  [nodes]
-  (->> (group-by :id nodes)
-       (map (fn [[k v]] [k (first v)]))
-       (into {})))
+(defn- forward-traversal->gd-buffers
+  [traverse-item traversal buffer-map input-count output-count id->node-map]
+  (when traverse-item
+    (let [{:keys [incoming id outgoing]} traverse-item
+          size (get-in id->node-map
+                              [id :output-size])
+          [input-idx input-count] (if (empty? incoming)
+                                    [input-count (inc input-count)]
+                                    [nil input-count])
+          [output-idx output-count] (if (empty? outgoing)
+                                      [output-count (inc output-count)]
+                                      [nil output-count])
+          new-buffer (cond-> {:size size}
+                       output-idx
+                       (assoc :output {output-idx size}))
+          [input-buffer incoming-id] (if input-idx
+                                       (let [input-size (get-in id->node-map [id :input-size])]
+                                        [{:size input-size
+                                          :inputs {input-idx input-size}}
+                                         (keyword (str (name id) "-input-" input-idx))])
+                                       [nil nil])
+          buffer-map (cond-> (assoc buffer-map id new-buffer)
+                       input-buffer
+                       (assoc incoming-id input-buffer))
+          incoming (if incoming-id
+                     [{:id incoming-id
+                       :input-idx input-idx}]
+                     incoming)]
+      (cons
+       [{:incoming incoming :id id :outgoing id} buffer-map]
+       (lazy-seq (forward-traversal->gd-buffers
+                  (first traversal) (rest traversal) buffer-map
+                  input-count output-count id->node-map))))))
 
 
 (defn network->gradient-descent
@@ -75,36 +113,39 @@ two traversals (forward,backward)
 and input and output buffer lists.
 Each traversal is sequence of maps like in create-forward-traversal
 exception the incoming and outgoing ids are buffer ids.
-{:buffers map id->{:buffer-size}
+{:buffers map id->{:size}
  :forward where incoming/outgoing maps to buffer id
  :backward where incoming/outgoing maps to buffer id}"
-  [built-network & {:keys [remove-type-set]}]
+  [built-network & {:keys [remove-type-set]
+                    :or {remove-type-set #{:input}}}]
   (let [forward-traversal (create-forward-traversal built-network remove-type-set)
         {:keys [nodes]} (get built-network :layer-graph)
-        id->node-map (create-id->node-map nodes)
+        id->node-map (build/nodes->id->node-map nodes)
         id->outgoing #(map (fn [{:keys [id] :as item}]
                              (assoc item :outgoing [id]))
-                         %)]
-    {:buffers (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
-                        (assoc buffer-map id {:buffer-size (get-in id->node-map
-                                                                   [id :output-size])}))
-                      {}
-                      forward-traversal)
-     :forward (id->outgoing forward-traversal)
-     :backward (id->outgoing (reverse-forward-traversal forward-traversal))}))
+                           %)
+        forward-traversal-data (forward-traversal->gd-buffers
+                                (first forward-traversal) (rest forward-traversal) {}
+                                0 0 id->node-map)
+        forward-traversal (map first forward-traversal-data)
+        buffer-map (second (last forward-traversal-data))]
+    {:forward forward-traversal
+     :buffers buffer-map
+     :backward (reverse-forward-traversal forward-traversal)}))
 
 
 (defn- allocate-buffer
-  "Assumption is that the free buffers are sorted by buffer-size"
+  "Assumption is that the free buffers are sorted by size"
   [id output-size free-buffers]
-  (let [compare-condition #(> (get % :buffer-size) output-size)
+  (let [free-buffers (sort-by :size free-buffers)
+        compare-condition #(> (get % :size) output-size)
         next-buffer (first (filter compare-condition
                                    free-buffers))]
     (if next-buffer
       [next-buffer (remove compare-condition free-buffers)]
       (let [next-buffer (or (last free-buffers)
                             {:id id})]
-        [(assoc next-buffer :buffer-size output-size) (drop-last free-buffers)]))))
+        [(assoc next-buffer :size output-size) (drop-last free-buffers)]))))
 
 
 (defn- free-in-flight-buffers
@@ -125,28 +166,68 @@ returns [free-buffers in-flight-buffers]"
   "Given a basic forward traversal generate a memory-optimised forward pass
 that uses the reasonably small buffers."
   [traverse-item forward-traverse-seq all-buffers
-   free-buffers in-flight-buffers id->node-map]
+   free-buffers in-flight-buffers id->node-map
+   input-count output-count]
   (when traverse-item
     (let [{:keys [incoming id outgoing]} traverse-item
+          [input-idx input-count] (if (empty? incoming)
+                                    [input-count (inc input-count)]
+                                    [nil input-count])
+          [output-idx output-count] (if (empty? outgoing)
+                                      [output-count (inc output-count)]
+                                      [nil output-count])
+          incoming-id (if input-idx
+                        (keyword (str (name id) "-input-" input-idx))
+                        nil)
+          ;;allocate input buffer if we are top of chain
+          input-size (get-in id->node-map [id :input-size])
+          [input-buffer free-buffers] (if input-idx
+                                        (allocate-buffer incoming-id
+                                                         input-size
+                                                         free-buffers)
+                                        [nil free-buffers])
+
+          input-buffer (when input-buffer
+                         (update input-buffer :inputs #(assoc % input-idx input-size)))
+
+          in-flight-buffers (if input-idx
+                              (assoc in-flight-buffers
+                                     incoming-id (assoc input-buffer
+                                                        :ref-count 1))
+                              in-flight-buffers)
+          ;;Allocate input buffer
           [next-buffer free-buffers] (allocate-buffer id
                                                       (get-in id->node-map
                                                               [id :output-size])
-                                                      (sort-by :buffer-size
-                                                               free-buffers))
-          [next-free in-flight-buffers] (free-in-flight-buffers incoming in-flight-buffers)
-          in-flight-buffers (assoc in-flight-buffers id (assoc next-buffer
-                                                               :ref-count
-                                                               (count outgoing)))
-          all-buffers (assoc all-buffers
-                             (get next-buffer :id)
-                             next-buffer)]
+                                                      free-buffers)
+          ;;mark in flight
+          in-flight-buffers (assoc in-flight-buffers
+                                   id (assoc next-buffer
+                                             :ref-count (count outgoing)))
+
+          ;;mangle incoming so it points to buffer ids, not to node ids
+          new-incoming (if input-idx
+                         [{:id incoming-id :input-idx input-idx}]
+                         (map #(get-in in-flight-buffers [% :id]) incoming))
+          [next-free in-flight-buffers] (free-in-flight-buffers (if input-idx
+                                                                  [incoming-id]
+                                                                  incoming)
+                                                                in-flight-buffers)
+          ;;Keep track of all buffers
+          all-buffers (cond-> (assoc all-buffers
+                                     (get next-buffer :id)
+                                     (dissoc next-buffer :ref-count))
+                        incoming-id
+                        (assoc (get input-buffer :id) (dissoc input-buffer
+                                                              :ref-count)))]
       (cons
-       [{:id id :outgoing (get next-buffer :id)} all-buffers]
+       [{:incoming new-incoming :id id :outgoing (get next-buffer :id)} all-buffers]
        (lazy-seq (forward-traversal->inference (first forward-traverse-seq)
                                                (rest forward-traverse-seq)
                                                all-buffers (concat free-buffers
                                                                    next-free)
-                                               in-flight-buffers id->node-map))))))
+                                               in-flight-buffers id->node-map
+                                               input-count output-count))))))
 
 
 (defn network->inference
@@ -157,7 +238,7 @@ that uses the reasonably small buffers."
   default to optimising for memory because this avoids OOM situations with large networks."
   [{:keys [layer-graph] :as built-network} & {:keys [optimise-type remove-type-set]
                                               :or {optimise-type :memory
-                                                   remove-type-set #{:dropout}}}]
+                                                   remove-type-set #{:dropout :input}}}]
 
   (if (= optimise-type :memory)
     (let [basic-forward (create-forward-traversal built-network remove-type-set)
@@ -166,8 +247,9 @@ that uses the reasonably small buffers."
                                                              {}
                                                              []
                                                              {}
-                                                             (create-id->node-map
-                                                              (get layer-graph :nodes)))]
+                                                             (build/nodes->id->node-map
+                                                              (get layer-graph :nodes))
+                                                             0 0)]
       {:forward (map first forward-traverse-seq)
        :buffers (second (last forward-traverse-seq))})
     (-> (network->gradient-descent built-network :remove-type-set remove-type-set)
