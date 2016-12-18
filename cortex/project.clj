@@ -10,8 +10,5 @@
                  [thinktopic/think.parallel "0.3.4"]
                  [thinktopic/resource "1.1.0"]]
 
-  :java-source-paths ["java"]
-
   :profiles {:dev {:source-paths ["src" "test/cljc" "test/clj"]}
-             :test {:source-paths ["src" "test/cljc" "test/clj"]
-                    :java-source-paths ["test/clj"]}})
+             :test {:source-paths ["src" "test/cljc" "test/clj"]}})
