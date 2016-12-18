@@ -1,9 +1,11 @@
-(ns cortex.nn.description.build
+(ns cortex.nn.build
   "A built network is a map with at least the key :network-description
 which is a graph of nodes,edges that describe the network."
-  (:require [cortex.nn.description.layers :as layers]
+  (:require [cortex.nn.layers :as layers]
             [clojure.set :as c-set]
-            [clojure.core.matrix :as m])
+            [clojure.core.matrix :as m]
+            [cortex.core-matrix-backends :as b]
+            [cortex.util :as util])
   (:import [java.util UUID]))
 
 
@@ -16,13 +18,13 @@ which is a graph of nodes,edges that describe the network."
   [previous item]
   item)
 
-(defn carry-data-format-forward
+(defn- carry-data-format-forward
   [previous item]
   (if-let [df (:output-data-format previous)]
     (assoc item :input-data-format df)
     item))
 
-(defn carry-input-image-dims-forward
+(defn- carry-input-image-dims-forward
   [previous item]
   (if-let [channels (:output-channels previous)]
     (assoc item :input-channels channels
@@ -39,7 +41,7 @@ which is a graph of nodes,edges that describe the network."
                       :output-data-format :planar)]
     result))
 
-(defn carry-image-dims-forward
+(defn- carry-image-dims-forward
   [previous item]
   (if-let [channels (:output-channels previous)]
     (let [data-format (get previous :output-data-format :planar)]
@@ -50,7 +52,7 @@ which is a graph of nodes,edges that describe the network."
              :output-data-format data-format))
     item))
 
-(defn build-pass-through-desc
+(defn- build-pass-through-desc
   "These layer types do not change their data types from input to output"
   [previous item]
   (let [io-size (:output-size previous)]
@@ -90,7 +92,7 @@ which is a graph of nodes,edges that describe the network."
   (build-pass-through-desc previous item))
 
 
-(defn build-convolutional-type-desc
+(defn- build-convolutional-type-desc
   [previous item ^long output-channels]
   (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
                 num-kernels dimension-op]
@@ -176,7 +178,7 @@ which is a graph of nodes,edges that describe the network."
                layer-list)))
 
 
-(defn layer-list->graph
+(defn- layer-list->graph
   [layer-list]
   (let [layer-list (->> (generate-layer-ids layer-list)
                         assign-layer-parents)]
@@ -184,7 +186,7 @@ which is a graph of nodes,edges that describe the network."
      :edges (layer-list->edge-list layer-list)}))
 
 
-(defn build-graph-node
+(defn- build-graph-node
   [child->parent-map id->node-map {:keys [id] :as my-node}]
   (let [built-nodes (map #(build-desc (get id->node-map %) my-node)
                          (get child->parent-map id))
@@ -198,6 +200,7 @@ which is a graph of nodes,edges that describe the network."
          (first built-nodes)
          :input-size (get-in id->node-map [first-parent :output-size])))
       my-node)))
+
 
 (defn edges->roots-and-leaves
   "Returns [roots leaves]"
@@ -213,7 +216,39 @@ which is a graph of nodes,edges that describe the network."
     [(set->ordered-vec root-set (map first edges))
      (set->ordered-vec leaf-set (map second edges))]))
 
-(defn nodes->id->node-map
+
+(defn edges->parent->child-map
+  "Given list of edges return a map of parent->list of children"
+  [edges & {:keys [add-roots?]
+            :or {add-roots? true}}]
+  (let [retval
+        (->> (group-by first edges)
+             (map (fn [[k v]]
+                    [k (distinct (map second v))]))
+             (into {}))]
+    (if add-roots?
+      (assoc retval
+             :roots (c-set/difference (set (map first edges))
+                                      (set (map second edges))))
+      retval)))
+
+
+(defn edges->child->parent-map
+  [edges & {:keys [add-leaves?]
+            :or {add-leaves? true}}]
+  (let [retval
+        (->> (group-by second edges)
+             (map (fn [[k v]]
+                    [k (distinct (map first v))]))
+             (into {}))]
+    (if add-leaves?
+      (assoc retval
+             :leaves (c-set/difference (set (map second edges))
+                                       (set (map first edges)))))))
+
+
+(defn- nodes->id->node-map
+  "Create a map of id->node from a list of nodes"
   [nodes]
   (->> (map (fn [node]
               [(:id node) node])
@@ -221,32 +256,82 @@ which is a graph of nodes,edges that describe the network."
        (into {})))
 
 
-(defn build-desc-seq-or-graph
+(defn- generate-param-id
+  [node-id param-key]
+  (keyword (str (name node-id) "-" (name param-key))))
+
+
+(defn edges->dfs-seq
+  "Take the list of edges and at least start id and produce an id-sequence in
+depth-first order."
+  ([edges root-id parent->child-map]
+   (tree-seq #(contains? parent->child-map %)
+             #(get parent->child-map %)
+             root-id))
+  ([edges root-id]
+   (edges->dfs-seq edges root-id (edges->parent->child-map edges)))
+  ([edges]
+   (edges->dfs-seq edges :roots (edges->parent->child-map edges :add-roots? true))))
+
+
+(defn- find-next-activation
+  [node-id id->node-map edges]
+  (let [activation-set #{:relu :logistic :tanh}]
+    (->> (edges->dfs-seq edges node-id)
+         (map #(get-in id->node-map [% :type]))
+         (filter activation-set)
+         first)))
+
+
+(defn- activation->weight-initialization
+  [activation]
+  (if (= activation :relu)
+    :relu
+    :xavier))
+
+(defn- generate-param-buffer
+  "Generate a parameter buffer.
+Returns pair of [parameter-buffer initialization-type]"
+  [{:keys [type shape-fn key] :as param-desc} node-id id->node-map edges]
+  (let [node (get id->node-map node-id)
+        param-data (get node key)
+        initialization-type (or (when (associative? param-data)
+                                  (get param-data :initialization-type))
+                                (activation->weight-initialization
+                                 (find-next-activation node-id id->node-map edges)))]
+    (condp = type
+      :scale
+      [(m/assign! (b/new-array (shape-fn node)) 1.0)
+       {:initialization :constant
+        :value 1}]
+      :weight
+      [(apply util/weight-matrix (concat (shape-fn node)
+                                         [initialization-type]))
+       initialization-type]
+      [(b/new-array (shape-fn node))
+       {:initialization :constant
+        :value 0}])))
+
+
+(defn- build-desc-seq-or-graph
   [desc-seq-or-graph]
   (let [desc-graph (if (sequential? desc-seq-or-graph)
                      (->> desc-seq-or-graph
                           flatten
                           layer-list->graph)
                      desc-seq-or-graph)
-        {:keys [nodes edges]} desc-graph
+        {:keys [nodes edges buffer-map]
+         :or {buffer-map {}}} desc-graph
         parents (set (map first edges))
         children (set (map second edges))
         [roots leaves] (edges->roots-and-leaves edges)
         id->node-map (nodes->id->node-map nodes)
         ;;Setup forward traversal so we let parameters flow
         ;;from top to bottom.
-        child->parent-map (-> (->> (group-by second edges)
-                                   (map (fn [[k v]]
-                                          [k (set (map first v))]))
-                                   (into {})))
-        parent->child-map (-> (->> (group-by first edges)
-                                   (map (fn [[k v]]
-                                          [k (set (map second v))]))
-                                   (into {}))
-                              (assoc :roots roots))
-        dfs-seq (->> (tree-seq #(contains? parent->child-map %)
-                               #(get parent->child-map %)
-                               :roots)
+        child->parent-map (edges->child->parent-map edges)
+        parent->child-map (edges->parent->child-map edges :add-roots? true)
+
+        dfs-seq (->> (edges->dfs-seq edges)
                      (drop 1))
         builder (partial build-graph-node child->parent-map)
         id->node-map (reduce (fn [id->node-map id]
@@ -254,15 +339,58 @@ which is a graph of nodes,edges that describe the network."
                                                          id->node-map
                                                          %)))
                              id->node-map
-                             dfs-seq)]
+                             dfs-seq)
+        ;;Export parameters to buffer-maps
+        [buffer-map id->node-map]
+        (reduce
+         (fn [[buffer-map id->node-map] [id node]]
+           (let [parameter-descs (layers/get-parameter-descriptions node)
+                 full-parameters
+                 (map (fn [{:keys [key] :as param-desc}]
+                        (let [param-entry (get node key)
+                              buffer (if (associative? param-entry)
+                                       (get buffer-map (get param-entry
+                                                               :buffer-id))
+                                       ;;If the parameter-entry is not associative
+                                       ;;and is non-nil then we assume it is the desired
+                                       ;;buffer.
+                                       param-entry)
+                              buffer-id (or (when (associative? param-entry)
+                                              (get param-entry :buffer-id))
+                                            (generate-param-id id key))
+                              param-entry (if (associative? param-entry)
+                                            (assoc param-entry
+                                                   :buffer-id buffer-id
+                                                   :key key)
+                                            {:buffer-id buffer-id
+                                             :key key})]
+                          (if-not buffer
+                            (let [[buffer init-type] (generate-param-buffer param-desc id
+                                                                            id->node-map edges)]
+                              (assoc param-entry
+                                     :buffer buffer
+                                     :initialization init-type))
+                            (assoc param-entry :buffer buffer))))
+                      parameter-descs)
+                 buffer-map (reduce (fn [buffer-map {:keys [buffer-id buffer]}]
+                                         (assoc buffer-map buffer-id buffer))
+                                       buffer-map
+                                       full-parameters)
+                 id->node-map (reduce (fn [id->node-map {:keys [key] :as param-entry}]
+                                        (assoc-in id->node-map [id key]
+                                                  (dissoc param-entry :buffer :key)))
+                                      id->node-map
+                                      full-parameters)]
+             [buffer-map id->node-map]))
+         [buffer-map id->node-map]
+         id->node-map)]
 
-    (assoc desc-graph
-           :nodes (vec (vals id->node-map))
-           :roots roots
-           :leaves leaves)))
+    {:id->node-map id->node-map
+     :edges edges
+     :buffer-map buffer-map}))
 
 
-(defn build-layer-graph
+(defn- build-layer-graph
   "build step verifies the network and fills in the implicit entries calculating
   things like the convolutional layer's output size.  Returns a map with at
   least :network-description as a key."
@@ -276,7 +404,7 @@ which is a graph of nodes,edges that describe the network."
     (-> (assoc network-description :layer-graph graph))))
 
 
-(defn get-graph-node-parameter-count
+(defn- get-graph-node-parameter-count
   ^long [desc]
   (long (->> (layers/get-parameter-descriptions desc)
              (map (fn [{:keys [shape-fn]}]
@@ -285,12 +413,12 @@ which is a graph of nodes,edges that describe the network."
              (reduce +))))
 
 
-(defn get-layer-graph-parameter-count
+(defn- get-layer-graph-parameter-count
   ^long [{:keys [nodes]}]
   (reduce + (map get-graph-node-parameter-count nodes)))
 
 
-(defn verify-graph-node
+(defn- verify-graph-node
   [node]
   (let [parameter-descriptions (layers/get-parameter-descriptions node)]
     (->>
@@ -308,7 +436,7 @@ which is a graph of nodes,edges that describe the network."
      (remove nil?))))
 
 
-(defn verify-layer-graph
+(defn- verify-layer-graph
   [{:keys [nodes]}]
   (mapcat verify-graph-node nodes))
 

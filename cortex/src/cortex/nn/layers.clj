@@ -1,4 +1,4 @@
-(ns cortex.nn.description.layers
+(ns cortex.nn.layers
   "Descriptions are the canonical representation of layers in cortex.  Implementations
 are expected to work with descriptions that are annotated with special information
 on them that pertails exactly to that implementation.  They are expected to be tolerant
@@ -156,7 +156,8 @@ no change to the input."
   "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
 of the output of a conv-net ignoring channels.  Caffe does this slightly different
 for pooling verse convolutional layers.  Furthermore keras does this differently
-than caffe so this exact calculation has been the source of a few compatibility issues."
+than caffe for pooling layers so this exact calculation has been the source of
+a few compatibility issues."
   [input-dim pad kernel-size stride dimension-op]
   (let [partial-result (/ (- (+ (double input-dim)
                                 (* 2 (double pad)))
@@ -213,6 +214,11 @@ calculations must be "
   [num-kernels (* kernel-width kernel-height input-channels)])
 
 
+(defn convolutional-bias-parameter-shape
+  [{:keys [num-kernels]}]
+  [num-kernels])
+
+
 (defmethod get-parameter-descriptions :convolutional
   [desc]
   [{:type :weight
@@ -220,7 +226,7 @@ calculations must be "
     :shape-fn convolutional-weight-parameter-shape}
    {:type :bias
     :key :bias
-    :shape-fn linear-bias-parameter-shape}])
+    :shape-fn convolutional-bias-parameter-shape}])
 
 
 (defn max-pooling
