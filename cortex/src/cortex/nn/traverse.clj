@@ -46,6 +46,25 @@ then one will be chosen automatically based on the layer type."
                                                                     :loss loss-function})))
 
 
+(defn get-dataset-bindings
+  "get a sequence of maps of:
+{:node-id
+ :dataset-stream
+ :direction [:input :output]
+ :loss-function (if output)}."
+  [{:keys [input-bindings output-bindings]}]
+  (concat (map (fn [[node-id {:keys [stream]}]]
+                 {:node-id node-id
+                  :dataset-stream stream
+                  :direction :input})
+               input-bindings)
+          (map (fn [[dataset-stream {:keys [node-id loss-function]}]]
+                 {:node-id node-id
+                  :dataset-stream dataset-stream
+                  :direction :output
+                  :loss-function loss-function}))))
+
+
 (defn- create-forward-traversal
   "A forward traversal is a linear dfs order sequence.
 There is an optional argument to remove nodes of a particular type from

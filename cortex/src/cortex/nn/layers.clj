@@ -4,22 +4,9 @@ are expected to work with descriptions that are annotated with special informati
 on them that pertails exactly to that implementation.  They are expected to be tolerant
 of extra keys/information on the descriptions.  Because of this the description
 constructors are all variable args with the extra arguments expected to be
-keyword-value pairs and are assoc'd into the description map.")
+  keyword-value pairs and are assoc'd into the description map."
+  (:require [cortex.loss :refer [merge-args arg-list->arg-map] :as loss]))
 
-
-(defn- arg-list->arg-map
-  [args]
-  (when-not (= 0 (rem (count args) 2))
-    (throw (ex-info "Argument count must be evenly divisble by 2"
-                    {:arguments args})))
-  (->> (partition 2 args)
-       (map vec)
-       (into {})))
-
-
-(defn- merge-args
-  [desc args]
-  (merge desc (arg-list->arg-map args)))
 
 
 (def parameter-buffer-types
@@ -63,12 +50,12 @@ keyword-value pairs and are assoc'd into the description map.")
   [(merge-args {:type :linear :output-size num-output} args)])
 
 
-(defn linear-weight-parameter-shape
+(defn- linear-weight-parameter-shape
   [{:keys [input-size output-size]}]
   [output-size input-size])
 
 
-(defn linear-bias-parameter-shape
+(defn- linear-bias-parameter-shape
   [{:keys [output-size]}]
   [output-size])
 
@@ -184,13 +171,13 @@ a few compatibility issues."
               args))
 
 
-(defn convolutional-output-width
+(defn- convolutional-output-width
   ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
   (long (get-padded-strided-dimension input-width kernel-width
                                       pad-x stride-x dimension-op)))
 
 
-(defn convolutional-output-height
+(defn- convolutional-output-height
   ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
   (long (get-padded-strided-dimension input-height kernel-height
                                       pad-y stride-y dimension-op)))
@@ -297,22 +284,6 @@ network graph description."
     network-desc-or-vec))
 
 
-
-
-(defn mse-loss
-  [& args]
-  (merge-args
-   {:type :mse-loss}
-   args))
-
-
-(defn softmax-loss
-  [& args]
-  (merge-args
-   {:type :softmax-loss}
-   args))
-
-
 (defmulti auto-bind-loss
   "Given a layer generate a default loss function."
   :type)
@@ -320,12 +291,12 @@ network graph description."
 
 (defmethod auto-bind-loss :default
   [_]
-  (mse-loss))
+  (loss/mse-loss))
 
 
 (defmethod auto-bind-loss :softmax
   [_]
-  (softmax-loss))
+  (loss/softmax-loss))
 
 
 ;;Optimization strategies
