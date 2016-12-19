@@ -1,6 +1,6 @@
 (ns cortex.nn.build
   "A built network is a map with at least the key :network-description
-which is a graph of nodes,edges that describe the network.
+which is a graph of id->node-map, edges that describe the network.
 The build step is responsible for
 * normalizing the network-description which could be a vector of descriptions
 * allocating any missing parameter buffers.  This entails initialization weights appropriate
@@ -22,7 +22,8 @@ The build step is responsible for
 
 (defmethod build-desc :input
   [previous item]
-  item)
+  (assoc item :input-size (get item :output-size)))
+
 
 (defn- carry-data-format-forward
   [previous item]
@@ -194,18 +195,19 @@ The build step is responsible for
 
 (defn- build-graph-node
   [child->parent-map id->node-map {:keys [id] :as my-node}]
-  (let [built-nodes (map #(build-desc (get id->node-map %) my-node)
-                         (get child->parent-map id))
-        first-parent (first (get child->parent-map id))]
-    (if (seq built-nodes)
-      (do
-        (when-not (every? #(= (first built-nodes) %) built-nodes)
-          (throw (ex-info "node differences detected during graph build step:"
-                          {:built-nodes built-nodes})))
-        (assoc
-         (first built-nodes)
-         :input-size (get-in id->node-map [first-parent :output-size])))
-      my-node)))
+  (let [parent-nodes (get child->parent-map id)
+        built-nodes (if parent-nodes
+                      (map #(build-desc (get id->node-map %) my-node)
+                           parent-nodes)
+                      [(build-desc nil my-node)])]
+    (when-not (every? #(= (first built-nodes) %) built-nodes)
+      (throw (ex-info "node differences detected during graph build step:"
+                      {:built-nodes built-nodes})))
+    (if-let [first-parent (first parent-nodes)]
+      (assoc
+       (first built-nodes)
+       :input-size (get-in id->node-map [first-parent :output-size]))
+      (first built-nodes))))
 
 
 (defn edges->roots-and-leaves
@@ -339,6 +341,7 @@ Returns pair of [parameter-buffer initialization-type]"
 
         dfs-seq (->> (edges->dfs-seq edges)
                      (drop 1))
+
         builder (partial build-graph-node child->parent-map)
         id->node-map (reduce (fn [id->node-map id]
                                (update id->node-map id #(builder

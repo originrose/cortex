@@ -297,6 +297,44 @@ network graph description."
     network-desc-or-vec))
 
 
+
+
+(defn mse-loss
+  [& args]
+  (merge-args
+   {:type :mse-loss}
+   args))
+
+
+(defn softmax-loss
+  [& args]
+  (merge-args
+   {:type :softmax-loss}
+   args))
+
+
+(defmulti auto-bind-loss
+  "Given a layer generate a default loss function."
+  :type)
+
+
+(defmethod auto-bind-loss :default
+  [_]
+  (mse-loss))
+
+
+(defmethod auto-bind-loss :softmax
+  [_]
+  (softmax-loss))
+
+
+;;Optimization strategies
+
+(defn adam
+  [& args]
+  {:type :adam})
+
+
 (def example-mnist-description
   [(input 28 28 1)
    (convolutional 5 0 1 20)

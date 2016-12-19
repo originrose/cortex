@@ -1,7 +1,49 @@
 (ns cortex.nn.traverse
   "Various graph traversal algorithms needed in order to implement
 either inference or gradient descent on a layer graph."
-  (:require [cortex.nn.build :as build]))
+  (:require [cortex.nn.build :as build]
+            [cortex.nn.layers :as layers]
+            [clojure.set :as c-set]))
+
+
+(defn- check-node-id
+  [built-network node-id]
+  (when-not (get-in built-network [:layer-graph :id->node-map node-id])
+    (throw (ex-info "Failed to find node id in graph"
+                    {:node-id node-id
+                     :graph-nodes (keys (get-in built-network [:layer-graph :id->node-map]))}))))
+
+
+(defn bind-input
+  "Bind a specific node to a dataset stream.  Returns a new network."
+  [built-network node-id dataset-stream-name]
+  ;;Multiple a node can bind to only one stream but one stream may be bound
+  ;;to multiple nodes.
+  (check-node-id built-network node-id)
+  (assoc-in built-network [:input-bindings node-id] {:stream dataset-stream-name}))
+
+
+(defn bind-output-infer
+  "Enable output from a given graph node.  Since this is inference we do not need
+to worry about loss functions."
+  [built-network node-id output-name]
+  (check-node-id built-network node-id)
+  ;;Any node can produce an output stream but they have to be uniquely named.  A node
+  ;;can bind to multiple output names.
+  (assoc-in built-network [:output-bindings output-name] {:node-id node-id}))
+
+
+(defn bind-output-train
+  "Enable output and bind it to a dataset stream for training.  If a loss function isn't specified
+then one will be chosen automatically based on the layer type."
+  [built-network node-id dataset-stream-name & {:keys [loss-function]}]
+  (check-node-id built-network node-id)
+  (let [loss-function (if loss-function
+                        loss-function
+                        (layers/auto-bind-loss (get-in built-network
+                                                       [:layer-graph :id->node-map node-id])))]
+    (assoc-in built-network [:output-bindings dataset-stream-name] {:node-id node-id
+                                                                    :loss loss-function})))
 
 
 (defn- create-forward-traversal
@@ -14,13 +56,21 @@ Each item in the sequence is a map of:
  :id
  :outgoing ()
 }"
-  [{:keys [layer-graph] :as built-network} remove-type-set]
+  [{:keys [layer-graph input-bindings output-bindings] :as built-network} remove-type-set]
   (let [{:keys [id->node-map edges]} layer-graph
-        remove-id-set (->> (filter #(contains? remove-type-set
-                                               (get % :type))
-                                   (vals id->node-map))
-                           (map :id)
-                           set)
+        ;;Removing all nodes of a given type from the network if they aren't marked as input or output.
+        keep-node-set (set (concat (keys input-bindings)
+                                   (map :node-id (vals output-bindings))))
+
+        ;;Ensure the remove set does not contain any of the keep node set.
+        remove-id-set (c-set/difference
+                       (->> (filter #(contains? remove-type-set
+                                                (get % :type))
+                                    (vals id->node-map))
+                            (map :id)
+                            set)
+                       keep-node-set)
+        ;;Trim items by type and patch up edges.
         edges (if (empty? remove-id-set)
                 edges
                 (let [alias-map (->> (map (fn [[top bottom]]
@@ -43,6 +93,24 @@ Each item in the sequence is a map of:
                                  (get alias-map bottom bottom)]))
                             edges)
                        (remove nil?))))
+        ;;walk over edges and create master keep node set of all connected edges
+        ;;Iterative algorithm with runtime at most of N where N is number of edges.
+        keep-node-set (loop [keep-node-set keep-node-set]
+                        (let [new-keep-node-set
+                              (reduce (fn [keep-node-set [top bottom]]
+                                        (if (contains? keep-node-set top)
+                                          (conj keep-node-set bottom)
+                                          keep-node-set))
+                                      keep-node-set
+                                      edges)]
+                          (if-not (= keep-node-set new-keep-node-set)
+                            (recur new-keep-node-set)
+                            new-keep-node-set)))
+
+        ;;Remove all edges that do not participate in the keep node set.
+        edges (filter #(and (contains? keep-node-set (first %))
+                            (contains? keep-node-set (second %)))
+                      edges)
         [roots leaves] (build/edges->roots-and-leaves edges)
         parent->child-map (build/edges->parent->child-map edges)
         child->parent-map (build/edges->child->parent-map edges)]
@@ -111,8 +179,9 @@ exception the incoming and outgoing ids are buffer ids.
 {:buffers map id->{:size}
  :forward where incoming/outgoing maps to buffer id
  :backward where incoming/outgoing maps to buffer id}"
-  [built-network & {:keys [remove-type-set]
-                    :or {remove-type-set #{:input}}}]
+  [built-network & {:keys [remove-type-set optimiser]
+                    :or {remove-type-set #{:input}
+                         optimiser (layers/adam)}}]
   (let [forward-traversal (create-forward-traversal built-network remove-type-set)
         {:keys [id->node-map]} (get built-network :layer-graph)
         id->outgoing #(map (fn [{:keys [id] :as item}]
@@ -125,7 +194,9 @@ exception the incoming and outgoing ids are buffer ids.
         buffer-map (second (last forward-traversal-data))]
     {:forward forward-traversal
      :buffers buffer-map
-     :backward (reverse-forward-traversal forward-traversal)}))
+     :backward (reverse-forward-traversal forward-traversal)
+     :type :gradient-descent
+     :optimiser optimiser}))
 
 
 (defn- allocate-buffer
@@ -245,6 +316,8 @@ that uses the reasonably small buffers."
                                                                   :id->node-map)
                                                              0 0)]
       {:forward (map first forward-traverse-seq)
-       :buffers (second (last forward-traverse-seq))})
+       :buffers (second (last forward-traverse-seq))
+       :type :inferences})
     (-> (network->gradient-descent built-network :remove-type-set remove-type-set)
-        (dissoc :backward))))
+        (dissoc :backward)
+        (assoc :type :inference))))

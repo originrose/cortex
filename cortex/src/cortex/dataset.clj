@@ -1,9 +1,15 @@
 (ns cortex.dataset
+  "Datasets are essentially infinite sequences of batches of data.  They have multiple data streams and
+generally have multiple batch types.  A batch type indicates the usage of the data; for instance
+the training batch type is expecting very random data that may be extended with augmentation."
   (:require [clojure.core.matrix :as m]
             [think.parallel.core :as parallel]
             [think.resource.core :as resource]))
 
 
+;;Cortex in general expects images to be planar datatypes meaning and entire
+;;red image followed by a green image followed by a blue image as opposed
+;;to a single image composed of rgb values interleaved.
 (def planar-image-layout [:channels :height :width])
 (def interleaved-image-layout [:height :width :channels])
 
@@ -99,10 +105,6 @@ If training split is 1.0 then all indexes are used for everything."
      :all all-indexes}))
 
 
-
-
-
-
 (defprotocol PDataset
   "The dataset protocol provides uniform access to named sequences of data.
 The system will expect to be able to access each sequence of data within a batch
@@ -116,19 +118,17 @@ or a more complex shape definition a layout, num-channels, width and height")
 
 
   (get-batches [ds batch-size batch-type shape-name-seq]
-    "Return a vector of sequences, one for each shape name in the label sequence.
+    "Return a possibly lazy sequence of maps data, one for each shape name in the label sequence.
   So to clarify if I have a dataset with six items for training
   where each item is composed of an image, a histogram and a label, I may call:
 
   (get-batches ds 3 :training [:image :label :histogram])
   and I should get back a potentially lazy sequence of batches, each batch has a
-  vector of items
-   ([(image image image)(label label label)(hist hist hist)]
-    [(image image image)(label label label)(hist hist hist)])
+  map of sequences of items.
+   ({:image (image image image) :label (label label label) :histogram (hist hist hist)}
+    {:image (image image image) :label (label label label) :histogram (hist hist hist)})
 
-  Put another way, within each batch the data is columnar in the order requested
-  by shape-name-seq."
-    ))
+  Put another way, within each batch the data is columnar labled by stream (shape) name"))
 
 
 (defn batches->columns
@@ -138,9 +138,11 @@ one column for each item requested from the batch."
   [batch-sequence]
   (when (and (not (empty? batch-sequence))
              (not (empty? (first batch-sequence))))
-   (mapv (fn [idx]
-           (mapcat #(nth % idx) batch-sequence))
-         (range (count (first batch-sequence))))))
+    (->> (map (fn [stream-name]
+                [stream-name
+                 (mapcat #(get % stream-name) batch-sequence)])
+              (keys (first batch-sequence)))
+         (into {}))))
 
 
 (defn get-data-sequence-from-dataset
@@ -150,24 +152,23 @@ evaluation results from a network with a given batch size you should call
 this function with the same batch type (probably holdout) and batch-size
 as what you used in the run call."
   [dataset name batch-type batch-size]
-  (->> (get-batches dataset batch-size batch-type [name])
-       batches->columns
-       first))
+  (-> (->> (get-batches dataset batch-size batch-type [name])
+           batches->columns)
+      (get name)))
 
 
 (defn- recur-column-data->column-groups
   [name-seq-seq column-data]
   (when-let [next-name-seq (first name-seq-seq)]
-    (cons (vec (take (count next-name-seq) column-data))
+    (cons (select-keys column-data next-name-seq)
           (lazy-seq (recur-column-data->column-groups
                      (rest name-seq-seq)
-                     (drop (count next-name-seq) column-data))))))
+                     column-data)))))
 
 
 (defn batch-sequence->column-groups
   "Given a sequence of sequences of names to pull from the dataset,
-return a sequence of columnar data vectors in the same order as the
-name sequences"
+return a sequence of columnar maps of information."
   [dataset batch-size batch-type name-seq-seq]
   (->> (flatten name-seq-seq)
        (get-batches dataset batch-size batch-type)
@@ -197,10 +198,11 @@ name sequences"
              ;;the overal batch sequence can be lazy.
              ;;each batch specifically can be a vector of lazy sequences, one for each
              ;;item of the batch.
-             (mapv (fn [item-name]
-                     (let [output-data (get-in data-shape-map [item-name :data])]
-                       (map output-data batch-index-seq)))
-                   name-seq))
+             (->> (map (fn [item-name]
+                         (let [output-data (get-in data-shape-map [item-name :data])]
+                           [item-name (map output-data batch-index-seq)]))
+                       name-seq)
+                  (into {})))
            batches))))
 
 
@@ -260,9 +262,12 @@ name sequences"
            (partition batch-size)
            (map (fn [batch-data]
                   (let [sequence-map (sequence->map-fn batch-data)]
-                    (mapv sequence-map shape-name-seq)))))))
+                    (select-keys sequence-map shape-name-seq)))))))
+
   resource/PResource
   (release-resource [ds]
+    ;;Given this is an infinite sequence we could have threads off in nowhere
+    ;;producing data that we would like to stop.
     (when shutdown-fn
       (shutdown-fn))))
 
