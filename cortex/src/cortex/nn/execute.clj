@@ -45,7 +45,7 @@ The context is expected to already be bound to the network."
         dataset-epoch (ds/get-batches dataset batch-size :training dataset-streams)
         trained-network (last (train-batch-sequence context built-network dataset-epoch))]
     (cons (update trained-network :epoch-count safe-inc)
-          (lazy-seq train-epoch-seq context trained-network dataset))))
+          (lazy-seq train-seq context trained-network dataset))))
 
 
 (defn inferences->node-id-loss-pairs
@@ -101,7 +101,7 @@ Returns map of:
         output-streams (->> (map :dataset-stream output-nodes)
                             set)
         label-fn #(ds/get-batches dataset batch-size infer-batch-type output-streams)]
-   (->> (create-train-epoch-seq context built-network dataset)
+   (->> (train-seq context built-network dataset)
         (map (fn [trained-network]
                {:network trained-network
                 :inferences (infer-batch-sequence context trained-network
