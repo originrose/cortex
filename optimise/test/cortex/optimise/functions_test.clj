@@ -3,7 +3,7 @@
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.operators :refer [+ - * /]]
             [clojure.test :refer :all]
-            [cortex.nn.protocols :as cp]
+            [cortex.optimise.protocols :as cp]
             [cortex.optimise.functions :refer :all]
             [cortex.util :refer [def-]]))
 

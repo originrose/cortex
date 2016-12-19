@@ -29,7 +29,7 @@
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.operators :refer [+ - * /]]
             [clojure.string :as str]
-            [cortex.nn.protocols :as cp]
+            [cortex.optimise.protocols :as cp]
             [cortex.optimise.parameters]
             [cortex.util :as util :refer [def-]]))
 

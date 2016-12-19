@@ -1,6 +1,6 @@
 (ns cortex.optimise.parameters-test
   (:require [clojure.test :refer :all]
-            [cortex.nn.protocols :as cp]
+            [cortex.optimise.protocols :as cp]
             [cortex.optimise.parameters :refer :all]))
 
 (def sample-map

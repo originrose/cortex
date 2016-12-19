@@ -34,7 +34,8 @@
   :params key."
   (:refer-clojure :exclude [+ - * /])
   (:require [clojure.core.matrix :as m]
-            [clojure.core.matrix.operators :refer [+ - * /]] [cortex.nn.protocols :as cp]
+            [clojure.core.matrix.operators :refer [+ - * /]]
+            [cortex.optimise.protocols :as cp]
             [cortex.optimise.parameters]))
 
 ;;;; Protocol extensions

@@ -8,7 +8,7 @@
   IPersistentMap: This is because IPersistentMap is a supertype of all
   Clojure records, which would make any extension of IPersistentMap
   likely to have unintended side effects."
-  (:require [cortex.nn.protocols :as cp]))
+  (:require [cortex.optimise.protocols :as cp]))
 
 (extend-type clojure.lang.APersistentMap
   cp/PParameters

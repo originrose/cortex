@@ -3,7 +3,7 @@
   (:require [clojure.core.matrix.operators :refer [+ - * /]]
             [clojure.test :refer :all]
             [cortex.optimise.optimisers :refer :all]
-            [cortex.nn.protocols :as cp]
+            [cortex.optimise.protocols :as cp]
             [cortex.util :refer [approx= def-]]))
 
 ;;;; Protocol extensions

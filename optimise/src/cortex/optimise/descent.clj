@@ -411,10 +411,10 @@
             [clojure.core.matrix.operators :refer [+ - * /]]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [cortex.nn.protocols :as cp]
+            [cortex.optimise.protocols :as cp]
             [cortex.optimise.functions :as function]
             [cortex.optimise.optimisers :as opts]
-            [cortex.util :as util :refer [defonce]]))
+            [cortex.optimise.util :as util :refer [defonce]]))
 
 ;;;; Config
 
