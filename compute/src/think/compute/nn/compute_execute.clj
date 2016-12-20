@@ -179,3 +179,7 @@ dataset/batch-sequence-columnar in order to transform sequence into specific seq
     "Run network forward and backward like 'forward-backward' but also calculate numeric
 gradients w/r/t the loss function and the provided answer.  This allows for gradient
 checking."))
+
+(defn create-context
+  [backend-fn]
+  (->ComputeExecutionContext backend-fn))

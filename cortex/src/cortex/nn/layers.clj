@@ -171,13 +171,13 @@ a few compatibility issues."
               args))
 
 
-(defn- convolutional-output-width
+(defn convolutional-output-width
   ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
   (long (get-padded-strided-dimension input-width kernel-width
                                       pad-x stride-x dimension-op)))
 
 
-(defn- convolutional-output-height
+(defn convolutional-output-height
   ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
   (long (get-padded-strided-dimension input-height kernel-height
                                       pad-y stride-y dimension-op)))

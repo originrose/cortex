@@ -1,28 +1,29 @@
 (ns cortex.nn.impl
   "Implementation helpers to aid implementing neural network cortex protocols
 or specific neural network layers"
-  (:require [cortex.nn.description :as desc]))
+  (:require [cortex.nn.layers :as layers]
+            [clojure.core.matrix.macros :refer [c-for]]))
 
 
 (defmacro convolution-outer-kernel
   [conv-desc & body]
-  `(let [^ConvLayerConfig config# ~config
-         ~'output-width (desc/convolutional-output-width conv-desc)
-         ~'output-height (desc/convolutional-output-height conv-desc)
-         ~'num-in-channels (long (:input-channels conv-desc))
-         ~'num-out-channels (long (:output-channels conv-desc))
-         ~'input-width (long (:input-width conv-desc))
-         ~'input-height (long (:input-height conv-desc))
+  `(let [~'conv-desc ~conv-desc
+         ~'output-width (layers/convolutional-output-width ~'conv-desc)
+         ~'output-height (layers/convolutional-output-height ~'conv-desc)
+         ~'num-in-channels (long (:input-channels ~'conv-desc))
+         ~'num-out-channels (long (:output-channels ~'conv-desc))
+         ~'input-width (long (:input-width ~'conv-desc))
+         ~'input-height (long (:input-height ~'conv-desc))
          ~'input-planar-stride (* ~'input-width ~'input-height)
          ~'output-planar-stride (* ~'output-width ~'output-height)
-         ~'output-channel-stride (* (.kernel-width config#) (.kernel-height config#))
+         ~'kernel-width (long (:kernel-width ~'conv-desc))
+         ~'kernel-height (long (:kernel-height ~'conv-desc))
+         ~'output-channel-stride (* ~'kernel-width ~'kernel-height)
          ~'output-column-stride (* ~'output-channel-stride ~'num-in-channels)
-         ~'kernel-width (long (:kernel-width conv-desc))
-         ~'kernel-height (long (:kernel-height conv-desc))
-         ~'stride-h (long (:stride-h conv-desc))
-         ~'stride-x (long (:stride-x conv-desc))
-         ~'pad-x (long (:pad-x conv-desc))
-         ~'pad-y (long (:pad-y conv-desc))
+         ~'stride-h (long (:stride-h ~'conv-desc))
+         ~'stride-x (long (:stride-x ~'conv-desc))
+         ~'pad-x (long (:pad-x ~'conv-desc))
+         ~'pad-y (long (:pad-y ~'conv-desc))
          ~'min-x (- 0 ~'pad-x)
          ~'min-y (- 0 ~'pad-y)
          ~'max-x (+ ~'input-width ~'pad-x)

@@ -1,4 +1,4 @@
-(ns cortex.verification.nn.layers
+(ns cortex.verify.nn.layers
   "Verify that layers do actually produce their advertised results."
   (:require [cortex.nn.layers :as layers]
             [cortex.nn.build :as build]
@@ -17,7 +17,7 @@
                                                  :batch-size
                                                  batch-size)
                                           input output-gradient)
-        traverse (get network :traversal)
+        traversal (get network :traversal)
         test-node (get-in network [:layer-graph test-layer-id])
         parameter-descriptions (layers/get-parameter-descriptions test-node)
         parameters (mapv (fn [{:keys [key] :as description}]
