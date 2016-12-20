@@ -75,3 +75,42 @@ across all inferences and labels."
    (/ (->> (map (partial loss-fn) v-seq target-seq)
            (reduce +))
       (count v-seq))))
+
+
+(defn max-index
+  [coll]
+  (second (reduce (fn [[max-val max-idx] idx]
+                    (if (or (nil? max-val)
+                            (> (coll idx) max-val))
+                      [(coll idx) idx]
+                      [max-val max-idx]))
+                  [nil nil]
+                  (range (count coll)))))
+
+(defn softmax-result-to-unit-vector
+  [result]
+  (let [zeros (apply vector (repeat (first (m/shape result)) 0))]
+    (assoc zeros (max-index (into [] (seq result))) 1.0)))
+
+
+(defn softmax-results-to-unit-vectors
+  [results]
+  (let [zeros (apply vector (repeat (first (m/shape (first results))) 0))]
+    (mapv #(assoc zeros (max-index (into [] (seq  %))) 1.0)
+          results)))
+
+(defn evaluate-softmax
+  "Provide a percentage correct for softmax.  This is much easier to interpret than
+the actual log-loss of the softmax unit."
+  [guesses answers]
+  (if (or (not (pos? (count guesses)))
+          (not (pos? (count answers)))
+          (not= (count guesses) (count answers)))
+    (throw (Exception. (format "evaluate-softmax: guesses [%d] and answers [%d] count must both be positive and equal."
+                               (count guesses)
+                               (count answers)))))
+  (let [results-answer-seq (mapv vector
+                                 (softmax-results-to-unit-vectors guesses)
+                                 answers)
+        correct (count (filter #(m/equals (first %) (second %)) results-answer-seq))]
+    (double (/ correct (count results-answer-seq)))))

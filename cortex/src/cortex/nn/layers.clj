@@ -300,10 +300,21 @@ network graph description."
 
 
 ;;Optimization strategies
-
 (defn adam
   [& args]
-  {:type :adam})
+  (merge-args
+   {:type :adam
+    :alpha 0.001
+    :beta1 0.9
+    :beta2 0.999
+    :epsilon 1e-8}
+   args))
+
+(defn adadelta
+  [& args]
+  {:type :adadelta
+   :decay 0.05
+   :epsilon 1e-6})
 
 
 (def example-mnist-description
