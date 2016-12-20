@@ -336,7 +336,7 @@ that uses the reasonably small buffers."
                                                              0 0)]
       {:forward (map first forward-traverse-seq)
        :buffers (second (last forward-traverse-seq))
-       :type :inferences})
+       :type :inference})
     (-> (network->gradient-descent built-network :remove-type-set remove-type-set)
         (dissoc :backward)
         (assoc :type :inference))))

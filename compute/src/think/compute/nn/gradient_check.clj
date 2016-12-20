@@ -49,7 +49,8 @@
                                    (drv/copy-host->device (drv/get-stream backend)
                                                           upload-buffer 0 device-buffer 0
                                                           elem-count)
-                                   (network-forward network loss-fn-seq input-seq answer-doubles))
+                                   (network-forward network loss-fn-seq input-seq
+                                                    answer-doubles))
                   ^doubles retval (double-array elem-count)
                   epsilon (double (get param-idx-epsilon-map idx 1e-4))]
               (drv/copy-device->host (drv/get-stream backend) device-buffer 0

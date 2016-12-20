@@ -5,16 +5,16 @@
             [think.compute.cpu-driver :as cpu-drv]
             [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
             [think.compute.optimise :as opt]
-            [think.compute.nn.layers :as layers]
+            [think.compute.nn.layers :as compute-layers]
+            [cortex.nn.layers :as layers]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.nn.impl.layers.convolution :as conv])
+            [cortex.nn.impl :as impl])
   (:import [think.compute.cpu_driver CPUDriver CPUStream]
            [java.nio DoubleBuffer FloatBuffer]
            [think.compute.math DeviceArray Tensor]
            [think.compute.optimise AdadeltaOptimiser AdamOptimiser]
-           [cortex.nn.impl.layers.convolution ConvLayerConfig]
            [java.util Arrays]
            [java.util.concurrent ForkJoinPool Callable Future]
            [think.datatype ArrayView DoubleArrayView FloatArrayView]))
@@ -231,10 +231,10 @@
   [input output config cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          output-ary# (ArrayView/toView ~output)]
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config
       :convolutional
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (let [input-val# (~cast-fn (if ~'input-valid?
                                     (v-aget input-ary# ~'input-addr)
                                     0.0))]
@@ -251,9 +251,9 @@
   `(let [output-ary# (ArrayView/toView ~input-gradient)
          input-ary# (ArrayView/toView ~conv-input-gradient)]
      ;;Zero accumulator
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config :convolutional
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (when ~'input-valid?
          (let [output-val# (v-aget output-ary# ~'input-addr)
                input-val# (v-aget input-ary# ~'output-conv-addr)]
@@ -263,9 +263,9 @@
   [input output config cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          output-ary# (ArrayView/toView ~output)]
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config :pooling
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (let [input-val# (~cast-fn (if ~'input-valid?
                                   (v-aget input-ary# ~'input-addr)
                                   0.0))
@@ -285,9 +285,9 @@
          output-ary# (ArrayView/toView ~output)
          input-gradient-ary# (ArrayView/toView ~input-gradient)
          output-gradient-ary# (ArrayView/toView ~output-gradient)]
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config :pooling
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (let [input-addr# ~'input-addr
              input-val# (~cast-fn (if ~'input-valid?
                                   (v-aget input-ary# input-addr#)
@@ -760,10 +760,10 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                           (double epsilon) (double pow-beta1-t) (double pow-beta2-t)
                           (.data m) (.data v)))
   (cpu-planar-input->convolution! [input ^DoubleArrayView input-convolved
-                                   ^ConvLayerConfig conv-config]
+                                   conv-config]
     (cpu-planar-input->convolution!-impl input input-convolved conv-config double))
   (cpu-convolution->planar-output! [input-convolved ^DoubleArrayView input-gradient
-                                    ^ConvLayerConfig conv-config]
+                                    conv-config]
     (cpu-convolution->planar-output!-impl input-convolved input-gradient conv-config double))
 
   (cpu-fill [buffer value]
@@ -913,9 +913,9 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 
 (defn create-convolution-matrix
-  [^ConvLayerConfig config backend batch-size]
-  (let [output-width (conv/get-output-width config :convolutional)
-        output-height (conv/get-output-height config :convolutional)
+  [config backend batch-size]
+  (let [output-width (layers/get-output-width config)
+        output-height (layers/get-output-height config)
         kernel-stride (* (.k-width config) (.k-height config))
         n-cols (* kernel-stride (.num-in-channels config))
         n-rows (* output-width output-height)]
@@ -923,8 +923,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 
 (defn create-conv-layer [backend ^ConvLayerConfig conv-config ^long batch-size]
-  (let [num-out-pixels (* (conv/get-output-width conv-config :convolutional)
-                          (conv/get-output-height conv-config :convolutional))]
+  (let [num-out-pixels (* (layers/get-output-width conv-config)
+                          (layers/get-output-height conv-config))]
     (->ConvolutionalLayer backend conv-config
                           (create-convolution-matrix conv-config backend batch-size)
                           (math/allocate-ones (drv/get-driver backend) (drv/get-stream backend)
