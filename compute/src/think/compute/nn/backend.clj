@@ -64,6 +64,7 @@
 
 (defn biased-multiply!
   [backend input weights bias output]
+  ;;(println input weights bias output)
   (let [stream (drv/get-stream backend)]
     (math/sum stream 1.0 bias 0.0 output)
     (math/gemm stream false true

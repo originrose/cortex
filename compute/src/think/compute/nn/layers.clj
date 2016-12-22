@@ -7,27 +7,41 @@ implementation as possible."
             [think.compute.math :as math]
             [think.compute.driver :as drv]
             [clojure.core.matrix :as m]
-            [cortex.util :as util]))
+            [cortex.util :as util]
+            [think.compute.nn.protocols :as compute-protocols]))
 
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-
-(defprotocol ComputeLayer
-  "Interface to connect the execution context to either a shared implementation
-(with sharing in this file) or a backend-specific implementation.  These functions are built to cause
-side effects."
-  (forward [layer parameter-buffers input-buffers output-buffers])
-  (backward [layer parameter-buffers output-buffers input-buffers]))
+(defn first-buffer
+  [buffer-vec]
+  (get-in buffer-vec [0 :buffer]))
 
 
-(defrecord InputLayer [backend]
-  ComputeLayer
+(defn first-gradient
+  [buffer-vec]
+  (get-in buffer-vec [0 :gradient]))
+
+
+(defrecord Linear [backend]
+  compute-protocols/ComputeLayer
   (forward [layer parameter-buffers input-buffers output-buffers]
-    (nn-backend/assign! backend (first input-buffers) (first output-buffers)))
-  (backward [layer parameter-buffers input-buffers output-buffers]))
-
+    (nn-backend/biased-multiply! backend
+                                 (first-buffer input-buffers)
+                                 (get-in parameter-buffers [:weights :buffer])
+                                 (get-in parameter-buffers [:bias :buffer])
+                                 (first-buffer output-buffers)))
+  (backward [layer parameter-buffers output-buffers input-buffers]
+    (nn-backend/biased-multiply-backward! backend
+                                          (first-buffer input-buffers)
+                                          (get-in parameter-buffers [:weights :buffer])
+                                          (get-in parameter-buffers [:bias :buffer])
+                                          (first-buffer output-buffers)
+                                          (first-gradient input-buffers)
+                                          (get-in parameter-buffers [:weights :gradient])
+                                          (get-in parameter-buffers [:bias :gradient])
+                                          (first-gradient output-buffers))))
 
 (defmulti create
   "Create a compute layer"
@@ -40,6 +54,6 @@ side effects."
   (nn-backend/create backend node batch-size))
 
 
-(defmethod create :input
+(defmethod create :linear
   [backend node batch-size]
-  (->InputLayer backend))
+  (->Linear backend))

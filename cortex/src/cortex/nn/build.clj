@@ -77,6 +77,10 @@ The build step is responsible for
   [previous item]
   (build-pass-through-desc previous item))
 
+(defmethod build-desc :tanh
+  [previous item]
+  (build-pass-through-desc previous item))
+
 (defmethod build-desc :dropout
   [previous item]
   (build-pass-through-desc previous item))
@@ -169,11 +173,11 @@ The build step is responsible for
 (defn- assign-layer-parents
   [layer-list]
   (concat [(first layer-list)]
-   (map (fn [parent-item current-item]
-          (if (get :parents current-item)
-            current-item
-            (assoc current-item :parents [(get parent-item :id)])))
-        layer-list (drop 1 layer-list))))
+          (map (fn [parent-item current-item]
+                 (if (get :parents current-item)
+                   current-item
+                   (assoc current-item :parents [(get parent-item :id)])))
+               layer-list (drop 1 layer-list))))
 
 
 (defn- layer-list->edge-list
@@ -271,7 +275,7 @@ The build step is responsible for
 
 (defn edges->dfs-seq
   "Take the list of edges and at least start id and produce an id-sequence in
-depth-first order."
+  depth-first order."
   ([edges root-id parent->child-map]
    (tree-seq #(contains? parent->child-map %)
              #(get parent->child-map %)
@@ -299,7 +303,7 @@ depth-first order."
 
 (defn- generate-param-buffer
   "Generate a parameter buffer.
-Returns pair of [parameter-buffer initialization-type]"
+  Returns pair of [parameter-buffer initialization-type]"
   [{:keys [type shape-fn key] :as param-desc} node-id id->node-map edges]
   (let [node (get id->node-map node-id)
         param-data (get node key)
@@ -358,8 +362,9 @@ Returns pair of [parameter-buffer initialization-type]"
                  (map (fn [{:keys [key] :as param-desc}]
                         (let [param-entry (get node key)
                               buffer (if (map? param-entry)
-                                       (get buffers (get param-entry
-                                                               :buffer-id))
+                                       (or (get param-entry :buffer)
+                                           (get buffers (get param-entry
+                                                             :buffer-id)))
                                        ;;If the parameter-entry is not associative
                                        ;;and is non-nil then we assume it is the desired
                                        ;;buffer.
@@ -382,9 +387,9 @@ Returns pair of [parameter-buffer initialization-type]"
                             (assoc param-entry :buffer buffer))))
                       parameter-descs)
                  buffers (reduce (fn [buffers {:keys [buffer-id buffer]}]
-                                         (assoc buffers buffer-id buffer))
-                                       buffers
-                                       full-parameters)
+                                   (assoc buffers buffer-id {:buffer buffer}))
+                                 buffers
+                                 full-parameters)
                  id->node-map (reduce (fn [id->node-map {:keys [key] :as param-entry}]
                                         (assoc-in id->node-map [id key]
                                                   (dissoc param-entry :buffer :key)))

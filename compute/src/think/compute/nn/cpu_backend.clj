@@ -6,6 +6,7 @@
             [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
             [think.compute.optimise :as opt]
             [think.compute.nn.layers :as compute-layers]
+            [think.compute.nn.protocols :as compute-protocols]
             [cortex.nn.layers :as layers]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
@@ -880,16 +881,16 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (defn- first-buffer
   [buffers]
-  (device-array->view (get-in buffers [0 :buffer])))
+  (device-array->view (compute-layers/first-buffer buffers)))
 
 
 (defn- first-gradient
   [buffers]
-  (device-array->view (get-in buffers [0 :gradient])))
+  (device-array->view (compute-layers/first-gradient buffers)))
 
 
 (defrecord ActivationLayer [layer cpu-stream]
-  compute-layers/ComputeLayer
+  compute-protocols/ComputeLayer
   (forward [this parameter-buffers input output]
     (cpu-drv/with-stream-dispatch cpu-stream
       (cpu-activation-forward (first-buffer input)

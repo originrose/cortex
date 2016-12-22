@@ -5,6 +5,7 @@
             [think.compute.nn.layers :as compute-layers]
             [think.compute.optimise :as compute-optimise]
             [think.compute.nn.backend :as backend]
+            [think.compute.nn.protocols :as compute-protocols]
             [clojure.core.matrix :as m]
             [think.resource.core :as resource]))
 
@@ -19,7 +20,8 @@
                             (let [graph-buffer (get-in network
                                                        [:layer-graph
                                                         :buffers
-                                                        buffer-id])]
+                                                        buffer-id
+                                                        :buffer])]
                               (cond-> {:buffer (backend/array backend graph-buffer)}
                                 (= pass-type :training)
                                 (assoc :gradient (backend/new-array backend
@@ -55,9 +57,9 @@
                       (fn [buffer]
                         (or buffer
                             (let [buffer-size (get-in traversal [:buffers buffer-key :size])]
-                              (cond-> {:buffer (backend/new-array backend [buffer-size])}
+                              (cond-> {:buffer (backend/new-array backend [buffer-size] batch-size)}
                                 (= pass-type :training)
-                                (assoc :gradient (backend/new-array backend [buffer-size]))))))))
+                                (assoc :gradient (backend/new-array backend [buffer-size] batch-size))))))))
          compute-binding
          (keys (get traversal :buffers)))]
     (assoc built-network
@@ -69,29 +71,29 @@
   [network {:keys [retain-gradients?]}]
   (let [backend (get-in network [:compute-binding :backend])
         core-m (fn [data] (backend/to-core-matrix backend data))]
-   (-> network
-       (update-in [:layer-graph :buffers]
-                  (fn [buffers]
+    (-> network
+        (update-in [:layer-graph :buffers]
+                   (fn [buffers]
+                     (reduce (fn [buffers [buf-id {:keys [buffer gradient]}]]
+                               (update buffers buf-id
+                                       (fn [result-buffer]
+                                         (cond-> (assoc result-buffer :buffer (core-m buffer))
+                                           retain-gradients?
+                                           (assoc :gradient (core-m gradient))))))
+                             buffers
+                             (get-in network [:compute-binding :parameter-buffers]))))
+        (assoc-in [:traversal :buffers]
+                  (if retain-gradients?
                     (reduce (fn [buffers [buf-id {:keys [buffer gradient]}]]
                               (update buffers buf-id
-                                      (fn [buffer]
-                                        (cond-> (assoc buffer :buffer (core-m buffer))
-                                          retain-gradients?
-                                          (assoc buffer :gradient (core-m gradient))))))
-                            buffers
-                            (get-in network [:compute-binding :parameter-buffers]))))
-       (assoc-in [:traversal :buffers]
-                 (if retain-gradients?
-                   (reduce (fn [buffers [buf-id {:keys [buffer gradient]}]]
-                             (update buffers buf-id
-                                     #(assoc
-                                       %
-                                       :buffer (core-m buffer)
-                                       :gradient (core-m gradient))))
-                           {}
-                           (get-in network [:compute-binding :traversal-buffers]))
-                   (get-in network [:traversal :buffers])))
-       (dissoc :compute-binding))))
+                                      #(assoc
+                                        %
+                                        :buffer (core-m buffer)
+                                        :gradient (core-m gradient))))
+                            {}
+                            (get-in network [:compute-binding :traversal-buffers]))
+                    (get-in network [:traversal :buffers])))
+        (dissoc :compute-binding))))
 
 
 (defn- find-buffers
@@ -112,13 +114,10 @@
                                (map (fn [[map-key buffer-entry]]
                                       ;;Assoc the input buffers into the appropriate spots if they are
                                       ;;passed in.
-                                      (println map-key)
                                       (let [input-buffer (get id->input-buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
-                                          (do (println map-key buffer-type
-                                                       (vec (backend/to-double-array backend input-buffer)))
-                                           [map-key (assoc buffer-entry buffer-type input-buffer)])
+                                          [map-key (assoc buffer-entry buffer-type input-buffer)]
                                           [map-key buffer-entry]))))
                                (into {}))
         buffer-resolve (partial find-buffers traversal-buffers)]
@@ -141,7 +140,7 @@
                                                       :parameter-buffers
                                                       (get node-parameter :buffer-id)])]
                 [key
-                 (assoc node-parameter :buffer parameter-buffer)])))
+                 (merge node-parameter parameter-buffer)])))
        (into {})))
 
 
@@ -160,10 +159,9 @@
 (defn- do-traverse
   [network id->input-buffer pass-direction]
   (let [pass-function (condp = pass-direction
-                        :forward compute-layers/forward
-                        :backward compute-layers/backward)
+                        :forward compute-protocols/forward
+                        :backward compute-protocols/backward)
         [network mapped-pass] (map-pass-to-buffers network id->input-buffer pass-direction)]
-    (print-traversal-buffers network)
     (->> mapped-pass
          (map (fn [{:keys [incoming id outgoing]}]
                 (pass-function
@@ -171,19 +169,19 @@
                  (get-node-parameters network id)
                  incoming outgoing)))
          dorun)
-    (print-traversal-buffers network)
     network))
 
 
 (defn- traverse
   [network id->input-map pass-type]
-  (resource/with-resource-context
-   (let [backend (get-in network [:compute-binding :backend])
-         id->buffer-map (->> id->input-map
-                                 (map (fn [[k v]]
-                                        [k (backend/array backend v)]))
-                                 (into {}))]
-     (do-traverse network id->buffer-map pass-type))))
+  (let [batch-size (get network :batch-size)]
+   (resource/with-resource-context
+     (let [backend (get-in network [:compute-binding :backend])
+           id->buffer-map (->> id->input-map
+                               (map (fn [[k v]]
+                                      [k (backend/array backend v batch-size)]))
+                               (into {}))]
+       (do-traverse network id->buffer-map pass-type)))))
 
 
 (defrecord ComputeExecutionContext [backend-fn]

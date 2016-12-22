@@ -13,34 +13,31 @@
   (compute-execute/create-context
    #(cpu-backend/create-cpu-backend test-utils/*datatype*)))
 
-
 (deftest relu-activation
   (verify-layers/relu-activation (create-context)))
 
+(deftest relu-activation-batch
+  (verify-layers/relu-activation-batch (create-context)))
+
+(deftest linear
+  (verify-layers/linear (create-context)))
+
+(deftest linear-batch
+  (verify-layers/linear-batch (create-context)))
+
+(deftest sigmoid
+  (verify-layers/test-activation (create-context) :logistic))
+
+(deftest tanh
+  (verify-layers/test-activation (create-context) :tanh))
+
+(deftest logistic-batch
+  (verify-layers/test-activation-batch (create-context) :logistic))
+
+(deftest tanh-batch
+  (verify-layers/test-activation-batch (create-context) :tanh))
+
 (comment
-  (def-double-float-test relu-activation-batch
-    (verify-layers/test-relu-activation-batch (create-context)))
-
-  (def-double-float-test linear
-    (verify-layers/test-linear (create-context)))
-
-  (def-double-float-test linear-batch
-    (verify-layers/test-linear-batch (create-context)))
-
-  (def-double-float-test l2-max-constraint
-    (verify-layers/test-l2-max-constraint (create-context)))
-
-  (def-double-float-test sigmoid
-    (verify-layers/test-activation (create-context) :sigmoid))
-
-  (def-double-float-test tanh
-    (verify-layers/test-activation (create-context) :tanh))
-
-  (def-double-float-test sigmoid-batch
-    (verify-layers/test-activation-batch (create-context) :sigmoid))
-
-  (def-double-float-test tanh-batch
-    (verify-layers/test-activation-batch (create-context) :tanh))
 
   (def-double-float-test softmax
     (verify-layers/softmax (create-context)))
