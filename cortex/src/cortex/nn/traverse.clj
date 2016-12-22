@@ -95,16 +95,17 @@ while output bindings are maps from node-id to {:stream :loss}."
   :loss-function (if output)}."
   [{:keys [traversal]}]
   (let [{:keys [input-bindings output-bindings]} traversal]
-    (concat (map (fn [[node-id {:keys [stream]}]]
+    (concat (map (fn [[node-id {:keys [input-stream]}]]
                    {:node-id node-id
-                    :dataset-stream stream
+                    :dataset-stream input-stream
                     :direction :input})
                  input-bindings)
-            (map (fn [[dataset-stream {:keys [node-id loss-function]}]]
+            (map (fn [[node-id {:keys [output-stream loss]}]]
                    {:node-id node-id
-                    :dataset-stream dataset-stream
+                    :dataset-stream output-stream
                     :direction :output
-                    :loss-function loss-function})))))
+                    :loss-function loss})
+                 output-bindings))))
 
 
 

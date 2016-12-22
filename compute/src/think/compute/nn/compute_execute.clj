@@ -5,9 +5,13 @@
             [think.compute.nn.layers :as compute-layers]
             [think.compute.optimise :as compute-optimise]
             [think.compute.nn.backend :as backend]
+            [cortex.nn.protocols :as cp]
             [think.compute.nn.protocols :as compute-protocols]
             [clojure.core.matrix :as m]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [think.compute.optimise :as opt]
+            [think.compute.batching-system :as batching-system]
+            [clojure.set :as c-set]))
 
 
 (defn- bind-node-parameter-buffers
@@ -28,6 +32,28 @@
                                                                     (m/shape graph-buffer))))))))))
           compute-buffers
           (layers/get-parameter-descriptions node)))
+
+
+(defn- create-batching-system
+  [backend built-network]
+  (let [bindings (traverse/get-dataset-bindings built-network)
+        stream->size-map (->> bindings
+                              (map (fn [{:keys [node-id dataset-stream direction]}]
+                                     (when dataset-stream
+                                       [dataset-stream
+                                        {:size
+                                         (get-in built-network
+                                                 [:layer-graph :id->node-map node-id :input-size])
+                                         :direction #{direction}}])))
+                              (remove nil?)
+                              (reduce (fn [eax [stream {:keys [size direction] :as entry}]]
+                                        (-> eax
+                                            (assoc-in [stream :size] size)
+                                            (update-in eax [stream :direction]
+                                                       #(c-set/union % direction))))
+                                      {}))
+        _ (println stream->size-map)]
+    (batching-system/create backend stream->size-map)))
 
 
 (defn- bind
@@ -64,7 +90,10 @@
          (keys (get traversal :buffers)))]
     (assoc built-network
            :compute-binding
-           (assoc compute-binding :backend backend))))
+           (assoc compute-binding
+                  :backend backend
+                  :batching-system (create-batching-system backend built-network)
+                  :optimiser (opt/create-compute-optimiser (get traversal :optimiser))))))
 
 
 (defn- save
@@ -190,15 +219,19 @@
       :backward (do-traverse network mapped-pass compute-protocols/backward))))
 
 
+(defn- train-sequence
+  [built-network batch-map-sequence options])
+
+
 (defrecord ComputeExecutionContext [backend-fn]
-  execute/PExecutionContext
+  cp/PExecutionContext
   (bind-to-network [context built-network options]
     (bind backend-fn built-network))
   (train-batch-sequence [context built-network batch-map-sequence options]
-    "Return a sequence of progressively better trained built-networks, one for each batch.")
+
+    )
   (infer-batch-sequence [context built-network batch-map-sequence options]
-    "Return a sequence of maps of node-id->double-array-seq.  Use
-dataset/batch-sequence-columnar in order to transform sequence into specific sequences.")
+)
   (save-to-network [context built-network options]
     (save built-network options))
   (forward-backward [context bound-network

@@ -9,43 +9,8 @@ layer-graph -> layer-graph via some training process."
             [cortex.nn.layers :as layers]
             [cortex.dataset :as ds]
             [think.resource.core :as resource]
-            [cortex.loss :as loss]))
-
-
-(defprotocol PExecutionContext
-  "A specific execution context implements all of the specific functionality of the network such as
-the nodes, loss functions, optimization engines, and various other details.
-There is a concept of a batch map sequence which is a sequence of maps of stream-names to
-batches of data.  This is the format produced by the dataset abstraction but it isn't strictly
-necessary to use the dataset abstraction in order to train or infer."
-  (bind-to-network [context built-network options]
-    "Bind an execution context to a network.  This should return a new network with any specific
-information the context needs embedded in it.  The network contains at least:
-{:layer-graph
- :traversal
- :batch-size}")
-  (train-batch-sequence [context built-network batch-map-sequence options]
-    "Return a sequence of progressively better trained built-networks, one for each batch.")
-  (infer-batch-sequence [context built-network batch-map-sequence options]
-    "Return a sequence of maps of node-id->double-array-seq.  Use dataset/batch-sequence-columnar in order
-to transform sequence into specific sequences.")
-  (save-to-network [context built-network options]
-    "Return a new network without context information and with any persistent information
-(like parameters) updated.  This may be called multiple times during the training process.
-Options is map that may contain:
-save-gradients? - save the gradients *and* the io buffers.")
-
-  ;;Test/verification interfaces
-  (forward-backward [context built-network
-                     stream->input-map
-                     node-id->output-gradient-map]
-    "Test interface - Run the network forward and backward using these inputs and output-gradients.")
-  (forward-backward-loss [context built-network
-                          stream->input-map
-                          node-id->loss-function-answer-map]
-    "Run network forward and backward like 'forward-backward' but also calculate numeric
-gradients w/r/t the loss function and the provided answer.  This allows for gradient
-checking.  The data should be saved back to the network after the passes"))
+            [cortex.loss :as loss]
+            [cortex.nn.protocols :as cp]))
 
 
 (defn- safe-inc
@@ -63,7 +28,7 @@ The context is expected to already be bound to the network."
                              (remove nil?)
                              set)
         dataset-epoch (ds/get-batches dataset batch-size :training dataset-streams)
-        trained-network (last (train-batch-sequence context built-network dataset-epoch {}))]
+        trained-network (last (cp/train-batch-sequence context built-network dataset-epoch {}))]
     (cons (update trained-network :epoch-count safe-inc)
           (lazy-seq train-seq context trained-network dataset))))
 
@@ -109,6 +74,7 @@ Returns map of:
   [context {:keys [batch-size] :as built-network} dataset & {:keys [infer-batch-type]
                                                              :or {infer-batch-type :cross-validation}}]
   (let [bindings (traverse/get-dataset-bindings built-network)
+        _ (println bindings)
         input-streams (->> bindings
                            (filter #(= :input (get % :direction)))
                            (map :dataset-stream)
@@ -124,11 +90,11 @@ Returns map of:
    (->> (train-seq context built-network dataset)
         (map (fn [trained-network]
                {:network trained-network
-                :inferences (infer-batch-sequence context trained-network
-                                                  (ds/get-batches dataset batch-size
-                                                                  infer-batch-type
-                                                                  input-streams)
-                                                  {})
+                :inferences (cp/infer-batch-sequence context trained-network
+                                                     (ds/get-batches dataset batch-size
+                                                                     infer-batch-type
+                                                                     input-streams)
+                                                     {})
                 :label-fn label-fn
                 :dataset-bindings bindings})))))
 
@@ -156,12 +122,12 @@ Returns map of:
     ;;that allocate major resources that have to be released when they are no longer needed.
     ;;THUS we do this with the with-resource-context call.
     (resource/with-resource-context
-      (as-> (bind-to-network context built-network {}) trained-network
+      (as-> (cp/bind-to-network context built-network {}) trained-network
         (train-infer-seq context trained-network dataset :infer-batch-type infer-batch-type)
         (take-while pred-fn trained-network)
-        last
-        :network
-        (save-to-network context trained-network {})))))
+        (last trained-network)
+        (get trained-network :network)
+        (cp/save-to-network context trained-network {})))))
 
 
 (defn infer
@@ -180,6 +146,6 @@ node-id->data-stream."
                            set)
         epoch (ds/get-batches dataset batch-size infer-batch-type input-streams)]
     (resource/with-resource-context
-      (as-> (bind-to-network context built-network {}) built-network
-        (infer-batch-sequence context built-network epoch {})
+      (as-> (cp/bind-to-network context built-network {}) built-network
+        (cp/infer-batch-sequence context built-network epoch {})
         ds/batches->columns))))

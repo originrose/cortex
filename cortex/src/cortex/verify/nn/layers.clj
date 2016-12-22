@@ -7,7 +7,8 @@
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
             [cortex.verify.utils :as utils]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [cortex.nn.protocols :as cp]))
 
 (defn bind-test-network
   [context network batch-size test-layer-id]
@@ -22,7 +23,7 @@
     (as-> (build/build-network network) network
       (traverse/network->training-traversal network input-bindings output-bindings)
       (assoc network :batch-size batch-size)
-      (execute/bind-to-network context network {}))))
+      (cp/bind-to-network context network {}))))
 
 
 (defn forward-backward-test-network
@@ -30,8 +31,8 @@
   (let [input-stream {:data input}
         output-gradient-stream {test-layer-id output-gradient}
         network
-        (as-> (execute/forward-backward context network input-stream output-gradient-stream) network
-          (execute/save-to-network context network {:save-gradients? true}))
+        (as-> (cp/forward-backward context network input-stream output-gradient-stream) network
+          (cp/save-to-network context network {:save-gradients? true}))
         traversal (get network :traversal)
         test-node (get-in network [:layer-graph :id->node-map test-layer-id])
         parameter-descriptions (layers/get-parameter-descriptions test-node)
