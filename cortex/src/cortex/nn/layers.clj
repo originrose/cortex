@@ -8,6 +8,20 @@ constructors are all variable args with the extra arguments expected to be
   (:require [cortex.loss :refer [merge-args arg-list->arg-map] :as loss]))
 
 
+(defmulti get-layer-metadata
+  "Get the metadata for the layer.  This ecompasses
+at least:
+:parameter-descriptions - A list of parameter descriptions.  see get-parameter-descriptons.
+ :pass-set - a set of pass types the layer is used in.  The set of possible types could be empty
+   or any of #{:training :inference}."
+  :type)
+
+
+(defmethod get-layer-metadata :default
+  [layer]
+  {:parameter-descriptions []
+   :pass-set #{:training :inference}})
+
 
 (def parameter-buffer-types
   [:weight
@@ -17,20 +31,23 @@ constructors are all variable args with the extra arguments expected to be
    :variance])
 
 
-(defmulti get-parameter-descriptions
+(defn get-parameter-descriptions
   "Get a list of parameter descriptions.  Parameter descriptions are maps:
 :key        description key which holds the parameter.
 :type       one of the parameter buffer types.  Possibly unknown type.
 :shape-fn   function which given the built description will return the
             core matrix parameter shape for this particular buffer."
-  ;;dispatch on layer type
-  :type)
+  [layer]
+  (get (get-layer-metadata layer) :parameter-descriptions))
 
 
-;;Most layers have no parameters
-(defmethod get-parameter-descriptions :default
-  [_]
-  [])
+(defn get-pass-set
+  "Get the pass types the layer is used in.  The set can be empty
+if the layer is a placeholder to help building graphs (input,output)
+or it can be #{:training} if the layer is used only during training (dropout)
+  or finally the default is #{:training :inference}"
+  [layer]
+  (get (get-layer-metadata layer) :pass-set))
 
 
 (defn input
@@ -43,6 +60,12 @@ constructors are all variable args with the extra arguments expected to be
      args)])
   ([output-size]
    (input output-size 1 1)))
+
+
+(defmethod get-layer-metadata :input
+  [layer]
+  {:parameter-descriptions []
+   :pass-set #{}})
 
 
 (defn linear
@@ -60,14 +83,16 @@ constructors are all variable args with the extra arguments expected to be
   [output-size])
 
 
-(defmethod get-parameter-descriptions :linear
+(defmethod get-layer-metadata :linear
   [desc]
-  [{:key :weights
-    :type :weight
-    :shape-fn linear-weight-parameter-shape}
-   {:key :bias
-    :type :bias
-    :shape-fn linear-bias-parameter-shape}])
+  {:parameter-descriptions
+   [{:key :weights
+     :type :weight
+     :shape-fn linear-weight-parameter-shape}
+    {:key :bias
+     :type :bias
+     :shape-fn linear-bias-parameter-shape}]
+   :pass-set #{:inference :training}})
 
 
 (defn softmax
@@ -132,6 +157,13 @@ no change to the input."
   [(merge-args
     {:type :dropout :distribution :gaussian :variance variance}
     args)])
+
+
+(defmethod get-layer-metadata :dropout
+  [layer]
+  {:parameter-descriptions []
+   :pass-set #{:training}})
+
 
 (def default-layer-type-dimension-op
   {:convolutional :floor
@@ -205,14 +237,17 @@ calculations must be "
   [num-kernels])
 
 
-(defmethod get-parameter-descriptions :convolutional
+(defmethod get-layer-metadata :convolutional
   [desc]
-  [{:type :weight
-    :key :weights
-    :shape-fn convolutional-weight-parameter-shape}
-   {:type :bias
-    :key :bias
-    :shape-fn convolutional-bias-parameter-shape}])
+  {:parameter-descriptions
+   [{:type :weight
+     :key :weights
+     :shape-fn convolutional-weight-parameter-shape}
+    {:type :bias
+     :key :bias
+     :shape-fn convolutional-bias-parameter-shape}]
+
+   :pass-set #{:training :inference}})
 
 
 (defn max-pooling
@@ -240,20 +275,23 @@ This is for cudnn compatibility.")))
     (dissoc arg-map :epsilon))])
 
 
-(defmethod get-parameter-descriptions :batch-normalization
+(defmethod get-layer-metadata :batch-normalization
   [desc]
-  [{:key :scale
-    :type :scale
-    :shape-fn linear-bias-parameter-shape}
-   {:key :bias
-    :type :bias
-    :shape-fn linear-bias-parameter-shape}
-   {:key :means
-    :type :mean
-    :shape-fn linear-bias-parameter-shape}
-   {:key :variances
-    :type :variance
-    :shape-fn linear-bias-parameter-shape}])
+  {:parameter-descriptions
+   [{:key :scale
+     :type :scale
+     :shape-fn linear-bias-parameter-shape}
+    {:key :bias
+     :type :bias
+     :shape-fn linear-bias-parameter-shape}
+    {:key :means
+     :type :mean
+     :shape-fn linear-bias-parameter-shape}
+    {:key :variances
+     :type :variance
+     :shape-fn linear-bias-parameter-shape}]
+
+   :pass-set #{:training :inference}})
 
 
 (defn local-response-normalization

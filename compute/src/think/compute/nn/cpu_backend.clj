@@ -879,29 +879,28 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 
 (defn- first-buffer
-  [buffers size]
-  (device-array->view (get-in buffers [0 :buffer]) size))
+  [buffers]
+  (device-array->view (get-in buffers [0 :buffer])))
 
 
 (defn- first-gradient
-  [buffers size]
-  (device-array->view (get-in buffers [0 :gradient]) size))
+  [buffers]
+  (device-array->view (get-in buffers [0 :gradient])))
 
 
 (defrecord ActivationLayer [layer cpu-stream]
   compute-layers/ComputeLayer
   (forward [this parameter-buffers input output]
     (cpu-drv/with-stream-dispatch cpu-stream
-      (cpu-activation-forward (first-buffer input (:input-size layer))
+      (cpu-activation-forward (first-buffer input)
                               (:type layer)
-                              (first-buffer output (:output-size layer)))))
-  (backward [this parameter-buffers input output]
-    (let [{:keys [input-size output-size]} layer]
-     (cpu-drv/with-stream-dispatch cpu-stream
-       (cpu-activation-backward (first-buffer input input-size) (:type layer)
-                                (first-buffer output output-size)
-                                (first-gradient output output-size)
-                                (first-gradient input input-size))))))
+                              (first-buffer output))))
+  (backward [this parameter-buffers output input]
+    (cpu-drv/with-stream-dispatch cpu-stream
+      (cpu-activation-backward (first-buffer input) (:type layer)
+                               (first-buffer output)
+                               (first-gradient output)
+                               (first-gradient input)))))
 
 (defmulti create-cpu-layer
   "Create a implementation layer for the cpu backend."

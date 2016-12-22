@@ -19,7 +19,7 @@ implementation as possible."
 (with sharing in this file) or a backend-specific implementation.  These functions are built to cause
 side effects."
   (forward [layer parameter-buffers input-buffers output-buffers])
-  (backward [layer parameter-buffers input-buffers output-buffers]))
+  (backward [layer parameter-buffers output-buffers input-buffers]))
 
 
 (defrecord InputLayer [backend]

@@ -9,14 +9,25 @@
 
 
 (defn forward-backward-test
+  "Take a 2 node network and assume"
   [context network test-layer-id batch-size input output-gradient]
-  (let [network (execute/forward-backward context
-                                          (assoc (build/build-network network)
-                                                 :traversal
-                                                 (traverse/network->gradient-descent network)
+  (let [test-layer-id :test
+        network (-> network
+                    flatten
+                    vec
+                    (assoc-in [0 :id] :input)
+                    (assoc-in [1 :id] test-layer-id))
+        input-bindings {:input :data}
+        output-bindings {test-layer-id {:stream :labels}}
+        input-stream {:data input}
+        output-gradient-stream {:test output-gradient}
+        network (execute/forward-backward context
+                                          (assoc (traverse/network->training-traversal (build/build-network network)
+                                                                                       input-bindings
+                                                                                       output-bindings)
                                                  :batch-size
                                                  batch-size)
-                                          input output-gradient)
+                                          input-stream output-gradient-stream)
         traversal (get network :traversal)
         test-node (get-in network [:layer-graph test-layer-id])
         parameter-descriptions (layers/get-parameter-descriptions test-node)
@@ -36,12 +47,13 @@
                                             first)
         incoming-buffers (mapv buffers incoming)
         outgoing-buffers (mapv buffers outgoing)]
+    (clojure.pprint/pprint outgoing-buffers)
     {:network network
      :parameters parameters
      :incoming-buffers incoming-buffers
      :outgoing-buffers outgoing-buffers
      :output (get (first outgoing-buffers) :buffer)
-     :input-gradient (get (first incoming-buffers :gradient))}))
+     :input-gradient (get (first incoming-buffers) :gradient)}))
 
 
 (defn relu-activation
@@ -51,7 +63,7 @@
         {:keys [output input-gradient]}
         (forward-backward-test context
                                [(layers/input item-count)
-                                (layers/relu :id :test)]
+                                (layers/relu)]
                                :test
                                1
                                ;;input sums to zero

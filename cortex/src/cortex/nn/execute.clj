@@ -14,31 +14,39 @@ layer-graph -> layer-graph via some training process."
 
 (defprotocol PExecutionContext
   "A specific execution context implements all of the specific functionality of the network such as
-the nodes, loss functions, optimization engines, and various other details."
+the nodes, loss functions, optimization engines, and various other details.
+There is a concept of a batch map sequence which is a sequence of maps of stream-names to
+batches of data.  This is the format produced by the dataset abstraction but it isn't strictly
+necessary to use the dataset abstraction in order to train or infer."
   (bind-to-network [context built-network options]
     "Bind an execution context to a network.  This should return a new network with any specific
 information the context needs embedded in it.  The network contains at least:
 {:layer-graph
  :traversal
  :batch-size}")
-  (train-batch-sequence [context built-network dataset-epoch options]
+  (train-batch-sequence [context built-network batch-map-sequence options]
     "Return a sequence of progressively better trained built-networks, one for each batch.")
-  (infer-batch-sequence [context built-network dataset-epoch options]
+  (infer-batch-sequence [context built-network batch-map-sequence options]
     "Return a sequence of maps of node-id->double-array-seq.  Use dataset/batch-sequence-columnar in order
 to transform sequence into specific sequences.")
   (save-to-network [context built-network options]
     "Return a new network without context information and with any persistent information
 (like parameters) updated.  This may be called multiple times during the training process.")
 
+
   ;;Test/verification interfaces
-  (forward-backward [context built-network input output-gradient]
+  (forward-backward [context built-network
+                     stream->input-map
+                     node-id->output-gradient-map]
     "Test interface - Run the (partial) network forward and backward and save everything; all
 calculated values (gradients, outputs, input-gradients) back to their respective
 places in the network.  Parameter gradients should be saved as gradient keys in
 respective buffers while the layer-graph buffers map should include matching buffers
 to the traverse' declared buffers with gradients members that map to the input gradients.
 The data should be saved back to the network after the passes.")
-  (forward-backward-loss [context built-network loss-function input answer]
+  (forward-backward-loss [context built-network
+                          stream->input-map
+                          node-id->loss-function-answer-map]
     "Run network forward and backward like 'forward-backward' but also calculate numeric
 gradients w/r/t the loss function and the provided answer.  This allows for gradient
 checking.  The data should be saved back to the network after the passes"))
@@ -140,14 +148,14 @@ Returns map of:
   This function is meant more as an example rather than the rule of how to train a network.
   It is a good idea, for example for the predicate function to have the side effect of saving
   the network if the current loss is lower than any previous loss."
-  [context built-network dataset pred-fn
+  [context built-network dataset input-bindings output-bindings pred-fn
    & {:keys [batch-size infer-batch-type optimiser]
       :or {batch-size 128 infer-batch-type :cross-validation
            optimiser (layers/adam)}}]
-  (let [traverse (traverse/network->gradient-descent built-network :optimiser optimiser)
-        built-network (assoc built-network
-                             :batch-size batch-size
-                             :traversal traverse)]
+  (let [built-network (traverse/network->training-traversal
+                       (assoc built-network :batch-size batch-size)
+                       input-bindings output-bindings
+                       :optimiser optimiser)]
     ;;the resource context here is very important because there are execution contexts
     ;;that allocate major resources that have to be released when they are no longer needed.
     ;;THUS we do this with the with-resource-context call.
@@ -163,12 +171,12 @@ Returns map of:
 (defn infer
   "Given a network and a dataset infer a set of data.  data is returned as a map of:
 node-id->data-stream."
-  [context built-network dataset & {:keys [batch-size infer-batch-type]
-                                    :or {batch-size 128 infer-batch-type :holdout}}]
-  (let [traverse (traverse/network->inference built-network)
-        build-network (assoc built-network
-                             :batch-size batch-size
-                             :traversal traverse)
+  [context built-network dataset input-bindings output-bindings
+   & {:keys [batch-size infer-batch-type]
+      :or {batch-size 128 infer-batch-type :holdout}}]
+  (let [built-network (traverse/network->inference-traversal built-network input-bindings output-bindings)
+        built-network (assoc built-network
+                             :batch-size batch-size)
         input-streams (->> (traverse/get-dataset-bindings built-network)
                            (filter #(= :input (get % :direction)))
                            (map :dataset-stream)
