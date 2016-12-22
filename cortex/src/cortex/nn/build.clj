@@ -103,6 +103,35 @@ The build step is responsible for
   (build-pass-through-desc previous item))
 
 
+(defn- get-padded-strided-dimension
+  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
+of the output of a conv-net ignoring channels.  Caffe does this slightly different
+for pooling verse convolutional layers.  Furthermore keras does this differently
+than caffe for pooling layers so this exact calculation has been the source of
+a few compatibility issues."
+  [input-dim pad kernel-size stride dimension-op]
+  (let [partial-result (/ (- (+ (double input-dim)
+                                (* 2 (double pad)))
+                             (double kernel-size))
+                          (double stride))
+        partial-result (double (condp = dimension-op
+                                 :floor (Math/floor partial-result)
+                                 :ceil (Math/ceil partial-result)))]
+    (long (+ partial-result 1))))
+
+
+(defn- convolutional-output-width
+  ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
+  (long (get-padded-strided-dimension input-width pad-x kernel-width
+                                      stride-x dimension-op)))
+
+
+(defn- convolutional-output-height
+  ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
+  (long (get-padded-strided-dimension input-height pad-y kernel-height
+                                      stride-y dimension-op)))
+
+
 (defn- build-convolutional-type-desc
   [previous item ^long output-channels]
   (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
@@ -115,18 +144,16 @@ The build step is responsible for
         ;;so there is no option to do the calculation with a ceil operation.  Should one
         ;;do that then the current cudnn operations will read outside of the provided
         ;;buffer bounds on at least their forward pass
-        output-width (layers/get-padded-strided-dimension
-                      input-width pad-x
-                      kernel-width stride-x dimension-op)
-        output-height (layers/get-padded-strided-dimension
-                       input-height pad-y
-                       kernel-height stride-y dimension-op)
+        item (assoc item
+                    :input-width input-width
+                    :input-height input-height
+                    :input-channels input-channels)
+        output-width (convolutional-output-width item)
+        output-height (convolutional-output-height item)
         output-size (* output-width output-height output-channels)
         input-data-format (get previous :output-data-format :planar)
         output-data-format (get item :output-data-format :planar)]
     (assoc item
-           :input-width input-width :input-height input-height
-           :input-channels input-channels
            :output-width output-width :output-height output-height
            :output-channels output-channels
            :output-size output-size

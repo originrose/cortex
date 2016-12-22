@@ -37,35 +37,35 @@
 (deftest tanh-batch
   (verify-layers/test-activation-batch (create-context) :tanh))
 
+(deftest softmax
+  (verify-layers/softmax (create-context)))
+
+(deftest softmax-batch
+  (verify-layers/softmax-batch (create-context)))
+
+(deftest softmax-batch-channels
+  (verify-layers/softmax-batch-channels (create-context)))
+
+(deftest conv-layer
+  (verify-layers/basic-conv-layer (create-context)))
+
+(deftest pool-layer
+  (verify-layers/pool-layer-basic (create-context)))
+
+(deftest dropout-bernoulli
+  (verify-layers/dropout-bernoulli (create-context)))
+
+(deftest dropout-gaussian
+  (verify-layers/dropout-gaussian (create-context)))
+
 (comment
 
-  (def-double-float-test softmax
-    (verify-layers/softmax (create-context)))
 
-  (def-double-float-test softmax-batch
-    (verify-layers/softmax-batch (create-context)))
 
-  (def-double-float-test softmax-batch-channels
-    (verify-layers/softmax-batch-channels (create-context)))
 
-  (def-double-float-test conv-layer
-    (verify-layers/basic-conv-layer (create-context)))
-
-  (def-double-float-test pool-layer
-    (verify-layers/pool-layer-basic (create-context)))
-
-  (def-double-float-test dropout-bernoulli
-    (verify-layers/dropout-bernoulli (create-context)))
-
-  (def-double-float-test dropout-gaussian
-    (verify-layers/dropout-gaussian (create-context)))
-
-  (def-double-float-test split
-    (verify-layers/split-basic (create-context)))
-
-  (def-double-float-test batch-normalization
+  (deftest batch-normalization
     (verify-layers/batch-normalization (create-context)))
 
-  (def-double-float-test local-response-normalization-forward
+  (deftest local-response-normalization-forward
     (verify-layers/lrn-forward (create-context)))
   )

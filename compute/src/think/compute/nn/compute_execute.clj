@@ -68,7 +68,7 @@
 
 
 (defn- save
-  [network {:keys [retain-gradients?]}]
+  [network {:keys [save-gradients?]}]
   (let [backend (get-in network [:compute-binding :backend])
         core-m (fn [data] (backend/to-core-matrix backend data))]
     (-> network
@@ -78,12 +78,12 @@
                                (update buffers buf-id
                                        (fn [result-buffer]
                                          (cond-> (assoc result-buffer :buffer (core-m buffer))
-                                           retain-gradients?
+                                           save-gradients?
                                            (assoc :gradient (core-m gradient))))))
                              buffers
                              (get-in network [:compute-binding :parameter-buffers]))))
         (assoc-in [:traversal :buffers]
-                  (if retain-gradients?
+                  (if save-gradients?
                     (reduce (fn [buffers [buf-id {:keys [buffer gradient]}]]
                               (update buffers buf-id
                                       #(assoc
@@ -157,31 +157,37 @@
 
 
 (defn- do-traverse
-  [network id->input-buffer pass-direction]
-  (let [pass-function (condp = pass-direction
-                        :forward compute-protocols/forward
-                        :backward compute-protocols/backward)
-        [network mapped-pass] (map-pass-to-buffers network id->input-buffer pass-direction)]
-    (->> mapped-pass
-         (map (fn [{:keys [incoming id outgoing]}]
-                (pass-function
-                 (get-in network [:compute-binding :id->node-map id])
-                 (get-node-parameters network id)
-                 incoming outgoing)))
-         dorun)
-    network))
+  [network mapped-pass pass-function]
+  (->> mapped-pass
+       (map (fn [{:keys [incoming id outgoing]}]
+              (pass-function
+               (get-in network [:compute-binding :id->node-map id])
+               (get-node-parameters network id)
+               incoming outgoing)))
+       dorun)
+  network)
+
+
+(defn- forward-traverse
+  [network mapped-pass]
+  (-> network
+      (do-traverse mapped-pass compute-protocols/prepare-forward!)
+      (do-traverse mapped-pass compute-protocols/forward)))
 
 
 (defn- traverse
-  [network id->input-map pass-type]
-  (let [batch-size (get network :batch-size)]
-   (resource/with-resource-context
-     (let [backend (get-in network [:compute-binding :backend])
-           id->buffer-map (->> id->input-map
-                               (map (fn [[k v]]
-                                      [k (backend/array backend v batch-size)]))
-                               (into {}))]
-       (do-traverse network id->buffer-map pass-type)))))
+  [network id->input-map pass-direction]
+  (let [batch-size (get network :batch-size)
+        backend (get-in network [:compute-binding :backend])
+        [network mapped-pass] (map-pass-to-buffers network
+                                                   (->> id->input-map
+                                                        (map (fn [[k v]]
+                                                               [k (backend/array backend v batch-size)]))
+                                                        (into {}))
+                                                   pass-direction)]
+    (condp = pass-direction
+      :forward (forward-traverse network mapped-pass)
+      :backward (do-traverse network mapped-pass compute-protocols/backward))))
 
 
 (defrecord ComputeExecutionContext [backend-fn]
@@ -195,15 +201,11 @@
 dataset/batch-sequence-columnar in order to transform sequence into specific sequences.")
   (save-to-network [context built-network options]
     (save built-network options))
-
-  (forward-backward [context built-network
+  (forward-backward [context bound-network
                      stream->input-map
                      node-id->output-gradient-map]
-    (resource/with-resource-context
-      (as-> (execute/bind-to-network context built-network {}) network
-        (traverse network stream->input-map :forward)
-        (traverse network node-id->output-gradient-map :backward)
-        (execute/save-to-network context network {:retain-gradients? true}))))
+    (as-> (traverse bound-network stream->input-map :forward) network
+      (traverse network node-id->output-gradient-map :backward)))
 
   (forward-backward-loss [context built-network
                           stream->input-map

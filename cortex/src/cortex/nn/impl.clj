@@ -8,8 +8,8 @@ or specific neural network layers"
 (defmacro convolution-outer-kernel
   [conv-desc & body]
   `(let [~'conv-desc ~conv-desc
-         ~'output-width (layers/convolutional-output-width ~'conv-desc)
-         ~'output-height (layers/convolutional-output-height ~'conv-desc)
+         ~'output-width (long (:output-width ~'conv-desc))
+         ~'output-height (long (:output-height ~'conv-desc))
          ~'num-in-channels (long (:input-channels ~'conv-desc))
          ~'num-out-channels (long (:output-channels ~'conv-desc))
          ~'input-width (long (:input-width ~'conv-desc))
@@ -20,7 +20,7 @@ or specific neural network layers"
          ~'kernel-height (long (:kernel-height ~'conv-desc))
          ~'output-channel-stride (* ~'kernel-width ~'kernel-height)
          ~'output-column-stride (* ~'output-channel-stride ~'num-in-channels)
-         ~'stride-h (long (:stride-h ~'conv-desc))
+         ~'stride-y (long (:stride-y ~'conv-desc))
          ~'stride-x (long (:stride-x ~'conv-desc))
          ~'pad-x (long (:pad-x ~'conv-desc))
          ~'pad-y (long (:pad-y ~'conv-desc))
@@ -34,7 +34,7 @@ or specific neural network layers"
             ~'chan-output-offset (* ~'chan ~'output-planar-stride)]
         (c-for
          [~'out-y 0 (< ~'out-y ~'output-height) (inc ~'out-y)]
-         (let [~'input-rel-y (- (* ~'out-y ~'stride-h) ~'pad-y)]
+         (let [~'input-rel-y (- (* ~'out-y ~'stride-y) ~'pad-y)]
            (c-for
             [~'out-x 0 (< ~'out-x ~'output-width) (inc ~'out-x)]
             (let [~'input-rel-x (- (* ~'out-x ~'stride-x) ~'pad-x)]

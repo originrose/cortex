@@ -31,19 +31,15 @@ information the context needs embedded in it.  The network contains at least:
 to transform sequence into specific sequences.")
   (save-to-network [context built-network options]
     "Return a new network without context information and with any persistent information
-(like parameters) updated.  This may be called multiple times during the training process.")
-
+(like parameters) updated.  This may be called multiple times during the training process.
+Options is map that may contain:
+save-gradients? - save the gradients *and* the io buffers.")
 
   ;;Test/verification interfaces
   (forward-backward [context built-network
                      stream->input-map
                      node-id->output-gradient-map]
-    "Test interface - Run the (partial) network forward and backward and save everything; all
-calculated values (gradients, outputs, input-gradients) back to their respective
-places in the network.  Parameter gradients should be saved as gradient keys in
-respective buffers while the layer-graph buffers map should include matching buffers
-to the traverse' declared buffers with gradients members that map to the input gradients.
-The data should be saved back to the network after the passes.")
+    "Test interface - Run the network forward and backward using these inputs and output-gradients.")
   (forward-backward-loss [context built-network
                           stream->input-map
                           node-id->loss-function-answer-map]

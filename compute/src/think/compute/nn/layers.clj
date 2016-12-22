@@ -24,6 +24,23 @@ implementation as possible."
   (get-in buffer-vec [0 :gradient]))
 
 
+(defn softmax-backward!
+  "Helper function for implementations."
+  [stream input-gradient output-gradient]
+  (math/assign! stream input-gradient output-gradient))
+
+
+(defmulti create
+  "Create a compute layer"
+  (fn [backend node batch-size]
+    (:type node)))
+
+
+(defmethod create :default
+  [backend node batch-size]
+  (nn-backend/create backend node batch-size))
+
+
 (defrecord Linear [backend]
   compute-protocols/ComputeLayer
   (forward [layer parameter-buffers input-buffers output-buffers]
@@ -43,17 +60,60 @@ implementation as possible."
                                           (get-in parameter-buffers [:bias :gradient])
                                           (first-gradient output-buffers))))
 
-(defmulti create
-  "Create a compute layer"
-  (fn [backend node batch-size]
-    (:type node)))
-
-
-(defmethod create :default
-  [backend node batch-size]
-  (nn-backend/create backend node batch-size))
-
 
 (defmethod create :linear
   [backend node batch-size]
   (->Linear backend))
+
+(defn dropout-prepare-forward!
+  "The reason this function is not part of forward is that in the off case
+you want to check gradients you need to call prepare-forward once precisely
+and then forward many times for every parameter of the network."
+  [{:keys [backend layer mult-buffer rand-buffer]} batch-size]
+  (let [dis-type (if (= (:distribution layer) :bernoulli)
+                   (math/flat-desc)
+                   (math/gaussian-desc 1 (:variance layer)))
+        elem-count (* (long batch-size) (long (:input-size layer)))]
+    (math/generate-rands (drv/get-stream backend)
+                         (math/device-buffer rand-buffer)
+                         dis-type)
+    (if (= (:distribution layer) :bernoulli)
+      (nn-backend/prepare-bernoulli-dropout! backend (:probability layer)
+                                             rand-buffer mult-buffer)
+      (nn-backend/prepare-gaussian-dropout! backend rand-buffer mult-buffer))))
+
+
+(defrecord Dropout [backend layer batch-size mult-buffer rand-buffer]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (let [input (first-buffer input-buffers)
+          output (first-buffer output-buffers)]
+     (math/elem-mul (drv/get-stream backend)
+                    1.0 (math/device-buffer input) 1
+                    (math/device-buffer mult-buffer) 1
+                    (math/device-buffer output) 1)))
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (let [input-gradient (first-gradient input-buffers)
+          output-gradient (first-gradient output-buffers)]
+     (math/elem-mul (drv/get-stream backend)
+                    1.0 (math/device-buffer output-gradient) 1
+                    (math/device-buffer mult-buffer) 1
+                    (math/device-buffer input-gradient) 1)))
+
+  compute-protocols/ComputePrepareForward
+  (prepare-forward! [this parameter-buffers input-buffers output-buffers]
+    (dropout-prepare-forward! this batch-size)))
+
+
+
+(defmethod create :dropout
+  [backend node batch-size]
+  (let [n-items (long (:input-size node))
+        mult-buffer (nn-backend/new-array backend [n-items]
+                                          batch-size)
+        rand-buffer (math/->DeviceArray (drv/allocate-rand-buffer
+                                         (drv/get-driver backend)
+                                         (math/ensure-factor-of-2
+                                          (* n-items (long batch-size))))
+                                        (math/create-tensor batch-size 1 1 n-items))]
+    (->Dropout backend node batch-size mult-buffer rand-buffer)))

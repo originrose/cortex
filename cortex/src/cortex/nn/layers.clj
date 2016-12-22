@@ -99,11 +99,11 @@ or it can be #{:training} if the layer is used only during training (dropout)
     "Define a softmax which may be multi-channelled.  The data is expected
   to be planar such that channel one has n-outputs followed in memory by
 channel 2 with n-outputs"
-  ([& {:keys [output-channels]
-       :or {output-channels 1}
-       :as arg-map}]
-   [(merge {:type :softmax :output-channels 1}
-           arg-map)]))
+  [& {:keys [output-channels]
+      :or {output-channels 1}
+      :as arg-map}]
+  [(merge {:type :softmax :output-channels 1}
+          arg-map)])
 (defn linear->softmax
   [num-classes & args]
   (vec
@@ -170,24 +170,7 @@ no change to the input."
    :max-pooling :ceil})
 
 
-(defn get-padded-strided-dimension
-  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
-of the output of a conv-net ignoring channels.  Caffe does this slightly different
-for pooling verse convolutional layers.  Furthermore keras does this differently
-than caffe for pooling layers so this exact calculation has been the source of
-a few compatibility issues."
-  [input-dim pad kernel-size stride dimension-op]
-  (let [partial-result (/ (- (+ (double input-dim)
-                                (* 2 (double pad)))
-                             (double kernel-size))
-                          (double stride))
-        partial-result (double (condp = dimension-op
-                                 :floor (Math/floor partial-result)
-                                 :ceil (Math/ceil partial-result)))]
-    (long (+ partial-result 1))))
-
-
-(defn convolutional-type-layer
+(defn- convolutional-type-layer
   [layer-type kernel-width kernel-height pad-x pad-y
    stride-x stride-y num-kernels dimension-op
    & args]
@@ -201,18 +184,6 @@ a few compatibility issues."
                :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
                :num-kernels num-kernels :dimension-op dimension-op}
               args))
-
-
-(defn convolutional-output-width
-  ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
-  (long (get-padded-strided-dimension input-width kernel-width
-                                      pad-x stride-x dimension-op)))
-
-
-(defn convolutional-output-height
-  ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
-  (long (get-padded-strided-dimension input-height kernel-height
-                                      pad-y stride-y dimension-op)))
 
 
 (defn convolutional

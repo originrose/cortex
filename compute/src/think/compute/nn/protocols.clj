@@ -8,3 +8,14 @@
 side effects."
   (forward [layer parameter-buffers input-buffers output-buffers])
   (backward [layer parameter-buffers output-buffers input-buffers]))
+
+
+(defprotocol ComputePrepareForward
+  "Some of the objects need a prepare call in order to correctly implement their forward pass.
+  See compute-layers/dropout-prepare-forward!"
+  (prepare-forward! [layer parameter-buffers input-buffers output-buffers]))
+
+
+(extend-type Object
+  ComputePrepareForward
+  (prepare-forward! [layer parameter-buffers input-buffers output-buffers]))
