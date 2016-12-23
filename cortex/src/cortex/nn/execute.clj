@@ -10,7 +10,8 @@ layer-graph -> layer-graph via some training process."
             [cortex.dataset :as ds]
             [think.resource.core :as resource]
             [cortex.loss :as loss]
-            [cortex.nn.protocols :as cp]))
+            [cortex.nn.protocols :as cp]
+            [cortex.optimise :as optimise]))
 
 
 (defn- safe-inc
@@ -117,7 +118,7 @@ Returns map of:
   [context built-network dataset input-bindings output-bindings pred-fn
    & {:keys [batch-size infer-batch-type optimiser disable-infer?]
       :or {batch-size 128 infer-batch-type :cross-validation
-           optimiser (layers/adam)}}]
+           optimiser (optimise/adam)}}]
   (let [built-network (traverse/network->training-traversal
                        (assoc built-network :batch-size batch-size)
                        input-bindings output-bindings

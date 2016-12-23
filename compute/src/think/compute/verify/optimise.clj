@@ -3,7 +3,9 @@
             [think.compute.nn.backend :as nn-backend]
             [think.datatype.core :as dtype]
             [think.compute.optimise :as opt]
+            [cortex.optimise :as cortex-opt]
             [think.compute.verify.utils :refer [def-double-float-test] :as utils]
+            [cortex.verify.utils :as cortex-utils]
             [clojure.core.matrix :as m]))
 
 
@@ -32,14 +34,14 @@
 (defn test-adam
   [backend]
   (let [parameters (nn-backend/array backend [1 2 3 4])
-        optimizer (opt/setup-optimiser (opt/adam) backend 4)]
+        optimizer (opt/create-compute-optimiser backend (cortex-opt/adam) 4)]
     (reduce (fn [optimizer item]
               (let [gradient (nn-backend/array backend (map #(* 2.0 %) (nn-backend/to-double-array backend parameters)))
                     optimizer (opt/batch-update optimizer)
                     _ (opt/compute-parameters! optimizer 1.0 0 gradient parameters)
                     item (m/eseq item)
                     guess (m/eseq (nn-backend/to-double-array backend parameters))]
-                (is (utils/about-there? guess item))
+                (is (cortex-utils/about-there? guess item))
                 optimizer))
             optimizer
             adam-answers)))

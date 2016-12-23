@@ -7,6 +7,7 @@
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
             [cortex.verify.utils :as utils]
+            [cortex.util :as cu]
             [think.resource.core :as resource]
             [cortex.nn.protocols :as cp]))
 
@@ -439,3 +440,67 @@ for that network."
         total-elem-count (double (* item-count batch-size))]
     (is (utils/about-there? (final-answer 0) total-elem-count 10))
     (is (utils/about-there? (final-answer 1) (* 2.0 total-elem-count) 20))))
+
+
+
+
+(defn batch-normalization
+  [context]
+  (let [batch-size 20
+        input-size 20
+        input-data-vector-fn (fn []
+                               (m/transpose
+                                (repeatedly input-size
+                                            #(-> (repeatedly batch-size cu/rand-gaussian)
+                                                 double-array
+                                                 (cu/ensure-gaussian! 5 20)))))
+        network (bind-test-network context [(layers/input input-size)
+                                            (layers/batch-normalization 0.8)]
+                                   batch-size :test)
+
+        input (input-data-vector-fn)
+        output-gradient (repeat (* batch-size
+                                   input-size) 1.0)
+        {:keys [output input-gradient parameters]}
+        (forward-backward-test-network context network input output-gradient :test)
+
+        double-output output
+        output-batches (mapv vec (partition input-size (seq double-output)))
+        output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))
+        input-stats (mapv cu/calc-mean-variance (m/transpose input-data-vector))
+        layer-means (get-in parameters [:means :buffer :buffer])
+        layer-variances (get-in parameters [:variances :buffer :buffer])
+        layer-stats (vec (map (fn [mean variance]
+                                {:mean mean
+                                 :variance variance})
+                              layer-means layer-variances))]
+    (doseq [output-idx (range (count output-stats))]
+      (let [{:keys [mean variance]} (output-stats output-idx)]
+        (is (utils/about-there? mean 0.0)
+            (format "Output mean incorrect at index %s" output-idx))
+        (is (utils/about-there? variance 1.0 1e-3)
+            (format "Output variance incorrect at index %s" output-idx))))
+    (dotimes [iter 5]
+     (let [input-data-vector (input-data-vector-fn)
+           new-input (nn-backend/array backend input-data-vector batch-size)
+           layer (cp/forward layer new-input)
+           output (cp/output layer)
+           double-output (nn-backend/to-double-array backend output)
+           output-batches (mapv vec (partition input-size (seq double-output)))
+           output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))]
+       (doseq [output-idx (range (count output-stats))]
+         (let [{:keys [mean variance]} (output-stats output-idx)]
+           (is (utils/about-there? mean 0.0)
+               (format "Output mean incorrect at index %s" output-idx))
+           (is (utils/about-there? variance 1.0 1e-3)
+               (format "Output variance incorrect at index %s" output-idx))))))
+    (let [running-means (nn-backend/to-double-array backend (:running-means layer))
+          running-inv-vars (nn-backend/to-double-array backend (:running-variances layer))]
+      (is (utils/about-there? 5.0 (/ (m/esum running-means)
+                                     input-size)))
+      ;;The running variances uses a population calculation for variances
+      ;;instead of a specific calculation for variance meaning
+      ;;you divide by n-1 instead of n.
+      (is (utils/about-there? 21.05 (/ (m/esum running-inv-vars)
+                                      input-size)
+                              1e-2)))))

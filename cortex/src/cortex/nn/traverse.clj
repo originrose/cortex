@@ -6,7 +6,8 @@ Note that input-bindings are maps from node-id to stream
 while output bindings are maps from node-id to {:stream :loss}."
   (:require [cortex.nn.build :as build]
             [cortex.nn.layers :as layers]
-            [clojure.set :as c-set]))
+            [clojure.set :as c-set]
+            [cortex.optimise :as optimise]))
 
 
 (defn- check-node-id
@@ -261,7 +262,7 @@ pairs of node-id to [stream-name loss-function].
  :backward where incoming/outgoing maps to buffer id}"
   [built-network input-bindings output-bindings
    & {:keys [optimiser]
-      :or {optimiser (layers/adam)}}]
+      :or {optimiser (optimise/adam)}}]
   (let [built-network (-> built-network
                           (bind-input-bindings input-bindings)
                           (bind-output-training-bindings output-bindings))

@@ -19,3 +19,7 @@ side effects."
 (extend-type Object
   ComputePrepareForward
   (prepare-forward! [layer parameter-buffers input-buffers output-buffers]))
+
+
+(defprotocol ComputeLayerInfer
+  (infer [layer parameter-buffers input-buffers output-buffers]))

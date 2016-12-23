@@ -308,24 +308,6 @@ network graph description."
   (loss/softmax-loss))
 
 
-;;Optimization strategies
-(defn adam
-  [& args]
-  (merge-args
-   {:type :adam
-    :alpha 0.001
-    :beta1 0.9
-    :beta2 0.999
-    :epsilon 1e-8}
-   args))
-
-(defn adadelta
-  [& args]
-  {:type :adadelta
-   :decay 0.05
-   :epsilon 1e-6})
-
-
 (def example-mnist-description
   [(input 28 28 1)
    (convolutional 5 0 1 20)

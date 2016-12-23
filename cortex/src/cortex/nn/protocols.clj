@@ -25,13 +25,22 @@ Options is map that may contain:
 save-gradients? - save the gradients *and* the io buffers.")
 
   ;;Test/verification interfaces
-  (forward-backward [context built-network
-                     stream->input-map
-                     node-id->output-gradient-map]
-    "Test interface - Run the network forward and backward using these inputs and output-gradients.")
+  (traverse [context bound-network id->input-map traverse-type]
+    "Run a traverse on the network using this input map for inputs.
+traverse-type is one of [:forward :backward :inference]")
   (forward-backward-loss [context built-network
                           stream->input-map
-                          node-id->loss-function-answer-map]
+                          node-id->loss-function-answer-map
+                          epsilon]
     "Run network forward and backward like 'forward-backward' but also calculate numeric
 gradients w/r/t the loss function and the provided answer.  This allows for gradient
 checking.  The data should be saved back to the network after the passes"))
+
+
+(defn forward-backward
+  "Given a bound network traverse forward and backward using exactly these inputs and
+these output-gradients.  This is used for testing that specific input/output-gradient pairs
+give specific results for layers."
+  [context bound-network stream->input-map node-id->output-gradient-map]
+  (as-> (traverse context bound-network stream->input-map :forward) bound-network
+    (traverse context bound-network stream->input-map :backward)))

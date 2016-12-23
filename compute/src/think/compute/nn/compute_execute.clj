@@ -404,15 +404,12 @@
     (infer-sequence built-network batch-map-sequence options))
   (save-to-network [context built-network options]
     (save built-network options))
-  (forward-backward [context bound-network
-                     stream->input-map
-                     node-id->output-gradient-map]
-    (as-> (traverse bound-network stream->input-map :forward) network
-      (traverse network node-id->output-gradient-map :backward)))
-
+  (traverse [context bound-network id->input-map direction]
+    (traverse bound-network id->input-map direction))
   (forward-backward-loss [context built-network
                           stream->input-map
-                          node-id->loss-function-answer-map]
+                          node-id->loss-function-answer-map
+                          epsilon]
     "Run network forward and backward like 'forward-backward' but also calculate numeric
 gradients w/r/t the loss function and the provided answer.  This allows for gradient
 checking."))
