@@ -15,9 +15,9 @@
 (deftest corn
   (verify-train/test-corn (create-context)))
 
-(comment
- (deftest layer->description
-   (verify-train/layer->description (create-backend))))
+(deftest train-mnist
+  (verify-train/train-mnist (create-context)))
+
 
 (comment
  (def-double-float-test simple-learning-attenuation

@@ -3,7 +3,8 @@
             [think.compute.math :as math]
             [think.datatype.core :as dtype]
             [cortex.dataset :as ds]
-            [clojure.set :as c-set]))
+            [clojure.set :as c-set]
+            [clojure.core.matrix :as m]))
 
 
 (set! *warn-on-reflection* true)
@@ -22,7 +23,6 @@
   ;;There is an option to skip the upload steps to the output buffers which
   ;;aren't necessary if you aren't doing gradient descent (e.g. any inference).
   (get-batches [bs batch-map-sequence upload-output-buffers?]))
-
 
 
 (defrecord DatasetBatchingSystem [backend stream->batch-info-map]
@@ -44,29 +44,31 @@
                         (let [{:keys [device-array host-buffer]} batch-buffers]
                           (dtype/copy-raw->item! (get batch-map stream) host-buffer 0)
                           (drv/copy-host->device (drv/get-stream backend) host-buffer 0
-                                                 (math/device-buffer device-array) 0 size)
+                                                 (math/device-buffer device-array) 0
+                                                 (m/ecount host-buffer))
                           [stream device-array])))
                  (into {})))
           batch-map-sequence))))
 
 
 (defn- create-batch-buffers
-  [backend size]
+  [backend size batch-size]
   (let [driver (drv/get-driver backend)
         datatype (dtype/get-datatype backend)]
    {:device-array (math/new-array driver
                                   (drv/get-stream backend)
                                   datatype
-                                  [size])
-    :host-buffer (drv/allocate-host-buffer driver size datatype)}))
+                                  [size]
+                                  batch-size)
+    :host-buffer (drv/allocate-host-buffer driver (* size batch-size) datatype)}))
 
 
 (defn create
-  [backend stream->size-map]
+  [backend stream->size-map batch-size]
   (let [stream->size-map
         (reduce (fn [stream->size-map [stream {:keys [size]}]]
                   (assoc-in stream->size-map [stream :batch-buffers]
-                            (create-batch-buffers backend size)))
+                            (create-batch-buffers backend size batch-size)))
                 stream->size-map
                 stream->size-map)]
     (->DatasetBatchingSystem backend stream->size-map)))

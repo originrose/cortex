@@ -34,6 +34,8 @@ The context is expected to already be bound to the network."
     (cons trained-network
           (lazy-seq (train-seq context trained-network dataset)))))
 
+(defonce last-pairs (atom nil))
+
 
 (defn inferences->node-id-loss-pairs
   "Given the set of inferences from an inference run of the network
@@ -53,7 +55,7 @@ while labels is a map of dataset-stream->data."
                                      (into {}))
         ;;inferences are organized by node id
         ;;labels are organized by dataset stream
-        inference-label-pairs (->> (keys inferences)
+        inference-label-pairs (->> (keys inference-columns)
                                    (map (fn [node-id]
                                           [node-id [(get inference-columns node-id)
                                                     (get label-columns (get node-id->output-streams node-id))]]))
@@ -61,6 +63,7 @@ while labels is a map of dataset-stream->data."
     (->> output-nodes
          (map (fn [{:keys [node-id loss-function]}]
                 (let [[inferences labels] (get inference-label-pairs node-id)]
+                  (reset! last-pairs [inferences labels])
                   [node-id (loss/average-loss loss-function inferences labels)]))))))
 
 
@@ -150,7 +153,6 @@ node-id->data-stream."
                            (remove nil?)
                            set)
         epoch (ds/get-batches dataset batch-size infer-batch-type input-streams)]
-    (clojure.pprint/pprint epoch)
     (resource/with-resource-context
       (as-> (cp/bind-to-network context built-network {}) network-or-seq
         (cp/infer-batch-sequence context network-or-seq epoch {})

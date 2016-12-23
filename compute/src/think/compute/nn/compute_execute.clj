@@ -39,7 +39,7 @@
 
 
 (defn- create-batching-system
-  [backend built-network]
+  [backend built-network batch-size]
   (let [bindings (traverse/get-dataset-bindings built-network)
         stream->size-map (->> bindings
                               (map (fn [{:keys [node-id dataset-stream direction]}]
@@ -67,7 +67,7 @@
                                                         :entry entry})))
                                      [k (assoc entry :size (first size))]))
                               (into {}))]
-    (batching-system/create backend stream->size-map)))
+    (batching-system/create backend stream->size-map batch-size)))
 
 
 (defn- bind
@@ -106,7 +106,7 @@
            :compute-binding
            (assoc compute-binding
                   :backend backend
-                  :batching-system (create-batching-system backend built-network)
+                  :batching-system (create-batching-system backend built-network batch-size)
                   :optimiser (compute-optimise/create-compute-optimiser backend
                                                                         (get traversal :optimiser)
                                                                         (get built-network :parameter-count))))))
@@ -270,29 +270,43 @@
     (let [[network forward-mapped-pass] (map-pass-to-buffers network
                                                              stream->buffer-map
                                                              :forward)
-          optimiser (get-in network [:compute-binding :optimiser])
+          optimiser (compute-optimise/batch-update (get-in network [:compute-binding :optimiser]))
           buffer-alpha (/ 1.0 (double (get network :batch-size)))
           backend (get-in network [:compute-binding :backend])]
       (forward-traverse network forward-mapped-pass)
       (doseq [{:keys [buffers loss-function dataset-stream] :as entry} output-bindings]
         (let [{:keys [buffer gradient]} buffers
               answer (get stream->buffer-map dataset-stream)]
-          (compute-loss/compute-loss-gradient loss-function backend buffer answer gradient)))
+          (compute-loss/compute-loss-gradient loss-function backend buffer answer gradient)
+          (comment
+           (clojure.pprint/pprint {:loss-function loss-function
+                                   :buffer (vec (take 10 (backend/to-double-array backend buffer)))
+                                   :answer (vec (take 10 (backend/to-double-array backend answer)))
+                                   :gradient (vec (take 10 (backend/to-double-array backend gradient)))}))))
       (backward-traverse network backward-mapped-pass)
       (reduce (fn [offset {:keys [buffers learning-attenuation]}]
-                (let [{:keys [buffer gradient]} buffers
+                (let [{:keys [buffer-id buffer gradient]} buffers
                       elem-count (long (m/ecount buffer))]
                   (compute-optimise/compute-parameters! optimiser
                                                         (* buffer-alpha learning-attenuation)
                                                         offset gradient buffer)
                   (drv/memset (drv/get-stream backend) (math/device-buffer gradient)
                               0 0 elem-count)
+
                   (+ offset elem-count)))
               0
               parameters)
-      (let [network (update-in network
+      (let [network (assoc-in network
                                [:compute-binding :optimiser]
-                               compute-optimise/batch-update)]
+                               optimiser)]
+        (comment
+         (clojure.pprint/pprint (mapv (fn [[k v]]
+                                        [k
+                                         (vec (take 10
+                                                    (backend/to-double-array (get-in network
+                                                                                     [:compute-binding :backend])
+                                                                             (:buffer v))))])
+                                      (get-in network [:compute-binding :traversal-buffers]))))
         (cons network
               (lazy-seq (recur-train-sequence network parameters backward-mapped-pass
                                               output-bindings (rest batch-seq))))))))
