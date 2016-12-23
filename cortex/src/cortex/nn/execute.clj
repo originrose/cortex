@@ -28,9 +28,11 @@ The context is expected to already be bound to the network."
                              (remove nil?)
                              set)
         dataset-epoch (ds/get-batches dataset batch-size :training dataset-streams)
-        trained-network (last (cp/train-batch-sequence context built-network dataset-epoch {}))]
-    (cons (update trained-network :epoch-count safe-inc)
-          (lazy-seq train-seq context trained-network dataset))))
+        trained-network (-> (cp/train-batch-sequence context built-network dataset-epoch {})
+                            last
+                            (update :epoch-count safe-inc))]
+    (cons trained-network
+          (lazy-seq (train-seq context trained-network dataset)))))
 
 
 (defn inferences->node-id-loss-pairs
@@ -74,7 +76,6 @@ Returns map of:
   [context {:keys [batch-size] :as built-network} dataset & {:keys [infer-batch-type]
                                                              :or {infer-batch-type :cross-validation}}]
   (let [bindings (traverse/get-dataset-bindings built-network)
-        _ (println bindings)
         input-streams (->> bindings
                            (filter #(= :input (get % :direction)))
                            (map :dataset-stream)
@@ -111,19 +112,23 @@ Returns map of:
   It is a good idea, for example for the predicate function to have the side effect of saving
   the network if the current loss is lower than any previous loss."
   [context built-network dataset input-bindings output-bindings pred-fn
-   & {:keys [batch-size infer-batch-type optimiser]
+   & {:keys [batch-size infer-batch-type optimiser disable-infer?]
       :or {batch-size 128 infer-batch-type :cross-validation
            optimiser (layers/adam)}}]
   (let [built-network (traverse/network->training-traversal
                        (assoc built-network :batch-size batch-size)
                        input-bindings output-bindings
-                       :optimiser optimiser)]
+                       :optimiser optimiser)
+        train-fn (if disable-infer?
+                   #(->> (train-seq context % dataset)
+                         (map (fn [net] {:network net})))
+                   #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
     ;;the resource context here is very important because there are execution contexts
     ;;that allocate major resources that have to be released when they are no longer needed.
     ;;THUS we do this with the with-resource-context call.
     (resource/with-resource-context
       (as-> (cp/bind-to-network context built-network {}) trained-network
-        (train-infer-seq context trained-network dataset :infer-batch-type infer-batch-type)
+        (train-fn trained-network)
         (take-while pred-fn trained-network)
         (last trained-network)
         (get trained-network :network)
@@ -145,7 +150,13 @@ node-id->data-stream."
                            (remove nil?)
                            set)
         epoch (ds/get-batches dataset batch-size infer-batch-type input-streams)]
+    (clojure.pprint/pprint epoch)
     (resource/with-resource-context
-      (as-> (cp/bind-to-network context built-network {}) built-network
-        (cp/infer-batch-sequence context built-network epoch {})
-        ds/batches->columns))))
+      (as-> (cp/bind-to-network context built-network {}) network-or-seq
+        (cp/infer-batch-sequence context network-or-seq epoch {})
+        ;;Because the resource context will close and batches->columns is lazy
+        ;;we have to force the realization of the entire sequence right here else we
+        ;;risk leaking deallocated resources out that will be accessed when the list
+        ;;is later realized
+        (vec network-or-seq)
+        (ds/batches->columns network-or-seq)))))

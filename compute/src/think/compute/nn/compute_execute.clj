@@ -9,9 +9,13 @@
             [think.compute.nn.protocols :as compute-protocols]
             [clojure.core.matrix :as m]
             [think.resource.core :as resource]
-            [think.compute.optimise :as opt]
             [think.compute.batching-system :as batching-system]
-            [clojure.set :as c-set]))
+            [think.compute.loss :as compute-loss]
+            [clojure.set :as c-set]
+            [clojure.core.matrix.macros :refer [c-for]]
+            [think.compute.driver :as drv]
+            [think.datatype.core :as dtype]
+            [think.compute.math :as math]))
 
 
 (defn- bind-node-parameter-buffers
@@ -41,18 +45,28 @@
                               (map (fn [{:keys [node-id dataset-stream direction]}]
                                      (when dataset-stream
                                        [dataset-stream
-                                        {:size
-                                         (get-in built-network
-                                                 [:layer-graph :id->node-map node-id :input-size])
+                                        ;;Using a set here to detect size mismatches
+                                        {:size #{(get-in built-network
+                                                          [:layer-graph :id->node-map node-id
+                                                           (if (= direction :input)
+                                                             :input-size
+                                                             :output-size)])}
                                          :direction #{direction}}])))
                               (remove nil?)
                               (reduce (fn [eax [stream {:keys [size direction] :as entry}]]
                                         (-> eax
-                                            (assoc-in [stream :size] size)
-                                            (update-in eax [stream :direction]
+                                            (update-in [stream :size]
+                                                       #(c-set/union %  size))
+                                            (update-in [stream :direction]
                                                        #(c-set/union % direction))))
-                                      {}))
-        _ (println stream->size-map)]
+                                      {})
+                              (map (fn [[k {:keys [size] :as entry}]]
+                                     (when (> (count size) 1)
+                                       (throw (ex-info "Stream is mapped to different sized nodes:"
+                                                       {:stream k
+                                                        :entry entry})))
+                                     [k (assoc entry :size (first size))]))
+                              (into {}))]
     (batching-system/create backend stream->size-map)))
 
 
@@ -93,7 +107,9 @@
            (assoc compute-binding
                   :backend backend
                   :batching-system (create-batching-system backend built-network)
-                  :optimiser (opt/create-compute-optimiser (get traversal :optimiser))))))
+                  :optimiser (compute-optimise/create-compute-optimiser backend
+                                                                        (get traversal :optimiser)
+                                                                        (get built-network :parameter-count))))))
 
 
 (defn- save
@@ -204,6 +220,11 @@
       (do-traverse mapped-pass compute-protocols/forward)))
 
 
+(defn- backward-traverse
+  [network mapped-pass]
+  (do-traverse network mapped-pass compute-protocols/backward))
+
+
 (defn- traverse
   [network id->input-map pass-direction]
   (let [batch-size (get network :batch-size)
@@ -216,11 +237,147 @@
                                                    pass-direction)]
     (condp = pass-direction
       :forward (forward-traverse network mapped-pass)
-      :backward (do-traverse network mapped-pass compute-protocols/backward))))
+      :backward (backward-traverse network mapped-pass))))
+
+
+(defn- get-output-bindings
+  [network]
+  (->> (traverse/get-dataset-bindings network)
+       (filter #(and (= :output (get % :direction))
+                     (get % :dataset-stream)))
+       (map (fn [{:keys [node-id] :as entry}]
+              (assoc entry
+                     :buffers
+                     (get-in network [:compute-binding
+                                      :traversal-buffers
+                                      {:output-id node-id}])
+                     :output-size (get-in network [:layer-graph
+                                                   :id->node-map
+                                                   node-id
+                                                   :output-size]))))))
+
+
+(defn- recur-train-sequence
+  [network parameters backward-mapped-pass output-bindings batch-seq]
+  (when-let [stream->buffer-map (first batch-seq)]
+    ;;Sometimes you have to print the entire batch out to see what is going on.
+    (comment
+      (clojure.pprint/pprint (mapv (fn [[k v]]
+                                    [k (vec (backend/to-double-array
+                                             (get-in network [:compute-binding :backend])
+                                             v))])
+                                  stream->buffer-map)))
+    (let [[network forward-mapped-pass] (map-pass-to-buffers network
+                                                             stream->buffer-map
+                                                             :forward)
+          optimiser (get-in network [:compute-binding :optimiser])
+          buffer-alpha (/ 1.0 (double (get network :batch-size)))
+          backend (get-in network [:compute-binding :backend])]
+      (forward-traverse network forward-mapped-pass)
+      (doseq [{:keys [buffers loss-function dataset-stream] :as entry} output-bindings]
+        (let [{:keys [buffer gradient]} buffers
+              answer (get stream->buffer-map dataset-stream)]
+          (compute-loss/compute-loss-gradient loss-function backend buffer answer gradient)))
+      (backward-traverse network backward-mapped-pass)
+      (reduce (fn [offset {:keys [buffers learning-attenuation]}]
+                (let [{:keys [buffer gradient]} buffers
+                      elem-count (long (m/ecount buffer))]
+                  (compute-optimise/compute-parameters! optimiser
+                                                        (* buffer-alpha learning-attenuation)
+                                                        offset gradient buffer)
+                  (drv/memset (drv/get-stream backend) (math/device-buffer gradient)
+                              0 0 elem-count)
+                  (+ offset elem-count)))
+              0
+              parameters)
+      (let [network (update-in network
+                               [:compute-binding :optimiser]
+                               compute-optimise/batch-update)]
+        (cons network
+              (lazy-seq (recur-train-sequence network parameters backward-mapped-pass
+                                              output-bindings (rest batch-seq))))))))
 
 
 (defn- train-sequence
-  [built-network batch-map-sequence options])
+  [network batch-map-sequence options]
+  (let [bs (get-in network [:compute-binding :batching-system])
+        backend (get-in network [:compute-binding :backend])
+        output-bindings (get-output-bindings network)
+        ;;These are the things we are ultimately optimizing
+        parameters (->> (get-in network [:layer-graph :id->node-map])
+                        (mapcat (fn [[id node]]
+                                  (map (fn [{:keys [key]}]
+                                         (let [param-entry (get node key)
+                                               param-buffer (get-in network [:compute-binding
+                                                                             :parameter-buffers
+                                                                             (get param-entry
+                                                                                  :buffer-id)])]
+                                           (assoc param-entry
+                                                  :buffers param-buffer
+                                                  :learning-attenuation (get node
+                                                                             :learning-attenuation
+                                                                             1.0))))
+                                       (layers/get-parameter-descriptions node))))
+                        vec)
+        ;;The buffers do not change going backward so we can pre-map this pass.
+        [network backward-mapped-pass] (map-pass-to-buffers network
+                                                            {}
+                                                            :backward)]
+    (->> (batching-system/get-batches bs batch-map-sequence true)
+         (recur-train-sequence network parameters backward-mapped-pass output-bindings))))
+
+
+(defn- infer-sequence
+  [network batch-map-sequence options]
+  (let [bs (get-in network [:compute-binding :batching-system])
+        backend (get-in network [:compute-binding :backend])
+        driver (drv/get-driver backend)
+        stream (drv/get-stream backend)
+        datatype (dtype/get-datatype backend)
+        batch-size (long (get-in network [:batch-size]))
+        output-bindings (->> (get-output-bindings network)
+                             (mapv (fn [{:keys [output-size] :as entry}]
+                                     (assoc entry
+                                            :elem-count (* batch-size (long output-size))
+                                            :host-buffer
+                                            (drv/allocate-host-buffer driver
+                                                                      (* batch-size
+                                                                         (long output-size))
+                                                                      datatype)))))
+        copy-fn (fn [^long idx ^long output-size host-buffer double-buffers]
+                  (dtype/copy! host-buffer (* idx output-size)
+                               (get double-buffers idx) 0
+                               output-size))]
+    (->> (batching-system/get-batches bs batch-map-sequence false)
+         (map (fn [stream->buffer-map]
+                (let [[network forward-mapped-pass] (map-pass-to-buffers network
+                                                                          stream->buffer-map
+                                                                         :forward)]
+                  (forward-traverse network forward-mapped-pass)
+                  (->> output-bindings
+                       (map (fn [{:keys [buffers node-id output-size host-buffer elem-count]}]
+                              (let [buffer (get buffers :buffer)
+                                    double-buffers (->> (repeatedly batch-size
+                                                                    #(double-array output-size))
+                                                        vec)]
+                                (drv/copy-device->host stream
+                                                       (math/device-buffer buffer) 0
+                                                       host-buffer 0
+                                                       elem-count)
+                                ;;with async copies this event is necessary.
+                                (drv/wait-for-event (drv/create-event stream))
+                                ;;This step is surprisingly slow if you are mixing datatypes - meaning
+                                ;;if your network is running anything other than double arithmetic -
+                                ;;fundamentally mixing datatypes when copying to/from nio buffers is
+                                ;;very slow at the moment.
+                                (if (< batch-size (.availableProcessors (Runtime/getRuntime)))
+                                  (c-for [idx 0 (< idx batch-size) (inc idx)]
+                                         (copy-fn idx output-size host-buffer double-buffers))
+                                  (->> (pmap #(copy-fn % output-size host-buffer double-buffers)
+                                             (range batch-size))
+                                       dorun))
+                                [node-id double-buffers])))
+                       (into {}))))))))
 
 
 (defrecord ComputeExecutionContext [backend-fn]
@@ -228,10 +385,9 @@
   (bind-to-network [context built-network options]
     (bind backend-fn built-network))
   (train-batch-sequence [context built-network batch-map-sequence options]
-
-    )
+    (train-sequence built-network batch-map-sequence options))
   (infer-batch-sequence [context built-network batch-map-sequence options]
-)
+    (infer-sequence built-network batch-map-sequence options))
   (save-to-network [context built-network options]
     (save built-network options))
   (forward-backward [context bound-network

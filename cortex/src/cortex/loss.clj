@@ -72,7 +72,7 @@
 across all inferences and labels."
   ^double [loss-fn v-seq target-seq]
   (double
-   (/ (->> (map (partial loss-fn) v-seq target-seq)
+   (/ (->> (map (partial loss loss-fn) v-seq target-seq)
            (reduce +))
       (count v-seq))))
 

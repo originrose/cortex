@@ -52,8 +52,9 @@
                            (fn [& args]
                              (< (swap! epoch-counter inc) n-epochs))
                            :batch-size 1
-                           :optimiser (layers/adadelta))
+                           :optimiser (layers/adadelta)
+                           :disable-infer true)
         results (-> (execute/infer context net dataset input-bindings output-bindings :batch-size 1)
-                 (get :test))
+                    :test)
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))
