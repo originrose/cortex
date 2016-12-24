@@ -27,13 +27,9 @@
       (cp/bind-to-network context network {}))))
 
 
-(defn forward-backward-test-network
-  [context network input output-gradient test-layer-id]
-  (let [input-stream {:data input}
-        output-gradient-stream {test-layer-id output-gradient}
-        network
-        (as-> (cp/forward-backward context network input-stream output-gradient-stream) network
-          (cp/save-to-network context network {:save-gradients? true}))
+(defn unpack-bound-network
+  [context network test-layer-id]
+  (let [network (cp/save-to-network context network {:save-gradients? true})
         traversal (get network :traversal)
         test-node (get-in network [:layer-graph :id->node-map test-layer-id])
         parameter-descriptions (layers/get-parameter-descriptions test-node)
@@ -55,12 +51,20 @@
                                             first)
         incoming-buffers (mapv buffers incoming)
         outgoing-buffers (mapv buffers outgoing)]
-     {:network network
-      :parameters parameters
-      :incoming-buffers incoming-buffers
-      :outgoing-buffers outgoing-buffers
-      :output (get (first outgoing-buffers) :buffer)
-      :input-gradient (get (first incoming-buffers) :gradient)}))
+    {:network network
+     :parameters parameters
+     :incoming-buffers incoming-buffers
+     :outgoing-buffers outgoing-buffers
+     :output (get (first outgoing-buffers) :buffer)
+     :input-gradient (get (first incoming-buffers) :gradient)}))
+
+
+(defn forward-backward-bound-network
+  [context network input output-gradient test-layer-id]
+  (let [input-stream {:data input}
+        output-gradient-stream {test-layer-id output-gradient}]
+    (as-> (cp/forward-backward context network input-stream output-gradient-stream) network
+      (unpack-bound-network context network test-layer-id))))
 
 
 (defn forward-backward-test
@@ -70,7 +74,7 @@ for that network."
   (resource/with-resource-context
     (let [test-layer-id :test]
      (as-> (bind-test-network context network batch-size test-layer-id) network
-       (forward-backward-test-network context network input output-gradient test-layer-id)))))
+       (forward-backward-bound-network context network input output-gradient test-layer-id)))))
 
 
 (defn relu-activation
@@ -397,7 +401,7 @@ for that network."
          (doall
           (for [iter (range repeat-count)]
             (let [{:keys [output input-gradient]}
-                  (forward-backward-test-network context dropout-network
+                  (forward-backward-bound-network context dropout-network
                                                  input output-gradient
                                                  test-layer-id)
                   output (m/eseq output)
@@ -431,7 +435,7 @@ for that network."
         (doall
          (for [iter (range repeat-count)]
            (let [{:keys [output input-gradient]}
-                  (forward-backward-test-network context dropout-network
+                  (forward-backward-bound-network context dropout-network
                                                  input output-gradient
                                                  test-layer-id)]
              [(m/esum (m/eseq output)) (m/esum (m/eseq input-gradient))])))
@@ -440,8 +444,6 @@ for that network."
         total-elem-count (double (* item-count batch-size))]
     (is (utils/about-there? (final-answer 0) total-elem-count 10))
     (is (utils/about-there? (final-answer 1) (* 2.0 total-elem-count) 20))))
-
-
 
 
 (defn batch-normalization
@@ -461,19 +463,12 @@ for that network."
         input (input-data-vector-fn)
         output-gradient (repeat (* batch-size
                                    input-size) 1.0)
-        {:keys [output input-gradient parameters]}
-        (forward-backward-test-network context network input output-gradient :test)
+        {:keys [output]}
+        (forward-backward-bound-network context network input output-gradient :test)
 
-        double-output output
-        output-batches (mapv vec (partition input-size (seq double-output)))
+        output-batches (mapv vec (partition input-size (m/eseq output)))
         output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))
-        input-stats (mapv cu/calc-mean-variance (m/transpose input-data-vector))
-        layer-means (get-in parameters [:means :buffer :buffer])
-        layer-variances (get-in parameters [:variances :buffer :buffer])
-        layer-stats (vec (map (fn [mean variance]
-                                {:mean mean
-                                 :variance variance})
-                              layer-means layer-variances))]
+        input-stats (mapv cu/calc-mean-variance (m/transpose input))]
     (doseq [output-idx (range (count output-stats))]
       (let [{:keys [mean variance]} (output-stats output-idx)]
         (is (utils/about-there? mean 0.0)
@@ -481,21 +476,23 @@ for that network."
         (is (utils/about-there? variance 1.0 1e-3)
             (format "Output variance incorrect at index %s" output-idx))))
     (dotimes [iter 5]
-     (let [input-data-vector (input-data-vector-fn)
-           new-input (nn-backend/array backend input-data-vector batch-size)
-           layer (cp/forward layer new-input)
-           output (cp/output layer)
-           double-output (nn-backend/to-double-array backend output)
-           output-batches (mapv vec (partition input-size (seq double-output)))
-           output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))]
+      (let [input (input-data-vector-fn)
+            {:keys [output]}
+            (forward-backward-bound-network context network input output-gradient :test)
+            output-batches (mapv vec (partition input-size (m/eseq output)))
+            output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))]
        (doseq [output-idx (range (count output-stats))]
          (let [{:keys [mean variance]} (output-stats output-idx)]
            (is (utils/about-there? mean 0.0)
                (format "Output mean incorrect at index %s" output-idx))
            (is (utils/about-there? variance 1.0 1e-3)
                (format "Output variance incorrect at index %s" output-idx))))))
-    (let [running-means (nn-backend/to-double-array backend (:running-means layer))
-          running-inv-vars (nn-backend/to-double-array backend (:running-variances layer))]
+
+
+    (let [{:keys [parameters]}
+          (forward-backward-bound-network context network input output-gradient :test)
+          running-means (get-in parameters [:means :buffer :buffer])
+          running-inv-vars (get-in parameters [:variances :buffer :buffer])]
       (is (utils/about-there? 5.0 (/ (m/esum running-means)
                                      input-size)))
       ;;The running variances uses a population calculation for variances

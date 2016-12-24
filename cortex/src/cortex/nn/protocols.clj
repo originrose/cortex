@@ -43,4 +43,4 @@ these output-gradients.  This is used for testing that specific input/output-gra
 give specific results for layers."
   [context bound-network stream->input-map node-id->output-gradient-map]
   (as-> (traverse context bound-network stream->input-map :forward) bound-network
-    (traverse context bound-network stream->input-map :backward)))
+    (traverse context bound-network node-id->output-gradient-map :backward)))
