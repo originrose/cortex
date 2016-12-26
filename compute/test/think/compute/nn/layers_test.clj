@@ -58,13 +58,15 @@
 (deftest dropout-gaussian
   (verify-layers/dropout-gaussian (create-context)))
 
+(deftest batch-normalization
+  (verify-layers/batch-normalization (create-context)))
+
 (comment
 
 
 
 
-  (deftest batch-normalization
-    (verify-layers/batch-normalization (create-context)))
+
 
   (deftest local-response-normalization-forward
     (verify-layers/lrn-forward (create-context)))

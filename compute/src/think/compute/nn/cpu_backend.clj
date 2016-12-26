@@ -1084,58 +1084,15 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 
 (defmethod create-cpu-layer :max-pooling
-   [backend layer batch-size]
-   (->MaxPooling backend layer))
+  [backend layer batch-size]
+  (->MaxPooling backend layer))
 
 
+(defrecord BatchNormalization [backend])
 
 
 (comment
 
- (defrecord BatchNormalization [backend])
- (extend-type BatchNormalization
-   nn-backend/PBatchNormalization
-   (batch-norm-calc! [layer input running-means running-variances scale bias output epsilon]
-     (let [[batch-size batch-stride] (math/batch-shape input)]
-       (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-         (cpu-bn-calc (device-array->view input)
-                      (device-array->view running-means)
-                      (device-array->view running-variances)
-                      (device-array->view scale)
-                      (device-array->view bias)
-                      (device-array->view output)
-                      batch-size batch-stride))))
-   (batch-norm-forward! [layer input
-                         running-means running-variances
-                         saved-means saved-variances
-                         scale bias output average-factor epsilon]
-     (let [[batch-size batch-stride] (math/batch-shape input)]
-       (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-         (cpu-update-means-variances (device-array->view input)
-                                     (device-array->view running-means)
-                                     (device-array->view running-variances)
-                                     (device-array->view saved-means)
-                                     (device-array->view saved-variances)
-                                     batch-size batch-stride
-                                     average-factor epsilon)))
-     (nn-backend/batch-norm-calc! layer input saved-means saved-variances
-                                  scale bias output epsilon))
-   (batch-norm-backward! [layer input saved-means saved-variances scale bias output
-                          scale-gradient bias-gradient input-gradient output-gradient
-                          epsilon]
-     (let [[batch-size batch-stride] (math/batch-shape input)]
-       (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-         (cpu-bn-backward (device-array->view input)
-                          (device-array->view saved-means)
-                          (device-array->view saved-variances)
-                          (device-array->view scale)
-                          (device-array->view bias)
-                          (device-array->view output)
-                          (device-array->view scale-gradient)
-                          (device-array->view bias-gradient)
-                          (device-array->view input-gradient)
-                          (device-array->view output-gradient)
-                          batch-size batch-stride)))))
 
 
  (defrecord LocalResponseNormalization [backend ^long width ^long height ^long n-channels
@@ -1200,4 +1157,46 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]
     (cpu-drv/with-stream-dispatch (.stream backend)
       (cpu-prepare-gaussian-dropout (device-array->view mult-buffer)
-                                    (device-array->view rand-buffer)))))
+                                    (device-array->view rand-buffer))))
+  nn-backend/PBatchNormalization
+  (batch-norm-inference! [backend input running-means running-variances scale bias output epsilon]
+    (let [[batch-size batch-stride] (math/batch-shape input)]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-bn-calc (device-array->view input)
+                     (device-array->view running-means)
+                     (device-array->view running-variances)
+                     (device-array->view scale)
+                     (device-array->view bias)
+                     (device-array->view output)
+                     batch-size batch-stride))))
+  (batch-norm-forward! [backend input
+                        running-means running-variances
+                        saved-means saved-variances
+                        scale bias output average-factor epsilon]
+    (let [[batch-size batch-stride] (math/batch-shape input)]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-update-means-variances (device-array->view input)
+                                    (device-array->view running-means)
+                                    (device-array->view running-variances)
+                                    (device-array->view saved-means)
+                                    (device-array->view saved-variances)
+                                    batch-size batch-stride
+                                    average-factor epsilon)))
+    (nn-backend/batch-norm-calc! backend input saved-means saved-variances
+                                 scale bias output epsilon))
+  (batch-norm-backward! [backend input saved-means saved-variances scale bias output
+                         scale-gradient bias-gradient input-gradient output-gradient
+                         epsilon]
+    (let [[batch-size batch-stride] (math/batch-shape input)]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-bn-backward (device-array->view input)
+                         (device-array->view saved-means)
+                         (device-array->view saved-variances)
+                         (device-array->view scale)
+                         (device-array->view bias)
+                         (device-array->view output)
+                         (device-array->view scale-gradient)
+                         (device-array->view bias-gradient)
+                         (device-array->view input-gradient)
+                         (device-array->view output-gradient)
+                         batch-size batch-stride)))))

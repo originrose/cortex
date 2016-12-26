@@ -103,10 +103,10 @@ computelayer/forward,backward."
 
 
 (defprotocol PBatchNormalization
-  (batch-norm-calc! [layer input running-means running-variances scale bias output epsilon])
-  (batch-norm-forward! [layer input
+  (batch-norm-inference! [backend input running-means running-variances scale bias output epsilon])
+  (batch-norm-forward! [backend input
                         running-means running-variances batch-means batch-variances
                         scale bias output average-factor epsilon])
-  (batch-norm-backward! [layer input batch-means batch-variances scale bias output
+  (batch-norm-backward! [backend input batch-means batch-variances scale bias output
                          scale-gradient bias-gradient input-gradient output-gradient
                          epsilon]))

@@ -19,7 +19,7 @@
 
 
 (defn- bind-node-parameter-buffers
-  [compute-buffers node network backend pass-type]
+  [compute-buffers node network backend traverse-type]
   (reduce (fn [compute-buffers {:keys [key]}]
             (let [{:keys [buffer-id] :as param-entry} (get node key)]
               (update compute-buffers buffer-id
@@ -31,7 +31,7 @@
                                                         buffer-id
                                                         :buffer])]
                               (cond-> {:buffer (backend/array backend graph-buffer)}
-                                (= pass-type :training)
+                                (= traverse-type :training)
                                 (assoc :gradient (backend/new-array backend
                                                                     (m/shape graph-buffer))))))))))
           compute-buffers
@@ -74,7 +74,7 @@
   [backend-fn {:keys [batch-size layer-graph traversal] :as built-network}]
   (let [backend (backend-fn)
         id->node-map (get layer-graph :id->node-map)
-        pass-type (get traversal :type)
+        traverse-type (get traversal :type)
         compute-binding
         (reduce
          (fn [compute-binding {:keys [incoming id outgoing]}]
@@ -87,7 +87,7 @@
                  (update-in [:parameter-buffers]
                             (fn [param-buffers]
                               (bind-node-parameter-buffers param-buffers node built-network
-                                                           backend pass-type))))))
+                                                           backend traverse-type))))))
          (get-in built-network [:compute-binding])
          (get traversal :forward))
         compute-binding
@@ -98,7 +98,7 @@
                         (or buffer
                             (let [buffer-size (get-in traversal [:buffers buffer-key :size])]
                               (cond-> {:buffer (backend/new-array backend [buffer-size] batch-size)}
-                                (= pass-type :training)
+                                (= traverse-type :training)
                                 (assoc :gradient (backend/new-array backend [buffer-size] batch-size))))))))
          compute-binding
          (keys (get traversal :buffers)))]
@@ -146,15 +146,28 @@
   (mapv traversal-buffers buffer-ids))
 
 
+(def pass-metadata
+  {:inference {:pass-functions [compute-protocols/infer]
+               :buffer-type :buffer
+               :input-key :input-stream
+               :traversal-key :forward}
+   :forward {:pass-functions [compute-protocols/prepare-forward!
+                             compute-protocols/forward]
+             :buffer-type :buffer
+             :input-key :input-stream
+             :traversal-key :forward}
+   :backward {:pass-functions [compute-protocols/backward]
+             :buffer-type :gradient
+             :input-key :output-id
+             :traversal-key :backward}})
+
+
 (defn- map-pass-to-buffers
   "Create a new pass with items mapped to buffers."
   [network id->input-buffer-map pass-direction]
-  (let [traversal-pass (get-in network [:traversal pass-direction])
-
+  (let [{:keys [traversal-key buffer-type input-key]} (get pass-metadata pass-direction)
+        traversal-pass (get-in network [:traversal traversal-key])
         backend (get-in network [:compute-binding :backend])
-        [buffer-type input-key] (condp = pass-direction
-                                  :forward [:buffer :input-stream]
-                                  :backward [:gradient :output-id])
         traversal-buffers (->> (get-in network [:compute-binding :traversal-buffers])
                                (map (fn [[map-key buffer-entry]]
                                       ;;Assoc the input buffers into the appropriate spots if they are
@@ -213,31 +226,21 @@
   network)
 
 
-(defn- forward-traverse
-  [network mapped-pass]
-  (-> network
-      (do-traverse mapped-pass compute-protocols/prepare-forward!)
-      (do-traverse mapped-pass compute-protocols/forward)))
-
-
-(defn- backward-traverse
-  [network mapped-pass]
-  (do-traverse network mapped-pass compute-protocols/backward))
-
-
 (defn- traverse
   [network id->input-map pass-direction]
   (let [batch-size (get network :batch-size)
         backend (get-in network [:compute-binding :backend])
-        [network mapped-pass] (map-pass-to-buffers network
-                                                   (->> id->input-map
-                                                        (map (fn [[k v]]
-                                                               [k (backend/array backend v batch-size)]))
-                                                        (into {}))
-                                                   pass-direction)]
-    (condp = pass-direction
-      :forward (forward-traverse network mapped-pass)
-      :backward (backward-traverse network mapped-pass))))
+        [network mapped-pass]
+        (map-pass-to-buffers network
+                             (->> id->input-map
+                                  (map (fn [[k v]]
+                                         [k (backend/array backend v batch-size)]))
+                                  (into {}))
+                             pass-direction)]
+    (reduce (fn [network pass-fn]
+              (do-traverse network mapped-pass pass-fn))
+            network
+            (get-in pass-metadata [pass-direction :pass-functions]))))
 
 
 (defn- get-output-bindings

@@ -117,3 +117,49 @@ and then forward many times for every parameter of the network."
                                           (* n-items (long batch-size))))
                                         (math/create-tensor batch-size 1 1 n-items))]
     (->Dropout backend node batch-size mult-buffer rand-buffer)))
+
+
+
+(defrecord BatchNormalization [backend layer batch-means batch-variances]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (nn-backend/batch-norm-forward! backend
+                                    (first-buffer input-buffers)
+                                    (get-in parameter-buffers [:means :buffer])
+                                    (get-in parameter-buffers [:variances :buffer])
+                                    batch-means batch-variances
+                                    (get-in parameter-buffers [:scale :buffer])
+                                    (get-in parameter-buffers [:bias :buffer])
+                                    (first-buffer output-buffers)
+                                    (get layer :average-factor)
+                                    (get layer :epsilon)))
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (nn-backend/batch-norm-backward! backend
+                                     (first-buffer input-buffers)
+                                     batch-means batch-variances
+                                     (get-in parameter-buffers [:scale :buffer])
+                                     (get-in parameter-buffers [:bias :buffer])
+                                     (first-buffer output-buffers)
+                                     (get-in parameter-buffers [:scale :gradient])
+                                     (get-in parameter-buffers [:bias :gradient])
+                                     (first-gradient input-buffers)
+                                     (first-gradient output-buffers)
+                                     (get layer :epsilon)))
+  compute-protocols/ComputeLayerInfer
+  (infer [this parameter-buffers input-buffers output-buffers]
+    (nn-backend/batch-norm-inference! backend
+                                      (first-buffer input-buffers)
+                                      (get-in parameter-buffers [:means :buffer])
+                                      (get-in parameter-buffers [:variances :buffer])
+                                      (get-in parameter-buffers [:scale :buffer])
+                                      (get-in parameter-buffers [:bias :buffer])
+                                      (first-buffer output-buffers)
+                                      (get layer :epsilon))))
+
+
+
+(defmethod create :batch-normalization
+  [backend node batch-size]
+  (->BatchNormalization backend node
+                        (nn-backend/new-array backend [(get node :input-size)])
+                        (nn-backend/new-array backend [(get node :input-size)])))

@@ -494,7 +494,8 @@ for that network."
           running-means (get-in parameters [:means :buffer :buffer])
           running-inv-vars (get-in parameters [:variances :buffer :buffer])]
       (is (utils/about-there? 5.0 (/ (m/esum running-means)
-                                     input-size)))
+                                     input-size)
+                              1e-4))
       ;;The running variances uses a population calculation for variances
       ;;instead of a specific calculation for variance meaning
       ;;you divide by n-1 instead of n.
