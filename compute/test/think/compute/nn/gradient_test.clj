@@ -22,14 +22,3 @@
 
 (deftest local-response-normalization-gradient
   (gradient/lrn-gradient (create-context)))
-
-
-(comment
-
- (deftest softmax-gradient
-   (gradient/softmax-gradient (create-context)))
-
-
- (deftest dropout-gaussian
-   (gradient/dropout-gaussian-gradient (create-context)))
-)

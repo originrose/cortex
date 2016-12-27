@@ -174,9 +174,11 @@
   [network {:keys [save-gradients?]}]
   (let [backend (get-in network [:compute-binding :backend])
         core-m (fn [data] (backend/to-core-matrix backend data))
-        ->doubles (fn [host-buffer] (let [retval (double-array (m/ecount host-buffer))]
-                                      (dtype/copy! host-buffer 0 retval 0 (m/ecount host-buffer))
-                                      retval))]
+        ->doubles (fn [host-buffer]
+                    (when host-buffer
+                     (let [retval (double-array (m/ecount host-buffer))]
+                       (dtype/copy! host-buffer 0 retval 0 (m/ecount host-buffer))
+                       retval)))]
     (-> network
         (update-in [:layer-graph :buffers]
                    (fn [buffers]
