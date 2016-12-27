@@ -18,6 +18,9 @@
             [think.compute.math :as math]))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Bind/save functionality
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn- bind-node-parameter-buffers
   [compute-buffers node network backend traverse-type]
   (reduce (fn [compute-buffers {:keys [key]}]
@@ -141,25 +144,28 @@
         (dissoc :compute-binding))))
 
 
-(defn- find-buffers
-  [traversal-buffers buffer-ids]
-  (mapv traversal-buffers buffer-ids))
-
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Specific traversal implementation
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (def pass-metadata
   {:inference {:pass-functions [compute-protocols/infer]
                :buffer-type :buffer
                :input-key :input-stream
                :traversal-key :forward}
    :forward {:pass-functions [compute-protocols/prepare-forward!
-                             compute-protocols/forward]
+                              compute-protocols/forward]
              :buffer-type :buffer
              :input-key :input-stream
              :traversal-key :forward}
    :backward {:pass-functions [compute-protocols/backward]
-             :buffer-type :gradient
-             :input-key :output-id
-             :traversal-key :backward}})
+              :buffer-type :gradient
+              :input-key :output-id
+              :traversal-key :backward}})
+
+
+(defn- find-buffers
+  [traversal-buffers buffer-ids]
+  (mapv traversal-buffers buffer-ids))
 
 
 (defn- map-pass-to-buffers
@@ -202,7 +208,7 @@
        (into {})))
 
 
-(defn print-traversal-buffers
+(defn- print-traversal-buffers
   [network]
   (println "!!Traversal buffers!!")
   (let [backend (get-in network [:compute-binding :backend])
@@ -215,32 +221,93 @@
 
 
 (defn- do-traverse
-  [network mapped-pass pass-function]
-  (->> mapped-pass
-       (map (fn [{:keys [incoming id outgoing]}]
-              (pass-function
-               (get-in network [:compute-binding :id->node-map id])
-               (get-node-parameters network id)
-               incoming outgoing)))
-       dorun)
-  network)
+  [network id->buffer-map pass-direction]
+  (let [[network mapped-pass] (map-pass-to-buffers network
+                                                   id->buffer-map
+                                                   pass-direction)]
+    (reduce (fn [network pass-function]
+              (->> mapped-pass
+                   (map (fn [{:keys [incoming id outgoing]}]
+                          (pass-function
+                           (get-in network [:compute-binding :id->node-map id])
+                           (get-node-parameters network id)
+                           incoming outgoing)))
+                   dorun)
+              network)
+            network
+            (get-in pass-metadata [pass-direction :pass-functions]))))
+
 
 
 (defn- traverse
+  "Expectiation is that the id->input-map has buffers that aren't already uploaded
+to the device."
   [network id->input-map pass-direction]
   (let [batch-size (get network :batch-size)
-        backend (get-in network [:compute-binding :backend])
-        [network mapped-pass]
-        (map-pass-to-buffers network
-                             (->> id->input-map
-                                  (map (fn [[k v]]
-                                         [k (backend/array backend v batch-size)]))
-                                  (into {}))
-                             pass-direction)]
-    (reduce (fn [network pass-fn]
-              (do-traverse network mapped-pass pass-fn))
-            network
-            (get-in pass-metadata [pass-direction :pass-functions]))))
+        backend (get-in network [:compute-binding :backend])]
+    (do-traverse network
+                 (->> id->input-map
+                      (map (fn [[k v]]
+                             [k (backend/array backend v batch-size)]))
+                      (into {}))
+                 pass-direction)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Training
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn- recur-train-sequence
+  "Training is a lazy sequence of these operations."
+  [network parameters output-bindings batch-seq]
+  (when-let [stream->buffer-map (first batch-seq)]
+    ;;Sometimes you have to print the entire batch out to see what is going on.
+    (comment
+      (clojure.pprint/pprint (mapv (fn [[k v]]
+                                     [k (vec (take 10
+                                                   (backend/to-double-array
+                                                    (get-in network [:compute-binding :backend])
+                                                    v)))])
+                                   stream->buffer-map)))
+    (let [network (do-traverse network stream->buffer-map :forward)
+          optimiser (compute-optimise/batch-update (get-in network [:compute-binding :optimiser]))
+          buffer-alpha (/ 1.0 (double (get network :batch-size)))
+          backend (get-in network [:compute-binding :backend])]
+      (doseq [{:keys [buffers loss-function dataset-stream] :as entry} output-bindings]
+        (let [{:keys [buffer gradient]} buffers
+              answer (get stream->buffer-map dataset-stream)]
+          (compute-loss/compute-loss-gradient loss-function backend buffer answer gradient)
+          (comment
+            (clojure.pprint/pprint {:loss-function loss-function
+                                    :buffer (vec (take 10 (backend/to-double-array backend buffer)))
+                                    :answer (vec (take 10 (backend/to-double-array backend answer)))
+                                    :gradient (vec (take 10 (backend/to-double-array backend gradient)))}))))
+      ;;Backward traverse uses existing buffers and doesn't need any id->buffer remapping
+      (do-traverse network {} :backward)
+      (reduce (fn [offset {:keys [buffers learning-attenuation]}]
+                (let [{:keys [buffer-id buffer gradient]} buffers
+                      elem-count (long (m/ecount buffer))]
+                  (compute-optimise/compute-parameters! optimiser
+                                                        (* buffer-alpha learning-attenuation)
+                                                        offset gradient buffer)
+                  (drv/memset (drv/get-stream backend) (math/device-buffer gradient)
+                              0 0 elem-count)
+
+                  (+ offset elem-count)))
+              0
+              parameters)
+      (let [network (assoc-in network
+                              [:compute-binding :optimiser]
+                              optimiser)]
+        (comment
+          (clojure.pprint/pprint (mapv (fn [[k v]]
+                                         [k
+                                          (vec (take 10
+                                                     (backend/to-double-array (get-in network
+                                                                                      [:compute-binding :backend])
+                                                                              (:buffer v))))])
+                                       (get-in network [:compute-binding :traversal-buffers]))))
+        (cons network
+              (lazy-seq (recur-train-sequence network parameters output-bindings (rest batch-seq))))))))
 
 
 (defn- get-output-bindings
@@ -258,61 +325,6 @@
                                                    :id->node-map
                                                    node-id
                                                    :output-size]))))))
-
-
-(defn- recur-train-sequence
-  [network parameters backward-mapped-pass output-bindings batch-seq]
-  (when-let [stream->buffer-map (first batch-seq)]
-    ;;Sometimes you have to print the entire batch out to see what is going on.
-    (comment
-      (clojure.pprint/pprint (mapv (fn [[k v]]
-                                    [k (vec (backend/to-double-array
-                                             (get-in network [:compute-binding :backend])
-                                             v))])
-                                  stream->buffer-map)))
-    (let [[network forward-mapped-pass] (map-pass-to-buffers network
-                                                             stream->buffer-map
-                                                             :forward)
-          optimiser (compute-optimise/batch-update (get-in network [:compute-binding :optimiser]))
-          buffer-alpha (/ 1.0 (double (get network :batch-size)))
-          backend (get-in network [:compute-binding :backend])]
-      (forward-traverse network forward-mapped-pass)
-      (doseq [{:keys [buffers loss-function dataset-stream] :as entry} output-bindings]
-        (let [{:keys [buffer gradient]} buffers
-              answer (get stream->buffer-map dataset-stream)]
-          (compute-loss/compute-loss-gradient loss-function backend buffer answer gradient)
-          (comment
-           (clojure.pprint/pprint {:loss-function loss-function
-                                   :buffer (vec (take 10 (backend/to-double-array backend buffer)))
-                                   :answer (vec (take 10 (backend/to-double-array backend answer)))
-                                   :gradient (vec (take 10 (backend/to-double-array backend gradient)))}))))
-      (backward-traverse network backward-mapped-pass)
-      (reduce (fn [offset {:keys [buffers learning-attenuation]}]
-                (let [{:keys [buffer-id buffer gradient]} buffers
-                      elem-count (long (m/ecount buffer))]
-                  (compute-optimise/compute-parameters! optimiser
-                                                        (* buffer-alpha learning-attenuation)
-                                                        offset gradient buffer)
-                  (drv/memset (drv/get-stream backend) (math/device-buffer gradient)
-                              0 0 elem-count)
-
-                  (+ offset elem-count)))
-              0
-              parameters)
-      (let [network (assoc-in network
-                               [:compute-binding :optimiser]
-                               optimiser)]
-        (comment
-         (clojure.pprint/pprint (mapv (fn [[k v]]
-                                        [k
-                                         (vec (take 10
-                                                    (backend/to-double-array (get-in network
-                                                                                     [:compute-binding :backend])
-                                                                             (:buffer v))))])
-                                      (get-in network [:compute-binding :traversal-buffers]))))
-        (cons network
-              (lazy-seq (recur-train-sequence network parameters backward-mapped-pass
-                                              output-bindings (rest batch-seq))))))))
 
 
 (defn- train-sequence
@@ -344,6 +356,9 @@
          (recur-train-sequence network parameters backward-mapped-pass output-bindings))))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Inference
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn- infer-sequence
   [network batch-map-sequence options]
   (let [bs (get-in network [:compute-binding :batching-system])
@@ -367,10 +382,7 @@
                                output-size))]
     (->> (batching-system/get-batches bs batch-map-sequence false)
          (map (fn [stream->buffer-map]
-                (let [[network forward-mapped-pass] (map-pass-to-buffers network
-                                                                          stream->buffer-map
-                                                                         :forward)]
-                  (forward-traverse network forward-mapped-pass)
+                (let [network (do-traverse network stream->buffer-map :inference)]
                   (->> output-bindings
                        (map (fn [{:keys [buffers node-id output-size host-buffer elem-count]}]
                               (let [buffer (get buffers :buffer)
@@ -381,7 +393,7 @@
                                                        (math/device-buffer buffer) 0
                                                        host-buffer 0
                                                        elem-count)
-                                ;;with async copies this event is necessary.
+                                ;;Wait for the network to finish the inference traversal
                                 (drv/wait-for-event (drv/create-event stream))
                                 ;;This step is surprisingly slow if you are mixing datatypes - meaning
                                 ;;if your network is running anything other than double arithmetic -
@@ -416,6 +428,7 @@
     "Run network forward and backward like 'forward-backward' but also calculate numeric
 gradients w/r/t the loss function and the provided answer.  This allows for gradient
 checking."))
+
 
 (defn create-context
   [backend-fn]

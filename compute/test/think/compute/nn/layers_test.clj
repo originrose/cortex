@@ -61,13 +61,5 @@
 (deftest batch-normalization
   (verify-layers/batch-normalization (create-context)))
 
-(comment
-
-
-
-
-
-
-  (deftest local-response-normalization-forward
-    (verify-layers/lrn-forward (create-context)))
-  )
+(deftest local-response-normalization-forward
+  (verify-layers/lrn-forward (create-context)))

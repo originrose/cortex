@@ -1088,40 +1088,36 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (->MaxPooling backend layer))
 
 
-(defrecord BatchNormalization [backend])
+(defn- layer-output->tensor
+  [{:keys [output-channels output-width output-height] :as layer} batch-size]
+  (math/create-tensor batch-size
+                      output-channels
+                      output-height
+                      output-width))
 
 
-(comment
+(defrecord LocalResponseNormalization [backend layer batch-size]
+  compute-protocols/ComputeLayer
+  (forward [this parameters input-buffers output-buffers]
+    (let [{:keys [n k alpha beta]} layer]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-lrn-forward (first-buffer input-buffers)
+                         (first-buffer output-buffers)
+                         (layer-output->tensor layer batch-size)
+                         n k alpha beta))))
+  (backward [this parameters output-buffers input-buffers]
+    (let [{:keys [n k alpha beta]} layer]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-lrn-backward (first-buffer input-buffers)
+                          (first-gradient output-buffers)
+                          (first-gradient input-buffers)
+                          (layer-output->tensor layer batch-size)
+                          n k alpha beta)))))
 
 
-
- (defrecord LocalResponseNormalization [backend ^long width ^long height ^long n-channels
-                                        n k alpha beta]
-   nn-backend/PBackendLayer
-   (forward! [layer input output]
-     (let [^Tensor input-tensor (.tensor ^DeviceArray input)
-           data-tensor (math/create-tensor (.batch-size input-tensor)
-                                           n-channels
-                                           height
-                                           width)]
-       (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-         (cpu-lrn-forward (device-array->view input)
-                          (device-array->view output)
-                          data-tensor
-                          n k alpha beta))))
-   (backward! [layer input output input-gradient output-gradient]
-     (let [^Tensor input-tensor (.tensor ^DeviceArray input)
-           data-tensor (math/create-tensor (.batch-size input-tensor)
-                                           n-channels
-                                           height
-                                           width)]
-       (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-         (cpu-lrn-backward (device-array->view input)
-                           (device-array->view output-gradient)
-                           (device-array->view input-gradient)
-                           data-tensor
-                           n k alpha beta))))))
-
+(defmethod create-cpu-layer :local-response-normalization
+  [backend layer batch-size]
+  (->LocalResponseNormalization backend layer batch-size))
 
 
 (extend-type CPUBackend
@@ -1182,8 +1178,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                     (device-array->view saved-variances)
                                     batch-size batch-stride
                                     average-factor epsilon)))
-    (nn-backend/batch-norm-calc! backend input saved-means saved-variances
-                                 scale bias output epsilon))
+    (nn-backend/batch-norm-inference! backend input saved-means saved-variances
+                                      scale bias output epsilon))
   (batch-norm-backward! [backend input saved-means saved-variances scale bias output
                          scale-gradient bias-gradient input-gradient output-gradient
                          epsilon]

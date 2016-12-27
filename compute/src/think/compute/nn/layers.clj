@@ -120,7 +120,8 @@ and then forward many times for every parameter of the network."
 
 
 
-(defrecord BatchNormalization [backend layer batch-means batch-variances]
+(defrecord BatchNormalization [backend layer batch-means batch-variances
+                               local-average-factor-atom]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
     (nn-backend/batch-norm-forward! backend
@@ -131,8 +132,12 @@ and then forward many times for every parameter of the network."
                                     (get-in parameter-buffers [:scale :buffer])
                                     (get-in parameter-buffers [:bias :buffer])
                                     (first-buffer output-buffers)
-                                    (get layer :average-factor)
-                                    (get layer :epsilon)))
+                                    @local-average-factor-atom
+                                    (get layer :epsilon))
+    ;;The very first batch we just set the running means to the batch-means.
+    ;;After that we linear interpolate between the current value and next value
+    ;;using the average factor as the interpolation factor.
+    (reset! local-average-factor-atom (get layer :average-factor)))
   (backward [this parameter-buffers output-buffers input-buffers]
     (nn-backend/batch-norm-backward! backend
                                      (first-buffer input-buffers)
@@ -162,4 +167,5 @@ and then forward many times for every parameter of the network."
   [backend node batch-size]
   (->BatchNormalization backend node
                         (nn-backend/new-array backend [(get node :input-size)])
-                        (nn-backend/new-array backend [(get node :input-size)])))
+                        (nn-backend/new-array backend [(get node :input-size)])
+                        (atom 1.0)))

@@ -494,11 +494,55 @@ for that network."
           running-means (get-in parameters [:means :buffer :buffer])
           running-inv-vars (get-in parameters [:variances :buffer :buffer])]
       (is (utils/about-there? 5.0 (/ (m/esum running-means)
-                                     input-size)
-                              1e-4))
+                                     input-size)))
       ;;The running variances uses a population calculation for variances
       ;;instead of a specific calculation for variance meaning
       ;;you divide by n-1 instead of n.
       (is (utils/about-there? 21.05 (/ (m/esum running-inv-vars)
                                       input-size)
                               1e-2)))))
+
+
+(defn- do-lrn-forward
+  [context num-input-channels lrn-n]
+  (let [batch-size 2
+        input-dim 2
+        input-num-pixels (* input-dim input-dim)
+        n-input (* num-input-channels input-num-pixels)
+        input (flatten (repeat batch-size (range n-input)))
+        output-gradient (repeat (* batch-size n-input) 1.0)]
+    (-> (forward-backward-test context [(layers/input input-dim input-dim num-input-channels)
+                                        (layers/local-response-normalization
+                                         :n lrn-n :k 1 :alpha 1 :beta 1)]
+                               batch-size input output-gradient)
+        (assoc :input-data input)
+        (update :output m/as-vector))))
+
+
+(defn lrn-forward
+  [context]
+  (let [lrn-data (do-lrn-forward context 3 1)]
+    (is (m/equals (mapv #(/ (double %) (+ 1 (* % %))) (:input-data lrn-data))
+                  (:output lrn-data)
+                  1e-4)))
+  (let [lrn-data (do-lrn-forward context 3 2)]
+    (is (m/equals (mapv double
+                        (flatten
+                         (repeat 2
+                                 [0.0 0.07142857142857142 0.09523809523809523 0.1
+                                  0.0975609756097561 0.09259259259259259 0.08695652173913043
+                                  0.08139534883720931 0.24242424242424243 0.21686746987951808
+                                  0.19607843137254902 0.17886178861788618])))
+                  (:output lrn-data)
+                  1e-4)))
+  (let [lrn-data (do-lrn-forward context 3 3)]
+    (is (m/equals (mapv double
+                        (flatten
+                         (repeat 2
+                                 [0.0 0.10344827586206898 0.13953488372093023
+                                  0.14754098360655737 0.14457831325301207 0.13636363636363638
+                                  0.1258741258741259 0.11538461538461539 0.28915662650602414
+                                  0.24770642201834867 0.21582733812949642
+                                  0.19075144508670522 ])))
+                  (:output lrn-data)
+                  1e-4))))
