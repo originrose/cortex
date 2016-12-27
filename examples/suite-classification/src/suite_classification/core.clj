@@ -238,7 +238,7 @@ to avoid overfitting the network to the training data."
     (imagez/show test-img)
     (infer/classify-one-observation (:network-description
                                      (suite-io/read-nippy-file "trained-network.nippy"))
-                                    observation (ds/create-image-shape mnist-num-classes
+                                    observation (ds/create-image-shape mnist-num-channels
                                                                        mnist-image-size
                                                                        mnist-image-size)
                                     mnist-datatype (classification/get-class-names-from-directory "mnist/testing"))))
