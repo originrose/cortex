@@ -28,10 +28,7 @@ save-gradients? - save the gradients *and* the io buffers.")
   (traverse [context bound-network id->input-map traverse-type]
     "Run a traverse on the network using this input map for inputs.
 traverse-type is one of [:forward :backward :inference]")
-  (forward-backward-loss [context built-network
-                          stream->input-map
-                          node-id->loss-function-answer-map
-                          epsilon]
+  (generate-numeric-gradients [context built-network stream->data-map epsilon]
     "Run network forward and backward like 'forward-backward' but also calculate numeric
 gradients w/r/t the loss function and the provided answer.  This allows for gradient
 checking.  The data should be saved back to the network after the passes"))

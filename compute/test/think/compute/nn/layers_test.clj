@@ -3,7 +3,9 @@
             [cortex.verify.nn.layers :as verify-layers]
             [think.compute.nn.cpu-backend :as cpu-backend]
             [think.compute.nn.compute-execute :as compute-execute]
-            [think.compute.verify.utils :refer [def-double-float-test] :as test-utils]))
+            [think.compute.verify.utils
+             :refer [def-double-float-test]
+             :as test-utils]))
 
 
 (use-fixtures :each test-utils/test-wrapper)

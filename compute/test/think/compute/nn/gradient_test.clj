@@ -1,32 +1,35 @@
 (ns think.compute.nn.gradient-test
   (:require [clojure.test :refer :all]
-            [think.compute.verify.nn.gradient :as gradient]
-            [think.compute.verify.utils :refer [def-double-float-test] :as test-utils]
-            [think.compute.nn.cpu-backend :as cpu-net]))
+            [cortex.verify.nn.gradient :as gradient]
+            [think.compute.nn.cpu-backend :as cpu-backend]
+            [think.compute.verify.utils :as test-utils]
+            [think.compute.nn.compute-execute :as compute-execute]))
 
 
-(use-fixtures :each test-utils/test-wrapper)
-
-
-(defn create-backend
+(defn create-context
   []
-  (cpu-net/create-cpu-backend test-utils/*datatype*))
+  (compute-execute/create-context
+   #(cpu-backend/create-cpu-backend test-utils/*datatype*)))
 
 
 (deftest corn-gradient
-  (gradient/corn-gradient (create-backend)))
-
-
-(deftest softmax-gradient
-  (gradient/softmax-gradient (create-backend)))
-
-
-(deftest dropout-gaussian
-  (gradient/dropout-gaussian-gradient (create-backend)))
+  (gradient/corn-gradient (create-context)))
 
 
 (deftest batch-normalization
-  (gradient/bn-gradient (create-backend)))
+  (gradient/batch-normalization-gradient (create-context)))
+
 
 (deftest local-response-normalization-gradient
-  (gradient/lrn-gradient (create-backend)))
+  (gradient/lrn-gradient (create-context)))
+
+
+(comment
+
+ (deftest softmax-gradient
+   (gradient/softmax-gradient (create-context)))
+
+
+ (deftest dropout-gaussian
+   (gradient/dropout-gaussian-gradient (create-context)))
+)

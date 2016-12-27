@@ -6,6 +6,7 @@
             [cortex.dataset :as ds]
             [cortex.loss :as loss]
             [cortex-datasets.mnist :as mnist]
+            [cortex.optimise :as opt]
             [clojure.test :refer :all]))
 
 
@@ -97,7 +98,7 @@
                            (fn [& args]
                              (< (swap! epoch-counter inc) n-epochs))
                            :batch-size 1
-                           :optimiser (layers/adadelta)
+                           :optimiser (opt/adadelta)
                            :disable-infer true)
         results (-> (execute/infer context net dataset input-bindings output-bindings :batch-size 1)
                     :test)

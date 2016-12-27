@@ -257,11 +257,12 @@ This is for cudnn compatibility.")))
      :shape-fn linear-bias-parameter-shape}
     {:key :means
      :type :mean
+     :non-trainable? true
      :shape-fn linear-bias-parameter-shape}
     {:key :variances
      :type :variance
+     :non-trainable? true
      :shape-fn linear-bias-parameter-shape}]
-
    :pass-set #{:training :inference}})
 
 

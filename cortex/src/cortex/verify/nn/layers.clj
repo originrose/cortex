@@ -14,11 +14,6 @@
 (defn bind-test-network
   [context network batch-size test-layer-id]
   (let [test-layer-id :test
-        network (-> network
-                    flatten
-                    vec
-                    (assoc-in [0 :id] :input)
-                    (assoc-in [1 :id] test-layer-id))
         input-bindings {:input :data}
         output-bindings {test-layer-id {:stream :labels}}]
     (as-> (build/build-network network) network
@@ -56,7 +51,8 @@
      :incoming-buffers incoming-buffers
      :outgoing-buffers outgoing-buffers
      :output (get (first outgoing-buffers) :buffer)
-     :input-gradient (get (first incoming-buffers) :gradient)}))
+     :input-gradient (get (first incoming-buffers) :gradient)
+     :numeric-input-gradient (get (first incoming-buffers) :numeric-gradient)}))
 
 
 (defn forward-backward-bound-network
