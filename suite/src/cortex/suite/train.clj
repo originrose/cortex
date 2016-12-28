@@ -1,9 +1,7 @@
 (ns cortex.suite.train
   (:require [cortex.suite.io :as suite-io]
-            [cortex.nn.description :as desc]
-            [think.compute.nn.train :as train]
-            [think.compute.nn.description :as compute-desc]
             [think.compute.nn.cuda-backend :as gpu-compute]
+            [cortex.nn.protocols :as cp]
             [think.resource.core :as resource]
             [clojure.java.io :as io]
             [think.compute.optimise :as opt]
@@ -23,7 +21,7 @@ in initial description.  Else returns the initial description"
 
 
 (defn save-network
-  [network network-loss initial-description network-filename]
+  [context network network-loss initial-description network-filename]
   (let [write-data {:cv-loss network-loss
                     :network-description (desc/network->description network)
                     :initial-description initial-description}]
