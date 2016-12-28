@@ -1,22 +1,16 @@
 (ns cortex.suite.inference
   (:require [cortex.dataset :as ds]
-            [think.compute.nn.description :as compute-desc]
             [think.compute.nn.cpu-backend :as cpu-backend]
+            [think.compute.nn.compute-execute :as ce]
             [think.resource.core :as resource]
-            [think.compute.nn.train :as train]
-            [think.compute.optimise :as opt]))
+            [cortex.optimise :as cortex-opt]))
 
 
 (defn infer-n-observations
-  [network-description observations observation-dataset-shape datatype & {:keys [cuda-backend?]}]
+  "Given a network that has exactly one input and output, infer on these observations"
+  [network observations observation-dataset-shape datatype & {:keys [cuda-backend?]}]
   (resource/with-resource-context
-    (let [backend (when cuda-backend?
-                    (try
-                      (require 'think.compute.nn.cuda-backend)
-                      ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
-                      (catch Throwable e
-                        (println e)
-                        nil)))
+    (let [context ()
           backend (when-not backend
                     (cpu-backend/create-cpu-backend datatype))
           network (compute-desc/build-and-create-network network-description backend 1)
