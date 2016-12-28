@@ -411,7 +411,7 @@ to the device."
                                                             {}
                                                             :backward)]
     (->> (batching-system/get-batches bs batch-map-sequence true)
-         (recur-train-sequence network parameters backward-mapped-pass output-bindings true))))
+         (recur-train-sequence network parameters output-bindings true))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

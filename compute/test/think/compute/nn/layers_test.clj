@@ -15,53 +15,53 @@
   (compute-execute/create-context
    #(cpu-backend/create-cpu-backend test-utils/*datatype*)))
 
-(deftest relu-activation
+(def-double-float-test relu-activation
   (verify-layers/relu-activation (create-context)))
 
-(deftest relu-activation-batch
+(def-double-float-test relu-activation-batch
   (verify-layers/relu-activation-batch (create-context)))
 
-(deftest linear
+(def-double-float-test linear
   (verify-layers/linear (create-context)))
 
-(deftest linear-batch
+(def-double-float-test linear-batch
   (verify-layers/linear-batch (create-context)))
 
-(deftest sigmoid
+(def-double-float-test sigmoid
   (verify-layers/test-activation (create-context) :logistic))
 
-(deftest tanh
+(def-double-float-test tanh
   (verify-layers/test-activation (create-context) :tanh))
 
-(deftest logistic-batch
+(def-double-float-test logistic-batch
   (verify-layers/test-activation-batch (create-context) :logistic))
 
-(deftest tanh-batch
+(def-double-float-test tanh-batch
   (verify-layers/test-activation-batch (create-context) :tanh))
 
-(deftest softmax
+(def-double-float-test softmax
   (verify-layers/softmax (create-context)))
 
-(deftest softmax-batch
+(def-double-float-test softmax-batch
   (verify-layers/softmax-batch (create-context)))
 
-(deftest softmax-batch-channels
+(def-double-float-test softmax-batch-channels
   (verify-layers/softmax-batch-channels (create-context)))
 
-(deftest conv-layer
+(def-double-float-test conv-layer
   (verify-layers/basic-conv-layer (create-context)))
 
-(deftest pool-layer
+(def-double-float-test pool-layer
   (verify-layers/pool-layer-basic (create-context)))
 
-(deftest dropout-bernoulli
+(def-double-float-test dropout-bernoulli
   (verify-layers/dropout-bernoulli (create-context)))
 
-(deftest dropout-gaussian
+(def-double-float-test dropout-gaussian
   (verify-layers/dropout-gaussian (create-context)))
 
-(deftest batch-normalization
+(def-double-float-test batch-normalization
   (verify-layers/batch-normalization (create-context)))
 
-(deftest local-response-normalization-forward
+(def-double-float-test local-response-normalization-forward
   (verify-layers/lrn-forward (create-context)))

@@ -20,7 +20,6 @@
 (System/setProperty "org.bytedeco.javacpp.nopointergc" "true")
 
 
-
 (extend-protocol dtype/PDatatype
   BytePointer
   (get-datatype [item] :byte)
@@ -34,27 +33,6 @@
   (get-datatype [item] :float)
   DoublePointer
   (get-datatype [item] :double))
-
-
-(extend-type Pointer
-  dtype/PCopyQueryDirect
-  (get-direct-copy-fn [dest dest-offset]
-    (fn [item item-offset elem-count]
-      (dtype/copy-to-buffer-direct! item item-offset
-                                    (.asBuffer dest) dest-offset
-                                    elem-count)))
-  dtype/PCopyToItemDirect
-  (copy-to-array-direct! [item item-offset dest dest-offset elem-count]
-    (dtype/copy-to-array-direct! (.asBuffer item) item-offset dest dest-offset elem-count))
-  (copy-to-buffer-direct! [item item-offset dest dest-offset elem-count]
-    (dtype/copy-to-buffer-direct! (.asBuffer item) item-offset dest dest-offset elem-count))
-  dtype/PAccess
-  (set-value! [item ^long offset value] (dtype/set-value! (.asBuffer item) offset value))
-  (set-constant! [item offset value elem-count]
-    (dtype/set-constant! (.asBuffer item) offset value elem-count))
-  (get-value [item ^long offset] (dtype/get-value (.asBuffer item) offset))
-  mp/PElementCount
-  (element-count [item] (mp/element-count (.asBuffer item))))
 
 
 (defn make-pointer-of-type
@@ -79,6 +57,7 @@
     (= datatype :float) (FloatPointer.)
     (= datatype :double) (DoublePointer.)))
 
+
 (defn- get-private-field [^Class cls field-name]
   (let [^Field field (first (filter
                              (fn [^Field x] (.. x getName (equals field-name)))
@@ -87,6 +66,8 @@
     field))
 
 (defonce address-field (get-private-field Pointer "address"))
+(defonce address-field (get-private-field Pointer "limit"))
+(defonce address-field (get-private-field Pointer "capacity"))
 (defonce position-field (get-private-field Pointer "position"))
 
 (defn offset-pointer
@@ -99,3 +80,33 @@ threadsafe while (.position ptr offset) is not."
     (.set ^Field address-field retval addr)
     (.set ^Field position-field retval (+ pos offset))
     retval))
+
+
+(defn as-buffer
+  "Get a nio buffer from the pointer to use in other places.  Note this
+  function is threadsafe while a raw .asBuffer call is not (!!)
+https://github.com/bytedeco/javacpp/issues/155"
+  [^Pointer ptr]
+  (locking ptr
+    (.asBuffer ptr)))
+
+
+(extend-type Pointer
+  dtype/PCopyQueryDirect
+  (get-direct-copy-fn [dest dest-offset]
+    (fn [item item-offset elem-count]
+      (dtype/copy-to-buffer-direct! item item-offset
+                                    (as-buffer dest) dest-offset
+                                    elem-count)))
+  dtype/PCopyToItemDirect
+  (copy-to-array-direct! [item item-offset dest dest-offset elem-count]
+    (dtype/copy-to-array-direct! (as-buffer item) item-offset dest dest-offset elem-count))
+  (copy-to-buffer-direct! [item item-offset dest dest-offset elem-count]
+    (dtype/copy-to-buffer-direct! (as-buffer item) item-offset dest dest-offset elem-count))
+  dtype/PAccess
+  (set-value! [item ^long offset value] (dtype/set-value! (as-buffer item) offset value))
+  (set-constant! [item offset value elem-count]
+    (dtype/set-constant! (as-buffer item) offset value elem-count))
+  (get-value [item ^long offset] (dtype/get-value (as-buffer item) offset))
+  mp/PElementCount
+  (element-count [item] (mp/element-count (as-buffer item))))

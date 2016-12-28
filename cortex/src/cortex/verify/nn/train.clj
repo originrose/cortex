@@ -139,5 +139,4 @@
                      :softmax-1)
 
         score (loss/evaluate-softmax results answers)]
-    (println score)
     (is (> score 0.6))))

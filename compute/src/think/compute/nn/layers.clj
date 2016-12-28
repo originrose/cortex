@@ -121,10 +121,10 @@ and then forward many times for every parameter of the network."
 
 
 (defrecord BatchNormalization [backend layer batch-means batch-variances
-                               local-average-factor-atom]
+                               local-average-factor-atom impl]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (nn-backend/batch-norm-forward! backend
+    (nn-backend/batch-norm-forward! impl
                                     (first-buffer input-buffers)
                                     (get-in parameter-buffers [:means :buffer])
                                     (get-in parameter-buffers [:variances :buffer])
@@ -139,7 +139,7 @@ and then forward many times for every parameter of the network."
     ;;using the average factor as the interpolation factor.
     (reset! local-average-factor-atom (get layer :average-factor)))
   (backward [this parameter-buffers output-buffers input-buffers]
-    (nn-backend/batch-norm-backward! backend
+    (nn-backend/batch-norm-backward! impl
                                      (first-buffer input-buffers)
                                      batch-means batch-variances
                                      (get-in parameter-buffers [:scale :buffer])
@@ -152,7 +152,7 @@ and then forward many times for every parameter of the network."
                                      (get layer :epsilon)))
   compute-protocols/ComputeLayerInfer
   (infer [this parameter-buffers input-buffers output-buffers]
-    (nn-backend/batch-norm-inference! backend
+    (nn-backend/batch-norm-inference! impl
                                       (first-buffer input-buffers)
                                       (get-in parameter-buffers [:means :buffer])
                                       (get-in parameter-buffers [:variances :buffer])
@@ -164,8 +164,9 @@ and then forward many times for every parameter of the network."
 
 
 (defmethod create :batch-normalization
-  [backend node batch-size]
-  (->BatchNormalization backend node
-                        (nn-backend/new-array backend [(get node :input-size)])
-                        (nn-backend/new-array backend [(get node :input-size)])
-                        (atom 1.0)))
+  [backend layer batch-size]
+  (->BatchNormalization backend layer
+                        (nn-backend/new-array backend [(get layer :input-size)])
+                        (nn-backend/new-array backend [(get layer :input-size)])
+                        (atom 1.0)
+                        (nn-backend/create backend layer batch-size)))
