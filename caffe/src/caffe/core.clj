@@ -1,6 +1,5 @@
 (ns caffe.core
   (:require [think.hdf5.core :as hdf5]
-            [cortex.nn.description :as desc]
             [think.resource.core :as resource]
             [clojure.java.io :as io]
             [instaparse.core :as insta]
@@ -8,7 +7,9 @@
             [think.datatype.core :as dtype]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.macros :refer [c-for]]
-            [think.compute.verify.import :as verify-import])
+            [cortex.verify.nn.import :as verify-import]
+            [cortex.nn.layers :as layers]
+            [think.compute.nn.compute-execute :as compute-execute])
   (:import [java.io StringReader]))
 
 
@@ -78,8 +79,8 @@ whitespace = #'\\s*'") parse-str)]
 
     (->>
      (condp = (count layer-shape)
-       1 (desc/input (first layer-shape))
-       4 (desc/input (nth layer-shape 3) (nth layer-shape 2) (nth layer-shape 1))
+       1 (layers/input (first layer-shape))
+       4 (layers/input (nth layer-shape 3) (nth layer-shape 2) (nth layer-shape 1))
        (throw (Exception. (format "Unexpected layer shape %s %s"
                                   layer-shape layer))))
      first
@@ -100,14 +101,14 @@ whitespace = #'\\s*'") parse-str)]
         (-> (get layer :convolution_param)
             read-string-vals)
         assoc-group-fn #(assoc % :group group)]
-    (->> (desc/convolutional kernel_size pad stride num_output)
+    (->> (layers/convolutional kernel_size pad stride num_output)
          first
          assoc-group-fn
          (add-layer-data-to-desc layer))))
 
 (defmethod prototxt-layer->desc :ReLU
   [layer]
-  (->> (desc/relu)
+  (->> (layers/relu)
        first
        (add-layer-data-to-desc layer)))
 
@@ -117,7 +118,7 @@ whitespace = #'\\s*'") parse-str)]
          :or {pad 0 stride 1}}
         (-> (get layer :pooling_param)
             read-string-vals)]
-    (->> (desc/max-pooling kernel_size pad stride)
+    (->> (layers/max-pooling kernel_size pad stride)
          first
          (add-layer-data-to-desc layer))))
 
@@ -128,7 +129,7 @@ whitespace = #'\\s*'") parse-str)]
          :or {alpha 0.0001 beta 0.75 local_size 5}}
         (-> (get layer :lrn_param)
             read-string-vals)]
-    (->> (desc/local-response-normalization
+    (->> (layers/local-response-normalization
           :alpha alpha :beta beta :n local_size :k 1)
          first
          (add-layer-data-to-desc layer))))
@@ -137,7 +138,7 @@ whitespace = #'\\s*'") parse-str)]
 (defmethod prototxt-layer->desc :InnerProduct
   [layer]
   (let [num_output (read-string (get-in layer [:inner_product_param :num_output]))]
-    (->> (desc/linear num_output)
+    (->> (layers/linear num_output)
          first
          (add-layer-data-to-desc layer))))
 
@@ -145,14 +146,14 @@ whitespace = #'\\s*'") parse-str)]
 (defmethod prototxt-layer->desc :Dropout
   [layer]
   (let [dropout_ratio (read-string (get-in layer [:dropout_param :dropout_ratio]))]
-    (->> (desc/dropout dropout_ratio)
+    (->> (layers/dropout dropout_ratio)
          first
          (add-layer-data-to-desc layer))))
 
 
 (defmethod prototxt-layer->desc :Softmax
   [layer]
-  (->> (desc/softmax)
+  (->> (layers/softmax)
        first
        (add-layer-data-to-desc layer)))
 
@@ -254,7 +255,9 @@ whitespace = #'\\s*'") parse-str)]
           layer-outputs (hdf5/child-map (:layer_outputs file-children))
           layer-id->output (reduce (fn [retval [layer-id node]]
                                      (if-let [output-group (get layer-output-map layer-id)]
-                                       (assoc retval (:id (last output-group)) (ensure-doubles (:data (hdf5/->clj node))))
+                                       (assoc retval
+                                              (:id (last output-group))
+                                              (ensure-doubles (:data (hdf5/->clj node))))
                                        (do
                                          (println "Failed to find layer for output:" layer-id)
                                          retval)))
@@ -281,4 +284,4 @@ whitespace = #'\\s*'") parse-str)]
   [fname]
   (let [import-result (caffe-h5->model fname)]
     (println (format "Verifying %d layers" (count (:model import-result))))
-    (verify-import/verify-model import-result)))
+    (verify-import/verify-model (compute-execute/create-context) import-result)))

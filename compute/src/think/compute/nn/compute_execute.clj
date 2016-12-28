@@ -16,7 +16,8 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [think.compute.driver :as drv]
             [think.datatype.core :as dtype]
-            [think.compute.math :as math]))
+            [think.compute.math :as math]
+            [think.compute.nn.cpu-backend :as cpu-backend]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -163,17 +164,20 @@
                                    (map (comp m/ecount :buffer))
                                    (apply +))]
     (-> network
-     (assoc-in [:compute-binding :optimiser]
-               (compute-optimise/create-compute-optimiser backend
-                                                          (get traversal :optimiser)
-                                                          trainable-param-count))
+        (assoc-in [:compute-binding :optimiser]
+                  (when-let [optimiser (get traversal :optimiser)]
+                    (compute-optimise/create-compute-optimiser backend
+                                                               optimiser
+                                                               trainable-param-count)))
      (assoc-in [:compute-binding :trainable-parameters] trainable-parameters))))
 
 
 (defn- save
   [network {:keys [save-gradients?]}]
   (let [backend (get-in network [:compute-binding :backend])
-        core-m (fn [data] (backend/to-core-matrix backend data))
+        core-m (fn [data]
+                 (when data
+                   (backend/to-core-matrix backend data)))
         ->doubles (fn [host-buffer]
                     (when host-buffer
                      (let [retval (double-array (m/ecount host-buffer))]
@@ -568,5 +572,7 @@ to the device."
 
 
 (defn create-context
-  [backend-fn]
-  (->ComputeExecutionContext backend-fn))
+  ([backend-fn]
+   (->ComputeExecutionContext backend-fn))
+  ([]
+   (create-context #(cpu-backend/create-cpu-backend))))

@@ -1,14 +1,16 @@
 (ns think.cortex.keras.core
   (:require [think.hdf5.core :as hdf5]
-            [cortex.nn.description :as desc]
+            [cortex.nn.layers :as layers]
+            [cortex.nn.build :as build]
             [think.resource.core :as resource]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.macros :refer [c-for]]
             [think.datatype.core :as dtype]
-            [think.compute.verify.import :as compute-verify]
-            [clojure.string :as string]))
+            [cortex.verify.nn.import :as compute-verify]
+            [clojure.string :as string]
+            [think.compute.nn.compute-execute :as compute-execute]))
 
 
 (set! *warn-on-reflection* true)
@@ -48,8 +50,9 @@
         kernel-count (long (get config :nb_filter))
         id (keyword (get config :name))
         activation (keyword (get config :activation))
-        conv-desc (first (desc/convolutional-expanded kernel-x kernel-y pad-x pad-y
-                                                      stride-x stride-y kernel-count))
+        conv-desc (first (layers/convolutional-type-layer
+                          :convolutional
+                          kernel-x kernel-y pad-x pad-y stride-x stride-y kernel-count :floor))
         conv-desc (assoc conv-desc :id id)]
     (when-not (= (:dim_ordering config) "tf")
       (throw
@@ -64,7 +67,7 @@
   [{:keys [config]}]
   (let [[kernel-x kernel-y] (:pool_size config)
         [stride-x stride-y] (:strides config)
-        [layer]             (desc/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
+        [layer]             (layers/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
         layer-id            (-> config :name keyword)]
     (assoc layer :id layer-id)))
 
@@ -78,7 +81,7 @@
   ;; Cortex uses keep probability, Keras uses drop probability.
   [{:keys [config]}]
   (assoc (first
-          (desc/dropout (- 1.0 (:p config))))
+          (layers/dropout (- 1.0 (:p config))))
          :id (keyword (:name config))))
 
 (defmethod model-item->desc :Flatten
@@ -91,7 +94,7 @@
   (let [output-size (long (:output_dim config))
         activation (keyword (get config :activation "linear"))
         id (keyword (:name config))
-        retval (-> (first (desc/linear output-size))
+        retval (-> (first (layers/linear output-size))
                    (assoc :id id))]
     (if-not (= activation :linear)
       [(assoc retval :embedded-activation true)
@@ -122,7 +125,7 @@
                              [] model)]
     ;;TODO models with a single channel input and figure out planar vs. interleaved
     (vec
-     (flatten (concat (desc/input width height n-channels)
+     (flatten (concat (layers/input width height n-channels)
                       (mapv (fn [mod-item]
                               (try
                                 (model-item->desc mod-item)
@@ -310,9 +313,19 @@ produce a new array of double values in the order desired"
       [(:input-size built-desc) (:output-size built-desc)])))
 
 
+(defn- raw-and-built-desc-seq
+  [raw-model]
+  (let [built-network (build/build-network raw-model)]
+    (map (fn [desc]
+           [desc (get-in built-network [:layer-graph :id->node-map
+                                        (get-in desc :id)])])
+         (flatten raw-model))))
+
+
 (defn- load-weights
   [desc-seq weight-file]
-  (let [weight-entry (first (filter (fn [node]
+  (let [desc-seq (raw-and-built-desc-seq desc-seq)
+        weight-entry (first (filter (fn [node]
                                       (= (hdf5/get-name node)
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
@@ -377,10 +390,9 @@ produce a new array of double values in the order desired"
   "Given a json model and weight hdf5 file load model into a cortex description layer."
   [model-json-fname weight-hdf5-fname]
   (let [model-desc (-> (read-model model-json-fname)
-                       model->simple-description)
-        built-desc (desc/build-full-network-description model-desc)
-        desc-seq   (mapv vector model-desc built-desc)]
-    (load-weights-for-description desc-seq weight-hdf5-fname)))
+                       model->simple-description)]
+    (load-weights-for-description model-desc weight-hdf5-fname)))
+
 
 (defn tokenize-output-name
   "Parses the layer type and position per layer in the outputs file based on Keras
@@ -406,6 +418,7 @@ produce a new array of double values in the order desired"
                    (let [raw-data (-> hdf5-node hdf5/->clj :data)
                          as-mat   (to-core-matrix raw-data [(m/ecount raw-data)]) ]
                      {lyr-id as-mat})))))
+
 
 (defn layer-output->ordered-data
   [layer-outputs]
@@ -458,7 +471,7 @@ produce a new array of double values in the order desired"
   "Output a layer output per desc associated with that desc.
   Output may be nil for a given desc."
   [desc-seq output-map]
-  (mapv (fn [[_ lyr-map]]
+  (mapv (fn [lyr-map]
           (if-let [matching-output (-> lyr-map :id output-map)]
             (if-not (:embedded-activation lyr-map)
               [lyr-map matching-output]
@@ -539,12 +552,8 @@ produce a new array of double values in the order desired"
                        model->simple-description)
           ;;We build the description in order to propagate information down the network.
           ;;We then use this information to do weight and output reordering
-          built-description (desc/build-full-network-description src-desc)
 
-          weight-desc (load-weights (mapv vector
-                                          src-desc
-                                          built-description)
-                                    model-file)
+          weight-desc (load-weights src-desc model-file)
           input-desc (first weight-desc)
           input-shape (if (:output-width input-desc)
                         [(:output-channels input-desc)
@@ -558,13 +567,14 @@ produce a new array of double values in the order desired"
                       (double-array (vec (repeat (reduce * input-shape) 1.0))))
           input (to-core-matrix file-data input-shape)
           layer-outputs (->> (layer-output->ordered-data (:layer_outputs file-child-map))
-                             (ordered-layer-outputs (drop 1 built-description))
+                             (ordered-layer-outputs (drop 1 src-desc))
                              (mapv reshape-layer-outputs))
 
           type-map (vec (map vector
                              (map :type (drop 1 weight-desc))
                              (map :layer-type layer-outputs)))]
-      (when-let [verify-seq (seq (desc/build-and-verify-trained-network weight-desc))]
+      (when-let [verify-seq (seq (get (build/build-network weight-desc)
+                                      :verification-failures))]
         (throw (Exception. (format "Built items failed verification:\n %s" (vec verify-seq)))))
       (when-not (= (count layer-outputs)
                    (- (count weight-desc) 1))
@@ -594,10 +604,9 @@ produce a new array of double values in the order desired"
                    :report (let [model-desc (-> json-file
                                                 read-model
                                                 model->simple-description)
-                                 built-desc (desc/build-full-network-description model-desc)
+                                 built-desc (build/build-network model-desc)
                                  outputs    (layer-output-by-id (hdf5/open-file output-file))
-                                 desc-seq   (mapv vector model-desc built-desc)
-                                 by-layer   (associate-layer-outputs desc-seq outputs)]
+                                 by-layer   (associate-layer-outputs model-desc outputs)]
                              (check-output-dims by-layer))}))))))
 
 
@@ -616,6 +625,7 @@ produce a new array of double values in the order desired"
        (println "No reshape required for: " (:id built-desc))
        data))))
 
+
 (defn load-sidecar-with-outputs
   "Given a sidecar model (as from load-sidecar-model) verify that outputs match
   outputs generated by Keras."
@@ -631,12 +641,12 @@ produce a new array of double values in the order desired"
                         [(:output-size input-desc)])
           test-data   (-> h5-file hdf5-child-map :test_image hdf5/->clj :data)
           input       (to-core-matrix test-data input-shape)
-          verify-seq  (desc/build-and-verify-trained-network weight-desc)
           with-output (associate-layer-outputs desc-seq outputs)
           lyr-outputs (mapv reshape-layer-output with-output)]
       {:model weight-desc
        :input input
        :layer-outputs lyr-outputs})))
+
 
 (defn load-sidecar-and-verify
   "Loads a Keras model with json-file, h5 weights file, and h5 output generated
@@ -646,15 +656,12 @@ produce a new array of double values in the order desired"
   (let [model-desc  (-> model-json-file
                         read-model
                         model->simple-description)
-        built-desc  (desc/build-full-network-description model-desc)
-        desc-seq    (mapv vector model-desc built-desc)
+
         weight-desc (load-sidecar-model model-json-file weights-h5-file output-h5-file)
-        with-output (load-sidecar-with-outputs weight-desc
-                                               desc-seq
-                                               output-h5-file)
-        verified    (compute-verify/verify-model with-output)]
-    (if (empty? (:cpu verified))
+        with-output (load-sidecar-with-outputs weight-desc model-desc output-h5-file)
+        verified    (compute-verify/verify-model (compute-execute/create-context) with-output)]
+    (if (empty? verified)
       (:model with-output)
       (throw (ex-info "Model did not pass verification."
-                {:cause  :incorrect-output
-                 :report verified})))))
+                      {:cause  :incorrect-output
+                       :report verified})))))

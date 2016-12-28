@@ -170,7 +170,7 @@ no change to the input."
    :max-pooling :ceil})
 
 
-(defn- convolutional-type-layer
+(defn convolutional-type-layer
   [layer-type kernel-width kernel-height pad-x pad-y
    stride-x stride-y num-kernels dimension-op
    & args]
