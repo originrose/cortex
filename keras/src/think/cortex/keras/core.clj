@@ -50,9 +50,9 @@
         kernel-count (long (get config :nb_filter))
         id (keyword (get config :name))
         activation (keyword (get config :activation))
-        conv-desc (first (layers/convolutional-type-layer
-                          :convolutional
-                          kernel-x kernel-y pad-x pad-y stride-x stride-y kernel-count :floor))
+        conv-desc (layers/convolutional-type-layer
+                   :convolutional
+                   kernel-x kernel-y pad-x pad-y stride-x stride-y kernel-count :floor)
         conv-desc (assoc conv-desc :id id)]
     (when-not (= (:dim_ordering config) "tf")
       (throw
@@ -67,7 +67,9 @@
   [{:keys [config]}]
   (let [[kernel-x kernel-y] (:pool_size config)
         [stride-x stride-y] (:strides config)
-        [layer]             (layers/max-pooling kernel-x kernel-y 0 0 stride-x stride-y)
+        layer             (layers/convolutional-type-layer :max-pooling
+                                                           kernel-x kernel-y 0 0
+                                                           stride-x stride-y 0 :ceil)
         layer-id            (-> config :name keyword)]
     (assoc layer :id layer-id)))
 
@@ -132,7 +134,7 @@
                                 (catch Exception e
                                   (throw
                                     (ex-info "Layer not yet supported."
-                                       {:cause (.getMessage ^Exception e)
+                                       {:exception e
                                         :layer mod-item})))))
                             model-vector))))))
 
@@ -318,7 +320,7 @@ produce a new array of double values in the order desired"
   (let [built-network (build/build-network raw-model)]
     (map (fn [desc]
            [desc (get-in built-network [:layer-graph :id->node-map
-                                        (get-in desc :id)])])
+                                        (get desc :id)])])
          (flatten raw-model))))
 
 
@@ -367,7 +369,8 @@ produce a new array of double values in the order desired"
                                                            :keras-dims  keras-dims})))
                                                (if (= 4 (count keras-dims))
                                                  (reshape-data weight-raw-data keras-dims [3 2 0 1])
-                                                 ;;Simple transpose for linear layers as keras stores data in column major format.
+                                                 ;;Simple transpose for linear layers as keras stores
+                                                 ;;data in column major format.
                                                  (reshape-data weight-raw-data keras-dims [1 0])))
                                              (ensure-doubles weight-raw-data))]
                     (assoc desc
@@ -422,18 +425,20 @@ produce a new array of double values in the order desired"
 
 (defn layer-output->ordered-data
   [layer-outputs]
-  (->> (hdf5-child-map layer-outputs)
-       (mapv (fn [[name-keywd node]]
-               (let [{:keys [index layer-type] } (tokenize-output-name (name name-keywd))
-                     clj-node (hdf5/->clj node)
-                     node-data (:data clj-node)]
-                 [index {:layer-type layer-type
-                         :data (to-core-matrix node-data [(m/ecount node-data)])}])))
-       (sort-by first)
-       (map second)
-       (remove #(or (= (:layer-type %) :Flatten)
-                    (= (:layer-type %) :ZeroPadding2D)))
-       vec))
+  (let [retval
+        (->> (hdf5-child-map layer-outputs)
+             (mapv (fn [[name-keywd node]]
+                     (let [{:keys [index layer-type] } (tokenize-output-name (name name-keywd))
+                           clj-node (hdf5/->clj node)
+                           node-data (:data clj-node)]
+                       [index {:layer-type layer-type
+                               :data (to-core-matrix node-data [(m/ecount node-data)])}])))
+             (sort-by first)
+             (map second)
+             (remove #(or (= (:layer-type %) :Flatten)
+                          (= (:layer-type %) :ZeroPadding2D)))
+             vec)]
+    retval))
 
 (def layer-type-map
   (into {}
@@ -489,19 +494,21 @@ produce a new array of double values in the order desired"
   "Output a layer output per desc associated with that desc.
   Output may be nil for a given desc."
   [desc-seq output-seq]
-  (loop [desc (first desc-seq)
-         desc-seq (rest desc-seq)
-         output-seq output-seq
-         retval []]
-    (if desc
-      (let [[retval output-seq] (if (:embedded-activation desc)
-                                  [(conj retval [desc nil]) output-seq]
-                                  [(conj retval [desc (if (contains? desc :embedded)
-                                                        (assoc (first output-seq) :layer-type :Activation)
-                                                        (first output-seq))])
-                                   (rest output-seq)])]
-        (recur (first desc-seq) (rest desc-seq) output-seq retval))
-      retval)))
+  (let [retval
+        (loop [desc (first desc-seq)
+               desc-seq (rest desc-seq)
+               output-seq output-seq
+               retval []]
+          (if desc
+            (let [[retval output-seq] (if (:embedded-activation desc)
+                                        [(conj retval [desc nil]) output-seq]
+                                        [(conj retval [desc (if (contains? desc :embedded)
+                                                              (assoc (first output-seq) :layer-type :Activation)
+                                                              (first output-seq))])
+                                         (rest output-seq)])]
+              (recur (first desc-seq) (rest desc-seq) output-seq retval))
+            retval))]
+    retval))
 
 
 
@@ -523,6 +530,7 @@ produce a new array of double values in the order desired"
 
 (defn- reshape-layer-outputs
   [[built-desc {:keys [data layer-type] :as layer-output}]]
+  (println "got output for" (keys built-desc) layer-type)
   (when layer-output
    (if-let [keras-dims (built-desc->keras-output-dims built-desc)]
      (do
@@ -567,7 +575,7 @@ produce a new array of double values in the order desired"
                       (double-array (vec (repeat (reduce * input-shape) 1.0))))
           input (to-core-matrix file-data input-shape)
           layer-outputs (->> (layer-output->ordered-data (:layer_outputs file-child-map))
-                             (ordered-layer-outputs (drop 1 src-desc))
+                             (ordered-layer-outputs (drop 1 weight-desc))
                              (mapv reshape-layer-outputs))
 
           type-map (vec (map vector

@@ -92,7 +92,10 @@ The build step is responsible for
 (defmethod build-desc :softmax
   [previous item]
   (let [io-size (:output-size previous)]
-    (assoc item :input-size io-size :output-size io-size)))
+    (assoc item
+           :input-size io-size
+           :output-size io-size
+           :output-channels (get item :output-channels 1))))
 
 (defmethod build-desc :batch-normalization
   [previous item]
