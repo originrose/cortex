@@ -55,6 +55,9 @@ in initial description.  Else returns the initial description"
       (reset! best-network-atom
               (save-network context network node-loss-map initial-description network-filename))
       (when best-network-function
+        ;;We use the same format here as the output of the evaluate network function below
+        ;;so that clients can use the same network display system.  This is why we have data
+        ;;in columnar formats.
         (best-network-function {:inferences inferences
                                 :labels (ds/batches->columns cv-output)
                                 :data cv-columnar-input
@@ -128,7 +131,7 @@ we continue to train forever.
                              {:initial-description initial-description
                               :cv-loss {}})))
 
-          input-streams (set (map second input-bindings))
+          input-streams (set (map (comp :stream second) input-bindings))
           output-streams (set (map (comp :stream second) output-bindings))
           cv-columnar-input (->> (ds/get-batches dataset batch-size :cross-validation input-streams)
                                  ds/batches->columns)

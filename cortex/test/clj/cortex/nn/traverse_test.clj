@@ -4,6 +4,7 @@
             [cortex.nn.build :as build]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
+            [cortex.loss :as loss]
             [clojure.data :as data]))
 
 
@@ -53,18 +54,19 @@
 
 
 (deftest build-big-description
-  (let [built-network (build/build-network mnist-description-with-toys)
-        input-bindings {:input-1 :data}
-        output-bindings {:softmax-1 {:stream :labels
-                                     :loss :softmax-loss}}
-        gradient-descent (->> (traverse/network->training-traversal built-network input-bindings output-bindings)
+  (let [input-bindings [(traverse/->input-binding :input-1 :data)]
+        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))]
+        network (-> (build/build-network mnist-description-with-toys)
+                    (traverse/bind-input-bindings input-bindings)
+                    (traverse/bind-output-bindings output-bindings))
+        gradient-descent (->> (traverse/network->training-traversal network)
                               :traversal
                               realize-traversals)
-        inference-mem (->> (traverse/network->inference-traversal built-network input-bindings output-bindings)
+        inference-mem (->> (traverse/network->inference-traversal network)
                            :traversal
                            realize-traversals)]
-    (is (= 434280 (get built-network :parameter-count)))
-    (is (= 434280 (->> (get-in built-network [:layer-graph :buffers])
+    (is (= 434280 (get network :parameter-count)))
+    (is (= 434280 (->> (get-in network [:layer-graph :buffers])
                        (map (comp m/ecount :buffer second))
                        (reduce +))))
     (is (= [nil nil]
@@ -107,7 +109,7 @@
              {:output-id :softmax-1}
              {:output-id :softmax-1,
               :output-stream :labels,
-              :loss :softmax-loss,
+              :loss {:type :softmax-loss }
               :size 10},
              {:id :convolutional-2} {:id :convolutional-2, :size 2880}}
             (get gradient-descent :buffers))))
@@ -141,7 +143,7 @@
             {:output-id :softmax-1}
             {:output-id :softmax-1,
              :output-stream :labels,
-             :loss :softmax-loss,
+             :loss {:type :softmax-loss}
              :size 10},
             {:id :convolutional-2} {:id :convolutional-2, :size 2880}}
            (get inference-mem :buffers)))))

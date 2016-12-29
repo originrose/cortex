@@ -41,15 +41,16 @@
                     flatten
                     vec)
         num-items (count network)
-        input-bindings {:input :data}
-        output-bindings {:test {:stream :labels
-                                :loss loss-fn}}]
+        input-bindings [(traverse/->input-binding :input :data)]
+        output-bindings [(traverse/->output-binding test-id :stream :labels :loss loss-fn)]]
     (as-> (-> network
               (assoc-in [0 :id] :input)
               (assoc-in [(- num-items 1) :id] test-id)) network
       (build/build-network network)
+      (traverse/bind-input-bindings network input-bindings)
+      (traverse/bind-output-bindings network output-bindings)
       (assoc network :batch-size batch-size)
-      (traverse/network->training-traversal network input-bindings output-bindings)
+      (traverse/network->training-traversal network)
       (cp/bind-to-network context network {:numeric-gradients? true})
       (cp/generate-numeric-gradients context network
                                      {:data input

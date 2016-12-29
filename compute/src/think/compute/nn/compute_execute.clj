@@ -54,11 +54,11 @@
 
 (defn- create-batching-system
   [backend built-network batch-size]
-  (let [bindings (traverse/get-dataset-bindings built-network)
+  (let [bindings (traverse/get-io-bindings built-network)
         stream->size-map (->> bindings
-                              (map (fn [{:keys [node-id dataset-stream direction]}]
-                                     (when dataset-stream
-                                       [dataset-stream
+                              (map (fn [{:keys [node-id stream direction]}]
+                                     (when stream
+                                       [stream
                                         ;;Using a set here to detect size mismatches
                                         {:size #{(get-in built-network
                                                           [:layer-graph :id->node-map node-id
@@ -318,9 +318,8 @@ to the device."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn- get-output-bindings
   [network]
-  (->> (traverse/get-dataset-bindings network)
-       (filter #(and (= :output (get % :direction))
-                     (get % :dataset-stream)))
+  (->> (traverse/get-output-bindings network)
+       (filter #(get % :stream))
        (map (fn [{:keys [node-id] :as entry}]
               (assoc entry
                      :buffers
@@ -335,15 +334,14 @@ to the device."
 
 (defn- get-input-bindings
   [network]
-  (->> (traverse/get-dataset-bindings network)
-       (filter #(and (= :input (get % :direction))
-                     (get % :dataset-stream)))
-       (map (fn [{:keys [dataset-stream node-id] :as entry}]
+  (->> (traverse/get-input-bindings network)
+       (filter #(get % :stream))
+       (map (fn [{:keys [stream node-id] :as entry}]
               (assoc entry
                      :buffers
                      (get-in network [:compute-binding
                                       :traversal-buffers
-                                      {:input-stream dataset-stream}])
+                                      {:input-stream stream}])
                      :size (get-in network [:layer-graph
                                             :id->node-map
                                             node-id
@@ -365,12 +363,12 @@ to the device."
     (let [network (do-traverse network stream->buffer-map :forward)
           buffer-alpha (/ 1.0 (double (get network :batch-size)))
           backend (get-in network [:compute-binding :backend])]
-      (doseq [{:keys [buffers loss-function dataset-stream] :as entry} output-bindings]
+      (doseq [{:keys [buffers loss stream] :as entry} output-bindings]
         (let [{:keys [buffer gradient]} buffers
-              answer (get stream->buffer-map dataset-stream)]
-          (compute-loss/compute-loss-gradient loss-function backend buffer answer gradient)
+              answer (get stream->buffer-map stream)]
+          (compute-loss/compute-loss-gradient loss backend buffer answer gradient)
           (comment
-            (clojure.pprint/pprint {:loss-function loss-function
+            (clojure.pprint/pprint {:loss loss
                                     :buffer (vec (take 10 (backend/to-double-array backend buffer)))
                                     :answer (vec (take 10 (backend/to-double-array backend answer)))
                                     :gradient (vec (take 10 (backend/to-double-array backend gradient)))}))))
@@ -500,7 +498,7 @@ to the device."
                                              [stream->data-map]))
         ;;generate a sequence of buffers in order to generate the numeric gradients.
         numeric-buffers (concat (->> (get-input-bindings network)
-                                     (map (fn [{:keys [dataset-stream] :as entry}]
+                                     (map (fn [{:keys [stream] :as entry}]
                                             (merge (dissoc entry :buffers)
                                                    (get entry :buffers)))))
                                 (remove #(get % :non-trainable?) parameters))
@@ -533,17 +531,17 @@ to the device."
                                (map (fn [node-id]
                                       (let [pos-data (get positive node-id)
                                             neg-data (get negative node-id)
-                                            {:keys [loss-function dataset-stream output-size]}
+                                            {:keys [loss stream output-size]}
                                             (get node-id->output-binding node-id)
                                             ;;Partition stream into batches
-                                            stream-data (->> (get stream->input-map dataset-stream)
+                                            stream-data (->> (get stream->input-map stream)
                                                              m/eseq
                                                              (partition output-size))]
                                         (->>
                                          (map (fn [pos neg answer]
                                                 (/
-                                                 (- (double (cortex-loss/loss loss-function pos answer))
-                                                    (double (cortex-loss/loss loss-function neg answer)))
+                                                 (- (double (cortex-loss/loss loss pos answer))
+                                                    (double (cortex-loss/loss loss neg answer)))
                                                  (* 2 epsilon)))
                                               pos-data neg-data stream-data)
                                          (apply +)))))

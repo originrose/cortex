@@ -14,15 +14,17 @@
 (defn bind-test-network
   [context network batch-size test-layer-id]
   (let [test-layer-id :test
-        input-bindings {:input :data}
-        output-bindings {test-layer-id {:stream :labels}}]
+        input-bindings [(traverse/->input-binding :input :data)]
+        output-bindings [(traverse/->output-binding test-layer-id :stream :labels)]]
     (as-> network network
       (flatten network)
       (vec network)
       (assoc-in network [0 :id] :input)
       (assoc-in network [1 :id] test-layer-id)
-      (build/build-network network) network
-      (traverse/network->training-traversal network input-bindings output-bindings)
+      (build/build-network network)
+      (traverse/bind-input-bindings network input-bindings)
+      (traverse/bind-output-bindings network output-bindings)
+      (traverse/network->training-traversal network)
       (assoc network :batch-size batch-size)
       (cp/bind-to-network context network {}))))
 

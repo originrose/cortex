@@ -145,6 +145,16 @@ one column for each item requested from the batch."
          (into {}))))
 
 
+(defn batches->columnsv
+  "See batches->columns.  Forces realization of each column"
+  [batch-sequence]
+  (->> batch-sequence
+       batches->columns
+       (map (fn [[k v]]
+              [k (vec v)]))
+       (into {})))
+
+
 (defn get-data-sequence-from-dataset
   "Get a sequence of data from the dataset.  Takes a batch size because
 datasets always give data in batches.  Note that if you are taking the

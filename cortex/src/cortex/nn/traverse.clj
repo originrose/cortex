@@ -11,103 +11,157 @@ while output bindings are maps from node-id to {:stream :loss}."
 
 
 (defn- check-node-id
-  [built-network node-id]
-  (when-not (get-in built-network [:layer-graph :id->node-map node-id])
+  [network node-id]
+  (when-not (get-in network [:layer-graph :id->node-map node-id])
     (throw (ex-info "Failed to find node id in graph"
                     {:node-id node-id
-                     :graph-nodes (keys (get-in built-network [:layer-graph :id->node-map]))}))))
+                     :graph-nodes (keys (get-in network [:layer-graph :id->node-map]))}))))
 
 
-(defn- bind-input
-  "Bind a specific node to a dataset stream.  Returns a new network."
-  [built-network node-id dataset-stream-name]
-  ;;Multiple a node can bind to only one stream but one stream may be bound
-  ;;to multiple nodes.
-  (check-node-id built-network node-id)
-  (assoc-in built-network [:traversal :input-bindings node-id] {:input-stream dataset-stream-name}))
+(defn bind-input
+  "Create an input binding.  Inputs are always bound to incoming streams."
+  [network node-id stream-name]
+  (check-node-id network node-id)
+  (assoc-in network [:traversal :input-bindings node-id] {:input-stream stream-name}))
+
+
+(defn ->input-binding
+  "Create a stand-alone input binding"
+  [node-id stream-name]
+  [node-id {:stream stream-name}])
 
 
 (defn bind-input-bindings
-  [built-network input-bindings]
-  (reduce (fn [built-network  [id stream]]
-            (bind-input built-network id stream))
-          built-network
+  [network input-bindings]
+  (reduce (fn [network [node-id {:keys [stream]}]]
+            (bind-input network node-id stream))
+          network
           input-bindings))
 
 
-(defn- bind-output-infer
-  "Enable output from a given graph node.  Since this is inference we do not need
-  to worry about loss functions."
-  [built-network node-id]
-  (check-node-id built-network node-id)
-  ;;Any node can produce an output stream but they have to be uniquely named.  A node
-  ;;can bind to multiple output names.
-  (assoc-in built-network [:traversal :output-bindings node-id] {}))
+(defn bind-output-infer
+  "Create an output binding.  For inference or to just get data out of the net
+while training no stream or loss is necessary"
+  [network node-id]
+  (check-node-id network node-id)
+  (assoc-in network [:traversal :output-bindings node-id {}]))
 
 
-(defn- destructure-output-binding
-  [output-binding]
-  (if (keyword? output-binding)
-    {:id output-binding}
-    (let [[id {:keys [stream loss]}] output-binding]
-      {:id id
-       :output-stream stream
-       :loss loss})))
+(defn bind-output-train
+  "Bind an output for training which means the node has both a stream and a loss
+  associated with it."
+  [network node-id stream & [loss]]
+  (check-node-id network node-id)
+  (assoc-in network [:traversal :output-bindings node-id]
+            {:output-stream stream
+             :loss (or loss
+                       (layers/auto-bind-loss node-id))}))
+
+(defn ->output-binding
+  "Create a stand-along output-binding"
+  [node-id & {:keys [stream loss]}]
+  [node-id {:stream stream
+            :loss loss}])
 
 
-(defn bind-output-inference-bindings
-  [built-network output-bindings]
-  (reduce (fn [built-network output-binding]
-            (bind-output-infer built-network
-                               (get (destructure-output-binding output-binding)
-                                    :id)))
-          built-network
+(defn bind-output-bindings
+  "Bind a list of output bindings to the network"
+  [network output-bindings]
+  (reduce (fn [network [node-id {:keys [stream loss]}]]
+            (bind-output-train network node-id stream loss))
+          network
           output-bindings))
 
 
-
-(defn- bind-output-train
-  "Enable output and bind it to a dataset stream for training.  If a loss function isn't specified
-  then one will be chosen automatically based on the layer type."
-  [built-network node-id dataset-stream-name & {:keys [loss-function]}]
-  (check-node-id built-network node-id)
-  (let [loss-function (if loss-function
-                        loss-function
-                        (layers/auto-bind-loss (get-in built-network
-                                                       [:layer-graph :id->node-map node-id])))]
-    (assoc-in built-network [:traversal :output-bindings node-id] {:output-stream dataset-stream-name
-                                                                   :loss loss-function})))
+(defn get-input-bindings
+  [network]
+  (->> (get-in network [:traversal :input-bindings])
+       (map (fn [[node-id {:keys [input-stream]}]]
+              {:node-id node-id
+               :stream input-stream
+               :direction :input}))))
 
 
-(defn bind-output-training-bindings
-  [built-network output-bindings]
-  (reduce (fn [built-network output-binding]
-            (let [{:keys [id output-stream loss]} (destructure-output-binding output-binding)]
-              (bind-output-train built-network id output-stream :loss-function loss)))
-          built-network
-          output-bindings))
+(defn get-output-bindings
+  [network]
+  (->> (get-in network [:traversal :output-bindings])
+       (map (fn [[node-id {:keys [output-stream loss]}]]
+              {:node-id node-id
+               :stream output-stream
+               :direction :output
+               :loss loss}))))
 
 
-(defn get-dataset-bindings
+(defn auto-bind-io
+  "Auto bind the network's roots and leaves to either :data :labels if there
+are exactly 1 root and leaf or to :data-x where x is a one-based index of the
+root and labels-x where labels are a 1-based index of the leaf.x"
+  [network]
+  (let [[roots leaves] (build/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
+        input-name-fn (if (> (count roots) 1)
+                        (fn [network]
+                          (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
+                        (constantly :data))
+        output-name-fn (if (> (count leaves) 1)
+                         (fn [network]
+                           (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
+                         (constantly :labels))]
+    (as-> network network
+      (reduce (fn [network root]
+                (bind-input network root (input-name-fn network)))
+              network
+              roots)
+      (reduce (fn [network leaf]
+                (bind-output-train network leaf (output-name-fn network)))
+              network
+              leaves))))
+
+
+(defn clear-io-bindings
+  "Remove all io bindings (if any exist) from the network."
+  [network]
+  (update network :traversal
+          (fn [traversal]
+            (-> traversal
+                (dissoc :input-bindings)
+                (dissoc :output-bindings)))))
+
+
+(defn get-io-bindings
   "get a sequence of maps of:
   {:node-id
-  :dataset-stream
+  :stream
   :direction [:input :output]
   :loss-function (if output)}."
-  [{:keys [traversal]}]
-  (let [{:keys [input-bindings output-bindings]} traversal]
-    (concat (map (fn [[node-id {:keys [input-stream]}]]
-                   {:node-id node-id
-                    :dataset-stream input-stream
-                    :direction :input})
-                 input-bindings)
-            (map (fn [[node-id {:keys [output-stream loss]}]]
-                   {:node-id node-id
-                    :dataset-stream output-stream
-                    :direction :output
-                    :loss-function loss})
-                 output-bindings))))
+  [network]
+  (concat (get-input-bindings network)
+          (get-output-bindings network)))
 
+
+(defn get-input-streams
+  "Get all dataset streams used for input."
+  [network]
+  (->> (get-input-bindings network)
+       (map :stream)
+       distinct))
+
+
+(defn get-output-streams
+  "Get all dataset streams use for output"
+  [network]
+  (->> (get-output-bindings network)
+       (map :stream)
+       (remove nil?)
+       distinct))
+
+
+(defn get-output-training-bindings
+  "Get a map of all of the output bindings that have both
+stream and loss members."
+  [network]
+  (->> (get-output-bindings network)
+       (filter #(and (get % :stream)
+                     (get % :loss)))))
 
 
 (defn create-forward-traversal
@@ -217,7 +271,7 @@ the previous step."
   (select-keys buffer-desc [:id :input-stream :output-id]))
 
 
-(defn forward-traversal->buffer-map
+(defn- forward-traversal->buffer-map
   [built-network forward-traversal]
   (let [id->node-map (get-in built-network [:layer-graph :id->node-map])]
     (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
@@ -234,13 +288,25 @@ the previous step."
             forward-traversal)))
 
 
-(defn clean-traversal-incoming-outgoing
+(defn- clean-traversal-incoming-outgoing
+  "Make the incoming and outgoing edges actually valid buffer keys
+which means removing extra information from them."
   [traversal]
   (map (fn [entry]
          (-> entry
              (update :incoming #(map buffer-desc->map-key %))
              (update :outgoing #(map buffer-desc->map-key %))))
        traversal))
+
+
+(defn- check-for-io-bindings
+  "Without any io bindings there is no traversal."
+  [network]
+  (when-not (and (> (count (get-input-bindings network)) 0)
+                 (> (count (get-output-bindings network)) 0))
+    (throw (ex-info "Either no input or no output bindings were found on the network"
+                    {:input-bindings (get-input-bindings network)
+                     :output-bindings (get-output-bindings network)}))))
 
 
 (defn network->training-traversal
@@ -260,22 +326,21 @@ pairs of node-id to [stream-name loss-function].
 {:buffers map id->{:size}
  :forward where incoming/outgoing maps to buffer id
  :backward where incoming/outgoing maps to buffer id}"
-  [built-network input-bindings output-bindings
+  [network
    & {:keys [optimiser]
       :or {optimiser (optimise/adam)}}]
-  (let [built-network (-> built-network
-                          (bind-input-bindings input-bindings)
-                          (bind-output-training-bindings output-bindings))
-        forward-traversal (->> (create-forward-traversal built-network)
-                               (filter-traversal built-network :training)
+
+  (check-for-io-bindings network)
+  (let [forward-traversal (->> (create-forward-traversal network)
+                               (filter-traversal network :training)
                                traversal->buffers)]
-    (update built-network
+    (update network
             :traversal
             #(merge %
                     {:forward (clean-traversal-incoming-outgoing forward-traversal)
                      :backward (-> (reverse-forward-traversal forward-traversal)
                                    clean-traversal-incoming-outgoing)
-                     :buffers (forward-traversal->buffer-map built-network forward-traversal)
+                     :buffers (forward-traversal->buffer-map network forward-traversal)
                      :type :training
                      :optimiser optimiser}))))
 
@@ -286,17 +351,14 @@ pairs of node-id to [stream-name loss-function].
   optimising for speed in which case the result is the forward pass of gradient descent
   and we expect implementations to have multiple batches in flight simultaneously.  We
   default to optimising for memory because this avoids OOM situations with large networks."
-  [{:keys [layer-graph] :as built-network}
-   input-bindings output-bindings]
-  (let [built-network (-> built-network
-                          (bind-input-bindings input-bindings)
-                          (bind-output-training-bindings output-bindings))
-        forward-traversal (->> (create-forward-traversal built-network)
-                               (filter-traversal built-network :inference)
+  [{:keys [layer-graph] :as network}]
+  (check-for-io-bindings network)
+  (let [forward-traversal (->> (create-forward-traversal network)
+                               (filter-traversal network :inference)
                                traversal->buffers)]
-    (update built-network
+    (update network
             :traversal
             #(merge %
                     {:forward (clean-traversal-incoming-outgoing forward-traversal)
-                     :buffers (forward-traversal->buffer-map built-network forward-traversal)
+                     :buffers (forward-traversal->buffer-map network forward-traversal)
                      :type :inference}))))

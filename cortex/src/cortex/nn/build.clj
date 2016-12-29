@@ -51,12 +51,10 @@ The build step is responsible for
 (defn- carry-image-dims-forward
   [previous item]
   (if-let [channels (:output-channels previous)]
-    (let [data-format (get previous :output-data-format :planar)]
-      (assoc item :output-channels channels
-             :output-width (:output-width previous)
-             :output-height (:output-height previous)
-             :input-data-format data-format
-             :output-data-format data-format))
+    (assoc (carry-input-image-dims-forward previous item)
+           :output-channels channels
+           :output-width (:output-width previous)
+           :output-height (:output-height previous))
     item))
 
 (defn- build-pass-through-desc
@@ -82,10 +80,6 @@ The build step is responsible for
   (build-pass-through-desc previous item))
 
 (defmethod build-desc :dropout
-  [previous item]
-  (build-pass-through-desc previous item))
-
-(defmethod build-desc :guassian-noise
   [previous item]
   (build-pass-through-desc previous item))
 
