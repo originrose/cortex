@@ -19,10 +19,26 @@
             [think.gate.core :as gate]))
 
 
+<<<<<<< HEAD
 (def image-size 28)
 (def num-classes 10)
 (def num-channels 1)
 (def datatype :float)
+=======
+
+;;We have to setup the web server slightly different when running
+;;from the repl; we enable live updates using figwheel and such.  When
+;;running from an uberjar we just launch the server and expect the
+;;particular resources to be available.  We ensure this with a makefile.
+(def ^:dynamic *running-from-repl* true)
+
+
+
+(def mnist-image-size 28)
+(def mnist-num-classes 10)
+(def mnist-num-channels 1)
+(def mnist-datatype :float)
+>>>>>>> master
 
 (defn ds-image->png
   [ds-data]
@@ -198,7 +214,6 @@ to avoid overfitting the network to the training data."
   ([]
    (display-dataset-and-model (create-dataset))))
 
-
 (defn train-forever
   []
   (let [dataset (create-dataset)
@@ -206,6 +221,12 @@ to avoid overfitting the network to the training data."
     (classification/train-forever dataset mnist-observation->image
                                   initial-network
                                   :confusion-matrix-atom confusion-matrix-atom)))
+
+
+(defn train-forever-uberjar
+  []
+  (with-bindings {#'*running-from-repl* false}
+    (train-forever)))
 
 
 (defn label-one
