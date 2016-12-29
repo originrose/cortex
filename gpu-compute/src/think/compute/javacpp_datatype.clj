@@ -66,8 +66,8 @@
     field))
 
 (defonce address-field (get-private-field Pointer "address"))
-(defonce address-field (get-private-field Pointer "limit"))
-(defonce address-field (get-private-field Pointer "capacity"))
+(defonce limit-field (get-private-field Pointer "limit"))
+(defonce capacity-field (get-private-field Pointer "capacity"))
 (defonce position-field (get-private-field Pointer "position"))
 
 (defn offset-pointer
@@ -82,13 +82,26 @@ threadsafe while (.position ptr offset) is not."
     retval))
 
 
+(defn duplicate-pointer
+  ^Pointer [^Pointer ptr]
+  (let [addr (.address ptr)
+        pos (.position ptr)
+        limit (.limit ptr)
+        capacity (.capacity ptr)
+        retval (make-empty-pointer-of-type (dtype/get-datatype ptr))]
+    (.set ^Field address-field retval addr)
+    (.set ^Field position-field retval pos)
+    (.set ^Field limit-field retval limit)
+    (.set ^Field capacity-field retval capacity)
+    retval))
+
+
 (defn as-buffer
   "Get a nio buffer from the pointer to use in other places.  Note this
   function is threadsafe while a raw .asBuffer call is not (!!)
 https://github.com/bytedeco/javacpp/issues/155"
   [^Pointer ptr]
-  (locking ptr
-    (.asBuffer ptr)))
+  (.asBuffer (duplicate-pointer ptr)))
 
 
 (extend-type Pointer

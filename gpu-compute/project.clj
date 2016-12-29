@@ -6,5 +6,5 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/compute "0.3.1-SNAPSHOT"]
                  [org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
-;;                 [org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
+;                 [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ])
