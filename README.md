@@ -4,7 +4,7 @@ Neural networks, regression and feature learning in Clojure.
 
 Cortex has been developed by [ThinkTopic](http://thinktopic.com) in collaboration with [Mike Anderson](https://github.com/mikera).
 
-![think-logo](https://cloud.githubusercontent.com/assets/17600203/21554073/d521008e-cdc9-11e6-9c20-530947239cf8.png)
+![thinktopic_logo_horizontal copy](https://cloud.githubusercontent.com/assets/17600203/21554511/5599d18e-cdcd-11e6-9d9f-9d50795e8475.png)
 
 ## Mailing List
 
