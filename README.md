@@ -1,5 +1,6 @@
 # Cortex ![TravisCI](https://travis-ci.com/thinktopic/cortex.svg?token=pNFS4aJt3yqGNNwZvG5z&branch=master)
 
+![think-logo](https://cloud.githubusercontent.com/assets/17600203/21554073/d521008e-cdc9-11e6-9c20-530947239cf8.png)
 
 Neural networks, regression and feature learning in Clojure.
 
