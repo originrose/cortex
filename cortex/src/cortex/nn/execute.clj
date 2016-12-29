@@ -36,13 +36,7 @@ See cortex.nn.protocols/PExecutionContext"
   "Save to the network.  If options includes save-gradients then all io buffers and gradients
 are saved.  Buffers are saved into the traversal section."
   [context network options]
-  ;;Save to network and remove the traversal if there is no reason to keep it.
-  ;;This avoids doing something like persisting the bindings and ending up in
-  ;;an odd spot.
-  (cond-> (-> (cp/save-to-network context network options)
-              traverse/clear-io-bindings)
-    (not (contains? options :save-gradients?))
-    (dissoc :traversal)))
+  (cp/save-to-network context network options))
 
 
 (defn- train-seq
@@ -160,5 +154,5 @@ call cortex-dataset/batches->columns"
 This does not need to be wrapped in a resource context; that is done for you."
   [context network dataset input-bindings output-bindings & args]
   (resource/with-resource-context
-   (->> (apply infer context network dataset input-bindings output-bindings args)
+    (->> (apply infer context network dataset input-bindings output-bindings args)
         ds/batches->columnsv)))

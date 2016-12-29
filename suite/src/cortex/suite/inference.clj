@@ -36,6 +36,11 @@
     (when-not (= 1 (count leaves))
       (throw (ex-info "Network must have exactly 1 leaf for infer-n-observations"
                       {:leaves leaves})))
+    (when-not (= 0 (rem (count observations)
+                        batch-size))
+      (throw (ex-info "Batch size does not evenly divide into the number of observations"
+                      {:batch-size batch-size
+                       :observation-count (count observations)})))
     (as-> (traverse/auto-bind-io network) network-or-seq
       (execute/infer-columns context network-or-seq dataset [] [] :batch-size 1)
       (get network-or-seq (first leaves)))))
@@ -45,9 +50,9 @@
   "data-shape is
 (ds/create-image-shape num-channels img-width img-height)"
   [network observation observation-dataset-shape class-names]
-  (let [results (apply infer-n-observations network [observation] observation-dataset-shape
-                       :batch-size 1
-                       :force-cpu? true)
+  (let [results (infer-n-observations network [observation] observation-dataset-shape
+                                      :batch-size 1
+                                      :force-cpu? true)
         result (vec (first results))]
     {:probability-map (into {} (map vec (partition 2 (interleave class-names result))))
      :classification (get class-names (loss/max-index result))}))

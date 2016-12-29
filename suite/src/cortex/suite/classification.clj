@@ -175,21 +175,32 @@ as it is training)."
                                    training-epoch-seq
                                    :shutdown-fn
                                    shutdown-fn)))
+
 (defonce last-network-eval (atom nil))
 
 (defn network-eval->rich-confusion-matrix
   "A rich confusion matrix is a confusion matrix with the list of inferences and
 observations in each cell instead of just a count."
-  [{:keys [dataset labels inferences data] :as network-eval}]
+  [dataset {:keys [labels inferences data] :as network-eval}]
   (reset! last-network-eval network-eval)
-  (let [class-names (get-in network-eval [:dataset :class-names])
+  (let [class-names (get dataset :class-names)
         vec->label #(class-names (loss/max-index (vec %)))
+        _ (when-not (and (= 1 (count inferences))
+                         (= 1 (count labels))
+                         (= 1 (count data)))
+            (throw (ex-info "Classification datasets should have 1 output, label, input."
+                            {:input (keys data)
+                             :labels (keys labels)
+                             :inferences (keys inferences)})))
         ;;There are a lot of firsts here because generically out network could take
         ;;many inputs and produce many outputs.  When we are training classification
         ;;tasks however we know this isn't the case; we have one input and one output
-        inference-answer-patch-pairs (->> (interleave (first inferences)
-                                                      (map vec->label (first labels))
-                                                      (first data))
+        inferences (first (vals inferences))
+        data (first (vals data))
+        labels (first (vals labels))
+        inference-answer-patch-pairs (->> (interleave inferences
+                                                      (map vec->label labels)
+                                                      data)
                                           (partition 3))
         initial-row (zipmap class-names (repeat {:inferences []
                                                  :observations []}))
@@ -226,13 +237,13 @@ observations in each cell instead of just a count."
 
 
 (defn reset-confusion-matrix
-  [confusion-matrix-atom observation->img-fn network-eval]
+  [confusion-matrix-atom observation->img-fn dataset network-eval]
   (swap! confusion-matrix-atom
          (fn [{:keys [update-index]}]
            (merge
             {:update-index (inc (long (or update-index 0)))}
             (rich-confusion-matrix->network-confusion-matrix
-             (network-eval->rich-confusion-matrix network-eval)
+             (network-eval->rich-confusion-matrix dataset network-eval)
              observation->img-fn))))
   nil)
 
@@ -272,7 +283,9 @@ observations in each cell instead of just a count."
   (->> (mapv (fn [{:keys [batch-type postprocess]}]
                (let [image-label-pairs
                      (->> (ds/get-batches dataset 50 batch-type [:data :labels])
-                          (mapcat #(apply interleave %))
+                          ds/batches->columns
+                          (#(interleave (get % :data)
+                                        (get % :labels)))
                           (partition 2)
                           postprocess
                           (take 100))]
@@ -336,8 +349,7 @@ observations in each cell instead of just a count."
 (defn best-network-function
   [confusion-matrix-atom observation->img-fn dataset network-eval]
   (reset-confusion-matrix confusion-matrix-atom observation->img-fn
-                          (assoc network-eval
-                                 :dataset dataset)))
+                          dataset network-eval))
 
 
 (defn train-forever

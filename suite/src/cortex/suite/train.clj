@@ -153,7 +153,7 @@ we continue to train forever.
 (defn- bindings->streams
   [bindings]
   (->> bindings
-       (map (comp :stream second))
+       (map :stream)
        (remove nil?)
        set))
 
@@ -161,15 +161,16 @@ we continue to train forever.
 (defn evaluate-network
   "Given a single-output network description and a dataset with the keys
 :data and :labels produced set of inferences, answers, and the observations
-used for both along with the original dataset."
-  [dataset network input-bindings output-bindings
+used for both along with the original dataset.  This expects a network with
+existing traversal bindings."
+  [dataset network
    & {:keys [batch-size batch-type]
       :or {batch-size 128
            batch-type :holdout}}]
-  (let [input-streams (bindings->streams input-bindings)
-        output-streams (bindings->streams output-bindings)
+  (let [input-streams (traverse/get-input-streams network)
+        output-streams (traverse/get-output-streams network)
         inferences (execute/infer-columns (create-cuda-context) network dataset
-                                          input-bindings output-bindings
+                                          [] []
                                           :batch-size batch-size
                                           :infer-batch-type batch-type)
         [data labels] (ds/batch-sequence->column-groups dataset batch-size batch-type
