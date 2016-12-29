@@ -37,14 +37,13 @@ in initial description.  Else returns the initial description"
 (defn per-epoch-eval-training-network
   [context best-network-atom network-filename initial-description
    best-network-function cv-columnar-input cv-output
-   {:keys [network inferences dataset-bindings]}]
-  (let [node-loss-map (->> (execute/inferences->node-id-loss-pairs inferences cv-output dataset-bindings)
+   {:keys [network inferences]}]
+  (let [node-loss-map (->> (execute/inferences->node-id-loss-pairs network inferences cv-output)
                            (into {}))
         current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
                             (when (map? best-loss)
                               best-loss)
                             {})]
-
     (println (format "Loss for epoch %s: %s" (get network :epoch-count) node-loss-map))
     (when (every? (fn [[id ave-loss]]
                     (if-let [best (get current-best-loss id)]
@@ -58,8 +57,8 @@ in initial description.  Else returns the initial description"
         ;;We use the same format here as the output of the evaluate network function below
         ;;so that clients can use the same network display system.  This is why we have data
         ;;in columnar formats.
-        (best-network-function {:inferences inferences
-                                :labels (ds/batches->columns cv-output)
+        (best-network-function {:inferences (ds/batches->columnsv inferences)
+                                :labels (ds/batches->columnsv cv-output)
                                 :data cv-columnar-input
                                 :loss node-loss-map}))))
   true)
@@ -112,7 +111,7 @@ cross-validation dataset in memory while training.
 If epoch-count is provided then we stop training after that many epochs else
 we continue to train forever.
 "
-  [dataset initial-description input-bindings output-bindings
+  [dataset initial-description network
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
              optimiser]
@@ -127,23 +126,21 @@ we continue to train forever.
                     loaded-network
                     (do
                       (backup-trained-network network-filestem)
-                      (merge (build/build-network initial-description)
+                      (merge network
                              {:initial-description initial-description
                               :cv-loss {}})))
 
-          input-streams (set (map (comp :stream second) input-bindings))
-          output-streams (set (map (comp :stream second) output-bindings))
+          input-streams (traverse/get-input-streams network)
+          output-streams (traverse/get-output-streams network)
           cv-columnar-input (->> (ds/get-batches dataset batch-size :cross-validation input-streams)
                                  ds/batches->columns)
           cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
           best-network-atom (atom network)
           context (create-cuda-context)
-          train-sequence (as-> (traverse/network->training-traversal network
-                                                                     input-bindings
-                                                                     output-bindings
-                                                                     :optimiser optimiser) network
-                           (cp/bind-to-network context network {})
-                           (execute/train-infer-seq context network dataset))
+          train-sequence (execute/train context network dataset [] []
+                                        :batch-size batch-size
+                                        :optimiser optimiser
+                                        :infer-batch-type :cross-validation)
           epoch-processor (partial per-epoch-eval-training-network context
                                    best-network-atom network-filename initial-description
                                    best-network-fn cv-columnar-input cv-labels)]
@@ -152,6 +149,13 @@ we continue to train forever.
              train-sequence)
            (map epoch-processor)
            doall))))
+
+(defn- bindings->streams
+  [bindings]
+  (->> bindings
+       (map (comp :stream second))
+       (remove nil?)
+       set))
 
 
 (defn evaluate-network
@@ -162,16 +166,14 @@ used for both along with the original dataset."
    & {:keys [batch-size batch-type]
       :or {batch-size 128
            batch-type :holdout}}]
-  (resource/with-resource-context
-    (let [input-streams (set (map second input-bindings))
-          output-streams (set (map (comp :stream second)) output-bindings)
-          context (create-cuda-context)
-
-          inferences (execute/infer context network dataset input-bindings output-bindings
-                                    :batch-size batch-size :infer-batch-type batch-type)]
-      {:dataset dataset
-       :labels (->> (ds/get-batches dataset batch-size batch-type output-streams)
-                    ds/batches->columns)
-       :inferences (ds/batches->columns inferences)
-       :data (->> (ds/get-batches dataset batch-size batch-type input-streams)
-                  ds/batches->columns)})))
+  (let [input-streams (bindings->streams input-bindings)
+        output-streams (bindings->streams output-bindings)
+        inferences (execute/infer-columns (create-cuda-context) network dataset
+                                          input-bindings output-bindings
+                                          :batch-size batch-size
+                                          :infer-batch-type batch-type)
+        [data labels] (ds/batch-sequence->column-groups dataset batch-size batch-type
+                                                        [input-streams output-streams])]
+    {:labels labels
+     :inferences inferences
+     :data data}))
