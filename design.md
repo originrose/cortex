@@ -61,14 +61,15 @@ steps necessary to use this for neural networks.
 1.  Building an initial minimal description into a network.  This
 calculates layer sizes and creates initial parameter buffers.
 2.  Bind the graph nodes to inputs and outputs.  Every node has an id
-and inputs are represented also by ids but they are called streams.
-Outputs for training are id->{:stream :loss} maps.
+and data coming form outside is represented by a stream.
+Inputs are maps of ```id->{:stream stream-name}```
+Outputs for training are ```id->{:stream stream-name :loss loss-fn}```.
 2.  Training.  Training can be thought of as a function that given a
 graph and a sequence if input,answer pairs returns a sequence of
 progressively better trained graphs.  This builds a traversal which
 calculates a forward traversal, backward traversal and io buffer list
-for the execution context.  A traversal is a sequence of {:incoming,
-:id: :outgoing} where incoming and outgoing are lists of buffer ids
+for the execution context.  A traversal is a sequence of 
+```{:incoming :id: :outgoing}``` where incoming and outgoing are lists of buffer ids
 and id is the node for execution.  The training system is expected to
 respect the traversal but it could for instance use a completely
 separate neural network facility to accomplish the transformation from
