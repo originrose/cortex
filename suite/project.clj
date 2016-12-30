@@ -8,4 +8,5 @@
                  [thinktopic/think.image "0.4.2"]
                  [com.taoensso/nippy "2.12.2"]
                  [garden "1.3.2"]]
-  :resource-paths ["cljs"])
+  :resource-paths ["cljs"]
+  :plugins [[lein-codox "0.10.2"]])

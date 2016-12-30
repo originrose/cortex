@@ -9,4 +9,5 @@
                  [thinktopic/cortex "0.3.1-SNAPSHOT"]
                  [thinktopic/cortex-datasets "0.3.1-SNAPSHOT"]]
   :java-source-paths ["java"]
+  :plugins [[lein-codox "0.10.2"]]
   )

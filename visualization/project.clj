@@ -8,4 +8,5 @@
                  [incanter/incanter-core "1.5.7"]
                  [incanter/incanter-charts "1.5.7"]
                  [thinktopic/think.image "0.4.2"]
-                 [thinktopic/cortex "0.3.1-SNAPSHOT"]])
+                 [thinktopic/cortex "0.3.1-SNAPSHOT"]]
+  :plugins [[lein-codox "0.10.2"]])

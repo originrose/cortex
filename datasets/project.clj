@@ -8,4 +8,5 @@
                  [net.mikera/core.matrix "0.50.0"]
                  [thinktopic/resource "1.1.0"]
                  [com.indeed/util-mmap "1.0.20"]
-                 [com.github.ben-manes.caffeine/caffeine "2.3.1"]])
+                 [com.github.ben-manes.caffeine/caffeine "2.3.1"]]
+  :plugins [[lein-codox "0.10.2"]])
