@@ -9,6 +9,7 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.verify.nn.import :as verify-import]
             [cortex.nn.layers :as layers]
+            [cortex.nn.build :as build]
             [think.compute.nn.compute-execute :as compute-execute])
   (:import [java.io StringReader]))
 
@@ -94,6 +95,7 @@ whitespace = #'\\s*'") parse-str)]
                        v)])
                 item-map)))
 
+
 (defmethod prototxt-layer->desc :Convolution
   [layer]
   (let [{:keys [kernel_size num_output pad stride group]
@@ -106,11 +108,13 @@ whitespace = #'\\s*'") parse-str)]
          assoc-group-fn
          (add-layer-data-to-desc layer))))
 
+
 (defmethod prototxt-layer->desc :ReLU
   [layer]
   (->> (layers/relu)
        first
        (add-layer-data-to-desc layer)))
+
 
 (defmethod prototxt-layer->desc :Pooling
   [layer]
@@ -275,7 +279,7 @@ whitespace = #'\\s*'") parse-str)]
                           desc))
                       model)]
       {:prototxt prototxt
-       :model model
+       :model (build/build-network model)
        :input input
        :layer-outputs layer-outputs})))
 
