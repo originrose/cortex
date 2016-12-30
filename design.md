@@ -81,6 +81,7 @@ so that it because easier to test and verify as much of cortex as possible witho
 execution of the training or inference algorithms.
 
 ## Rational->Design Justification
+
 ### Provide the least amount of cognitive overhead for new developers.
 * Implement as much of cortex as possible in the base cortex library using simple datastructures.
 The more logic that can be removed from the compute execution context and tested simple using clojure maps
@@ -97,6 +98,7 @@ through a set of object constructors and then chaining it back to the graph laye
 * Push as much functionality up into the cortex layer as possible and out of the various execution context.
 Implementing graph operations like split or join, for instance, can be largely done in the cortex layer with
 minimal involvement of the execution contexts aside from implementing some subset of specific operations.
+
 ### Enable networks that look more graphlike in structure.
 * Cortex is now a graph of id->node map and edge list.
 
