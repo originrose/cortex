@@ -17,19 +17,12 @@ over time but it should allow you to train some initial classifiers or regressio
 
 ## Cortex Design
 
-Cortex is currently split into three main projects and a number of sub projects.
- * cortex - high level protocols and simple experimental implementation.
- * compute - general purpose compute abstraction for high-performance cpu and gpu implementations.
- * gpu-compute - cuda implementation of compute abstraction, bindings to cudnn.
-
-Additionally you will find:
- * datasets - code for importing and managing datasets.
- * visualization - code for debugging neural nets and visualization data (tsne).
-
-* training a model
-
+Design is detailed here:
+[Cortex Design Document](design.md)
 Please see the various unit tests and examples for training a model.  Specifically see:
-[mnist verification](compute/src/think/compute/verify/nn/mnist.clj).
+[mnist verification](cortex/src/verify/nn/train.clj)
+Also, for an example of using cortex in a more real-world scenario please see:
+[mnist example](examples/suite-classification/src/suite_classification/core.clj).
 
 
 
