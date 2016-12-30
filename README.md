@@ -21,7 +21,7 @@ Design is detailed here:
 [Cortex Design Document](design.md)
 
 Please see the various unit tests and examples for training a model.  Specifically see:
-[mnist verification](cortex/src/verify/nn/train.clj)
+[mnist verification](cortex/src/cortex/verify/nn/train.clj)
 
 Also, for an example of using cortex in a more real-world scenario please see:
 [mnist example](examples/suite-classification/src/suite_classification/core.clj).
@@ -100,7 +100,7 @@ Once downloaded and unzipping, moving the files:
 
 
 
- 
+
 ### See also:
 
 [Roadmap](ROADMAP.md)
