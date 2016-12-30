@@ -56,6 +56,8 @@ network types using the compute and gpu-compute frameworks.
 ## Cortex High Level Design
 Cortex is designed as a specialized graph framework.  There are a few
 steps necessary to use this for neural networks.
+
+
 1.  Building an initial minimal description into a network.  This
 calculates layer sizes and creates initial parameter buffers.
 2.  Bind the graph nodes to inputs and outputs.  Every node has an id
