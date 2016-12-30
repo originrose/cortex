@@ -19,12 +19,11 @@
             [think.gate.core :as gate]))
 
 
-<<<<<<< HEAD
 (def image-size 28)
 (def num-classes 10)
 (def num-channels 1)
 (def datatype :float)
-=======
+
 
 ;;We have to setup the web server slightly different when running
 ;;from the repl; we enable live updates using figwheel and such.  When
@@ -32,13 +31,6 @@
 ;;particular resources to be available.  We ensure this with a makefile.
 (def ^:dynamic *running-from-repl* true)
 
-
-
-(def mnist-image-size 28)
-(def mnist-num-classes 10)
-(def mnist-num-channels 1)
-(def mnist-datatype :float)
->>>>>>> master
 
 (defn ds-image->png
   [ds-data]
@@ -206,10 +198,15 @@ to avoid overfitting the network to the training data."
                                                dataset
                                                loaded-data
                                                :batch-type :cross-validation)))
-     (gate/open (atom
-                 (classification/create-routing-map confusion-matrix-atom
-                                                    data-display-atom))
-                :clj-css-path "src/css")
+
+     (let [open-message
+           (gate/open (atom
+                       (classification/create-routing-map confusion-matrix-atom
+                                                          data-display-atom))
+                      :clj-css-path "src/css"
+                      :live-updates? *running-from-repl*
+                      :port 8091)]
+              (println open-message))
      confusion-matrix-atom))
   ([]
    (display-dataset-and-model (create-dataset))))
