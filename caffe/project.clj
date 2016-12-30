@@ -6,4 +6,5 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/hdf5 "0.1.2"]
                  [thinktopic/compute "0.3.1-SNAPSHOT"]
-                 [instaparse "1.4.3"]])
+                 [instaparse "1.4.3"]]
+  :plugins [[lein-codox "0.10.2"]])

@@ -11,4 +11,6 @@
                  [thinktopic/resource "1.1.0"]]
 
   :profiles {:dev {:source-paths ["src" "test/cljc" "test/clj"]}
-             :test {:source-paths ["src" "test/cljc" "test/clj"]}})
+             :test {:source-paths ["src" "test/cljc" "test/clj"]}}
+
+  :plugins [[lein-codox "0.10.2"]])

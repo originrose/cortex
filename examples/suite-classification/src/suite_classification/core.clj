@@ -236,7 +236,7 @@ to avoid overfitting the network to the training data."
         observation (mnist-png->observation datatype false test-img)]
     (imagez/show test-img)
     (infer/classify-one-observation (suite-io/read-nippy-file "trained-network.nippy")
-                                    observation (ds/create-image-shape num-classes
+                                    observation (ds/create-image-shape num-channels
                                                                        image-size
                                                                        image-size)
                                     (classification/get-class-names-from-directory "mnist/testing"))))

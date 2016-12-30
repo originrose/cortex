@@ -10,4 +10,5 @@
                  [thinktopic/cortex-datasets "0.3.1-SNAPSHOT"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]
   :java-source-paths ["java"]
+  :plugins [[lein-codox "0.10.2"]]
   )
