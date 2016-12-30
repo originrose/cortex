@@ -109,6 +109,7 @@ to the same buffer.
 ### Coalesce algorithms into as high a level as possible.
 * A significant amount of code was removed from the layer implementations of the compute layer and it was split
 between the compute execution context and the cortex build/traversal/execution system.
+
 ### Allow multiple completely independent backends with very different requirements.
 * The entire graph, traversal, and supporting information is passed to the execution context.  This allows the
 context complete freedom in its expression of the graph and execution of the traversal.
