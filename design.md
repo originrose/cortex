@@ -81,32 +81,37 @@ so that it because easier to test and verify as much of cortex as possible witho
 execution of the training or inference algorithms.
 
 ## Rational->Design Justification
-###Provide the least amount of cognitive overhead for new developers.
+### Provide the least amount of cognitive overhead for new developers.
 * Implement as much of cortex as possible in the base cortex library using simple datastructures.
 The more logic that can be removed from the compute execution context and tested simple using clojure maps
 the better.
 * Remove anything from cortex that isn't necessary for current execution.  Keep experiments in branches.
-###Create an architecture that will survive a long time.
+
+### Create an architecture that will survive a long time.
 * The basic design is that given a graph, annotate the graph with better parameters.  The graph nodes and such
 are passed all the way through to the actual execution of the layers so it is easy to, for instance, add a
 map entry to a layer and then use it during execution or during optimization.  It doesn't require chaining it
 through a set of object constructors and then chaining it back to the graph layer for serialization.
-###Allow simple testable implementation of the majority of the design.
+
+### Allow simple testable implementation of the majority of the design.
 * Push as much functionality up into the cortex layer as possible and out of the various execution context.
 Implementing graph operations like split or join, for instance, can be largely done in the cortex layer with
 minimal involvement of the execution contexts aside from implementing some subset of specific operations.
-###Enable networks that look more graphlike in structure.
+### Enable networks that look more graphlike in structure.
 * Cortex is now a graph of id->node map and edge list.
-###Enable parameter sharing.
+
+### Enable parameter sharing.
 * Parameters are linked to by buffer id from a parameter entry.  This allows multiple parameters to point
 to the same buffer.
-###Coalesce algorithms into as high a level as possible.
+
+### Coalesce algorithms into as high a level as possible.
 * A significant amount of code was removed from the layer implementations of the compute layer and it was split
 between the compute execution context and the cortex build/traversal/execution system.
-###Allow multiple completely independent backends with very different requirements.
+### Allow multiple completely independent backends with very different requirements.
 * The entire graph, traversal, and supporting information is passed to the execution context.  This allows the
 context complete freedom in its expression of the graph and execution of the traversal.
-###Ensure any backend has complete freedom of expression of desired functionality.
+
+### Ensure any backend has complete freedom of expression of desired functionality.
 * Again, this is done by ensuring the interface between cortex proper and any backend is as thin as possible
 meaning entire blocks of execution (train for this epoch of data) are specified at one function call.  Compare
 this against a design where each layer's interface is specified and the interface then becomes extremely
