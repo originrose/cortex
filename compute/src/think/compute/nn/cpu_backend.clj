@@ -5,16 +5,17 @@
             [think.compute.cpu-driver :as cpu-drv]
             [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
             [think.compute.optimise :as opt]
-            [think.compute.nn.layers :as layers]
+            [think.compute.nn.layers :as compute-layers]
+            [think.compute.nn.protocols :as compute-protocols]
+            [cortex.nn.layers :as layers]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.nn.impl.layers.convolution :as conv])
+            [cortex.nn.impl :as impl])
   (:import [think.compute.cpu_driver CPUDriver CPUStream]
            [java.nio DoubleBuffer FloatBuffer]
            [think.compute.math DeviceArray Tensor]
            [think.compute.optimise AdadeltaOptimiser AdamOptimiser]
-           [cortex.nn.impl.layers.convolution ConvLayerConfig]
            [java.util Arrays]
            [java.util.concurrent ForkJoinPool Callable Future]
            [think.datatype ArrayView DoubleArrayView FloatArrayView]))
@@ -118,7 +119,7 @@
          val-0# (~cast-fn 0)
          val-1# (~cast-fn 1)]
      (cond
-       (= ~act-type :sigmoid)
+       (= ~act-type :logistic)
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (v-aset dest# idx#
                     (/ val-1#
@@ -142,7 +143,7 @@
          val-1# (~cast-fn 1)
          val-0# (~cast-fn 0)]
      (cond
-       (= ~act-type :sigmoid)
+       (= ~act-type :logistic)
        ;; input gradient = output * (1 - output) * output-gradient
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [out-val# (v-aget dest# idx#)]
@@ -231,10 +232,10 @@
   [input output config cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          output-ary# (ArrayView/toView ~output)]
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config
       :convolutional
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (let [input-val# (~cast-fn (if ~'input-valid?
                                     (v-aget input-ary# ~'input-addr)
                                     0.0))]
@@ -251,9 +252,9 @@
   `(let [output-ary# (ArrayView/toView ~input-gradient)
          input-ary# (ArrayView/toView ~conv-input-gradient)]
      ;;Zero accumulator
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config :convolutional
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (when ~'input-valid?
          (let [output-val# (v-aget output-ary# ~'input-addr)
                input-val# (v-aget input-ary# ~'output-conv-addr)]
@@ -263,16 +264,16 @@
   [input output config cast-fn]
   `(let [input-ary# (ArrayView/toView ~input)
          output-ary# (ArrayView/toView ~output)]
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config :pooling
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (let [input-val# (~cast-fn (if ~'input-valid?
                                   (v-aget input-ary# ~'input-addr)
                                   0.0))
              output-addr# (+ (* ~'out-y ~'output-width)
                              ~'out-x
                              ~'chan-output-offset)
-             k-idx# (+ (* ~'k-y ~'k-width) ~'k-x)
+             k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
              output-val# (v-aget output-ary# output-addr#)]
          (when (or (= 0 k-idx#)
                    (> input-val# output-val#))
@@ -285,9 +286,9 @@
          output-ary# (ArrayView/toView ~output)
          input-gradient-ary# (ArrayView/toView ~input-gradient)
          output-gradient-ary# (ArrayView/toView ~output-gradient)]
-     (conv/convolution-outer-kernel
+     (impl/convolution-outer-kernel
       ~config :pooling
-      (conv/convolution-roll-unroll-inner-kernel
+      (impl/convolution-roll-unroll-inner-kernel
        (let [input-addr# ~'input-addr
              input-val# (~cast-fn (if ~'input-valid?
                                   (v-aget input-ary# input-addr#)
@@ -295,7 +296,7 @@
              output-addr# (+ (* ~'out-y ~'output-width)
                              ~'out-x
                              ~'chan-output-offset)
-             k-idx# (+ (* ~'k-y ~'k-width) ~'k-x)
+             k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
              output-val# (v-aget output-ary# output-addr#)]
          (when (= input-val# output-val#)
            (v-aset input-gradient-ary# input-addr#
@@ -760,19 +761,19 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                           (double epsilon) (double pow-beta1-t) (double pow-beta2-t)
                           (.data m) (.data v)))
   (cpu-planar-input->convolution! [input ^DoubleArrayView input-convolved
-                                   ^ConvLayerConfig conv-config]
+                                   conv-config]
     (cpu-planar-input->convolution!-impl input input-convolved conv-config double))
   (cpu-convolution->planar-output! [input-convolved ^DoubleArrayView input-gradient
-                                    ^ConvLayerConfig conv-config]
+                                    conv-config]
     (cpu-convolution->planar-output!-impl input-convolved input-gradient conv-config double))
 
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (double value)))
-  (cpu-max-pooling-forward [input ^DoubleArrayView output ^ConvLayerConfig conv-config]
+  (cpu-max-pooling-forward [input ^DoubleArrayView output conv-config]
     (cpu-max-pooling-forward-impl input output conv-config double))
   (cpu-max-pooling-backward [input ^DoubleArrayView output ^DoubleArrayView input-gradient
-                             ^DoubleArrayView output-gradient ^ConvLayerConfig conv-config]
+                             ^DoubleArrayView output-gradient conv-config]
     (cpu-max-pooling-backward-impl input output input-gradient output-gradient conv-config
                                    double))
   (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
@@ -829,19 +830,17 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (AdamOptimiser/step_f (float gradient-alpha) (.data gradient) (.data parameters)
                           param-offset (float alpha) (float beta1) (float beta2) (float epsilon)
                           (float pow-beta1-t) (float pow-beta2-t) (.data m) (.data v)))
-  (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved
-                                   ^ConvLayerConfig conv-config]
+  (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved conv-config]
     (cpu-planar-input->convolution!-impl input input-convolved conv-config float))
-  (cpu-convolution->planar-output! [input-convolved ^FloatArrayView input-gradient
-                                    ^ConvLayerConfig conv-config]
+  (cpu-convolution->planar-output! [input-convolved ^FloatArrayView input-gradient conv-config]
     (cpu-convolution->planar-output!-impl input-convolved input-gradient conv-config float))
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (float value)))
-  (cpu-max-pooling-forward [input ^FloatArrayView output ^ConvLayerConfig conv-config]
+  (cpu-max-pooling-forward [input ^FloatArrayView output conv-config]
     (cpu-max-pooling-forward-impl input output conv-config float))
   (cpu-max-pooling-backward [input ^FloatArrayView output ^FloatArrayView input-gradient
-                             ^FloatArrayView output-gradient ^ConvLayerConfig conv-config]
+                             ^FloatArrayView output-gradient conv-config]
     (cpu-max-pooling-backward-impl input output input-gradient output-gradient conv-config
                                    float))
   (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
@@ -873,104 +872,147 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (cpu-lrn-backward-impl input output-gradient input-gradient input-tensor
                            n k alpha beta float)))
 
-
-(defrecord ActivationLayer [act-type cpu-stream])
-
-
 (defn device-array->view
-  [dev-ary]
-  (dtype/->view (math/device-buffer dev-ary)))
+  [dev-ary & [size]]
+  (if size
+    (dtype/->view (math/device-buffer dev-ary) 0 size)
+    (dtype/->view (math/device-buffer dev-ary))))
 
 
-(extend-type ActivationLayer
-  nn-backend/PBackendLayer
-  (forward! [layer ^DeviceArray input ^DeviceArray output]
-    (cpu-drv/with-stream-dispatch (.cpu-stream layer)
-      (cpu-activation-forward (device-array->view input) (.act-type layer) (device-array->view output))))
-  (backward! [layer ^DeviceArray input ^DeviceArray output
-              ^DeviceArray input-gradient ^DeviceArray output-gradient]
-    (cpu-drv/with-stream-dispatch (.cpu-stream layer)
-      (cpu-activation-backward (device-array->view input) (.act-type layer)
-                               (device-array->view output)
-                               (device-array->view output-gradient)
-                               (device-array->view input-gradient)))))
-
-(defrecord SoftmaxLayer [cpu-stream n-input channels])
-(extend-type SoftmaxLayer
-  nn-backend/PBackendLayer
-  (forward! [layer ^DeviceArray input ^DeviceArray output]
-    (cpu-drv/with-stream-dispatch (.cpu-stream layer)
-      (cpu-softmax-forward (device-array->view input) (device-array->view output)
-                           (.n-input layer) (.channels layer))))
-  (backward! [layer ^DeviceArray input ^DeviceArray output
-              ^DeviceArray input-gradient ^DeviceArray output-gradient]
-    (layers/softmax-backward! (.cpu-stream layer) input-gradient output-gradient)))
+(defn- first-buffer
+  [buffers]
+  (device-array->view (compute-layers/first-buffer buffers)))
 
 
+(defn- first-gradient
+  [buffers]
+  (device-array->view (compute-layers/first-gradient buffers)))
 
-(defrecord ConvolutionalLayer [backend ^ConvLayerConfig conv-config
-                               input-convolved ones])
 
+(defrecord ActivationLayer [layer cpu-stream]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input output]
+    (cpu-drv/with-stream-dispatch cpu-stream
+      (cpu-activation-forward (first-buffer input)
+                              (:type layer)
+                              (first-buffer output))))
+  (backward [this parameter-buffers output input]
+    (cpu-drv/with-stream-dispatch cpu-stream
+      (cpu-activation-backward (first-buffer input) (:type layer)
+                               (first-buffer output)
+                               (first-gradient output)
+                               (first-gradient input)))))
+
+(defmulti create-cpu-layer
+  "Create a implementation layer for the cpu backend."
+  (fn [backend layer batch-size]
+    (get layer :type)))
+
+
+(defmethod create-cpu-layer :logistic
+  [backend layer batch-size]
+  (->ActivationLayer layer (drv/get-stream backend)))
+
+(defmethod create-cpu-layer :relu
+  [backend layer batch-size]
+  (->ActivationLayer layer (drv/get-stream backend)))
+
+(defmethod create-cpu-layer :tanh
+  [backend layer batch-size]
+  (->ActivationLayer layer (drv/get-stream backend)))
+
+
+(defrecord SoftmaxLayer [layer cpu-stream]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input output]
+    (cpu-drv/with-stream-dispatch cpu-stream
+      (cpu-softmax-forward (first-buffer input) (first-buffer output)
+                           (:input-size layer) (:output-channels layer))))
+  (backward [this parameter-buffers output input]
+    (compute-layers/softmax-backward! cpu-stream
+                                      (compute-layers/first-gradient input)
+                                      (compute-layers/first-gradient output))))
+
+
+(defmethod create-cpu-layer :softmax
+  [backend layer batch-size]
+  (->SoftmaxLayer layer (drv/get-stream backend)))
+
+
+(defrecord ConvolutionalLayer [backend conv-config input-convolved ones])
 
 (defn create-convolution-matrix
-  [^ConvLayerConfig config backend batch-size]
-  (let [output-width (conv/get-output-width config :convolutional)
-        output-height (conv/get-output-height config :convolutional)
-        kernel-stride (* (.k-width config) (.k-height config))
-        n-cols (* kernel-stride (.num-in-channels config))
+  [config backend batch-size]
+  (let [output-width (long (:output-width config))
+        output-height (long (:output-height config))
+        kernel-stride (* (long (get config :kernel-width))
+                         (long (get config :kernel-height)) )
+        n-cols (* kernel-stride (long (:input-channels config)))
         n-rows (* output-width output-height)]
     (nn-backend/new-array backend [n-rows n-cols] batch-size)))
 
 
-(defn create-conv-layer [backend ^ConvLayerConfig conv-config ^long batch-size]
-  (let [num-out-pixels (* (conv/get-output-width conv-config :convolutional)
-                          (conv/get-output-height conv-config :convolutional))]
+(defn create-conv-layer [backend conv-config ^long batch-size]
+  (let [num-out-pixels (* (long (:output-width conv-config))
+                          (long (:output-height conv-config)))]
     (->ConvolutionalLayer backend conv-config
                           (create-convolution-matrix conv-config backend batch-size)
                           (math/allocate-ones (drv/get-driver backend) (drv/get-stream backend)
                                               (dtype/get-datatype backend) num-out-pixels))))
 
-
 (extend-type ConvolutionalLayer
-  nn-backend/PBackendWeightedLayer
-  (weighted-forward! [layer input output weights bias]
-    (let [^ConvLayerConfig conv-config (.conv-config layer)
-          output-width (conv/get-output-width conv-config :convolutional)
-          output-height (conv/get-output-height conv-config :convolutional)
+  compute-protocols/ComputeLayer
+  (forward [layer parameter-buffers input-buffers output-buffers]
+    (let [{:keys [num-kernels] :as conv-config} (.conv-config layer)
+          output-width (long (:output-width conv-config))
+          output-height (long (:output-height conv-config))
           num-out-pixels (* output-width output-height)
-          num-out-channels (.num-out-channels conv-config)
+          num-out-channels (long num-kernels)
           cpu-stream (drv/get-stream (.backend layer))
-          current-thread-stream (cpu-drv/create-main-thread-cpu-stream)]
+          current-thread-stream (cpu-drv/create-main-thread-cpu-stream)
+          input (compute-layers/first-buffer input-buffers)
+          output (compute-layers/first-buffer output-buffers)
+          weights (get-in parameter-buffers [:weights :buffer])
+          bias (get-in parameter-buffers [:bias :buffer])]
       ;;In parallel process each item of the batch.
       ;;This allows us to take advantage of at least
       ;;*some* multithreading without having to explicity program much of it.
       (cpu-drv/with-stream-dispatch cpu-stream
         (doall (pmap (fn [[input output input-convolved]]
-                       (cpu-planar-input->convolution! (device-array->view input)
-                                                       (device-array->view input-convolved)
-                                                       (.conv-config layer))
-                       ;;set the output to the bias...can't think of another way of doing this.
-                       (math/gemm current-thread-stream true false
-                                  1.0 bias (.ones layer)
-                                  0.0 output)
-                       (math/gemm current-thread-stream false true
-                                  1.0 weights input-convolved
-                                  1.0 output))
-                     (math/batched-data-to-per-input-data
-                      (drv/get-driver (.backend layer))
-                      [input output (.input-convolved layer)]))))))
-
-  (weighted-backward! [layer input output weights bias
-                       weight-gradient bias-gradient input-gradient output-gradient]
-    (let [^ConvLayerConfig conv-config (.conv-config layer)
-          output-width (conv/get-output-width conv-config :convolutional)
-          output-height (conv/get-output-height conv-config :convolutional)
+                      ;;Redefine output to be the correct shape
+                      (let [output (math/with-tensor output
+                                     (math/create-tensor num-out-channels num-out-pixels))]
+                        (cpu-planar-input->convolution! (device-array->view input)
+                                                        (device-array->view input-convolved)
+                                                        (.conv-config layer))
+                        ;;set the output to the bias...can't think of another way of doing this.
+                        (math/gemm current-thread-stream true false
+                                   1.0 bias (.ones layer)
+                                   0.0 output)
+                        (math/gemm current-thread-stream false true
+                                   1.0 weights input-convolved
+                                   1.0 output)))
+                    (math/batched-data-to-per-input-data
+                     (drv/get-driver (.backend layer))
+                     [input output (.input-convolved layer)]))))))
+  (backward [layer parameter-buffers output-buffers input-buffers]
+    (let [{:keys [num-kernels] :as conv-config} (.conv-config layer)
+          output-width (long (:output-width conv-config))
+          output-height (long (:output-height conv-config))
           num-out-pixels (* output-width output-height)
-          num-out-channels (.num-out-channels conv-config)
-          io-data (math/batched-data-to-per-input-data (drv/get-driver (.backend layer))
-                                                       [input output input-gradient
-                                                        output-gradient
-                                                        (.input-convolved layer)])
+          num-out-channels (long num-kernels)
+          input (compute-layers/first-buffer input-buffers)
+          output (compute-layers/first-buffer output-buffers)
+          input-gradient (compute-layers/first-gradient input-buffers)
+          output-gradient (compute-layers/first-gradient output-buffers)
+          weights (get-in parameter-buffers [:weights :buffer])
+          bias (get-in parameter-buffers [:bias :buffer])
+          weight-gradient (get-in parameter-buffers [:weights :gradient])
+          bias-gradient (get-in parameter-buffers [:bias :gradient])
+          batch-driver (drv/get-driver (.backend layer))
+          input-convolved (:input-convolved layer)
+          batched-data [input output input-gradient output-gradient input-convolved]
+          io-data (math/batched-data-to-per-input-data batch-driver batched-data)
           cpu-stream (drv/get-stream (.backend layer))
           current-thread-stream (cpu-drv/create-main-thread-cpu-stream)]
       (cpu-drv/with-stream-dispatch cpu-stream
@@ -979,13 +1021,12 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
         (doseq [[input output input-gradient output-gradient input-convolved] io-data]
           (let [output-gradient (math/with-tensor output-gradient
                                   (math/create-tensor num-out-channels num-out-pixels))]
-           (math/gemm current-thread-stream false true
-                      1.0 (.ones layer) output-gradient
-                      1.0 bias-gradient)
-           (math/gemm current-thread-stream false false
-                      1.0 output-gradient input-convolved
-                      1.0 weight-gradient)))
-
+            (math/gemm current-thread-stream false true
+                       1.0 (.ones layer) output-gradient
+                       1.0 bias-gradient)
+            (math/gemm current-thread-stream false false
+                       1.0 output-gradient input-convolved
+                       1.0 weight-gradient)))
         ;;Once weight/bias gradient accumulation is complete...
         ;;In parallel calculate the input gradients and roll/accumulate
         ;;back up into input vectors.  This changes input convolved
@@ -1005,210 +1046,127 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                                         conv-config))
                      io-data))))))
 
-(defrecord MaxPooling [backend ^ConvLayerConfig conv-config])
-(defn create-max-pooling
-  [backend ^ConvLayerConfig config batch-size]
-  (->MaxPooling backend config))
+
+(defmethod create-cpu-layer :convolutional
+  [backend layer batch-size]
+  (create-conv-layer backend layer (long batch-size)))
 
 
-(extend-type MaxPooling
-  nn-backend/PBackendLayer
-  (forward! [layer input output]
-    (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
-      (doall (pmap (fn [[input output]]
-                     (cpu-max-pooling-forward (device-array->view input)
-                                              (device-array->view output)
-                                              (.conv-config layer)))
-                   (math/batched-data-to-per-input-data (drv/get-driver (.backend layer))
-                                                        [input output])))))
-  (backward! [layer input output input-gradient output-gradient]
-    (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
-      (doall (pmap (fn [[input output input-gradient output-gradient]]
-                     (cpu-fill (device-array->view input-gradient) 0)
-                     (cpu-max-pooling-backward (device-array->view input)
-                                               (device-array->view output)
-                                               (device-array->view input-gradient)
-                                               (device-array->view output-gradient)
-                                               (.conv-config layer)))
-                   (math/batched-data-to-per-input-data
-                    (drv/get-driver (.backend layer))
-                    [input output input-gradient output-gradient]))))))
+(defrecord MaxPooling [backend conv-config]
+  compute-protocols/ComputeLayer
+  (forward [layer parameters input-buffers output-buffers]
+    (let [input (compute-layers/first-buffer input-buffers)
+          output (compute-layers/first-buffer output-buffers)]
+      (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
+        (doall (pmap (fn [[input output]]
+                       (cpu-max-pooling-forward (device-array->view input)
+                                                (device-array->view output)
+                                                conv-config))
+                     (math/batched-data-to-per-input-data (drv/get-driver (.backend layer))
+                                                          [input output]))))))
+
+  (backward [layer parameters output-buffers input-buffers]
+    (let [input (compute-layers/first-buffer input-buffers)
+          output (compute-layers/first-buffer output-buffers)
+          input-gradient (compute-layers/first-gradient input-buffers)
+          output-gradient (compute-layers/first-gradient output-buffers)]
+      (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
+        (doall (pmap (fn [[input output input-gradient output-gradient]]
+                       (cpu-fill (device-array->view input-gradient) 0)
+                       (cpu-max-pooling-backward (device-array->view input)
+                                                 (device-array->view output)
+                                                 (device-array->view input-gradient)
+                                                 (device-array->view output-gradient)
+                                                 conv-config))
+                     (math/batched-data-to-per-input-data
+                      (drv/get-driver (.backend layer))
+                      [input output input-gradient output-gradient])))))))
 
 
-(defrecord BatchNormalization [backend])
-(extend-type BatchNormalization
+(defmethod create-cpu-layer :max-pooling
+  [backend layer batch-size]
+  (->MaxPooling backend layer))
+
+
+(defn- layer-output->tensor
+  [{:keys [output-channels output-width output-height] :as layer} batch-size]
+  (math/create-tensor batch-size
+                      output-channels
+                      output-height
+                      output-width))
+
+(defrecord BatchNormalization [backend]
   nn-backend/PBatchNormalization
-  (batch-norm-calc! [layer input running-means running-variances scale bias output epsilon]
+  (batch-norm-inference! [this input running-means running-variances scale bias output epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-     (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-       (cpu-bn-calc (device-array->view input)
-                    (device-array->view running-means)
-                    (device-array->view running-variances)
-                    (device-array->view scale)
-                    (device-array->view bias)
-                    (device-array->view output)
-                    batch-size batch-stride))))
-  (batch-norm-forward! [layer input
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-bn-calc (device-array->view input)
+                     (device-array->view running-means)
+                     (device-array->view running-variances)
+                     (device-array->view scale)
+                     (device-array->view bias)
+                     (device-array->view output)
+                     batch-size batch-stride))))
+  (batch-norm-forward! [this input
                         running-means running-variances
                         saved-means saved-variances
                         scale bias output average-factor epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-       (cpu-update-means-variances (device-array->view input)
-                                   (device-array->view running-means)
-                                   (device-array->view running-variances)
-                                   (device-array->view saved-means)
-                                   (device-array->view saved-variances)
-                                   batch-size batch-stride
-                                   average-factor epsilon)))
-    (nn-backend/batch-norm-calc! layer input saved-means saved-variances
-                              scale bias output epsilon))
-  (batch-norm-backward! [layer input saved-means saved-variances scale bias output
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-update-means-variances (device-array->view input)
+                                    (device-array->view running-means)
+                                    (device-array->view running-variances)
+                                    (device-array->view saved-means)
+                                    (device-array->view saved-variances)
+                                    batch-size batch-stride
+                                    average-factor epsilon)))
+    (nn-backend/batch-norm-inference! this input saved-means saved-variances
+                                      scale bias output epsilon))
+  (batch-norm-backward! [this input saved-means saved-variances scale bias output
                          scale-gradient bias-gradient input-gradient output-gradient
                          epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-     (cpu-drv/with-stream-dispatch (drv/get-stream (:backend layer))
-       (cpu-bn-backward (device-array->view input)
-                        (device-array->view saved-means)
-                        (device-array->view saved-variances)
-                        (device-array->view scale)
-                        (device-array->view bias)
-                        (device-array->view output)
-                        (device-array->view scale-gradient)
-                        (device-array->view bias-gradient)
-                        (device-array->view input-gradient)
-                        (device-array->view output-gradient)
-                        batch-size batch-stride)))))
-
-
-(defrecord LocalResponseNormalization [backend ^long width ^long height ^long n-channels
-                                       n k alpha beta]
-  nn-backend/PBackendLayer
-  (forward! [layer input output]
-    (let [^Tensor input-tensor (.tensor ^DeviceArray input)
-          data-tensor (math/create-tensor (.batch-size input-tensor)
-                                          n-channels
-                                          height
-                                          width)]
       (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-        (cpu-lrn-forward (device-array->view input)
+        (cpu-bn-backward (device-array->view input)
+                         (device-array->view saved-means)
+                         (device-array->view saved-variances)
+                         (device-array->view scale)
+                         (device-array->view bias)
                          (device-array->view output)
-                         data-tensor
-                         n k alpha beta))))
-  (backward! [layer input output input-gradient output-gradient]
-    (let [^Tensor input-tensor (.tensor ^DeviceArray input)
-          data-tensor (math/create-tensor (.batch-size input-tensor)
-                                          n-channels
-                                          height
-                                          width)]
-     (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-       (cpu-lrn-backward (device-array->view input)
-                         (device-array->view output-gradient)
+                         (device-array->view scale-gradient)
+                         (device-array->view bias-gradient)
                          (device-array->view input-gradient)
-                         data-tensor
-                         n k alpha beta)))))
+                         (device-array->view output-gradient)
+                         batch-size batch-stride)))))
 
 
-(defrecord Recurrrent [backend recurrent-type recurrent-directions
-                       ^long n-input ^long n-output ^long batch-size
-                       multiplied-input
-                       multiplied-hidden
-                       input-plus-hidden
-                       weights-and-biases
-                       weight-and-bias-gradients
-                       weight-and-bias-keys]
-  nn-backend/PRecurrent
-  (get-recurrent-weights-and-biases [layer]
-    (vec (mapcat weights-and-biases weight-and-bias-keys)))
-  (get-recurrent-weight-and-bias-gradients [layer]
-    (vec (mapcat weight-and-bias-gradients weight-and-bias-keys)))
-  ;;We don't have an external representation of the weights and biases
-  ;;so this step is not necessary.
-  (copy-implementation-weights-and-biases! [layer weights-and-biases])
-  (recurrent-calc! [layer input initial-hidden-state initial-cell-state output]
-    ;;First linear translation of the system.
-    (comment
-     (nn-backend/biased-multiply! backend input (first (:input weights-and-biases))
-                               (second (:input weights-and-biases)) multiplied-input)
-     (let [output-vec (split-array-into-batches output)
-           hidden-vec (split-array-into-batches multiplied-hidden)
-           input-vec (split-array-into-batches multiplied-input)
-           input-plus-hidden-vec (split-array-into-batches input-plus-hidden)]
-       (loop [idx 0
-              input-hidden-state initial-hidden-state
-              input-cell-state initial-cell-state]
-         (let [iter-output (output-vec idx)
-               iter-input (input-vec idx)
-               iter-temp-out (intermediate-output-vec idx)
-               input-plus-hidden (input-plus-hidden-vec idx)]
-           (when (< idx batch-size)
-             (nn-backend/biased-multiply! backend input-hidden-state
-                                       (first (:recurrence weights-and-biases))
-                                       (second (:recurrence weights-and-biases))
-                                       (hidden-vec idx))
-             (math/sum (drv/get-stream backend) 1.0 iter-input 1.0
-                       input-plus-hiden)
-             (cond
-               (contains? #{:relu :tanh} recurrent-type)
-               (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-                 (cpu-activation-forward (device-array->view iter-temp-out)
-                                         recurrent-type
-                                         (device-array->view iter-output)))
-               :else
-               (throw (Exception. "Unrecognized recurrence type")))
-             (recur (inc idx) iter-output running-cell-state)))))))
-  (recurrent-forward! [layer input hidden-state cell-state output]
-    (nn-backend/recurrent-calc! layer input hidden-state cell-state output))
-  (recurrent-backward! [layer input hidden-state cell-state
-                        hidden-state-gradient cell-state-gradient
-                        input-gradient output-gradient]
-    (comment
-     ;;Chain rule this stuff backwards...
-     (cond
-       (contains? #{:relu :tanh} recurrent-type)
-       (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-         (cpu-activation-backward (device-array->view running-hidden-state)
-                                  recurrent-type
-                                  (device-array->view output)
-                                  (device-array->view output-gradient)
-                                  (device-array->view temp-out-gradient)))
-       :else
-       (throw (Exception. "Unrecognized recurrence type")))
-     (let [out-gradient-vec (split-array-into-batches temp-out-gradient)
-           hidden-state-input (vec (concat [initial-hidden-state-gradient]
-                                           (drop-last
-                                            (split-array-into-batches output))))
-           input-vec (split-array-into-batches input)
-           hidden-state-gradients (split-array-into-batches hidden-state-gradient)]
-       (c-for
-        [idx 0 (< idx batch-size) (inc idx)]
-        (let [ridx (- batch-size idx 1)]
-          ;;gradient for hidden state
-          (nn-backend/biased-multiply-backward! backend (hidden-state-input ridx)
-                                             (first (:recurrence weights-and-biases))
-                                             (second (:recurrence weights-and-biases))
-                                             (out-gradient-vec ridx)
-                                             (hidden-state-gradients ridx)
-                                             (first (:recurrence weight-and-bias-gradients))
-                                             (second (:recurrence weight-and-bias-gradients))
-                                             (out-gradient-vec ridx))
-
-          (nn-backend/biased-multiply-backward! backend (input-vec ridx)
-                                             (first (:input weights-and-biases))
-                                             (second (:input weights-and-biases))
-                                             (out-gradient-vec ridx)
-                                             (hidden-state-gradients ridx)
-                                             (first (:input weight-and-bias-gradients))
-                                             (second (:input weight-and-bias-gradients))
-                                             (out-gradient-vec ridx))
-          )
-
-        )))
-    (nn-backend/biased-multiply-backward! backend )
-    )
-  )
+(defmethod create-cpu-layer :batch-normalization
+  [backend layer batch-size]
+  (->BatchNormalization backend))
 
 
+(defrecord LocalResponseNormalization [backend layer batch-size]
+  compute-protocols/ComputeLayer
+  (forward [this parameters input-buffers output-buffers]
+    (let [{:keys [n k alpha beta]} layer]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-lrn-forward (first-buffer input-buffers)
+                         (first-buffer output-buffers)
+                         (layer-output->tensor layer batch-size)
+                         n k alpha beta))))
+  (backward [this parameters output-buffers input-buffers]
+    (let [{:keys [n k alpha beta]} layer]
+      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+        (cpu-lrn-backward (first-buffer input-buffers)
+                          (first-gradient output-buffers)
+                          (first-gradient input-buffers)
+                          (layer-output->tensor layer batch-size)
+                          n k alpha beta)))))
+
+
+(defmethod create-cpu-layer :local-response-normalization
+  [backend layer batch-size]
+  (->LocalResponseNormalization backend layer batch-size))
 
 
 (extend-type CPUBackend
@@ -1219,28 +1177,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   drv/PStreamProvider
   (get-stream [backend] (.stream backend))
   nn-backend/PLayerCreation
-  (create-layer [backend {:keys [layer-type] :as layer-desc}]
-    (cond
-      (contains? #{:sigmoid :relu :tanh} layer-type)
-      (->ActivationLayer layer-type (.stream backend))
-      (= :softmax layer-type)
-      (->SoftmaxLayer (.stream backend) (:output-size layer-desc) (get layer-desc :channels 1))
-      (= :convolution layer-type)
-      (create-conv-layer backend (:conv-config layer-desc) (:batch-size layer-desc))
-      (= :max-pooling layer-type)
-      (->MaxPooling backend (:conv-config layer-desc))
-      (= :batch-normalization layer-type)
-      (->BatchNormalization backend)
-      (= :local-response-normalization layer-type)
-      (->LocalResponseNormalization backend
-                                    (long (:width layer-desc))
-                                    (long (:height layer-desc))
-                                    (long (:n-channels layer-desc))
-                                    (:n layer-desc)
-                                    (:k layer-desc)
-                                    (:alpha layer-desc)
-                                    (:beta layer-desc))
-      :else (throw (Exception. (str "Unrecognized layer type: " layer-type)))))
+  (create [backend layer batch-size]
+    (create-cpu-layer backend layer batch-size))
   opt/POptimiseBackend
   (adadelta-step! [backend ^DeviceArray gradient ^DeviceArray parameters
                    gradient-alpha param-offset decay epsilon

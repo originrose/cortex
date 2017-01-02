@@ -7,7 +7,8 @@
                  [org.clojure/core.async "0.2.391"]
                  [thinktopic/datatype "0.1.0"]
                  [thinktopic/cortex "0.3.1-SNAPSHOT"]
-                 [thinktopic/cortex-datasets "0.3.1-SNAPSHOT"]]
+                 [thinktopic/cortex-datasets "0.3.1-SNAPSHOT"]
+                 [com.github.fommil.netlib/all "1.1.2" :extension "pom"]]
   :java-source-paths ["java"]
   :plugins [[lein-codox "0.10.2"]]
   )

@@ -1,14 +1,17 @@
 (ns cortex.suite.train
   (:require [cortex.suite.io :as suite-io]
-            [cortex.nn.description :as desc]
-            [think.compute.nn.train :as train]
-            [think.compute.nn.description :as compute-desc]
             [think.compute.nn.cuda-backend :as gpu-compute]
+            [cortex.nn.protocols :as cp]
             [think.resource.core :as resource]
             [clojure.java.io :as io]
-            [think.compute.optimise :as opt]
             [cortex.dataset :as ds]
-            [think.compute.batching-system :as bs]))
+            [think.compute.batching-system :as bs]
+            [think.compute.nn.compute-execute :as ce]
+            [think.compute.nn.cuda-backend :as cuda-backend]
+            [cortex.nn.execute :as execute]
+            [cortex.nn.traverse :as traverse]
+            [cortex.optimise :as cortex-opt]
+            [cortex.nn.build :as build]))
 
 
 (defn load-network
@@ -23,41 +26,47 @@ in initial description.  Else returns the initial description"
 
 
 (defn save-network
-  [network network-loss initial-description network-filename]
-  (let [write-data {:cv-loss network-loss
-                    :network-description (desc/network->description network)
-                    :initial-description initial-description}]
+  [context network network-loss initial-description network-filename]
+  (let [write-data (-> (cp/save-to-network context network {})
+                       (assoc :cv-loss network-loss
+                              :initial-description initial-description))]
     (suite-io/write-nippy-file network-filename write-data)
     write-data))
 
 
 (defn per-epoch-eval-training-network
-  [best-network-atom network-filename initial-description
-   best-network-function loss-compare-fn cv-input cv-output
-   epoch-idx {:keys [batching-system network] :as train-config}]
-  (let [{:keys [train-config avg-loss inferences]}
-        (train/evaluate-training-network cv-output train-config :cross-validation)
-        current-best-loss (get @best-network-atom :cv-loss)]
-
-    (println (format "Loss for epoch %s: %s" epoch-idx avg-loss))
-    (when (loss-compare-fn avg-loss current-best-loss)
+  [context best-network-atom network-filename initial-description
+   best-network-function cv-columnar-input cv-output
+   {:keys [network inferences]}]
+  (let [node-loss-map (->> (execute/inferences->node-id-loss-pairs network inferences cv-output)
+                           (into {}))
+        current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
+                            (when (map? best-loss)
+                              best-loss)
+                            {})]
+    (println (format "Loss for epoch %s: %s" (get network :epoch-count) node-loss-map))
+    (when (every? (fn [[id ave-loss]]
+                    (if-let [best (get current-best-loss id)]
+                      (< ave-loss best)
+                      true))
+                  node-loss-map)
       (println "Saving network")
       (reset! best-network-atom
-              (save-network network avg-loss initial-description network-filename))
+              (save-network context network node-loss-map initial-description network-filename))
       (when best-network-function
-        (best-network-function {:inferences inferences
-                                :labels cv-output
-                                :data cv-input
-                                :dataset (bs/get-dataset batching-system)
-                                :loss avg-loss}))))
-  @best-network-atom)
+        ;;We use the same format here as the output of the evaluate network function below
+        ;;so that clients can use the same network display system.  This is why we have data
+        ;;in columnar formats.
+        (best-network-function {:inferences (ds/batches->columnsv inferences)
+                                :labels (ds/batches->columnsv cv-output)
+                                :data cv-columnar-input
+                                :loss node-loss-map}))))
+  true)
 
 
-(defn build-gpu-network
-  [network-description batch-size]
-  (compute-desc/build-and-create-network network-description
-                                         (gpu-compute/create-backend :float)
-                                         batch-size))
+(defn create-cuda-context
+  []
+  (ce/create-context #(cuda-backend/create-backend :float)))
 
 
 (defn backup-trained-network
@@ -102,70 +111,70 @@ cross-validation dataset in memory while training.
 If epoch-count is provided then we stop training after that many epochs else
 we continue to train forever.
 "
-  [dataset initial-description input-labels output-labels-and-loss
+  [dataset initial-description network
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
-             optimiser loss-compare-fn]
+             optimiser]
       :or {batch-size 128
            network-filestem "trained-network"
-           optimiser (opt/adam)
-           loss-compare-fn (fn [new-loss old-loss]
-                             (< (first new-loss)
-                                (first old-loss)))}}]
+           optimiser (cortex-opt/adam)}}]
   (resource/with-resource-context
     (let [network-filename (str network-filestem ".nippy")
           ;;Backup the trained network if we haven't already
-          network-desc-loss-map (if-let [loaded-network (load-network network-filename
-                                                                      initial-description)]
-                                  loaded-network
-                                  (do
-                                    (backup-trained-network network-filestem)
-                                    {:network-description initial-description
-                                     :initial-description initial-description
-                                     :cv-loss (vec (repeat (count output-labels-and-loss)
-                                                           Double/MAX_VALUE))}))
-          all-labels (concat input-labels
-                             (map first output-labels-and-loss))
+          network (if-let [loaded-network (load-network network-filename
+                                                        initial-description)]
+                    loaded-network
+                    (do
+                      (backup-trained-network network-filestem)
+                      (merge network
+                             {:initial-description initial-description
+                              :cv-loss {}})))
 
-          [cv-input cv-labels] (ds/batch-sequence->column-groups
-                                dataset batch-size :cross-validation
-                                [input-labels (mapv first output-labels-and-loss)])
-          ;;Realize these concretely so that we don't pay for a bunch
-          ;;of thunking over and over again.
-          cv-input (mapv vec cv-input)
-          cv-labels (mapv vec cv-labels)
-          best-network-atom (atom network-desc-loss-map)
-          network-description (:network-description network-desc-loss-map)
-          network (build-gpu-network network-description batch-size)
-          train-sequence (train/create-train-epoch-sequence network optimiser dataset
-                                                            input-labels output-labels-and-loss)
-          epoch-processor (partial per-epoch-eval-training-network
+          input-streams (traverse/get-input-streams network)
+          output-streams (traverse/get-output-streams network)
+          cv-columnar-input (->> (ds/get-batches dataset batch-size :cross-validation input-streams)
+                                 ds/batches->columns)
+          cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
+          best-network-atom (atom network)
+          context (create-cuda-context)
+          train-sequence (execute/train context network dataset [] []
+                                        :batch-size batch-size
+                                        :optimiser optimiser
+                                        :infer-batch-type :cross-validation)
+          epoch-processor (partial per-epoch-eval-training-network context
                                    best-network-atom network-filename initial-description
-                                   best-network-fn loss-compare-fn cv-input
-                                   cv-labels)]
+                                   best-network-fn cv-columnar-input cv-labels)]
       (->> (if epoch-count
              (take epoch-count train-sequence)
              train-sequence)
-           (map-indexed epoch-processor)
+           (map epoch-processor)
            doall))))
+
+(defn- bindings->streams
+  [bindings]
+  (->> bindings
+       (map :stream)
+       (remove nil?)
+       set))
 
 
 (defn evaluate-network
   "Given a single-output network description and a dataset with the keys
 :data and :labels produced set of inferences, answers, and the observations
-used for both along with the original dataset."
-  [dataset network-description & {:keys [batch-size batch-type input-labels output-labels]
-                                  :or {batch-size 128
-                                       batch-type :holdout
-                                       input-labels [:data]
-                                       output-labels [:labels]}}]
-  (resource/with-resource-context
-    (let [[cv-input cv-labels] (ds/batch-sequence->column-groups
-                                dataset batch-size batch-type
-                                [input-labels output-labels])
-          network (build-gpu-network network-description batch-size)
-          inferences (train/run network dataset input-labels :batch-type batch-type)]
-      {:dataset dataset
-       :labels cv-labels
-       :inferences inferences
-       :data cv-input})))
+used for both along with the original dataset.  This expects a network with
+existing traversal bindings."
+  [dataset network
+   & {:keys [batch-size batch-type]
+      :or {batch-size 128
+           batch-type :holdout}}]
+  (let [input-streams (traverse/get-input-streams network)
+        output-streams (traverse/get-output-streams network)
+        inferences (execute/infer-columns (create-cuda-context) network dataset
+                                          [] []
+                                          :batch-size batch-size
+                                          :infer-batch-type batch-type)
+        [data labels] (ds/batch-sequence->column-groups dataset batch-size batch-type
+                                                        [input-streams output-streams])]
+    {:labels labels
+     :inferences inferences
+     :data data}))

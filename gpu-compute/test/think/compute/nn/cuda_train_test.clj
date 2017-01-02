@@ -1,29 +1,26 @@
 (ns think.compute.nn.cuda-train-test
   (:require [clojure.test :refer :all]
-            [think.compute.verify.nn.train :as verify-train]
+            [cortex.verify.nn.train :as verify-train]
             [think.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
-            [think.compute.nn.cuda-backend :as cuda-backend]))
+            [think.compute.nn.cuda-backend :as cuda-backend]
+            [think.compute.nn.compute-execute :as ce]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
-(defn create-backend
+(defn create-context
   []
-  (cuda-backend/create-backend verify-utils/*datatype*))
+  (ce/create-context
+   #(cuda-backend/create-backend verify-utils/*datatype*)))
 
-(def-double-float-test train-step
-  (verify-train/test-train-step (create-backend)))
+(deftest corn
+  (verify-train/test-corn (create-context)))
 
-(def-double-float-test optimise
-  (verify-train/test-optimise (create-backend)))
+(def-double-float-test mnist
+  (verify-train/train-mnist (create-context)))
 
-(def-double-float-test corn
-  (verify-train/test-corn (create-backend)))
+(comment
+ (def-double-float-test simple-learning-attenuation
+   (verify-train/test-simple-learning-attenuation (create-context)))
 
-(deftest layer->description
-  (verify-train/layer->description (create-backend)))
-
-(def-double-float-test simple-learning-attenuation
-  (verify-train/test-simple-learning-attenuation (create-backend)))
-
-(def-double-float-test softmax-channels
-  (verify-train/test-softmax-channels (create-backend)))
+ (def-double-float-test softmax-channels
+   (verify-train/test-softmax-channels (create-context))))

@@ -245,6 +245,11 @@ argument for creating an array storing a batch of data."
 (defn with-tensor
   "Given the data in this array, create a new array with a different tensor."
   [^DeviceArray ary ^Tensor tensor]
+  (when-not (<= (long (m/ecount tensor))
+                (long (m/ecount (.tensor ary))))
+    (throw (ex-info "Array reshaped to larger size!"
+                    {:input-tensor (.tensor ary)
+                     :output-tensor tensor})))
   (->DeviceArray (.device-buffer ary) tensor))
 
 

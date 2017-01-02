@@ -1,70 +1,66 @@
 (ns think.compute.nn.cuda-layers-test
   (:require [think.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
             [clojure.test :refer :all]
-            [think.compute.verify.nn.layers :as verify-layers]
-            [think.compute.nn.cuda-backend :as cuda-backend]))
+            [cortex.verify.nn.layers :as verify-layers]
+            [think.compute.nn.cuda-backend :as cuda-backend]
+            [think.compute.nn.compute-execute :as compute-execute]))
 
 
 (use-fixtures :each verify-utils/test-wrapper)
 
-(defn create-backend
+(defn create-context
   []
-  (cuda-backend/create-backend verify-utils/*datatype*))
+  (compute-execute/create-context
+   #(cuda-backend/create-backend verify-utils/*datatype*)))
 
 
-(def-double-float-test relu-activation
-  (verify-layers/test-relu-activation (create-backend)))
+(deftest relu-activation
+  (verify-layers/relu-activation (create-context)))
 
-(def-double-float-test relu-activation-batch
-  (verify-layers/test-relu-activation-batch (create-backend)))
+(deftest relu-activation-batch
+  (verify-layers/relu-activation-batch (create-context)))
 
-(def-double-float-test linear
-  (verify-layers/test-linear (create-backend)))
+(deftest linear
+  (verify-layers/linear (create-context)))
 
-(def-double-float-test linear-batch
-  (verify-layers/test-linear-batch (create-backend)))
+(deftest linear-batch
+  (verify-layers/linear-batch (create-context)))
 
-(def-double-float-test l2-max-constraint
-  (verify-layers/test-l2-max-constraint (create-backend)))
+(deftest sigmoid
+  (verify-layers/test-activation (create-context) :logistic))
 
-(def-double-float-test sigmoid
-  (verify-layers/test-activation (create-backend) :sigmoid))
+(deftest tanh
+  (verify-layers/test-activation (create-context) :tanh))
 
-(def-double-float-test tanh
-  (verify-layers/test-activation (create-backend) :tanh))
+(deftest sigmoid-batch
+  (verify-layers/test-activation-batch (create-context) :logistic))
 
-(def-double-float-test sigmoid-batch
-  (verify-layers/test-activation-batch (create-backend) :sigmoid))
+(deftest tanh-batch
+  (verify-layers/test-activation-batch (create-context) :tanh))
 
-(def-double-float-test tanh-batch
-  (verify-layers/test-activation-batch (create-backend) :tanh))
+(deftest softmax
+  (verify-layers/softmax (create-context)))
 
-(def-double-float-test softmax
-  (verify-layers/softmax (create-backend)))
+(deftest softmax-batch
+  (verify-layers/softmax-batch (create-context)))
 
-(def-double-float-test softmax-batch
-  (verify-layers/softmax-batch (create-backend)))
+(deftest softmax-batch-channels
+  (verify-layers/softmax-batch-channels (create-context)))
 
-(def-double-float-test softmax-batch-channels
-  (verify-layers/softmax-batch-channels (create-backend)))
+(deftest conv-layer
+  (verify-layers/basic-conv-layer (create-context)))
 
-(def-double-float-test conv-layer
-  (verify-layers/basic-conv-layer (create-backend)))
+(deftest pool-layer
+  (verify-layers/pool-layer-basic (create-context)))
 
-(def-double-float-test pool-layer
-  (verify-layers/pool-layer-basic (create-backend)))
+(deftest dropout-bernoulli
+  (verify-layers/dropout-bernoulli (create-context)))
 
-(def-double-float-test dropout-bernoulli
-  (verify-layers/dropout-bernoulli (create-backend)))
+(deftest dropout-gaussian
+  (verify-layers/dropout-gaussian (create-context)))
 
-(def-double-float-test dropout-gaussian
-  (verify-layers/dropout-gaussian (create-backend)))
+(deftest batch-normalization
+  (verify-layers/batch-normalization (create-context)))
 
-(def-double-float-test split
-  (verify-layers/split-basic (create-backend)))
-
-(def-double-float-test batch-normalization
-  (verify-layers/batch-normalization (create-backend)))
-
-(def-double-float-test local-response-normalization-forward
-  (verify-layers/lrn-forward (create-backend)))
+(deftest local-response-normalization-forward
+  (verify-layers/lrn-forward (create-context)))

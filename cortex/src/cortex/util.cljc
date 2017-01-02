@@ -3,21 +3,18 @@
   (:require
     [clojure.core.matrix :as m]
     [clojure.core.matrix.random :as rand-matrix]
+    [cortex.core-matrix-backends :as b]
     [clojure.string :as str]
-    [cortex.nn.protocols :as cp]
-    [cortex.nn.backends :as b]
     [clojure.pprint :as pp]
     #?(:cljs [goog.string :refer [format]]))
-
-  #?(:clj (:import [mikera.vectorz Vectorz]))
-  #?(:clj (:import [java.io Writer]
+  #?(:clj (:import [mikera.vectorz Vectorz]
+                   [java.io Writer]
                    [java.util Random])))
 
 #?(:clj (do (set! *warn-on-reflection* true)
             (set! *unchecked-math* :warn-on-boxed)))
 
 ;;;; Vars
-
 (defmacro defonce
   "Like clojure.core/defonce, but allows docstring."
   {:added "1.0"
@@ -52,30 +49,9 @@
   [expr]
   `(format "Elapsed time: %f msecs" (:time (ctime* ~expr))))
 
-;;;; Mathematics
-
-(defn tanh'
-  "Compute the derivative of the tanh function for a given output.  Works on any array shape.
-
-     tanh'(y) = 1 - tanh(y)^2 "
-  [y]
-  (if (number? y)
-    (let [y (double y)] (- 1 (* y y)))
-    (let [r (m/array :vectorz y)]
-      (m/fill! r 1)
-      (m/add-scaled-product! r y y -1.0)
-      r)))
-
-(defn logistic'
-  "Compute the derivative of the logistic (sigmoid) function for a given output. Works on any array shape.
-
-     sigma'(y) = y * (1 - y) "
-  [y]
-  (m/emul y (m/sub 1.0 y)))
-
 (defn clamp
   "Constrains x to be between floor and ceil."
-  [^double floor ^double x ^double ceil]
+  ^double [^double floor ^double x ^double ceil]
   (max floor
        (min x ceil)))
 
@@ -90,7 +66,7 @@
 (defn avg
   "Calculates the arithmetic mean of a sequence of numbers."
   [& xs]
-  (/ ^double (apply + xs) (count xs)))
+  (double (/ (double (m/esum xs)) (count xs))))
 
 ;;;; Random number generation
 
@@ -271,15 +247,6 @@
     :else
     data))
 
-;;;; Lazy maps
-
-;;; Inspired by https://github.com/Malabarba/lazy-map-clojure
-;;; but makes a few improvements, like having the seq not return
-;;; map entries with Delays still in them, supporting reduce-kv,
-;;; and having a prettier str representation.
-
-;;;; Lazy maps -- convenience macro for customizing pr-str
-
 (defmacro extend-print
   [class str-fn]
   `(do
@@ -289,270 +256,6 @@
      (defmethod print-method ~class
        [obj# ^Writer writer#]
        (.write writer# ^String (~str-fn obj#)))))
-
-;;;; Lazy maps -- placeholder text for unrealized values
-
-(defrecord PlaceholderText [text])
-
-(extend-print PlaceholderText :text)
-
-;;;; Lazy maps -- map entry type
-
-(deftype LazyMapEntry [key_ val_]
-
-  clojure.lang.Associative
-  (containsKey [this k]
-    (boolean (#{0 1} k)))
-  (entryAt [this k]
-    (cond
-      (= k 0) (map-entry 0 key_)
-      (= k 1) (LazyMapEntry. 1 val_)
-      :else nil))
-
-  clojure.lang.IFn
-  (invoke [this k]
-    (.valAt this k))
-
-  clojure.lang.IHashEq
-  (hasheq [this]
-    (.hasheq
-      ^clojure.lang.IHashEq
-      (vector key_ (force val_))))
-
-  clojure.lang.ILookup
-  (valAt [this k]
-    (cond
-      (= k 0) key_
-      (= k 1) (force val_)
-      :else nil))
-  (valAt [this k not-found]
-    (cond
-      (= k 0) key_
-      (= k 1) (force val_)
-      :else not-found))
-
-  clojure.lang.IMapEntry
-  (key [this] key_)
-  (val [this] (force val_))
-
-  clojure.lang.Indexed
-  (nth [this i]
-    (cond
-      (= i 0) key_
-      (= i 1) (force val_)
-      (integer? i) (throw (IndexOutOfBoundsException.))
-      :else (throw (IllegalArgumentException. "Key must be integer")))
-    (.valAt this i))
-  (nth [this i not-found]
-    (try
-      (.nth this i)
-      (catch Exception _ not-found)))
-
-  clojure.lang.IPersistentCollection
-  (count [this] 2)
-  (empty [this] false)
-  (equiv [this o]
-    (.equiv
-      [key_ (force val_)]
-      o))
-
-  clojure.lang.IPersistentStack
-  (peek [this] (force val_))
-  (pop [this] [key_])
-
-  clojure.lang.IPersistentVector
-  (assocN [this i v]
-    (.assocN [key_ (force val_)] i v))
-  (cons [this o]
-    (.cons [key_ (force val_)] o))
-
-  clojure.lang.Reversible
-  (rseq [this] (lazy-seq (list (force val_) key_)))
-
-  clojure.lang.Seqable
-  (seq [this]
-    (cons key_ (lazy-seq (list (force val_)))))
-
-  clojure.lang.Sequential
-
-  java.io.Serializable
-
-  java.lang.Comparable
-  (compareTo [this o]
-    (.compareTo
-      ^java.lang.Comparable
-      (vector key_ (force val_))
-      o))
-
-  java.lang.Iterable
-  (iterator [this]
-    (.iterator
-      ^java.lang.Iterable
-      (.seq this)))
-
-  java.lang.Object
-  (toString [this]
-    (str [key_ (if (and (delay? val_)
-                        (not (realized? val_)))
-                 (->PlaceholderText "<unrealized>")
-                 (force val_))]))
-
-  java.util.Map$Entry
-  (getKey [this] key_)
-  (getValue [this] (force val_))
-
-  java.util.RandomAccess)
-
-(defn lazy-map-entry
-  [k v]
-  (LazyMapEntry. k v))
-
-(extend-print LazyMapEntry #(.toString ^LazyMapEntry %))
-
-;;;; Lazy maps -- map type
-
-(declare LazyMap->printable)
-
-(deftype LazyMap [^clojure.lang.IPersistentMap contents]
-
-  clojure.lang.Associative
-  (containsKey [this k]
-    (and contents
-         (.containsKey contents k)))
-  (entryAt [this k]
-    (and contents
-         (lazy-map-entry k (.valAt contents k))))
-
-  clojure.lang.IFn
-  (invoke [this k]
-    (.valAt this k))
-  (invoke [this k not-found]
-    (.valAt this k not-found))
-
-  clojure.lang.IKVReduce
-  (kvreduce [this f init]
-    (reduce-kv f init (into {} this)))
-
-  clojure.lang.ILookup
-  (valAt [this k]
-    (and contents
-         (force (.valAt contents k))))
-  (valAt [this k not-found]
-    ;; This will not behave properly if not-found is a Delay,
-    ;; but that's a pretty obscure edge case.
-    (and contents
-         (force (.valAt contents k not-found))))
-
-  clojure.lang.IMapIterable
-  (keyIterator [this]
-    (.iterator
-      ^java.lang.Iterable
-      (keys contents)))
-  (valIterator [this]
-    (.iterator
-      ;; Using the higher-arity form of map prevents chunking.
-      ^java.lang.Iterable
-      (map (fn [[k v] _]
-             (force v))
-           contents
-           (repeat nil))))
-
-  clojure.lang.IPersistentCollection
-  (count [this]
-    (if contents
-      (.count contents)
-      0))
-  (empty [this]
-    (or (not contents)
-        (.empty contents)))
-  (cons [this o]
-    (LazyMap. (.cons (or contents {}) o)))
-  (equiv [this o]
-    (.equiv
-      ^clojure.lang.IPersistentCollection
-      (into {} this) o))
-
-  clojure.lang.IPersistentMap
-  (assoc [this key val]
-    (LazyMap. (.assoc (or contents {}) key val)))
-  (without [this key]
-    (LazyMap. (.without (or contents {}) key)))
-
-  clojure.lang.Seqable
-  (seq [this]
-    ;; Using the higher-arity form of map prevents chunking.
-    (map (fn [[k v] _]
-           (lazy-map-entry k v))
-         contents
-         (repeat nil)))
-
-  java.lang.Iterable
-  (iterator [this]
-    (.iterator
-      ^java.lang.Iterable
-      (.seq this)))
-
-  java.lang.Object
-  (toString [this]
-    (str (LazyMap->printable this))))
-
-(extend-print LazyMap #(.toString ^LazyMap %))
-
-(defn LazyMap->printable
-  "Converts a lazy map to a regular map that has placeholder text
-  for the unrealized values. No matter what is done to the returned
-  map, the original map will not be forced."
-  [m]
-  (map-vals #(if (and (delay? %)
-                      (not (realized? %)))
-               (->PlaceholderText "<unrealized>")
-               (force %))
-            (.contents ^LazyMap m)))
-
-(defn lazy-map-dispatch
-  "This is a dispatch function for clojure.pprint that prints
-  lazy maps without forcing them."
-  [obj]
-  (cond
-    (instance? LazyMap obj)
-    (pp/simple-dispatch (LazyMap->printable obj))
-    (instance? PlaceholderText obj)
-    (pr obj)
-    :else
-    (pp/simple-dispatch obj)))
-
-(defmacro lazy-map
-  [map]
-  `(->LazyMap
-     ~(->> map
-        (apply concat)
-        (partition 2)
-        (clojure.core/map (fn [[k v]] [k `(delay ~v)]))
-        (into {}))))
-
-(defn force-map
-  "Realizes all the values in a lazy map, returning a regular map."
-  [m]
-  (into {} m))
-
-(defn ->?LazyMap
-  "Behaves the same as ->LazyMap, except that if m is already a lazy
-  map, returns it directly. This prevents the creation of a lazy map
-  wrapping another lazy map, which (while not terribly wrong) is not
-  the best."
-  [m]
-  (if (instance? LazyMap m)
-    m
-    (->LazyMap m)))
-
-;;;; Arrays and matrices
-
-(def EMPTY-VECTOR (m/new-array [0]))
-
-(defn empty-array
-  "Constructs a new empty (zero-filled) array of the given shape"
-  ([shape]
-   (m/new-array :vectorz shape)))
 
 (defn calc-mean-variance
   [data]
@@ -570,6 +273,7 @@
                         num-elems)]
         {:mean mean
          :variance variance}))))
+
 
 (defn ensure-gaussian!
   [data ^double mean ^double variance]
@@ -712,52 +416,8 @@
                (recur (inc i) (inc hits) (next sequence)))
              (recur (inc i) 0 (next sequence)))))))))
 
-;;;; Confusion matrices
-
-(defn confusion-matrix
-  "A confusion matrix shows the predicted classes for each of the actual
-  classes in order to understand performance and commonly confused classes.
-
-                   Predicted
-                 Cat Dog Rabbit
-         | Cat	   5  3  0
-  Actual | Dog	   2  3  1
-         | Rabbit  0  2  11
-
-  Initialize with a set of string labels, and then call add-prediction for
-  each prediction to accumulate into the matrix."
-  [labels]
-  (let [prediction-map (zipmap labels (repeat 0))]
-    (into {} (for [label labels]
-               [label prediction-map]))))
-
-(defn add-prediction
-  [conf-mat prediction label]
-  (update-in conf-mat [label prediction] inc))
-
-(defn print-confusion-matrix
-  [conf-mat]
-  (let [conf-rows (mapv (fn [[k v]]
-                          (merge v {:label k}))
-                        conf-mat)
-        label-row (vec (concat [:label] (keys conf-mat)))]
-    (pp/print-table label-row conf-rows)))
-
 ;;;; Time
 
-#?(:clj (defn timestamp [] (System/nanoTime))
-   :cljs (defn timestamp [] (.getTime (js/Date.))))
-
-(defn ms-elapsed
-  ([start]
-   (ms-elapsed start (timestamp)))
-  ([start end]
-   (let [start (double start)
-         end (double end)]
-     #?(:clj  (/ (- end start) 1000000.0))
-     :cljs (- end start))))
-
-;;;; Exceptions
 
 #?(:clj
    (defmacro error
@@ -858,46 +518,3 @@
      (m/sub! result target)
      (m/scale! result 2.0)
      result)))
-
-(def DIFFERENCE-DELTA 1e-5)
-
-;; TODO: This will return the relative differences between the components of the
-;; analytic gradient computed by the network and the numerical gradient, but it
-;; would be nice if it just said, yes!  Need to figure out how close they should
-;; be.  Maybe just check that each difference is < 0.01 ???
-;;
-;; You may want to check cortex.optimise.functions/check-gradient. -- Radon 07/16
-(defn gradient-check
-  "Use a finite difference approximation of the derivative to verify
-  that backpropagation and the derivatives of layers and activation functions are correct.
-
-    f'(x) =  f(x + h) - (f(x - h)
-             --------------------
-                    (2 * h)
-
-  Where h is our perterbation of the input, or delta.  This requires evaluating the
-  loss function twice for every dimension of the gradient.
-  "
-  [net loss-fn optimizer input label & {:keys [delta]}]
-  (let [delta (double (or delta DIFFERENCE-DELTA))
-        net (cp/forward net input)
-        output (cp/output net)
-        loss (cp/loss loss-fn output label)
-        loss-gradient (cp/loss-gradient loss-fn output label)
-        net (cp/backward net input loss-gradient)
-        gradient (double (cp/input-gradient net))]
-    (map
-      (fn [i]
-        (let [xi (double (m/mget input 0 i))
-              x1 (m/mset input 0 i (+ xi delta))
-              y1 (cp/forward net input)
-              c1 (double (cp/loss loss-fn y1 label))
-
-              x2 (m/mset input 0 i (- xi delta))
-              y2 (cp/forward net input)
-              c2 (double (cp/loss loss-fn y2 label))
-              numeric-gradient (double (/ (- c1 c2) (* 2 delta)))
-              relative-error (/ (Math/abs (- gradient numeric-gradient))
-                                (Math/abs (+ gradient numeric-gradient)))]
-          relative-error))
-      (range (m/column-count input)))))

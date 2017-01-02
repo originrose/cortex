@@ -6,18 +6,23 @@
             [think.image.patch :as patch]
             [think.image.data-augmentation :as image-aug]
             [think.compute.optimise :as opt]
-            [cortex.nn.description :as desc]
+            [cortex.nn.layers :as layers]
             [think.image.image-util :as image-util]
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
-            [cortex.suite.classification :as classification]
             [cortex.dataset :as ds]
-            [think.compute.nn.train :as train]
+            [cortex.suite.classification :as classification]
             [cortex.suite.inference :as infer]
             [cortex.suite.io :as suite-io]
             [cortex.suite.train :as suite-train]
+            [cortex.loss :as loss]
             [think.gate.core :as gate]))
 
+
+(def image-size 28)
+(def num-classes 10)
+(def num-channels 1)
+(def datatype :float)
 
 
 ;;We have to setup the web server slightly different when running
@@ -27,18 +32,12 @@
 (def ^:dynamic *running-from-repl* true)
 
 
-
-(def mnist-image-size 28)
-(def mnist-num-classes 10)
-(def mnist-num-channels 1)
-(def mnist-datatype :float)
-
 (defn ds-image->png
   [ds-data]
-  (let [data-bytes (byte-array (* 28 28))
+  (let [data-bytes (byte-array (* image-size image-size))
         num-pixels (alength data-bytes)
-        retval (image/new-image image/*default-image-impl* mnist-image-size
-                                mnist-image-size :gray)]
+        retval (image/new-image image/*default-image-impl*
+                                image-size image-size :gray)]
     (c-for [idx 0 (< idx num-pixels) (inc idx)]
            (aset data-bytes idx
                  (unchecked-byte (* 255.0
@@ -49,7 +48,7 @@
 (defn vec-label->label
   [ds-label]
   (get (vec (map str (range 10)))
-       (opt/max-index ds-label)))
+       (loss/max-index ds-label)))
 
 
 (defn write-data
@@ -89,20 +88,19 @@
     (dorun (pmap test-fn training-observation-label-seq))))
 
 
-(defn create-basic-mnist-description
-  []
-  [(desc/input mnist-image-size mnist-image-size mnist-num-channels)
-   (desc/convolutional 5 0 1 20)
-   (desc/max-pooling 2 0 2)
-   (desc/relu)
-   (desc/convolutional 5 0 1 50)
-   (desc/max-pooling 2 0 2)
-   (desc/relu)
-   (desc/convolutional 1 0 1 50)
-   (desc/relu)
-   (desc/linear->relu 1000)
-   (desc/dropout 0.5)
-   (desc/linear->softmax mnist-num-classes)])
+(def initial-network
+  [(layers/input image-size image-size num-channels)
+   (layers/convolutional 5 0 1 20)
+   (layers/max-pooling 2 0 2)
+   (layers/relu)
+   (layers/convolutional 5 0 1 50)
+   (layers/max-pooling 2 0 2)
+   (layers/relu)
+   (layers/convolutional 1 0 1 50)
+   (layers/relu)
+   (layers/linear->relu 1000)
+   (layers/dropout 0.5)
+   (layers/linear->softmax num-classes)])
 
 
 (def max-image-rotation-degrees 25)
@@ -131,7 +129,7 @@
 
 (defn mnist-observation->image
   [observation]
-  (patch/patch->image [observation observation observation] mnist-image-size))
+  (patch/patch->image [observation observation observation] image-size))
 
 
 ;;Bumping this up and producing several images per source image means that you may need
@@ -165,59 +163,60 @@ to avoid overfitting the network to the training data."
           (repeat label))))
 
 
-(defn create-dataset
+(defonce create-dataset
+  (memoize
+   (fn
+     []
+     (println "checking that we have produced all images")
+     (build-image-data)
+     (println "building dataset")
+     (classification/create-classification-dataset-from-labeled-data-subdirs
+      "mnist/training" "mnist/testing"
+      (ds/create-image-shape num-channels image-size image-size)
+      (partial observation-label-pairs true datatype)
+      (partial observation-label-pairs false datatype)
+      :epoch-element-count 60000
+      :shuffle-training-epochs? (> *num-augmented-images-per-file* 2)))))
+
+
+(defn load-trained-network
   []
-  (println "checking that we have produced all images")
-  (build-image-data)
-  (println "building dataset")
-  (classification/create-classification-dataset-from-labeled-data-subdirs
-   "mnist/training" "mnist/testing"
-   (ds/create-image-shape mnist-num-channels mnist-image-size mnist-image-size)
-   (partial observation-label-pairs true mnist-datatype)
-   (partial observation-label-pairs false mnist-datatype)
-   :epoch-element-count 60000
-   :shuffle-training-epochs? (> *num-augmented-images-per-file* 2)))
-
-
-
-(defn load-trained-network-desc
-  []
-  (:network-description (suite-io/read-nippy-file "trained-network.nippy")))
+  (suite-io/read-nippy-file "trained-network.nippy"))
 
 
 (defn display-dataset-and-model
-  ([dataset initial-description]
-   (let [data-display-atom (atom {})
+  ([dataset]
+   (let [initial-description initial-network
+         data-display-atom (atom {})
          confusion-matrix-atom (atom {})]
      (classification/reset-dataset-display data-display-atom dataset mnist-observation->image)
      (when-let [loaded-data (suite-train/load-network "trained-network.nippy"
                                                       initial-description)]
        (classification/reset-confusion-matrix confusion-matrix-atom mnist-observation->image
+                                              dataset
                                               (suite-train/evaluate-network
-                                                dataset
-                                                (:network-description loaded-data)
-                                                :batch-type :cross-validation)))
+                                               dataset
+                                               loaded-data
+                                               :batch-type :cross-validation)))
+
      (let [open-message
            (gate/open (atom
-                        (classification/create-routing-map confusion-matrix-atom
-                                                           data-display-atom))
+                       (classification/create-routing-map confusion-matrix-atom
+                                                          data-display-atom))
                       :clj-css-path "src/css"
                       :live-updates? *running-from-repl*
                       :port 8091)]
-       (println open-message))
+              (println open-message))
      confusion-matrix-atom))
   ([]
-   (display-dataset-and-model (create-dataset) (create-basic-mnist-description))
-   nil))
-
+   (display-dataset-and-model (create-dataset))))
 
 (defn train-forever
   []
   (let [dataset (create-dataset)
-        initial-description (create-basic-mnist-description)
-        confusion-matrix-atom (display-dataset-and-model dataset initial-description)]
+        confusion-matrix-atom (display-dataset-and-model dataset)]
     (classification/train-forever dataset mnist-observation->image
-                                  initial-description
+                                  initial-network
                                   :confusion-matrix-atom confusion-matrix-atom)))
 
 
@@ -234,11 +233,10 @@ to avoid overfitting the network to the training data."
                                                                             false))
         [test-file test-label] (first file-label-pairs)
         test-img (imagez/load-image test-file)
-        observation (mnist-png->observation mnist-datatype false test-img)]
+        observation (mnist-png->observation datatype false test-img)]
     (imagez/show test-img)
-    (infer/classify-one-observation (:network-description
-                                     (suite-io/read-nippy-file "trained-network.nippy"))
-                                    observation (ds/create-image-shape mnist-num-channels
-                                                                       mnist-image-size
-                                                                       mnist-image-size)
-                                    mnist-datatype (classification/get-class-names-from-directory "mnist/testing"))))
+    (infer/classify-one-observation (suite-io/read-nippy-file "trained-network.nippy")
+                                    observation (ds/create-image-shape num-channels
+                                                                       image-size
+                                                                       image-size)
+                                    (classification/get-class-names-from-directory "mnist/testing"))))

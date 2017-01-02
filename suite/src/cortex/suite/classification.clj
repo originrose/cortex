@@ -1,28 +1,21 @@
 (ns cortex.suite.classification
   (:require [cortex.dataset :as ds]
-            [cortex.nn.description :as desc]
             [cortex.suite.io :as suite-io]
             [clojure.java.io :as io]
             [think.parallel.core :as parallel]
             [taoensso.nippy :as nippy]
-            [think.compute.batching-system :as batch]
-            [think.compute.nn.train :as train]
             [think.compute.nn.cuda-backend :as gpu-compute]
             [think.compute.nn.cpu-backend :as cpu-backend]
-            [think.compute.nn.description :as compute-desc]
-            [think.compute.optimise :as opt]
+            [cortex.optimise :as opt]
             [think.resource.core :as resource]
             [cortex.util :as util]
             [clojure.core.matrix :as m]
             [clojure.edn]
-            [cortex.suite.train :as suite-train])
-  (:import [java.io File InputStream OutputStream ByteArrayOutputStream]
-           [javax.swing JComponent JLabel JPanel BoxLayout JScrollPane SwingConstants
-            BorderFactory]
-           [java.awt Graphics2D Color GridLayout BorderLayout Component Rectangle]
-           [java.awt.event ActionEvent ActionListener MouseListener MouseEvent]
-           [java.awt.image BufferedImage]
-           [mikera.gui Frames JIcon]))
+            [cortex.suite.train :as suite-train]
+            [cortex.loss :as loss]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.build :as build])
+  (:import [java.io File]))
 
 
 (set! *warn-on-reflection* true)
@@ -80,7 +73,7 @@ is infinite."
   [class-names]
   (let [index->class-name (into {} (map-indexed vector class-names))]
     (fn [label-vec]
-      (get index->class-name (opt/max-index label-vec)))))
+      (get index->class-name (loss/max-index label-vec)))))
 
 
 (defn create-classification-dataset
@@ -182,21 +175,32 @@ as it is training)."
                                    training-epoch-seq
                                    :shutdown-fn
                                    shutdown-fn)))
+
 (defonce last-network-eval (atom nil))
 
 (defn network-eval->rich-confusion-matrix
   "A rich confusion matrix is a confusion matrix with the list of inferences and
 observations in each cell instead of just a count."
-  [{:keys [dataset labels inferences data] :as network-eval}]
+  [dataset {:keys [labels inferences data] :as network-eval}]
   (reset! last-network-eval network-eval)
-  (let [class-names (get-in network-eval [:dataset :class-names])
-        vec->label #(class-names (opt/max-index (vec %)))
+  (let [class-names (get dataset :class-names)
+        vec->label #(class-names (loss/max-index (vec %)))
+        _ (when-not (and (= 1 (count inferences))
+                         (= 1 (count labels))
+                         (= 1 (count data)))
+            (throw (ex-info "Classification datasets should have 1 output, label, input."
+                            {:input (keys data)
+                             :labels (keys labels)
+                             :inferences (keys inferences)})))
         ;;There are a lot of firsts here because generically out network could take
         ;;many inputs and produce many outputs.  When we are training classification
         ;;tasks however we know this isn't the case; we have one input and one output
-        inference-answer-patch-pairs (->> (interleave (first inferences)
-                                                      (map vec->label (first labels))
-                                                      (first data))
+        inferences (first (vals inferences))
+        data (first (vals data))
+        labels (first (vals labels))
+        inference-answer-patch-pairs (->> (interleave inferences
+                                                      (map vec->label labels)
+                                                      data)
                                           (partition 3))
         initial-row (zipmap class-names (repeat {:inferences []
                                                  :observations []}))
@@ -233,13 +237,13 @@ observations in each cell instead of just a count."
 
 
 (defn reset-confusion-matrix
-  [confusion-matrix-atom observation->img-fn network-eval]
+  [confusion-matrix-atom observation->img-fn dataset network-eval]
   (swap! confusion-matrix-atom
          (fn [{:keys [update-index]}]
            (merge
             {:update-index (inc (long (or update-index 0)))}
             (rich-confusion-matrix->network-confusion-matrix
-             (network-eval->rich-confusion-matrix network-eval)
+             (network-eval->rich-confusion-matrix dataset network-eval)
              observation->img-fn))))
   nil)
 
@@ -279,7 +283,9 @@ observations in each cell instead of just a count."
   (->> (mapv (fn [{:keys [batch-type postprocess]}]
                (let [image-label-pairs
                      (->> (ds/get-batches dataset 50 batch-type [:data :labels])
-                          (mapcat #(apply interleave %))
+                          ds/batches->columns
+                          (#(interleave (get % :data)
+                                        (get % :labels)))
                           (partition 2)
                           postprocess
                           (take 100))]
@@ -341,8 +347,9 @@ observations in each cell instead of just a count."
 
 
 (defn best-network-function
-  [confusion-matrix-atom observation->img-fn network-eval]
-  (reset-confusion-matrix confusion-matrix-atom observation->img-fn network-eval))
+  [confusion-matrix-atom observation->img-fn dataset network-eval]
+  (reset-confusion-matrix confusion-matrix-atom observation->img-fn
+                          dataset network-eval))
 
 
 (defn train-forever
@@ -353,13 +360,13 @@ training will continue from there."
    & {:keys [epoch-count batch-size confusion-matrix-atom]
       :or {batch-size 128
            confusion-matrix-atom (atom {})}}]
-  (doseq [_ (repeatedly
-             #(suite-train/train-n dataset initial-description
-                                   [:data] [[:labels (opt/softmax-loss)]]
-                                   dataset
-                                   initial-description
-                                   :best-network-fn (partial best-network-function
-                                                             confusion-matrix-atom
-                                                             observation->image-fn)
-                                   :epoch-count epoch-count
-                                   :batch-size batch-size))]))
+  (let [network (-> (build/build-network initial-description)
+                    traverse/auto-bind-io)]
+   (doseq [_ (repeatedly
+              #(suite-train/train-n dataset initial-description network
+                                    :best-network-fn (partial best-network-function
+                                                              confusion-matrix-atom
+                                                              observation->image-fn
+                                                              dataset)
+                                    :epoch-count epoch-count
+                                    :batch-size batch-size))])))
