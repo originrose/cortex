@@ -333,10 +333,31 @@ along with failure reasons."
 
 
 (defn network->edges
+  "Get all of the edges of the network.  This is useful because a few algorithms above take
+the edge list."
   [network]
   (get-in network [:layer-graph :edges]))
 
 
 (defn network->node
+  "Get a node from the network."
   [network node-id]
   (get-in network [:layer-graph :id->node-map node-id]))
+
+
+(defn get-node-parameters
+  "Get a flattened form of the parameters for a given node.  The list of returned parameters
+will be a merged map of the parameter meta data, the parameter and the parameter buffer(s) should
+they exist.  Some transformations such as setting non-trainable? on the parameter level if the learning
+attenuation is 0 will happen."
+  [network node-id]
+  (let [node (network->node network node-id)]
+    (->> (layers/get-parameter-descriptions node)
+         (mapv (fn [{:keys [key] :as param-desc}]
+                 (let [param (get node key)
+                       buffers (get-in network [:layer-graph :buffers (get param :buffer-id)])
+                       retval (merge param-desc param buffers)]
+                   (assoc retval
+                          :non-trainable?
+                          (or (get retval :non-trainable?)
+                              (= 0.0 (double (get node :learning-attenuation 1.0)))))))))))
