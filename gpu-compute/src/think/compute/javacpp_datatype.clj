@@ -1,5 +1,7 @@
 (ns think.compute.javacpp-datatype
   (:require [think.datatype.core :as dtype]
+            [think.datatype.marshal :as marshal]
+            [think.datatype.time-test :as time-test]
             [clojure.core.matrix.protocols :as mp])
   (:import [org.bytedeco.javacpp
             BytePointer IntPointer LongPointer DoublePointer
@@ -123,3 +125,31 @@ https://github.com/bytedeco/javacpp/issues/155"
   (get-value [item ^long offset] (dtype/get-value (as-buffer item) offset))
   mp/PElementCount
   (element-count [item] (mp/element-count (as-buffer item))))
+
+(defn to-pointer
+  ^Pointer [obj] obj)
+
+(defmacro copy-to-impl
+  [dest-type cast-type-fn copy-to-dest-fn cast-fn]
+  `[(keyword (name ~copy-to-dest-fn)) (fn [src# src-offset# dest# dest-offset# n-elems#]
+                                        (~(eval copy-to-dest-fn)
+                                         (as-buffer src#) src-offset#
+                                         dest# dest-offset# n-elems#))])
+
+
+(extend Pointer
+  marshal/PCopyToArray
+  (->> (marshal/array-type-iterator copy-to-impl)
+       (into {}))
+  marshal/PCopyToBuffer
+  (->> (marshal/buffer-type-iterator copy-to-impl)
+       (into {})))
+
+
+(defn float->double-ary-time-test
+  []
+  (let [n-elems 100000
+        src (make-pointer-of-type :float (range n-elems))
+        dest (double-array n-elems)]
+    (time-test/time-test
+     #(dtype/copy! src 0 dest 0 n-elems))))
