@@ -1,5 +1,5 @@
 (ns cortex.verify.nn.import
-  (:require [cortex.nn.build :as build]
+  (:require [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.execute :as execute]
             [cortex.nn.protocols :as cp]
@@ -12,14 +12,14 @@
 (defn verify-model
   ([context network input layer-output-vec]
    (when-not (contains? network :layer-graph)
-     (throw (ex-info "Network appears to not be built (cortex.nn.build/build-network)"
+     (throw (ex-info "Network appears to not be built (cortex.nn.network/build-network)"
                      {:network-keys (try (keys network)
                                          (catch Exception e []))})))
    (when-let [failures (seq (get network :verification-failures))]
      (throw (Exception. (format "Description verification failed:\n %s"
                                 (with-out-str (clojure.pprint/pprint failures))))))
    (resource/with-resource-context
-     (let [[roots leaves] (build/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
+     (let [[roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
            input-bindings {(first roots) :data}
            output-bindings (->> leaves
                                 (map #(vector % {}))

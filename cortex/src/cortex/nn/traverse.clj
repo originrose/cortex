@@ -4,7 +4,7 @@ either inference or gradient descent on a layer graph.
 
 Note that input-bindings are maps from node-id to stream
 while output bindings are maps from node-id to {:stream :loss}."
-  (:require [cortex.nn.build :as build]
+  (:require [cortex.nn.network :as network]
             [cortex.nn.layers :as layers]
             [clojure.set :as c-set]
             [cortex.optimise :as optimise]))
@@ -55,7 +55,7 @@ while training no stream or loss is necessary"
   (assoc-in network [:traversal :output-bindings node-id]
             {:output-stream stream
              :loss (or loss
-                       (layers/auto-bind-loss node-id))}))
+                       (layers/get-layer-default-loss (network/network->node network node-id)))}))
 
 (defn ->output-binding
   "Create a stand-along output-binding"
@@ -97,7 +97,7 @@ while training no stream or loss is necessary"
 are exactly 1 root and leaf or to :data-x where x is a one-based index of the
 root and labels-x where labels are a 1-based index of the leaf.x"
   [network]
-  (let [[roots leaves] (build/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
+  (let [[roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
         input-name-fn (if (> (count roots) 1)
                         (fn [network]
                           (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
@@ -178,10 +178,10 @@ Each item in the sequence is a map of:
   (let [{:keys [id->node-map edges]} layer-graph
         {:keys [input-bindings output-bindings]} (get built-network :traversal)
         ;;Remove all edges that do not participate in the keep node set.
-        [roots leaves] (build/edges->roots-and-leaves edges)
-        parent->child-map (build/edges->parent->child-map edges)
-        child->parent-map (build/edges->child->parent-map edges)]
-    (->> (build/edges->dfs-seq edges :roots parent->child-map)
+        [roots leaves] (network/edges->roots-and-leaves edges)
+        parent->child-map (network/edges->parent->child-map edges)
+        child->parent-map (network/edges->child->parent-map edges)]
+    (->> (network/edges->dfs-seq edges :roots parent->child-map)
          (drop 1)
          (map (fn [id]
                 {:incoming (concat

@@ -1,7 +1,7 @@
 (ns cortex.nn.traverse-test
   (:require [cortex.nn.traverse :as traverse]
             [cortex.nn.layers :as layers]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
             [cortex.loss :as loss]
@@ -56,7 +56,7 @@
 (deftest build-big-description
   (let [input-bindings [(traverse/->input-binding :input-1 :data)]
         output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))]
-        network (-> (build/build-network mnist-description-with-toys)
+        network (-> (network/build-network mnist-description-with-toys)
                     (traverse/bind-input-bindings input-bindings)
                     (traverse/bind-output-bindings output-bindings))
         gradient-descent (->> (traverse/network->training-traversal network)

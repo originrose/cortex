@@ -1,4 +1,4 @@
-(ns cortex.nn.build
+(ns cortex.nn.network
   "A built network is a map with at least the key :network-description
 which is a graph of id->node-map, edges that describe the network.
 The build step is responsible for
@@ -15,161 +15,10 @@ The build step is responsible for
   (:import [java.util UUID]))
 
 
-
-(defmulti build-desc (fn [result item]
-                       (:type item)))
-
-
-(defmethod build-desc :input
-  [previous item]
-  (assoc item :input-size (get item :output-size)))
-
-
-(defn- carry-data-format-forward
-  [previous item]
-  (if-let [df (:output-data-format previous)]
-    (assoc item :input-data-format df)
-    item))
-
-(defn- carry-input-image-dims-forward
-  [previous item]
-  (if-let [channels (:output-channels previous)]
-    (assoc item :input-channels channels
-           :input-width (:output-width previous)
-           :input-height (:output-height previous))
-    item))
-
-(defmethod build-desc :linear
-  [previous item]
-  (let [input-size (:output-size previous)
-        result (assoc (->> (carry-data-format-forward previous item)
-                           (carry-input-image-dims-forward previous))
-                      :input-size input-size
-                      :output-data-format :planar)]
-    result))
-
-(defn- carry-image-dims-forward
-  [previous item]
-  (if-let [channels (:output-channels previous)]
-    (assoc (carry-input-image-dims-forward previous item)
-           :output-channels channels
-           :output-width (:output-width previous)
-           :output-height (:output-height previous))
-    item))
-
-(defn- build-pass-through-desc
-  "These layer types do not change their data types from input to output"
-  [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc (carry-image-dims-forward previous item)
-           :input-size io-size :output-size io-size)))
-
-
-;;Pure activation layers can be placed on images as well as
-;;on vectors.
-(defmethod build-desc :relu
-  [previous item]
-  (build-pass-through-desc previous item))
-
-(defmethod build-desc :logistic
-  [previous item]
-  (build-pass-through-desc previous item))
-
-(defmethod build-desc :tanh
-  [previous item]
-  (build-pass-through-desc previous item))
-
-(defmethod build-desc :dropout
-  [previous item]
-  (build-pass-through-desc previous item))
-
-(defmethod build-desc :softmax
-  [previous item]
-  (let [io-size (:output-size previous)]
-    (assoc item
-           :input-size io-size
-           :output-size io-size
-           :output-channels (get item :output-channels 1))))
-
-(defmethod build-desc :batch-normalization
-  [previous item]
-  (build-pass-through-desc previous item))
-
-(defmethod build-desc :local-response-normalization
-  [previous item]
-  (build-pass-through-desc previous item))
-
-
-(defn- get-padded-strided-dimension
-  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
-of the output of a conv-net ignoring channels.  Caffe does this slightly different
-for pooling verse convolutional layers.  Furthermore keras does this differently
-than caffe for pooling layers so this exact calculation has been the source of
-a few compatibility issues."
-  [input-dim pad kernel-size stride dimension-op]
-  (let [partial-result (/ (- (+ (double input-dim)
-                                (* 2 (double pad)))
-                             (double kernel-size))
-                          (double stride))
-        partial-result (double (condp = dimension-op
-                                 :floor (Math/floor partial-result)
-                                 :ceil (Math/ceil partial-result)))]
-    (long (+ partial-result 1))))
-
-
-(defn- convolutional-output-width
-  ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
-  (long (get-padded-strided-dimension input-width pad-x kernel-width
-                                      stride-x dimension-op)))
-
-
-(defn- convolutional-output-height
-  ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
-  (long (get-padded-strided-dimension input-height pad-y kernel-height
-                                      stride-y dimension-op)))
-
-
-(defn- build-convolutional-type-desc
-  [previous item ^long output-channels]
-  (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
-                num-kernels dimension-op]
-         :or {dimension-op :floor}} item
-        input-width (:output-width previous)
-        input-height (:output-height previous)
-        input-channels (:output-channels previous)
-        ;;Convolutional layers have to be calculated this way for cudnn compability
-        ;;so there is no option to do the calculation with a ceil operation.  Should one
-        ;;do that then the current cudnn operations will read outside of the provided
-        ;;buffer bounds on at least their forward pass
-        item (assoc item
-                    :input-width input-width
-                    :input-height input-height
-                    :input-channels input-channels)
-        output-width (convolutional-output-width item)
-        output-height (convolutional-output-height item)
-        output-size (* output-width output-height output-channels)
-        input-data-format (get previous :output-data-format :planar)
-        output-data-format (get item :output-data-format :planar)]
-    (assoc item
-           :output-width output-width :output-height output-height
-           :output-channels output-channels
-           :output-size output-size
-           :input-data-format input-data-format :output-data-format output-data-format)))
-
-
-(defmethod build-desc :convolutional
-  [previous {:keys [num-kernels] :as item}]
-  (when-not (= :floor (get item :dimension-op :floor))
-    (throw (ex-info "Convolutional layers can only have floor dimension operation"
-                    {:dimension-op (get item :dimension-op :floor)})))
-  (build-convolutional-type-desc previous item (long num-kernels)))
-
-
-(defmethod build-desc :max-pooling
-  [{:keys [output-channels]
-    :or {output-channels 1}
-    :as previous} item]
-  (build-convolutional-type-desc previous item (long output-channels)))
+(defn- build-node
+  [parent-nodes item]
+  (let [build-fn (layers/get-layer-build-fn item)]
+    (build-fn parent-nodes item)))
 
 
 (defn- generate-layer-ids
@@ -223,19 +72,12 @@ a few compatibility issues."
 
 (defn- build-graph-node
   [child->parent-map id->node-map {:keys [id] :as my-node}]
-  (let [parent-nodes (get child->parent-map id)
-        built-nodes (if parent-nodes
-                      (map #(build-desc (get id->node-map %) my-node)
-                           parent-nodes)
-                      [(build-desc nil my-node)])]
-    (when-not (every? #(= (first built-nodes) %) built-nodes)
-      (throw (ex-info "node differences detected during graph build step:"
-                      {:built-nodes built-nodes})))
-    (if-let [first-parent (first parent-nodes)]
-      (assoc
-       (first built-nodes)
-       :input-size (get-in id->node-map [first-parent :output-size]))
-      (first built-nodes))))
+  (let [parent-nodes (->> (get child->parent-map id)
+                          (map id->node-map))]
+
+    (cond-> (build-node parent-nodes my-node)
+      (seq parent-nodes)
+      (assoc :input-size (get (first parent-nodes) :output-size)))))
 
 
 (defn edges->roots-and-leaves
@@ -488,3 +330,13 @@ along with failure reasons."
     (assoc built-network
            :verification-failures (seq (verify-layer-graph layer-graph))
            :parameter-count (get-layer-graph-parameter-count layer-graph))))
+
+
+(defn network->edges
+  [network]
+  (get-in network [:layer-graph :edges]))
+
+
+(defn network->node
+  [network node-id]
+  (get-in network [:layer-graph :id->node-map node-id]))

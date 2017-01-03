@@ -9,7 +9,7 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.verify.nn.import :as verify-import]
             [cortex.nn.layers :as layers]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [think.compute.nn.compute-execute :as compute-execute])
   (:import [java.io StringReader]))
 
@@ -279,7 +279,7 @@ whitespace = #'\\s*'") parse-str)]
                           desc))
                       model)]
       {:prototxt prototxt
-       :model (build/build-network model)
+       :model (network/build-network model)
        :input input
        :layer-outputs layer-outputs})))
 
