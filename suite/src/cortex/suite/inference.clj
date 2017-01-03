@@ -4,7 +4,7 @@
             [think.compute.nn.compute-execute :as ce]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [cortex.loss :as loss]))
 
 
@@ -29,7 +29,7 @@
         dataset (ds/->InMemoryDataset {:data {:data observations
                                               :shape observation-dataset-shape}}
                                       (vec (range (count observations))))
-        [roots leaves] (build/edges->roots-and-leaves (get-in network [:layer-graph :edges]))]
+        [roots leaves] (network/edges->roots-and-leaves (network/network->edges network))]
     (when-not (= 1 (count roots))
       (throw (ex-info "Network must have exactly 1 root for infer-n-observations"
                       {:roots roots})))

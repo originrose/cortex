@@ -10,8 +10,7 @@
             [think.compute.nn.cuda-backend :as cuda-backend]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
-            [cortex.optimise :as cortex-opt]
-            [cortex.nn.build :as build]))
+            [cortex.optimise :as cortex-opt]))
 
 
 (defn load-network

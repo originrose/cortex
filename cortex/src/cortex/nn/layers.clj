@@ -9,18 +9,77 @@ constructors are all variable args with the extra arguments expected to be
 
 
 (defmulti get-layer-metadata
-  "Get the metadata for the layer.  This ecompasses
+  "Get the metadata for the layer.  This encompasses
 at least:
 :parameter-descriptions - A list of parameter descriptions.  see get-parameter-descriptons.
- :pass-set - a set of pass types the layer is used in.  The set of possible types could be empty
-   or any of #{:training :inference}."
+:pass-set - a set of pass types the layer is used in.  The set of possible types could be empty
+   or any of #{:training :inference}.
+:build-fn - A function that takes a list of previous built layers along with this layer and sets
+  information on this layer about its output size and such.  There is a default build function
+  provided if this layer has no build function specified for it that simple assumes the layer
+  does not change the dimensions of the input.
+:default-loss The default loss descriptor for this layer type if one isn't provided in the
+  output binding."
   :type)
+
+
+(defn- carry-input-image-dims-forward
+  [previous item]
+  (if-let [channels (:output-channels previous)]
+    (assoc item :input-channels channels
+           :input-width (:output-width previous)
+           :input-height (:output-height previous))
+    item))
+
+
+(defn- carry-image-dims-forward
+  [previous item]
+  (if-let [channels (:output-channels previous)]
+    (assoc (carry-input-image-dims-forward previous item)
+           :output-channels channels
+           :output-width (:output-width previous)
+           :output-height (:output-height previous))
+    item))
+
+
+(defn- ensure-single-parent
+  [previous-nodes node]
+  (when-not (= 1 (count previous-nodes))
+    (throw (ex-info "Node only takes a single node of input."
+                    {:node node
+                     :previous previous-nodes})))
+  (first previous-nodes))
+
+
+(defn- default-build-fn
+  [previous-nodes node]
+  (let [previous (ensure-single-parent previous-nodes node)
+        io-size (get previous :output-size)]
+    (-> (carry-image-dims-forward previous node)
+        (assoc :input-size io-size
+               :output-size io-size))))
+
+(defn- default-layer-metadata
+  []
+  {:parameter-descriptions []
+   :pass-set #{:training :inference}
+   :build-fn default-build-fn
+   :default-loss (loss/mse-loss)})
 
 
 (defmethod get-layer-metadata :default
   [layer]
-  {:parameter-descriptions []
-   :pass-set #{:training :inference}})
+  (default-layer-metadata))
+
+
+(defn get-layer-build-fn
+  [layer]
+  (get (get-layer-metadata layer) :build-fn default-build-fn))
+
+
+(defn get-layer-default-loss
+  [layer]
+  (get (get-layer-metadata layer) :default-loss (loss/mse-loss)))
 
 
 (def parameter-buffer-types
@@ -65,7 +124,13 @@ or it can be #{:training} if the layer is used only during training (dropout)
 (defmethod get-layer-metadata :input
   [layer]
   {:parameter-descriptions []
-   :pass-set #{}})
+   :pass-set #{}
+   :build-fn (fn [_ layer]
+               (assoc layer
+                      :input-size (get layer :output-size)
+                      :input-width (get layer :output-width)
+                      :input-height (get layer :output-height)
+                      :input-channels (get layer :output-channels)))})
 
 
 (defn linear
@@ -83,6 +148,15 @@ or it can be #{:training} if the layer is used only during training (dropout)
   [output-size])
 
 
+(defn- build-linear
+  [previous-seq item]
+  (let [previous (ensure-single-parent previous-seq item)
+        input-size (:output-size previous)
+        result (assoc (carry-input-image-dims-forward previous item)
+                      :input-size input-size)]
+    result))
+
+
 (defmethod get-layer-metadata :linear
   [desc]
   {:parameter-descriptions
@@ -92,7 +166,8 @@ or it can be #{:training} if the layer is used only during training (dropout)
     {:key :bias
      :type :bias
      :shape-fn linear-bias-parameter-shape}]
-   :pass-set #{:inference :training}})
+   :pass-set #{:inference :training}
+   :build-fn build-linear})
 
 
 (defn softmax
@@ -104,6 +179,25 @@ channel 2 with n-outputs"
       :as arg-map}]
   [(merge {:type :softmax :output-channels 1}
           arg-map)])
+
+
+(defn- build-softmax
+  [previous-seq item]
+  (let [previous (ensure-single-parent previous-seq item)
+        io-size (:output-size previous)]
+    (assoc item
+           :input-size io-size
+           :output-size io-size
+           :output-channels (get item :output-channels 1))))
+
+
+(defmethod get-layer-metadata :softmax
+  [layer]
+  (assoc (default-layer-metadata)
+         :build-fn build-softmax
+         :default-loss (loss/softmax-loss)))
+
+
 (defn linear->softmax
   [num-classes & args]
   (vec
@@ -198,14 +292,68 @@ calculations must be "
     :dimension-op :floor)])
 
 
-(defn convolutional-weight-parameter-shape
+(defn- convolutional-weight-parameter-shape
   [{:keys [kernel-width kernel-height num-kernels input-channels]}]
   [num-kernels (* kernel-width kernel-height input-channels)])
 
 
-(defn convolutional-bias-parameter-shape
+(defn- convolutional-bias-parameter-shape
   [{:keys [num-kernels]}]
   [num-kernels])
+
+
+(defn- get-padded-strided-dimension
+  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
+of the output of a conv-net ignoring channels.  Caffe does this slightly different
+for pooling verse convolutional layers.  Furthermore keras does this differently
+than caffe for pooling layers so this exact calculation has been the source of
+a few compatibility issues."
+  [input-dim pad kernel-size stride dimension-op]
+  (let [partial-result (/ (- (+ (double input-dim)
+                                (* 2 (double pad)))
+                             (double kernel-size))
+                          (double stride))
+        partial-result (double (condp = dimension-op
+                                 :floor (Math/floor partial-result)
+                                 :ceil (Math/ceil partial-result)))]
+    (long (+ partial-result 1))))
+
+
+(defn- convolutional-output-width
+  ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
+  (long (get-padded-strided-dimension input-width pad-x kernel-width
+                                      stride-x dimension-op)))
+
+
+(defn- convolutional-output-height
+  ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
+  (long (get-padded-strided-dimension input-height pad-y kernel-height
+                                      stride-y dimension-op)))
+
+
+(defn- build-convolutional-type-node
+  [previous item ^long output-channels]
+  (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
+                num-kernels dimension-op]
+         :or {dimension-op :floor}} item
+        input-width (:output-width previous)
+        input-height (:output-height previous)
+        input-channels (:output-channels previous)
+        ;;Convolutional layers have to be calculated with floor for cudnn compatibility
+        item (assoc item
+                    :input-width input-width
+                    :input-height input-height
+                    :input-channels input-channels)
+        output-width (convolutional-output-width item)
+        output-height (convolutional-output-height item)
+        output-size (* output-width output-height output-channels)
+        input-data-format (get previous :output-data-format :planar)
+        output-data-format (get item :output-data-format :planar)]
+    (assoc item
+           :output-width output-width :output-height output-height
+           :output-channels output-channels
+           :output-size output-size
+           :input-data-format input-data-format :output-data-format output-data-format)))
 
 
 (defmethod get-layer-metadata :convolutional
@@ -217,14 +365,31 @@ calculations must be "
     {:type :bias
      :key :bias
      :shape-fn convolutional-bias-parameter-shape}]
-
-   :pass-set #{:training :inference}})
+   :pass-set #{:training :inference}
+   :build-fn (fn [previous-seq node]
+               ;;Convolutional layers can only have a floor dimension operation for cudnn compatibility.
+               (when-not (= :floor (get node :dimension-op :floor))
+                 (throw (ex-info "Convolutional layers can only have floor dimension operation"
+                                 {:dimension-op (get node :dimension-op)
+                                  :node node})))
+               (build-convolutional-type-node (ensure-single-parent previous-seq node)
+                                              node (get node :num-kernels)))})
 
 
 (defn max-pooling
   ([kernel-dim pad stride & args]
    [(apply convolutional-type-layer :max-pooling kernel-dim kernel-dim pad pad
            stride stride 0 :ceil args)]))
+
+
+(defmethod get-layer-metadata :max-pooling
+  [layer]
+  (assoc (default-layer-metadata)
+         :build-fn (fn [previous-seq node]
+                     (let [previous (ensure-single-parent previous-seq node)]
+                      (build-convolutional-type-node previous
+                                                     node
+                                                     (get previous :output-channels))))))
 
 
 (defn batch-normalization
@@ -292,21 +457,6 @@ network graph description."
   (if-not (map? network-desc-or-vec)
     {:layer-graph network-desc-or-vec}
     network-desc-or-vec))
-
-
-(defmulti auto-bind-loss
-  "Given a layer generate a default loss function."
-  :type)
-
-
-(defmethod auto-bind-loss :default
-  [_]
-  (loss/mse-loss))
-
-
-(defmethod auto-bind-loss :softmax
-  [_]
-  (loss/softmax-loss))
 
 
 (def example-mnist-description

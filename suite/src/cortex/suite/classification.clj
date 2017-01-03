@@ -14,7 +14,7 @@
             [cortex.suite.train :as suite-train]
             [cortex.loss :as loss]
             [cortex.nn.traverse :as traverse]
-            [cortex.nn.build :as build])
+            [cortex.nn.network :as network])
   (:import [java.io File]))
 
 
@@ -360,7 +360,7 @@ training will continue from there."
    & {:keys [epoch-count batch-size confusion-matrix-atom]
       :or {batch-size 128
            confusion-matrix-atom (atom {})}}]
-  (let [network (-> (build/build-network initial-description)
+  (let [network (-> (network/build-network initial-description)
                     traverse/auto-bind-io)]
    (doseq [_ (repeatedly
               #(suite-train/train-n dataset initial-description network

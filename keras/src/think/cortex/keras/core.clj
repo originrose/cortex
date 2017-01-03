@@ -1,7 +1,7 @@
 (ns think.cortex.keras.core
   (:require [think.hdf5.core :as hdf5]
             [cortex.nn.layers :as layers]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [think.resource.core :as resource]
             [cheshire.core :as json]
@@ -371,7 +371,7 @@ produce a new array of double values in the order desired"
                                     :weights weight-double-data
                                     :bias (ensure-doubles (:data (hdf5/->clj bias-ds))))))
                          desc))))
-             build/build-network)]
+             network/build-network)]
     (when-let [verify-seq (seq (get network :verification-failures))]
       (throw (ex-info "Built items failed verification"
                       {:verification-failures  (vec verify-seq)})))
@@ -552,7 +552,7 @@ network."
                    :report (let [model-desc (-> json-file
                                                 read-model
                                                 model->simple-description)
-                                 network (build/build-network model-desc)
+                                 network (network/build-network model-desc)
                                  outputs (network-output-file->outputs network (hdf5/open-file output-file))]
                              (check-output-dims network outputs))}))))))
 

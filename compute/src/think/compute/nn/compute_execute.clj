@@ -17,7 +17,8 @@
             [think.compute.driver :as drv]
             [think.datatype.core :as dtype]
             [think.compute.math :as math]
-            [think.compute.nn.cpu-backend :as cpu-backend]))
+            [think.compute.nn.cpu-backend :as cpu-backend]
+            [cortex.nn.network :as network]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -29,78 +30,41 @@
         datatype (dtype/get-datatype backend)
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))]
-   (reduce (fn [compute-buffers {:keys [key non-trainable?]}]
-             (let [{:keys [buffer-id] :as param-entry} (get node key)
-                   gradients? (and (not non-trainable?) gradients?)
-                   numeric-gradients? (and (not non-trainable?) numeric-gradients?)]
-               (update compute-buffers buffer-id
-                       (fn [compute-buffer]
-                         (or compute-buffer
-                             (let [graph-buffer (get-in network
-                                                        [:layer-graph
-                                                         :buffers
-                                                         buffer-id
-                                                         :buffer])]
-                               (cond-> {:buffer (backend/array backend graph-buffer)}
-                                 gradients?
-                                 (assoc :gradient (backend/new-array backend
-                                                                     (m/shape graph-buffer)))
-                                 numeric-gradients?
-                                 (assoc :numeric-gradient (alloc-host (m/ecount graph-buffer))
-                                        :host-buffer (alloc-host (m/ecount graph-buffer))))))))))
-           compute-buffers
-           (layers/get-parameter-descriptions node))))
+    (reduce (fn [compute-buffers {:keys [key non-trainable? buffer-id] :as parameter}]
+              (let [gradients? (and (not non-trainable?) gradients?)
+                    numeric-gradients? (and (not non-trainable?) numeric-gradients?)]
+                (update compute-buffers buffer-id
+                        (fn [compute-buffer]
+                          (or compute-buffer
+                              (let [graph-buffer (get parameter :buffer)]
+                                (cond-> {:buffer (backend/array backend graph-buffer)}
+                                  gradients?
+                                  (assoc :gradient (backend/new-array backend
+                                                                      (m/shape graph-buffer)))
+                                  numeric-gradients?
+                                  (assoc :numeric-gradient (alloc-host (m/ecount graph-buffer))
+                                         :host-buffer (alloc-host (m/ecount graph-buffer))))))))))
+            compute-buffers
+            (network/get-node-parameters network (get node :id)))))
 
 
 (defn- create-batching-system
   [backend built-network batch-size]
-  (let [bindings (traverse/get-io-bindings built-network)
-        stream->size-map (->> bindings
-                              (map (fn [{:keys [node-id stream direction]}]
-                                     (when stream
-                                       [stream
-                                        ;;Using a set here to detect size mismatches
-                                        {:size #{(get-in built-network
-                                                          [:layer-graph :id->node-map node-id
-                                                           (if (= direction :input)
-                                                             :input-size
-                                                             :output-size)])}
-                                         :direction #{direction}}])))
-                              (remove nil?)
-                              (reduce (fn [eax [stream {:keys [size direction] :as entry}]]
-                                        (-> eax
-                                            (update-in [stream :size]
-                                                       #(c-set/union %  size))
-                                            (update-in [stream :direction]
-                                                       #(c-set/union % direction))))
-                                      {})
-                              (map (fn [[k {:keys [size] :as entry}]]
-                                     (when (> (count size) 1)
-                                       (throw (ex-info "Stream is mapped to different sized nodes:"
-                                                       {:stream k
-                                                        :entry entry})))
-                                     [k (assoc entry :size (first size))]))
-                              (into {}))]
-    (batching-system/create backend stream->size-map batch-size)))
+  (batching-system/create backend
+                          (traverse/network->stream->size-map built-network)
+                          batch-size))
 
 
 (defn- get-node-parameters
   "Get a combined form of the node parameters"
   [network id]
-  (let [node (get-in network [:layer-graph :id->node-map id])]
-   (->> (layers/get-parameter-descriptions node)
-        (map (fn [{:keys [key] :as metadata}]
-               (let [node-parameter (get-in network [:layer-graph :id->node-map id key])
-                     parameter-buffer (get-in network [:compute-binding
-                                                       :parameter-buffers
-                                                       (get node-parameter :buffer-id)])]
-                 [key
-                  (->
-                   (->> metadata
-                        (merge node-parameter)
-                        (merge parameter-buffer))
-                   (assoc :learning-attenuation (get node :learning-attenuation 1.0)))])))
-        (into {}))))
+  (->> (network/get-node-parameters network id)
+       (map (fn [{:keys [buffer-id key] :as parameter}]
+              [key
+               (merge parameter (get-in network [:compute-binding
+                                                 :parameter-buffers
+                                                 buffer-id]))]))
+       (into {})))
 
 
 (defn- load-training-parameters
@@ -124,6 +88,9 @@
         datatype (dtype/get-datatype backend)
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))
+        backward-buffers (if gradients?
+                           (traverse/network->backward-buffer-set built-network)
+                           #{})
         compute-binding
         (reduce
          (fn [compute-binding {:keys [incoming id outgoing]}]
@@ -145,7 +112,11 @@
            (update-in compute-binding [:traversal-buffers buffer-key]
                       (fn [buffer]
                         (or buffer
-                            (let [buffer-size (get-in traversal [:buffers buffer-key :size])]
+                            (let [buffer-size (get-in traversal [:buffers buffer-key :size])
+                                  gradients? (and gradients?
+                                                  (contains? backward-buffers buffer-key))
+                                  numeric-gradients? (and numeric-gradients?
+                                                          (contains? backward-buffers buffer-key))]
                               (cond-> {:buffer (backend/new-array backend [buffer-size] batch-size)}
                                 gradients?
                                 (assoc :gradient (backend/new-array backend [buffer-size] batch-size))
@@ -366,7 +337,9 @@ to the device."
       (doseq [{:keys [buffers loss stream] :as entry} output-bindings]
         (let [{:keys [buffer gradient]} buffers
               answer (get stream->buffer-map stream)]
-          (compute-loss/compute-loss-gradient loss backend buffer answer gradient)
+          ;;If the entire backward pass was nixed then there was no
+          (when gradient
+            (compute-loss/compute-loss-gradient loss backend buffer answer gradient))
           (comment
             (clojure.pprint/pprint {:loss loss
                                     :buffer (vec (take 10 (backend/to-double-array backend buffer)))
@@ -380,9 +353,10 @@ to the device."
                 (reduce (fn [offset {:keys [buffer gradient learning-attenuation non-trainable?]}]
                           (let [elem-count (long (m/ecount buffer))]
                             (when-not non-trainable?
-                             (compute-optimise/compute-parameters! optimiser
-                                                                   (* buffer-alpha learning-attenuation)
-                                                                   offset gradient buffer)
+                              (compute-optimise/compute-parameters! optimiser
+                                                                    (* buffer-alpha learning-attenuation)
+                                                                    offset gradient buffer))
+                            (when gradient
                              (drv/memset (drv/get-stream backend) (math/device-buffer gradient)
                                          0 0 elem-count))
                             (+ offset elem-count)))

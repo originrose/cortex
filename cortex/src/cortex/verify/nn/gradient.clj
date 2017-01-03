@@ -1,7 +1,7 @@
 (ns cortex.verify.nn.gradient
   (:require [cortex.nn.execute :as execute]
             [cortex.nn.layers :as layers]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.protocols :as cp]
             [cortex.verify.utils :as utils]
@@ -46,11 +46,11 @@
     (as-> (-> network
               (assoc-in [0 :id] :input)
               (assoc-in [(- num-items 1) :id] test-id)) network
-      (build/build-network network)
+      (network/build-network network)
       (traverse/bind-input-bindings network input-bindings)
       (traverse/bind-output-bindings network output-bindings)
       (assoc network :batch-size batch-size)
-      (traverse/network->training-traversal network)
+      (traverse/network->training-traversal network :keep-non-trainable? true)
       (cp/bind-to-network context network {:numeric-gradients? true})
       (cp/generate-numeric-gradients context network
                                      {:data input

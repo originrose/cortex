@@ -2,7 +2,7 @@
   (:require [cortex.nn.layers :as layers]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [cortex.dataset :as ds]
             [cortex.loss :as loss]
             [cortex-datasets.mnist :as mnist]
@@ -83,7 +83,7 @@
    n-epochs map-fn]
   (let [output-id (ffirst output-bindings)]
    (resource/with-resource-context
-     (as-> (build/build-network network) net-or-seq
+     (as-> (network/build-network network) net-or-seq
        (execute/train context net-or-seq dataset input-bindings output-bindings
                       :batch-size batch-size
                       :optimiser optimiser

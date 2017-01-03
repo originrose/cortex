@@ -1,7 +1,7 @@
 (ns cortex.verify.nn.layers
   "Verify that layers do actually produce their advertised results."
   (:require [cortex.nn.layers :as layers]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.execute :as execute]
             [clojure.test :refer :all]
@@ -21,10 +21,10 @@
       (vec network)
       (assoc-in network [0 :id] :input)
       (assoc-in network [1 :id] test-layer-id)
-      (build/build-network network)
+      (network/build-network network)
       (traverse/bind-input-bindings network input-bindings)
       (traverse/bind-output-bindings network output-bindings)
-      (traverse/network->training-traversal network)
+      (traverse/network->training-traversal network :keep-non-trainable? true)
       (assoc network :batch-size batch-size)
       (cp/bind-to-network context network {}))))
 

@@ -1,7 +1,7 @@
-(ns cortex.nn.build-test
+(ns cortex.nn.network-test
   (:require [clojure.test :refer :all]
             [cortex.nn.layers :as layers]
-            [cortex.nn.build :as build]
+            [cortex.nn.network :as network]
             [clojure.core.matrix :as m]))
 
 
@@ -9,7 +9,7 @@
 (deftest specify-weights-bias
   (let [weight-data [[1 2][3 4]]
         bias-data [0 10]
-        built-network (build/build-network [(layers/input 2)
+        built-network (network/build-network [(layers/input 2)
                                             (layers/linear
                                              2
                                              :weights {:buffer weight-data}
