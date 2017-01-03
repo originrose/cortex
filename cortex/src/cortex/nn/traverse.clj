@@ -238,7 +238,7 @@ Each item in the sequence is a map of:
 we need the incoming and outgoing edges to hold unique ids such that
 the incoming buffer of the next step points to the outgoing buffer of
 the previous step."
-  [traversal]
+  [traversal buffer-map]
   (->> traversal
        (reduce (fn [[traversal buffer-map] {:keys [incoming id outgoing] :as entry}]
                  [(conj traversal
@@ -251,8 +251,7 @@ the previous step."
                          :id id
                          :outgoing outgoing})
                   (assoc buffer-map id outgoing)])
-               [[] {}])
-       first))
+               [[] buffer-map])))
 
 
 (defn- reverse-forward-traversal
@@ -299,6 +298,19 @@ which means removing extra information from them."
        traversal))
 
 
+(defn- remove-non-trainable
+  [network traversal]
+  (-> (reduce (fn [[keep-set traversal] {:keys [incoming id] :as item}]
+                (let [keep? (or (seq (filter #(contains? keep-set (get % :id)) incoming))
+                                (network/any-trainable-parameters? network id))]
+                  (if keep?
+                    [(conj keep-set id) (conj traversal item)]
+                    [keep-set traversal])))
+              [#{} []]
+              traversal)
+      second))
+
+
 (defn- check-for-io-bindings
   "Without any io bindings there is no traversal."
   [network]
@@ -327,20 +339,27 @@ pairs of node-id to [stream-name loss-function].
  :forward where incoming/outgoing maps to buffer id
  :backward where incoming/outgoing maps to buffer id}"
   [network
-   & {:keys [optimiser]
+   & {:keys [optimiser keep-non-trainable?]
       :or {optimiser (optimise/adam)}}]
 
   (check-for-io-bindings network)
   (let [forward-traversal (->> (create-forward-traversal network)
-                               (filter-traversal network :training)
-                               traversal->buffers)]
+                               (filter-traversal network :training))
+        [forward-with-buffers buffer-map] (traversal->buffers forward-traversal {})
+        backward-pass (if keep-non-trainable?
+                        forward-traversal
+                        (remove-non-trainable network forward-traversal))]
     (update network
             :traversal
             #(merge %
-                    {:forward (clean-traversal-incoming-outgoing forward-traversal)
-                     :backward (-> (reverse-forward-traversal forward-traversal)
+                    {:forward (-> forward-with-buffers
+                                  clean-traversal-incoming-outgoing)
+                     :backward (-> backward-pass
+                                   (traversal->buffers buffer-map)
+                                   first
+                                   reverse-forward-traversal
                                    clean-traversal-incoming-outgoing)
-                     :buffers (forward-traversal->buffer-map network forward-traversal)
+                     :buffers (forward-traversal->buffer-map network forward-with-buffers)
                      :type :training
                      :optimiser optimiser}))))
 
@@ -355,10 +374,65 @@ pairs of node-id to [stream-name loss-function].
   (check-for-io-bindings network)
   (let [forward-traversal (->> (create-forward-traversal network)
                                (filter-traversal network :inference)
-                               traversal->buffers)]
+                               (#(traversal->buffers % {}))
+                               first)]
     (update network
             :traversal
             #(merge %
                     {:forward (clean-traversal-incoming-outgoing forward-traversal)
                      :buffers (forward-traversal->buffer-map network forward-traversal)
                      :type :inference}))))
+
+
+(defn- traversal->buffer-set
+  [traversal]
+  (->> traversal
+       (mapcat (fn [{:keys [incoming outgoing]}]
+                 (concat incoming outgoing)))
+       set))
+
+
+(defn network->forward-buffer-set
+  "Get the set of buffers used for the forward pass"
+  [network]
+  (->> (get-in network [:traversal :forward])
+       traversal->buffer-set))
+
+
+(defn network->backward-buffer-set
+  "Get the set of buffers used for the backward pass"
+  [network]
+  (->> (get-in network [:traversal :backward])
+       traversal->buffer-set))
+
+
+(defn network->stream->size-map
+  "Given a network produce a map of stream->size map.  Detect if there are potentially multiple
+sizes specified for a given stream and error out if so."
+  [network]
+  (->> (get-io-bindings network)
+       (map (fn [{:keys [node-id stream direction]}]
+              (when stream
+                [stream
+                 ;;Using a set here to detect size mismatches
+                 {:size #{(get-in network
+                                  [:layer-graph :id->node-map node-id
+                                   (if (= direction :input)
+                                     :input-size
+                                     :output-size)])}
+                  :direction #{direction}}])))
+       (remove nil?)
+       (reduce (fn [eax [stream {:keys [size direction] :as entry}]]
+                 (-> eax
+                     (update-in [stream :size]
+                                #(c-set/union %  size))
+                     (update-in [stream :direction]
+                                #(c-set/union % direction))))
+               {})
+       (map (fn [[k {:keys [size] :as entry}]]
+              (when (> (count size) 1)
+                (throw (ex-info "Stream is mapped to different sized nodes:"
+                                {:stream k
+                                 :entry entry})))
+              [k (assoc entry :size (first size))]))
+       (into {})))

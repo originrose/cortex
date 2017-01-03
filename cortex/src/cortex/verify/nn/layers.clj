@@ -24,7 +24,7 @@
       (network/build-network network)
       (traverse/bind-input-bindings network input-bindings)
       (traverse/bind-output-bindings network output-bindings)
-      (traverse/network->training-traversal network)
+      (traverse/network->training-traversal network :keep-non-trainable? true)
       (assoc network :batch-size batch-size)
       (cp/bind-to-network context network {}))))
 

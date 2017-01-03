@@ -147,3 +147,49 @@
              :size 10},
             {:id :convolutional-2} {:id :convolutional-2, :size 2880}}
            (get inference-mem :buffers)))))
+
+
+(deftest non-trainable-zero-attenuation
+  (let [num-non-trainable 9
+        src-desc (flatten mnist-description-with-toys)
+        non-trainable-layers (take num-non-trainable src-desc)
+        trainable-layers (drop num-non-trainable src-desc)
+        new-desc (concat (map (fn [layer] (assoc layer :learning-attenuation 0)) non-trainable-layers)
+                         trainable-layers)
+        network (-> (network/build-network new-desc)
+                    traverse/auto-bind-io
+                    traverse/network->training-traversal)
+        traversal (-> (get network :traversal)
+                      realize-traversals)]
+    (is (= [nil nil]
+           (minimal-diff
+            [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :softmax-1}]}
+             {:id :linear-2, :incoming [{:id :softmax-1}], :outgoing [{:id :linear-2}]}
+             {:id :dropout-4, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
+             {:id :relu-3, :incoming [{:id :dropout-4}], :outgoing [{:id :relu-3}]}
+             {:id :linear-1, :incoming [{:id :relu-3}], :outgoing [{:id :linear-1}]}
+             {:id :batch-normalization-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}]
+            (get traversal :backward))))))
+
+
+(deftest non-trainable-node-non-trainable
+  (let [num-non-trainable 9
+        src-desc (flatten mnist-description-with-toys)
+        non-trainable-layers (take num-non-trainable src-desc)
+        trainable-layers (drop num-non-trainable src-desc)
+        new-desc (concat (map (fn [layer] (assoc layer :non-trainable? true)) non-trainable-layers)
+                         trainable-layers)
+        network (-> (network/build-network new-desc)
+                    traverse/auto-bind-io
+                    traverse/network->training-traversal)
+        traversal (-> (get network :traversal)
+                      realize-traversals)]
+    (is (= [nil nil]
+           (minimal-diff
+            [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :softmax-1}]}
+             {:id :linear-2, :incoming [{:id :softmax-1}], :outgoing [{:id :linear-2}]}
+             {:id :dropout-4, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
+             {:id :relu-3, :incoming [{:id :dropout-4}], :outgoing [{:id :relu-3}]}
+             {:id :linear-1, :incoming [{:id :relu-3}], :outgoing [{:id :linear-1}]}
+             {:id :batch-normalization-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}]
+            (get traversal :backward))))))

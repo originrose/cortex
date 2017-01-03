@@ -358,6 +358,17 @@ attenuation is 0 will happen."
                        buffers (get-in network [:layer-graph :buffers (get param :buffer-id)])
                        retval (merge param-desc param buffers)]
                    (assoc retval
+                          :learning-attenuation
+                          (or (get retval :learning-attenuation)
+                              (double (get node :learning-attenuation 1.0)))
                           :non-trainable?
                           (or (get retval :non-trainable?)
+                              (get node :non-trainable?)
                               (= 0.0 (double (get node :learning-attenuation 1.0)))))))))))
+
+
+(defn any-trainable-parameters?
+  [network node-id]
+  (->> (get-node-parameters network node-id)
+       (remove :non-trainable?)
+       seq))

@@ -50,7 +50,7 @@
       (traverse/bind-input-bindings network input-bindings)
       (traverse/bind-output-bindings network output-bindings)
       (assoc network :batch-size batch-size)
-      (traverse/network->training-traversal network)
+      (traverse/network->training-traversal network :keep-non-trainable? true)
       (cp/bind-to-network context network {:numeric-gradients? true})
       (cp/generate-numeric-gradients context network
                                      {:data input
