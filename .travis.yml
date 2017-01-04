@@ -9,7 +9,6 @@ env:
   - TEST_DIR=cortex
   - TEST_DIR=datasets
   - TEST_DIR=compute
-  - TEST_DIR=keras
   - TEST_DIR=caffe
 
 branches:
