@@ -5,7 +5,7 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/gpu-compute "0.3.1-SNAPSHOT"]
-                 [thinktopic/think.image "0.4.2"]
+                 [thinktopic/think.image "0.4.5"]
                  [com.taoensso/nippy "2.12.2"]
                  [garden "1.3.2"]]
   :resource-paths ["cljs"]

@@ -120,16 +120,16 @@
   ;;image->patch always returns [r-data g-data g-data]
   ;;since we know these are grayscale *and* we setup the
   ;;network for 1 channel we just take r-data
-  (first
-   (patch/image->patch (if augment?
-                         (img-aug-pipeline img)
-                         img)
-                       (image-util/image->rect img) datatype)))
+  (patch/image->patch (if augment?
+                        (img-aug-pipeline img)
+                        img)
+                      :datatype datatype
+                      :colorspace :gray))
 
 
 (defn mnist-observation->image
   [observation]
-  (patch/patch->image [observation observation observation] image-size))
+  (patch/patch->image observation image-size))
 
 
 ;;Bumping this up and producing several images per source image means that you may need
@@ -163,7 +163,7 @@ to avoid overfitting the network to the training data."
           (repeat label))))
 
 
-(defonce create-dataset
+(def create-dataset
   (memoize
    (fn
      []
@@ -210,6 +210,7 @@ to avoid overfitting the network to the training data."
      confusion-matrix-atom))
   ([]
    (display-dataset-and-model (create-dataset))))
+
 
 (defn train-forever
   []

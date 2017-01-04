@@ -40,7 +40,8 @@ each directory has the same number of files."
                                      (repeat (.getName sub-dir))))))]
     (if infinite?
       (apply interleave file-sequences)
-      (mapcat identity file-sequences))))
+      (-> (mapcat identity file-sequences)
+          shuffle))))
 
 
 (defn src-seq->obs-seq
