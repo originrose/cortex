@@ -365,7 +365,6 @@ produce a new array of double values in the order desired"
                            (println "loading weights/bias for" (:id desc))
                            (let [weight-clj (hdf5/->clj weight-ds)
                                  weight-raw-data (:data weight-clj)
-                                 weight-shape (get-weight-shape desc weight-raw-data)
                                  weight-double-data (ensure-doubles weight-raw-data)]
                              (assoc desc
                                     :weights weight-double-data
