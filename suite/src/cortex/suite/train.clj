@@ -1,13 +1,12 @@
 (ns cortex.suite.train
   (:require [cortex.suite.io :as suite-io]
-            [think.compute.nn.cuda-backend :as gpu-compute]
             [cortex.nn.protocols :as cp]
             [think.resource.core :as resource]
             [clojure.java.io :as io]
             [cortex.dataset :as ds]
             [think.compute.batching-system :as bs]
             [think.compute.nn.compute-execute :as ce]
-            [think.compute.nn.cuda-backend :as cuda-backend]
+            [think.compute.nn.cpu-backend :as cpu-backend]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
             [cortex.optimise :as cortex-opt]))
@@ -63,9 +62,22 @@ in initial description.  Else returns the initial description"
   true)
 
 
-(defn create-cuda-context
-  []
-  (ce/create-context #(cuda-backend/create-backend :float)))
+(defn create-context
+  "Attempt to create a gpu context.  If that fails create a cpu context."
+  [& {:keys [datatype force-cpu? force-gpu?]
+      :or {datatype :float}}]
+  (ce/create-context (fn []
+                       (or (when-not force-cpu?
+                             (try
+                               (require 'think.compute.nn.cuda-backend)
+                               ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
+                               (catch Exception e
+                                 (println (format "Failed to create cuda backend (%s); will use cpu backend"
+                                                  e))
+                                 (when force-gpu?
+                                   (throw e))
+                                 nil)))
+                           (cpu-backend/create-cpu-backend datatype)))))
 
 
 (defn backup-trained-network
@@ -113,10 +125,12 @@ we continue to train forever.
   [dataset initial-description network
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
-             optimiser]
+             optimiser
+             force-gpu?]
       :or {batch-size 128
            network-filestem "trained-network"
-           optimiser (cortex-opt/adam)}}]
+           optimiser (cortex-opt/adam)
+           force-gpu? true}}]
   (resource/with-resource-context
     (let [network-filename (str network-filestem ".nippy")
           ;;Backup the trained network if we haven't already
@@ -135,7 +149,7 @@ we continue to train forever.
                                  ds/batches->columns)
           cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
           best-network-atom (atom network)
-          context (create-cuda-context)
+          context (create-context :force-gpu? force-gpu?)
           train-sequence (execute/train context network dataset [] []
                                         :batch-size batch-size
                                         :optimiser optimiser
@@ -163,12 +177,13 @@ we continue to train forever.
 used for both along with the original dataset.  This expects a network with
 existing traversal bindings."
   [dataset network
-   & {:keys [batch-size batch-type]
+   & {:keys [batch-size batch-type force-gpu?]
       :or {batch-size 128
-           batch-type :holdout}}]
+           batch-type :holdout
+           force-gpu? true}}]
   (let [input-streams (traverse/get-input-streams network)
         output-streams (traverse/get-output-streams network)
-        inferences (execute/infer-columns (create-cuda-context) network dataset
+        inferences (execute/infer-columns (create-context :force-gpu? force-gpu?) network dataset
                                           [] []
                                           :batch-size batch-size
                                           :infer-batch-type batch-type)
