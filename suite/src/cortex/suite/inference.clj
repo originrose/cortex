@@ -17,7 +17,7 @@
                      (or (when-not force-cpu?
                            (try
                              (require 'think.compute.nn.cuda-backend)
-                             ((resolve 'think.compote.nn.cuda-backend/create-backend) datatype)
+                             ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
                              (catch Exception e
                                (println (format "Failed to create cuda backend (%s); will use cpu backend"
                                                 e))
@@ -42,13 +42,12 @@
                       {:batch-size batch-size
                        :observation-count (count observations)})))
     (as-> (traverse/auto-bind-io network) network-or-seq
-      (execute/infer-columns context network-or-seq dataset [] [] :batch-size 1)
+      (execute/infer-columns context network-or-seq dataset [] [] :batch-size batch-size)
       (get network-or-seq (first leaves)))))
 
 
 (defn classify-one-observation
-  "data-shape is
-(ds/create-image-shape num-channels img-width img-height)"
+  "observation-dataset-shape is something like (ds/create-image-shape num-channels img-width img-height)"
   [network observation observation-dataset-shape class-names]
   (let [results (infer-n-observations network [observation] observation-dataset-shape
                                       :batch-size 1
