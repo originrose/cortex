@@ -9,7 +9,8 @@
             [think.compute.nn.cpu-backend :as cpu-backend]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
-            [cortex.optimise :as cortex-opt]))
+            [cortex.optimise :as cortex-opt]
+            [cortex.nn.network :as network]))
 
 
 (defn load-network
@@ -157,6 +158,8 @@ we continue to train forever.
           epoch-processor (partial per-epoch-eval-training-network context
                                    best-network-atom network-filename initial-description
                                    best-network-fn cv-columnar-input cv-labels)]
+      (println "Training network:")
+      (network/print-layer-summary network)
       (->> (if epoch-count
              (take epoch-count train-sequence)
              train-sequence)
