@@ -372,3 +372,67 @@ attenuation is 0 will happen."
   (->> (get-node-parameters network node-id)
        (remove :non-trainable?)
        seq))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Print Layer Summary
+(defn- network->parameter-keys
+  [network]
+  (->> network
+       :layer-graph
+       :id->node-map
+       vals
+       (mapcat layers/get-parameter-descriptions)
+       (map :key)
+       (distinct)
+       (sort)))
+
+(defn- layer->input-str
+  [layer]
+  (if (:input-width layer)
+    (format "%sx%sx%s - %s"
+            (:input-channels layer)
+            (:input-height layer)
+            (:input-width layer)
+            (:input-size layer))
+    (str (:input-size layer))))
+
+(defn- layer->output-str
+  [layer]
+  (if (:output-width layer)
+    (format "%sx%sx%s - %s"
+            (:output-channels layer)
+            (:output-height layer)
+            (:output-width layer)
+            (:output-size layer))
+    (str (:output-size layer))))
+
+(defn- layer->buffer-shape
+  [network layer k]
+  (-> network
+      (get-in [:layer-graph :buffers (get-in layer [k :buffer-id]) :buffer])
+      m/shape))
+
+(defn print-layer-summary
+  "Given a network, prints a table summarizing layer input/output sizes as well
+as parameter buffer shapes. This function does not work with descriptions (as
+opposed to networks), but consider:
+
+    (->> description
+         network/build-network
+         traverse/auto-bind-io
+         traverse/network->training-traversal
+         network/print-layer-summary)"
+  [network]
+  (let [parameter-keys (network->parameter-keys network)]
+    (->> network
+         :traversal :forward
+         (mapv (fn [{:keys [id]}]
+                 (let [layer (network->node network id)]
+                   (into {"type" (:type layer)
+                          "input" (layer->input-str layer)
+                          "output" (layer->output-str layer)}
+                         (for [k parameter-keys]
+                                   [k (layer->buffer-shape network layer k)])))))
+         (clojure.pprint/print-table (concat ["type" "input" "output"] parameter-keys))))
+  (println "\nParameter count:" (:parameter-count network)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
