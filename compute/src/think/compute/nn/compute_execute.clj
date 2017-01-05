@@ -133,7 +133,15 @@
         trainable-parameters (load-training-parameters network)
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
-                                   (apply +))]
+                                   (apply +))
+        l1-buffer-size (long (->> trainable-parameters
+                                  (filter #(> (get % :l1-regularization 0) 0))
+                                  (map #(m/ecount (get % :buffer)))
+                                  (apply max 0)))
+        network (if (> l1-buffer-size 0)
+                  (assoc-in network [:compute-binding :l1-buffer]
+                            (drv/allocate-device-buffer driver l1-buffer-size datatype))
+                  network)]
     (-> network
         (assoc-in [:compute-binding :optimiser]
                   (when-let [optimiser (get traversal :optimiser)]
@@ -333,7 +341,9 @@ to the device."
                                    stream->buffer-map)))
     (let [network (do-traverse network stream->buffer-map :forward)
           buffer-alpha (/ 1.0 (double (get network :batch-size)))
-          backend (get-in network [:compute-binding :backend])]
+          backend (get-in network [:compute-binding :backend])
+          stream (drv/get-stream backend)
+          driver (drv/get-driver backend)]
       (doseq [{:keys [buffers loss stream] :as entry} output-bindings]
         (let [{:keys [buffer gradient]} buffers
               answer (get stream->buffer-map stream)]
@@ -350,15 +360,35 @@ to the device."
       (let [network
             (if optimise?
               (let [optimiser (compute-optimise/batch-update (get-in network [:compute-binding :optimiser]))]
-                (reduce (fn [offset {:keys [buffer gradient learning-attenuation non-trainable?]}]
-                          (let [elem-count (long (m/ecount buffer))]
+                (reduce (fn [offset {:keys [buffer gradient learning-attenuation non-trainable?] :as parameter}]
+                          (let [elem-count (long (m/ecount buffer))
+                                l2-reg (double (get parameter :l2-regularization 0))
+                                l1-reg (double (get parameter :l1-regularization 0))
+                                ;;For some things it is easier to just work at the flat buffer level and not
+                                ;;at the device array level.
+                                gradient-buf (math/device-buffer gradient)
+                                param-buf (math/device-buffer buffer)]
                             (when-not non-trainable?
+                              (when (> l2-reg 0.0)
+                                (math/sum stream l2-reg param-buf 1.0 gradient-buf gradient-buf))
+                              (when (> l1-reg 0.0)
+                                (let [l1-buffer (get-in network [:compute-binding :l1-buffer])]
+                                  (when-not (and l1-buffer
+                                                 (>= (long (m/ecount l1-buffer))
+                                                     elem-count))
+                                    (throw (ex-info "l1 reg buffer missing or too small"
+                                                    {:l1-buffer-size (m/ecount l1-buffer)})))
+                                  (let [l1-buffer (drv/sub-buffer driver l1-buffer 0 elem-count)]
+                                    ;;The derivative of the absolute value function is either -1 or 1
+                                    ;;depending on the value of the parameter.
+                                    (math/select stream param-buf l1-buffer -1 1)
+                                    ;;Add derivatives to gradient
+                                    (math/sum stream l1-reg l1-buffer 1.0 gradient-buf gradient-buf))))
                               (compute-optimise/compute-parameters! optimiser
                                                                     (* buffer-alpha learning-attenuation)
                                                                     offset gradient buffer))
                             (when gradient
-                             (drv/memset (drv/get-stream backend) (math/device-buffer gradient)
-                                         0 0 elem-count))
+                             (drv/memset stream gradient-buf 0 0 elem-count))
                             (+ offset elem-count)))
                         0
                         parameters)

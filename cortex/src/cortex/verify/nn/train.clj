@@ -37,12 +37,12 @@
 
 (def mnist-network
   [(layers/input 28 28 1 :id :input)
-   (layers/convolutional 5 0 1 20)
+   (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.001})
    (layers/max-pooling 2 0 2)
    (layers/dropout 0.9)
    (layers/relu)
    (layers/local-response-normalization)
-   (layers/convolutional 5 0 1 50)
+   (layers/convolutional 5 0 1 50 :weights {:l2-regularization 0.001})
    (layers/max-pooling 2 0 2)
    (layers/batch-normalization 0.9)
    (layers/linear->relu 500)
@@ -82,20 +82,24 @@
    batch-size dataset optimiser disable-infer? infer-batch-type
    n-epochs map-fn]
   (let [output-id (ffirst output-bindings)]
-   (resource/with-resource-context
-     (as-> (network/build-network network) net-or-seq
-       (execute/train context net-or-seq dataset input-bindings output-bindings
-                      :batch-size batch-size
-                      :optimiser optimiser
-                      :disable-infer? disable-infer?
-                      :infer-batch-type infer-batch-type)
-       (take n-epochs net-or-seq)
-       (map map-fn net-or-seq)
-       (last net-or-seq)
-       (execute/save-to-network context (get net-or-seq :network) {})
-       (execute/infer-columns context net-or-seq dataset input-bindings output-bindings
-                              :batch-size batch-size)
-       (get net-or-seq output-id)))))
+    (resource/with-resource-context
+      (network/print-layer-summary (-> network
+                                       network/build-network
+                                       traverse/auto-bind-io
+                                       traverse/network->training-traversal))
+      (as-> (network/build-network network) net-or-seq
+        (execute/train context net-or-seq dataset input-bindings output-bindings
+                       :batch-size batch-size
+                       :optimiser optimiser
+                       :disable-infer? disable-infer?
+                       :infer-batch-type infer-batch-type)
+        (take n-epochs net-or-seq)
+        (map map-fn net-or-seq)
+        (last net-or-seq)
+        (execute/save-to-network context (get net-or-seq :network) {})
+        (execute/infer-columns context net-or-seq dataset input-bindings output-bindings
+                               :batch-size batch-size)
+        (get net-or-seq output-id)))))
 
 
 

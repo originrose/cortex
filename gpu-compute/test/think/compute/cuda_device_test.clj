@@ -34,3 +34,6 @@
 
 (verify-utils/def-double-float-test l2-constraint-scale
   (verify-driver/l2-constraint-scale (create-driver) verify-utils/*datatype*))
+
+(verify-utils/def-double-float-test select
+  (verify-driver/select (create-driver) verify-utils/*datatype*))

@@ -147,3 +147,19 @@
      (math/l2-constraint-scale stream buf-a 1 5)
      (is (close-enough (mapv double answer)
                        (mapv double (->array buf-a)))))))
+
+
+(defn select
+  [device datatype]
+  (backend-test-pre
+   device datatype
+   (let [n-elems 1000
+         values (mapv #(- % 0.5) (repeatedly n-elems rand))
+         buf-a (make-buffer values)
+         buf-b (make-buffer (repeat n-elems 0))
+         answer (mapv #(if (< % 0)
+                         -1.0
+                         1.0)
+                      values)]
+     (math/select stream buf-a buf-b -1.0 1.0)
+     (is (m/equals answer (vec (->array buf-b)))))))
