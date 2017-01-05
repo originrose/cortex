@@ -62,7 +62,12 @@ to be same length as a and b.")
     "Given a vector that contains x^2,
 a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
   (generate-rands [stream rand-buffer distribution]
-    "Generate some random numbers defined by the distribution."))
+    "Generate some random numbers defined by the distribution.")
+  (select [stream buffer less-zero-value equal-or-greater-val]
+    "Check buffer value against zero and set it to one value if it is less than zero
+and another value if it is greater or equal to zero:
+buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;"))
+
 
   (defmacro math-error
   [msg]

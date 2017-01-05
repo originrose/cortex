@@ -7,7 +7,8 @@
             [clojure.core.matrix.protocols :as mp]
             [think.compute.math :as math]
             [think.compute.cpu-driver :as cpu-drv]
-            [think.compute.math-util :as mu])
+            [think.compute.math-util :as mu]
+            [clojure.core.matrix :as m])
   (:import [org.bytedeco.javacpp cuda
             BytePointer IntPointer LongPointer DoublePointer
             Pointer PointerPointer FloatPointer ShortPointer
@@ -289,7 +290,8 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
                           :elementwise-multiply (load-float-double-function
                                                  "elementwise_multiply")
                           :l2-constraint-scale (load-float-double-function
-                                                "l2_constraint_scale")}]
+                                                "l2_constraint_scale")
+                          :select (load-float-double-function "select")}]
     (->CudaDriver device-functions (create-blas-context) (create-rand-context))))
 
 
@@ -518,7 +520,8 @@ relies only on blockDim.x block.x and thread.x"
   (cuda-mul-rows [A a-colstride x inc-x a-row-count a-col-count C c-colstride stream])
   (cuda-elem-mul [x inc-x alpha y inc-y res inc-res elem-count stream])
   (cuda-l2-constraint-scale [a inc-a a-elem-count l2-max-constraint stream])
-  (cuda-generate-rands [rand-buffer distribution elem-count stream]))
+  (cuda-generate-rands [rand-buffer distribution elem-count stream])
+  (cuda-select [select-buffer lt-zero ge-zero elem-count stream]))
 
 
 (defn bool->blas-trans
@@ -637,7 +640,13 @@ relies only on blockDim.x block.x and thread.x"
                           (long elem-count) 0
                           a (int inc-a) (double l2-max-constraint) (int elem-count)))
   (cuda-generate-rands [rand-buffer distribution elem-count stream]
-    (throw (Exception. "Cuda cannot generate double rands"))))
+    (throw (Exception. "Cuda cannot generate double rands")))
+  (cuda-select [select-buffer lt-zero ge-zero elem-count stream]
+    (let [elem-count (long elem-count)]
+      (launch-linear-kernel stream (dev-fn-from-stream stream :select :double)
+                            elem-count 0
+                            select-buffer (double lt-zero) (double ge-zero)
+                            elem-count))))
 
 (extend-type FloatPointer
   PCudaMath
@@ -736,7 +745,13 @@ relies only on blockDim.x block.x and thread.x"
                      ^curand$curandGenerator_st rand-context
                      rand-buffer (long elem-count)))
        :else
-       (throw (Exception. (str "Unrecognized distribution type: " distribution)))))))
+       (throw (Exception. (str "Unrecognized distribution type: " distribution))))))
+  (cuda-select [select-buffer lt-zero ge-zero elem-count stream]
+    (let [elem-count (long elem-count)]
+      (launch-linear-kernel stream (dev-fn-from-stream stream :select :float)
+                            elem-count 0
+                            select-buffer (float lt-zero) (float ge-zero)
+                            elem-count))))
 
 
 (extend-type CudaStream
@@ -807,7 +822,9 @@ relies only on blockDim.x block.x and thread.x"
     (when-not (= 0 (rem (math/ecount rand-buffer) 2))
       (throw (Exception.
               (format "Cuda devices are only capabled of generating even numbers of rands."))))
-    (cuda-generate-rands (->ptr rand-buffer) distribution (math/ecount rand-buffer) stream)))
+    (cuda-generate-rands (->ptr rand-buffer) distribution (math/ecount rand-buffer) stream))
+  (select [stream sel-buf lt-zero ge-zero]
+    (cuda-select (->ptr sel-buf) lt-zero ge-zero (m/ecount sel-buf) stream)))
 
 
 (extend-type cuda$CUevent_st

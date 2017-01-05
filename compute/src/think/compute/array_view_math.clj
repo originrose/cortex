@@ -25,7 +25,8 @@
   ;;Create a scale vector with either 1.0 in the row if the row-len is < the
   ;;l2 constraint or (/ l2-max-constraint row-len) otherwise.
   (l2-constraint-scale [a inc-a l2-max-constraint])
-  (generate-rands [rand-buffer distribution]))
+  (generate-rands [rand-buffer distribution])
+  (select [a lt-zero ge-zero]))
 
 
 (defmacro sum-impl
@@ -90,6 +91,21 @@
               (if (< row-len# l2-max-constraint#)
                 (v-aset a# a-offset# 1.0)
                 (v-aset a# a-offset# (/ l2-max-constraint# row-len#)))))))
+
+
+(defmacro select-impl
+  [a lt-zero ge-zero cast-fn]
+  `(let [a# (ArrayView/toView ~a)
+         lt-zero# (~cast-fn ~lt-zero)
+         ge-zero# (~cast-fn ~ge-zero)
+         a-elem-count# (.length a#)]
+     (c-for [idx# 0 (< idx# a-elem-count#) (inc idx#)]
+            (v-aset a# idx#
+                    (~cast-fn
+                     (if (>= (v-aget a# idx#) 0)
+                       ge-zero#
+                       lt-zero#))))))
+
 
 (extend-protocol PCPUMathImpl
   DoubleArrayView
@@ -166,6 +182,8 @@
     (l2-constraint-scale-impl a inc-a l2-max-constraint double))
   (generate-rands [^DoubleArrayView rand-buffer distribution elem-count]
     (throw (Exception. "Random generation operates on float buffers for CUDA compatibility")))
+  (select [^DoubleArrayView a lt-zero ge-zero]
+    (select-impl a lt-zero ge-zero double))
 
   FloatArrayView
   (gemm [^FloatArrayView A a-colstride
@@ -268,7 +286,9 @@
         (c-for [idx 0 (< idx elem-count) (inc idx)]
                (v-aset rand-view idx (float (.nextFloat rand-gen))))
         :else
-        (throw (Exception. (str "Unrecognized distribution: " distribution)))))))
+        (throw (Exception. (str "Unrecognized distribution: " distribution))))))
+  (select [^FloatArrayView a lt-zero ge-zero]
+    (select-impl a lt-zero ge-zero float)))
 
 
 (extend-protocol resource/PResource
