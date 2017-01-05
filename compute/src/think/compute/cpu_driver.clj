@@ -170,9 +170,10 @@ Use with care; the synchonization primitives will just hang with this stream."
   (generate-rands [stream rand-buffer distribution]
     (with-stream-dispatch stream
       (avm/generate-rands (dtype/->view rand-buffer) distribution)))
-  (select [stream buffer less-zero-value equal-or-greater-val]
+  (select [stream src-buf buffer less-zero-value equal-or-greater-val]
     (with-stream-dispatch stream
-      (avm/select buffer less-zero-value equal-or-greater-val))))
+      (avm/select (dtype/->view src-buf) (dtype/->view buffer)
+                  less-zero-value equal-or-greater-val))))
 
 
 (extend-type Buffer

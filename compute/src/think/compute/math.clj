@@ -27,14 +27,16 @@ in here should be 100% portable across different compute drivers."
 (defprotocol PMath
   "Base math abstraction.  Note the constants (alpha, beta) must be in the same
   datatype as the buffers.  The buffers must be device buffers and the matrixes are
-  assumed to be row major.
+  assumed to be row major.  Note that this interface expects raw device buffers and
+  *not* DeviceArrays (the multidimension abstraction presented below).
   gemm: C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C
   sum: y = a*x + b*y
   gemv: y = alpha * A * x + y
   mul-rows (diagonal gemm): given a matrix and vector, multiply each row by the
     corresponding element in the vector.  Place result in C.
   elem-mul: result = elementwise multiply alpha * a * b
-  l2-constraint-scale: create scale vector with either 1.0 or (constraint / row-len)."
+  l2-constraint-scale: create scale vector with either 1.0 or (constraint / row-len)
+  select: create a buffer with fixed constants for values >= 0 and values < 0."
   (gemm-impl [stream trans-a? trans-b?
               a-row-count a-col-count b-col-count
               alpha A a-colstride
@@ -63,10 +65,10 @@ to be same length as a and b.")
 a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
   (generate-rands [stream rand-buffer distribution]
     "Generate some random numbers defined by the distribution.")
-  (select [stream buffer less-zero-value equal-or-greater-val]
+  (select [stream src-buf dest-buf less-zero-value equal-or-greater-val]
     "Check buffer value against zero and set it to one value if it is less than zero
 and another value if it is greater or equal to zero:
-buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;"))
+dest-buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;"))
 
 
   (defmacro math-error

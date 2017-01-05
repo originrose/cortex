@@ -156,9 +156,10 @@
    (let [n-elems 1000
          values (mapv #(- % 0.5) (repeatedly n-elems rand))
          buf-a (make-buffer values)
+         buf-b (make-buffer (repeat n-elems 0))
          answer (mapv #(if (< % 0)
                          -1.0
                          1.0)
                       values)]
-     (math/select stream buf-a -1.0 1.0)
-     (is (m/equals answer (vec (->array buf-a)))))))
+     (math/select stream buf-a buf-b -1.0 1.0)
+     (is (m/equals answer (vec (->array buf-b)))))))
