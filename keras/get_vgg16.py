@@ -1,5 +1,4 @@
 from keras.applications import vgg16
-import json
 
 output_pre = "models/vgg16"
 
