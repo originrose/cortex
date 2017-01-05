@@ -428,12 +428,11 @@ opposed to networks), but consider:
          :traversal :forward
          (mapv (fn [{:keys [id]}]
                  (let [layer (network->node network id)]
-                   (into {}
-                         (concat [["type" (:type layer)]
-                                  ["input" (layer->input-str layer)]
-                                  ["output" (layer->output-str layer)]]
-                                 (for [k parameter-keys]
-                                   [k (layer->buffer-shape network layer k)]))))))
+                   (into {"type" (:type layer)
+                          "input" (layer->input-str layer)
+                          "output" (layer->output-str layer)}
+                         (for [k parameter-keys]
+                                   [k (layer->buffer-shape network layer k)])))))
          (clojure.pprint/print-table (concat ["type" "input" "output"] parameter-keys))))
   (println "\nParameter count:" (:parameter-count network)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
