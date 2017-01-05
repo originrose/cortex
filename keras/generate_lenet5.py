@@ -71,6 +71,11 @@ def train(model, X_train, y_train, epochs, validation_data=None):
     return model
 
 
+def save(model, output_pre):
+    with open(output_pre + '.json', 'w') as jsonf:
+        jsonf.write(model.to_json())
+    model.save_weights(output_pre + ".h5")
+
 # import MNIST dataset from Keras, reshape to add gray channel dimension
 (X_train, y_train), (X_test, y_test) = mnist.load_data()
 X_train = X_train.reshape(X_train.shape[0], 28, 28, 1)
@@ -79,7 +84,10 @@ y_train = np_utils.to_categorical(y_train, 10)
 y_test = np_utils.to_categorical(y_test, 10)
 
 # train a modern and lenet inspired model, save them.
-# model = modern_model()
-# model = train(model, X_train, y_train, 8, validation_data=(X_test, y_test))
+model = modern_model()
+model = train(model, X_train, y_train, 8, validation_data=(X_test, y_test))
 model2 = mnist_model()
 model2 = train(model2, X_train, y_train, 8, validation_data=(X_test, y_test))
+
+save(model, "models/modern_mnist")
+save(model2, "models/cortex_mnist")
