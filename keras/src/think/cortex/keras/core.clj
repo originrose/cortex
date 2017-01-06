@@ -30,8 +30,8 @@
   [config]
   (cond
     (:padding config)                 (:padding config)
-    (= (:border_mode config) "same")  [(mod (:nb_col config) 2)
-                                       (mod (:nb_row config) 2)]
+    (= (:border_mode config) "same")  [(quot (:nb_col config) 2)
+                                       (quot (:nb_row config) 2)]
     ;; else covers "valid" padding
     :else                             [0 0]))
 
