@@ -351,20 +351,20 @@ will be a merged map of the parameter meta data, the parameter and the parameter
 they exist.  Some transformations such as setting non-trainable? on the parameter level if the learning
 attenuation is 0 will happen."
   [network node-id]
-  (let [node (network->node network node-id)]
+  (let [node (network->node network node-id)
+        node-parameter (select-keys node [:learning-attenuation :l1-regularization
+                                          :l2-regularization :non-trainable?
+                                          :l2-max-constraint])]
     (->> (layers/get-parameter-descriptions node)
          (mapv (fn [{:keys [key] :as param-desc}]
                  (let [param (get node key)
                        buffers (get-in network [:layer-graph :buffers (get param :buffer-id)])
-                       retval (merge param-desc param buffers)]
+                       retval (merge param-desc node-parameter param buffers)
+                       learning-attenuation (double (get retval :learning-attenuation 1.0))]
                    (assoc retval
-                          :learning-attenuation
-                          (or (get retval :learning-attenuation)
-                              (double (get node :learning-attenuation 1.0)))
-                          :non-trainable?
-                          (or (get retval :non-trainable?)
-                              (get node :non-trainable?)
-                              (= 0.0 (double (get node :learning-attenuation 1.0)))))))))))
+                          :learning-attenuation learning-attenuation
+                          :non-trainable? (or (get retval :non-trainable?)
+                                              (= 0.0 learning-attenuation)))))))))
 
 
 (defn any-trainable-parameters?
