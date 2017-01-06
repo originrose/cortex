@@ -6,6 +6,4 @@
 
 
 (deftest verify-mnist
-  (let [test-model (keras/load-combined-hdf5-file "models/mnist_combined.h5")
-        verification-failure (import/verify-model (ce/create-context) test-model)]
-    (is (empty? verification-failure))))
+  (keras/load-sidecar-and-verify "models/cortex_mnist.json" "models/cortex_mnist.h5" "models/cortex_mnist_output.h5"))
