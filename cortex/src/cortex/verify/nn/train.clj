@@ -45,7 +45,8 @@
    (layers/convolutional 5 0 1 50 :weights {:l2-regularization 0.001})
    (layers/max-pooling 2 0 2)
    (layers/batch-normalization 0.9)
-   (layers/linear->relu 500)
+   (layers/linear 500 :l2-max-constraint 4.0)
+   (layers/relu)
    (layers/linear 10)
    (layers/softmax :id :output)])
 

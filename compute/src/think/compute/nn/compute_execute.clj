@@ -24,6 +24,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  Bind/save functionality
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn- allocate-l2-temp-data
+  [weights backend]
+  (let [weight-shape (m/shape weights)]
+   {:weight-temp (backend/new-array backend weight-shape)
+    :weight-magnitude-temp (backend/new-array backend
+                                              [(first weight-shape)])
+    :ones-vec (backend/allocate-ones backend (second weight-shape))}))
+
+(defn is-l2-max-constraint-valid?
+  [parameter]
+  (and (> (get parameter :l2-max-constraint 0.0) 0.0)
+       (= :weight (get parameter :type))))
+
+
 (defn- bind-node-parameter-buffers
   [compute-buffers node network backend gradients? numeric-gradients?]
   (let [driver (drv/get-driver backend)
@@ -32,7 +46,8 @@
                      (drv/allocate-host-buffer driver elem-count datatype))]
     (reduce (fn [compute-buffers {:keys [key non-trainable? buffer-id] :as parameter}]
               (let [gradients? (and (not non-trainable?) gradients?)
-                    numeric-gradients? (and (not non-trainable?) numeric-gradients?)]
+                    numeric-gradients? (and (not non-trainable?) numeric-gradients?)
+                    l2-max-constraint (double (get parameter :l2-max-constraint 0.0))]
                 (update compute-buffers buffer-id
                         (fn [compute-buffer]
                           (or compute-buffer
@@ -43,7 +58,9 @@
                                                                       (m/shape graph-buffer)))
                                   numeric-gradients?
                                   (assoc :numeric-gradient (alloc-host (m/ecount graph-buffer))
-                                         :host-buffer (alloc-host (m/ecount graph-buffer))))))))))
+                                         :host-buffer (alloc-host (m/ecount graph-buffer)))
+                                  (is-l2-max-constraint-valid? parameter)
+                                  (merge (allocate-l2-temp-data graph-buffer backend)))))))))
             compute-buffers
             (network/get-node-parameters network (get node :id)))))
 
@@ -327,6 +344,29 @@ to the device."
                                             :input-size]))))))
 
 
+(defn- apply-l2-max-constraint
+  [backend {:keys [weight-temp weight-magnitude-temp ones-vec buffer l2-max-constraint]}]
+  (when l2-max-constraint
+    (let [weight-ecount (long (math/ecount buffer))
+          [num-w-rows num-w-cols] (math/shape-2d buffer)]
+      (backend/assign! backend weight-temp buffer)
+      (math/elem-mul (drv/get-stream backend)
+                     1.0 (math/device-buffer buffer) 1
+                     (math/device-buffer weight-temp) 1
+                     (math/device-buffer weight-temp) 1)
+      (math/gemv (drv/get-stream backend) false num-w-rows num-w-cols
+                 1.0 (math/device-buffer weight-temp) num-w-cols
+                 (math/device-buffer ones-vec) 1
+                 0.0 (math/device-buffer weight-magnitude-temp) 1)
+      (math/l2-constraint-scale (drv/get-stream backend)
+                                (math/device-buffer weight-magnitude-temp) 1
+                                l2-max-constraint)
+      (math/mul-rows (drv/get-stream backend) num-w-rows num-w-cols
+                     (math/device-buffer buffer) num-w-cols
+                     (math/device-buffer weight-magnitude-temp) 1
+                                          (math/device-buffer buffer) num-w-cols))))
+
+
 (defn- recur-train-sequence
   "Training is a lazy sequence of these operations."
   [network parameters output-bindings optimise? batch-seq]
@@ -364,6 +404,7 @@ to the device."
                           (let [elem-count (long (m/ecount buffer))
                                 l2-reg (double (get parameter :l2-regularization 0))
                                 l1-reg (double (get parameter :l1-regularization 0))
+                                l2-max-constraint (double (get parameter :l2-max-constraint 0))
                                 ;;For some things it is easier to just work at the flat buffer level and not
                                 ;;at the device array level.
                                 gradient-buf (math/device-buffer gradient)
@@ -386,9 +427,11 @@ to the device."
                                     (math/sum stream l1-reg l1-buffer 1.0 gradient-buf gradient-buf))))
                               (compute-optimise/compute-parameters! optimiser
                                                                     (* buffer-alpha learning-attenuation)
-                                                                    offset gradient buffer))
+                                                                    offset gradient buffer)
+                              (when (is-l2-max-constraint-valid? parameter)
+                                (apply-l2-max-constraint backend parameter)))
                             (when gradient
-                             (drv/memset stream gradient-buf 0 0 elem-count))
+                              (drv/memset stream gradient-buf 0 0 elem-count))
                             (+ offset elem-count)))
                         0
                         parameters)
