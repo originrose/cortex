@@ -6,6 +6,24 @@ from keras.utils import np_utils
 from keras.optimizers import SGD
 
 
+def simple_mnist_model():
+    """No strides or pooling in this model should result in ambiguous dimensions."""
+    model = Sequential()
+    model.add(Convolution2D(32, 5, 5, border_mode='same', input_shape=(28, 28, 1)))
+    model.add(Activation('relu'))
+    model.add(MaxPooling2D((2, 2)))
+    model.add(Convolution2D(64, 3, 3, border_mode='same'))
+    model.add(MaxPooling2D((2, 2)))
+    model.add(Activation('relu'))
+    model.add(Flatten())
+    model.add(Dense(512))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(10))
+    model.add(Activation('softmax'))
+    return model
+
+
 def mnist_model():
     """Cortex MNIST impl inspired model:
 
@@ -84,10 +102,14 @@ y_train = np_utils.to_categorical(y_train, 10)
 y_test = np_utils.to_categorical(y_test, 10)
 
 # train a modern and lenet inspired model, save them.
-model = modern_model()
-model = train(model, X_train, y_train, 8, validation_data=(X_test, y_test))
-model2 = mnist_model()
-model2 = train(model2, X_train, y_train, 8, validation_data=(X_test, y_test))
+# model = modern_model()
+# model = train(model, X_train, y_train, 8, validation_data=(X_test, y_test))
+# save(model, "models/modern_mnist")
 
-save(model, "models/modern_mnist")
-save(model2, "models/cortex_mnist")
+# model2 = mnist_model()
+# model2 = train(model2, X_train, y_train, 8, validation_data=(X_test, y_test))
+# save(model2, "models/cortex_mnist")
+
+model3 = simple_mnist_model()
+model3 = train(model3, X_train, y_train, 8, validation_data=(X_test, y_test))
+save(model3, "models/simple_mnist")
