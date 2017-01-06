@@ -261,6 +261,12 @@
   "Given input with given dims and relative reshape indexes
 produce a new array of double values in the order desired"
   ^doubles [data data-dims reshape-indexes]
+  (when-not (= (m/ecount data)
+               (apply * data-dims))
+    (throw (ex-info "Data does not match passed in dimensions"
+                    {:data-size (m/ecount data)
+                     :dimensions data-dims
+                     :dimension-size (apply * data-dims)})))
   (let [^doubles data (ensure-doubles data)
         n-elems (long (reduce * data-dims))
         retval (double-array (alength data))
@@ -402,8 +408,9 @@ produce a new array of double values in the order desired"
   [layer-outputs]
   (let [by-id (hdf5-child-map layer-outputs)]
     (apply merge (for [[lyr-id hdf5-node] by-id]
-                   (let [raw-data (-> hdf5-node hdf5/->clj :data)
-                         as-mat   (to-core-matrix raw-data [(m/ecount raw-data)]) ]
+                   (let [clj-data (-> hdf5-node hdf5/->clj)
+                         raw-data (get clj-data :data)
+                         as-mat   (to-core-matrix raw-data [(m/ecount raw-data)])]
                      {lyr-id as-mat})))))
 
 
