@@ -575,7 +575,7 @@ network."
   throws ex-info with a report containing layers which did not pass verification."
   [model-json-file weights-h5-file output-h5-file]
   (let [network (load-sidecar-model model-json-file weights-h5-file output-h5-file)
-        import-result (network-output-file->import-result network)
+        import-result (network-output-file->import-result network output-h5-file)
         verified    (compute-verify/verify-model (compute-execute/create-context) import-result)]
     (if (empty? verified)
       (:model import-result)

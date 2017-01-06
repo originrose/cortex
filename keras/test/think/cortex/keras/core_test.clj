@@ -5,5 +5,8 @@
             [think.compute.nn.compute-execute :as ce]))
 
 
-(deftest verify-mnist
-  (keras/load-sidecar-and-verify "models/cortex_mnist.json" "models/cortex_mnist.h5" "models/cortex_mnist_output.h5"))
+(deftest verify-simple-mnist
+  "This is a basic model which has no ambiguity introduced by uneven strides,
+  where frameworks start to differ. A failure here indicates a very basic
+  problem in the Keras importer."
+  (keras/load-sidecar-and-verify "models/simple_mnist.json" "models/simple_mnist.h5" "models/simple_mnist_output.h5"))
