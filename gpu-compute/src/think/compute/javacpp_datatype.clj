@@ -5,7 +5,8 @@
             [clojure.core.matrix.protocols :as mp])
   (:import [org.bytedeco.javacpp
             BytePointer IntPointer LongPointer DoublePointer
-            Pointer PointerPointer FloatPointer ShortPointer]
+            Pointer PointerPointer FloatPointer ShortPointer
+            Pointer$DeallocatorReference]
            [java.lang.reflect Field]))
 
 
@@ -71,6 +72,7 @@
 (defonce limit-field (get-private-field Pointer "limit"))
 (defonce capacity-field (get-private-field Pointer "capacity"))
 (defonce position-field (get-private-field Pointer "position"))
+(defonce deallocator-field (get-private-field Pointer "deallocator"))
 
 (defn offset-pointer
   "Create a 'fake' temporary pointer to use in api calls.  Note this function is
@@ -96,6 +98,13 @@ threadsafe while (.position ptr offset) is not."
     (.set ^Field limit-field retval limit)
     (.set ^Field capacity-field retval capacity)
     retval))
+
+
+(defn release-pointer
+  [^Pointer item]
+  (.close item)
+  (.deallocate item false)
+  (.set ^Field deallocator-field item nil))
 
 
 (defn as-buffer

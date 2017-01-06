@@ -279,7 +279,8 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 
 (extend-type Pointer
   resource/PResource
-  (release-resource [item]))
+  (release-resource [item]
+    (jcpp-dtype/release-pointer item)))
 
 
 (defn create-cuda-driver
@@ -344,7 +345,7 @@ before we set it, do the operation, and unlock the object after."
       (cuda/cudaStreamCreate retval)
       (->CudaStream impl (resource/track retval))))
   (allocate-host-buffer [impl elem-count elem-type]
-    (jcpp-dtype/make-pointer-of-type elem-type elem-count))
+    (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count)))
   (allocate-device-buffer [impl ^long elem-count elem-type]
     (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
           retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
