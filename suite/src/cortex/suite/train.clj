@@ -12,6 +12,8 @@
             [cortex.optimise :as cortex-opt]
             [cortex.nn.network :as network]))
 
+(def default-network-filestem "trained-network")
+(def trained-networks-folder "trained-networks/")
 
 (defn load-network
   "Loads a map of {:cv-loss :network-description :initial-description}
@@ -86,7 +88,7 @@ in initial description.  Else returns the initial description"
   (let [network-filename (str network-filestem ".nippy")]
     (when (.exists (io/file network-filename))
       (let [backup-filename  (->> (map (fn [idx]
-                                         (str "trained-networks/" network-filestem
+                                         (str trained-networks-folder network-filestem
                                               "-" idx ".nippy"))
                                        (drop 1 (range)))
                                   (remove #(.exists (io/file %)))
@@ -129,7 +131,7 @@ we continue to train forever.
              optimiser
              force-gpu?]
       :or {batch-size 128
-           network-filestem "trained-network"
+           network-filestem default-network-filestem
            optimiser (cortex-opt/adam)
            force-gpu? true}}]
   (resource/with-resource-context
@@ -195,3 +197,27 @@ existing traversal bindings."
     {:labels labels
      :inferences inferences
      :data data}))
+
+(defn print-trained-networks-summary
+  "Prints a summary of the different networks trained so far.
+  Respects an (optional) `network-filestem`."
+  [& {:keys [network-filestem
+             cv-loss->number
+             cv-loss-display-precision
+             extra-keys]
+      :or {network-filestem default-network-filestem
+           cv-loss->number #(apply + (vals %))
+           cv-loss-display-precision 3}}]
+  (let [cv-loss-format-string (format "%%.%sf" cv-loss-display-precision)]
+    (->> trained-networks-folder
+         io/file
+         file-seq
+         (filter #(let [n (.getPath %)]
+                    (and (.contains n (.concat trained-networks-folder network-filestem))
+                         (.endsWith n ".nippy"))))
+         (map (fn [f] [f (suite-io/read-nippy-file f)]))
+         (map (fn [[f network]] (assoc network :filename (.getName f))))
+         (map (fn [network] (update network :cv-loss cv-loss->number)))
+         (sort-by :cv-loss)
+         (map (fn [network] (update network :cv-loss #(format cv-loss-format-string %))))
+         (clojure.pprint/print-table (concat [:filename :cv-loss :parameter-count] extra-keys)))))
