@@ -13,27 +13,28 @@
             [clojure.string :as string]
             [think.compute.nn.compute-execute :as compute-execute]))
 
-
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* true)
 
-
-(defn read-model
+(defn read-json-model
   "Reads a JSON keras model into a Clojure map. Just a literal representation
-  with no additional munging at this point."
+  with no additional munging at this point. Fn is public for test purposes, to
+  ensure we don't lose/mismatch information from model->desc."
   [fname]
   (json/parse-string (slurp fname) keyword))
 
 
 (defn match-padding
-  "Maps from Keras padding descriptors to Cortex pad-x and pad-y values."
+  "Maps from Keras padding descriptors to Cortex pad-x and pad-y values. Fn is
+  public for test purposes."
   [config]
   (cond
     (:padding config)                 (:padding config)
-    (= (:border_mode config) "same")  [(mod (:nb_col config) 2)
-                                       (mod (:nb_row config) 2)]
+    (= (:border_mode config) "same")  [(quot (:nb_col config) 2)
+                                       (quot (:nb_row config) 2)]
     ;; else covers "valid" padding
     :else                             [0 0]))
+
 
 (defmulti model-item->desc
   "Multimethod that dispatches on keyword version of Keras model item key
@@ -106,7 +107,8 @@
         :embedded id}]
       [retval])))
 
-(defn model->simple-description
+
+(defn- keras-model->simple-description
   "Returns a simple (unbuilt) model description given the hashmap literal
   representation of a Keras JSON model description."
   [model]
@@ -140,6 +142,8 @@
                             model-vector))))))
 
 (defn hdf5-child-map
+  "For a node, return the children from that node as values corresponding to
+  parent node name (as keyword) keys."
   [node]
   (into {} (map (fn [node-child]
                   [(keyword (hdf5/get-name node-child))
@@ -259,8 +263,14 @@
 
 (defn- reshape-data
   "Given input with given dims and relative reshape indexes
-produce a new array of double values in the order desired"
+  produce a new array of double values in the order desired"
   ^doubles [data data-dims reshape-indexes]
+  (when-not (= (m/ecount data)
+               (apply * data-dims))
+    (throw (ex-info "Data does not match passed in dimensions"
+                    {:data-size (m/ecount data)
+                     :dimensions data-dims
+                     :dimension-size (apply * data-dims)})))
   (let [^doubles data (ensure-doubles data)
         n-elems (long (reduce * data-dims))
         retval (double-array (alength data))
@@ -276,13 +286,13 @@ produce a new array of double values in the order desired"
              (aset retval output-idx (aget data idx))))
     retval))
 
-
 (defn to-core-matrix
+  "Reshape data into ideal-shape and load into core matrix. For rationale behind
+  this workaround, see: https://github.com/mikera/core.matrix/issues/299
+
+  In brief, the simple case of using m/reshape has serious performance issues."
   [data ideal-shape]
   (let [^doubles data (ensure-doubles data)]
-    ;;https://github.com/mikera/core.matrix/issues/299
-
-    ;;The simple case of using m/reshape has serious performance issues.
     (case (count ideal-shape)
       1 data
       2 (let [[n-rows n-cols] ideal-shape
@@ -295,6 +305,7 @@ produce a new array of double values in the order desired"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Load/reshaping of weights
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn node->keras-dims
   [node]
   (cond
@@ -306,7 +317,6 @@ produce a new array of double values in the order desired"
       [(:input-width node) (:input-height node)
        (:input-channels node) (:output-size node)]
       [(:input-size node) (:output-size node)])))
-
 
 (defn- reshape-weights
   "check and possibly reshape weights for a given node."
@@ -330,7 +340,6 @@ produce a new array of double values in the order desired"
             (->> (layers/get-parameter-descriptions node)
                  (filter #(= :weight (get % :type)))
                  seq))))
-
 
 (defn- description->network
   "Given a simple list of descriptors load the weights and return a network."
@@ -386,24 +395,18 @@ produce a new array of double values in the order desired"
     (description->network desc-seq (hdf5/open-file weights-fname))))
 
 
-(defn json-weight-file->network
-  "Given a json model and weight hdf5 file load model into a cortex description layer."
-  [model-json-fname weight-hdf5-fname]
-  (let [model-desc (-> (read-model model-json-fname)
-                       model->simple-description)]
-    (description-weight-file->network model-desc weight-hdf5-fname)))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Load/reshape of layer outputs
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- outputs->output-map
-  "Given the layer outputs "
+  "Read the layer outputs from a file."
   [layer-outputs]
   (let [by-id (hdf5-child-map layer-outputs)]
     (apply merge (for [[lyr-id hdf5-node] by-id]
-                   (let [raw-data (-> hdf5-node hdf5/->clj :data)
-                         as-mat   (to-core-matrix raw-data [(m/ecount raw-data)]) ]
+                   (let [clj-data (-> hdf5-node hdf5/->clj)
+                         raw-data (get clj-data :data)
+                         as-mat   (to-core-matrix raw-data [(m/ecount raw-data)])]
                      {lyr-id as-mat})))))
 
 
@@ -415,7 +418,6 @@ produce a new array of double values in the order desired"
                          (get-in [:traversal :forward]))]
     (->> (map :id forward-pass)
          (map #(get-in network [:layer-graph :id->node-map %])))))
-
 
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.
@@ -443,8 +445,7 @@ produce a new array of double values in the order desired"
   (when (every? #(% node) [:output-channels :output-height :output-width])
     [(:output-height node) (:output-width node) (:output-channels node)]))
 
-
-(defn reshape-layer-output
+(defn- reshape-layer-output
   "For outputs that aren't flat, reshape layer weights to use Cortex ordering
   instead of Keras dim ordering."
   [[node data]]
@@ -460,125 +461,76 @@ produce a new array of double values in the order desired"
        data))))
 
 
-(defn- network-output-data->outputs
-  "Load the layer outputs an return a list of outputs (some may be nil)
-in order of the forward traversal of the gradient descent pass of the
-network."
-  [network hdf5-layer-outputs]
-  (->> (outputs->output-map hdf5-layer-outputs)
-       (associate-layer-outputs network)
-       (mapv reshape-layer-output)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; functions below this line should be considered part of the (evolving) public
+;; contract of the Keras importer.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn network-output-file->test-image
+  "Given a network output h5 file, we read in the test image that has been
+  stored in there."
+  [output-file]
+  (-> (hdf5/open-file output-file)
+      hdf5-child-map
+      :test_image
+      hdf5/->clj
+      :data))
 
-(defn- network-output-file->outputs
-  "Given an output file (hdf5 opened already) we return a map from keyword layer-id to
-  a core matrix object that contains the values of the outputs at that layer from the
-  test image during keras export process."
-  [network output-file]
-  (network-output-data->outputs network (-> output-file hdf5-child-map :layer_outputs)))
+(defn network-output-file->layer-outputs
+  "Read output values from h5 file, return in hash-map of layer-id as keyword
+  to value as core matrix array."
+  [h5-filepath]
+  (let [lyr-map (-> h5-filepath
+                    hdf5/open-file
+                    hdf5-child-map
+                    :layer_outputs)]
+    (outputs->output-map lyr-map)))
 
+(defn keras-json->cortex-desc
+  "This function fulfills one basic contract of the importer: for a given Keras
+  architecture description in a JSON file with supported layer types, we map it
+  to a cortex description of the same architecture.
 
-(defn- check-output-dims
-  "Given a mapping of vector tuples of built layer descriptions and output weights,
-  as from `associate-layer-outputs`, returns information on all layers whose dims
-  do not match."
-  [network output-vec]
-  (->> (network->nodes network)
-       (map (fn [output node]
-              (when output
-                (when-not (= (m/ecount output)
-                             (:output-size node))
-                  {:keras-output-size (m/ecount output)
-                   :node-output-size (:output-size node)})))
-            output-vec)
-       (remove nil?)))
+  This also defines a separate, valid import path. I.e., if we don't want to
+  import weights but we want to create a Cortex model with an equivalent arch.
+  to some well-known Keras model, we can use its architecture json as a single
+  argument to this function to get said description for said Cortex model."
+  [model-json-fname]
+  (-> model-json-fname
+      read-json-model
+      keras-model->simple-description))
 
+(defn json-weight-file->network
+  "This function reads the JSON architecture in Keras format, converts to a
+  Cortex description, builds the Cortex description into an instantiated
+  network,  then loads the Keras specified weights into the live Cortex
+  network."
+  [model-json-fname weight-hdf5-fname]
+  (let [model-desc (keras-json->cortex-desc model-json-fname)]
+    (description-weight-file->network model-desc weight-hdf5-fname)))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;Loading of combined or separate h5 files
-;;combined means weights, outputs, model-json all in one file.
-;;separate means all the above are in separate files
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn network->input
-  [network test-image]
-  (let [input-node (first (network->nodes network))
-        input-shape (if (:output-width input-node)
-                      [(:output-channels input-node)
-                       (* (:output-height input-node)
-                          (:output-width input-node))]
-                      [(:output-size input-node)])]
-    (if test-image
-      (:data (hdf5/->clj test-image))
-      (double-array (vec (repeat (apply * input-shape) 1.0))))))
-
-
-(defn load-combined-hdf5-file
-  "Load an f5 file with the model json, the weights and the output all combined
-  into one file."
-  [fname]
-  (resource/with-resource-context
-    (let [model-file (hdf5/open-file fname)
-          file-child-map (hdf5-child-map model-file)
-          printer (fn [item]
-                    (clojure.pprint/pprint item)
-                    item)
-          src-desc (-> (:model_config file-child-map)
-                       hdf5/->clj
-                       :data
-                       first
-                       (json/parse-string keyword)
-                       model->simple-description)
-          network (description->network src-desc model-file)
-          input (network->input network (get file-child-map :test_image))
-          outputs (network-output-data->outputs network (:layer_outputs file-child-map))]
-      {:model network
-       :input input
-       :layer-outputs outputs})))
-
-
-(defn load-sidecar-model
-  "Given a json file, weights h5 file, and output file (generated by Python
-  export utils provided by cortex-keras), attempt to load model and, if
-  failing, throw an ex-info that includes a report of model<->weight mismatched
-  dimensions."
-  [json-file weights-h5-file output-file]
-  (resource/with-resource-context
-    (try
-      (json-weight-file->network json-file weights-h5-file)
-      (catch Exception e
-        (throw (ex-info "Cannot create model, returning diagnostics."
-                  {:cause  :model-weight-mismatch
-                   :report (let [model-desc (-> json-file
-                                                read-model
-                                                model->simple-description)
-                                 network (network/build-network model-desc)
-                                 outputs (network-output-file->outputs network (hdf5/open-file output-file))]
-                             (check-output-dims network outputs))}))))))
-
-
-(defn- network-output-file->import-result
-  "Given a sidecar model (as from load-sidecar-model) verify that outputs match
-  outputs generated by Keras."
-  [network output-file]
-  (resource/with-resource-context
-    (let [h5-file     (hdf5/open-file output-file)
-          outputs     (network-output-file->outputs network h5-file)
-          input       (network->input network (-> h5-file hdf5-child-map :test_image))]
-      {:model network
-       :input input
-       :layer-outputs outputs})))
-
-
-(defn load-sidecar-and-verify
+(defn import-model
   "Loads a Keras model with json-file, h5 weights file, and h5 output generated
   by provided Python export scripts if it passes verification. If it does not,
-  throws ex-info with a report containing layers which did not pass verification."
+  throws ex-info with a report containing layers which did not pass verification.
+
+  Note: if model fails earlier, it's the responsibility of functions that read
+  Keras architecture or load h5 weights or outputs to throw close to the error.
+
+  All import paths should go through this function. If you intend to define an
+  import path (consolidated h5 file or otherwise), do so as different arity or
+  dispatch through this function."
   [model-json-file weights-h5-file output-h5-file]
-  (let [network (load-sidecar-model model-json-file weights-h5-file output-h5-file)
-        import-result (network-output-file->import-result network)
-        verified    (compute-verify/verify-model (compute-execute/create-context) import-result)]
+  (let [network     (json-weight-file->network model-json-file weights-h5-file)
+        test-image  (network-output-file->test-image output-h5-file)
+        output-map  (network-output-file->layer-outputs output-h5-file)
+        assoc-out   (associate-layer-outputs network output-map)
+        reshaped    (mapv reshape-layer-output assoc-out)
+        for-verify  {:model network
+                     :input test-image
+                     :layer-outputs reshaped}
+        verified     (compute-verify/verify-model (compute-execute/create-context) for-verify)]
     (if (empty? verified)
-      (:model import-result)
+      network
       (throw (ex-info "Model did not pass verification."
-                      {:cause  :incorrect-output
-                       :report verified})))))
+                      {:report verified})))))

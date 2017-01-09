@@ -83,6 +83,9 @@ def layer_outputs(h5file, json_file=None, out_fname='layer_outputs.h5'):
             # output 0 is kind of a hack here, keras actually supports
             # multiple outputs from a layer, although not common in modeling
             # practice
+            print("Writing outputs for layer: {0} with output shape {1}"
+                  .format(lyr.name, output[0].shape))
+
             layer_group[lyr.name] = output[0]
 
         # Write out the original weights to the new hdf5 file
