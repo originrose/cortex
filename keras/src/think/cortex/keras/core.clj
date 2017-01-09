@@ -498,7 +498,6 @@ produce a new array of double values in the order desired"
       hdf5/->clj
       :data))
 
-
 (defn network-output-file->layer-outputs
   "Read output values from h5 file, return in hash-map of layer-id as keyword
   to value as core matrix array."
@@ -551,7 +550,7 @@ produce a new array of double values in the order desired"
         test-image  (network-output-file->test-image output-h5-file)
         output-map (network-output-file->layer-outputs output-h5-file)
         assoc-out  (associate-layer-outputs network output-map)
-        reshaped  (mapv reshape-layer-output output-map)
+        reshaped  (mapv reshape-layer-output assoc-out)
         import-result {:model network
                        :input test-image
                        :layer-outputs reshaped}
