@@ -16,9 +16,10 @@ def simple_mnist_model():
     model.add(MaxPooling2D((2, 2)))
     model.add(Activation('relu'))
     model.add(Flatten())
-    model.add(Dense(512))
+    model.add(Dense(128))
     model.add(Activation('relu'))
-    model.add(Dropout(0.5))
+    # dropped for now from verification. 
+    # model.add(Dropout(0.5))
     model.add(Dense(10))
     model.add(Activation('softmax'))
     return model
@@ -102,14 +103,14 @@ y_train = np_utils.to_categorical(y_train, 10)
 y_test = np_utils.to_categorical(y_test, 10)
 
 # train a modern and lenet inspired model, save them.
-# model = modern_model()
-# model = train(model, X_train, y_train, 8, validation_data=(X_test, y_test))
+# model3 = modern_model()
+# model3 = train(model3, X_train, y_train, 8, validation_data=(X_test, y_test))
 # save(model, "models/modern_mnist")
 
 # model2 = mnist_model()
 # model2 = train(model2, X_train, y_train, 8, validation_data=(X_test, y_test))
 # save(model2, "models/cortex_mnist")
 
-model3 = simple_mnist_model()
-model3 = train(model3, X_train, y_train, 8, validation_data=(X_test, y_test))
-save(model3, "models/simple_mnist")
+model = simple_mnist_model()
+model = train(model, X_train, y_train, 8, validation_data=(X_test, y_test))
+save(model, "models/simple_mnist")

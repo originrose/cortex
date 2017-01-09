@@ -29,7 +29,7 @@
     ;; these are known properties of simple model, if model changes,
     ;; update this part of test.
     (is (= "1.1.2" (:keras_version keras-model)))
-    (is (= 12 (count (:config keras-model)) (count model-desc)))
+    (is (= 11 (count (:config keras-model)) (count model-desc)))
     ;; within intersection of layer types both keras and cortex use,
     ;; the models should each contain those in the same order.
     (is (= (remove #(.contains ^String (str %) "flatten")
@@ -42,7 +42,7 @@
   that built result is correct."
   (let [model-desc (keras/keras-json->cortex-desc simple_archf)
         built-net   (network/build-network model-desc)]
-    (is (= 1630602 (:parameter-count built-net)))
+    (is (= 422154 (:parameter-count built-net)))
     (is (nil? (:verification-failures built-net)))))
 
 
