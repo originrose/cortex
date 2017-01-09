@@ -24,7 +24,7 @@
 (deftest keras-json-load
   "This test ensures that we get back a model we can load into a valid cortex
   description."
-  (let [keras-model (keras/read-model simple_archf)
+  (let [keras-model (keras/read-json-model simple_archf)
         model-desc  (keras/model->simple-description keras-model)]
     ;; these are known properties of simple model, if model changes,
     ;; update this part of test.
@@ -40,7 +40,7 @@
 (deftest network-builds
   "Ensure that the model we read in from Keras can actually be built, and
   that built result is correct."
-  (let [keras-model (keras/read-model simple_archf)
+  (let [keras-model (keras/read-json-model simple_archf)
         model-desc  (keras/model->simple-description keras-model)
         built-net   (network/build-network model-desc)]
     (is (= 1630602 (:parameter-count built-net)))
@@ -49,7 +49,7 @@
 
 (deftest read-outputs-correctly
   "Ensures that we read in output arrays for all layers that have them."
-  (let [keras-model (keras/read-model simple_archf)
+  (let [keras-model (keras/read-json-model simple_archf)
         model-desc  (keras/model->simple-description keras-model)
         built-net   (network/build-network model-desc)
         outputs     (keras/network-output-file->outputs built-net simple_outf)
@@ -67,4 +67,4 @@
 
   Model does, however, inclue Dropout, so requires handling in inference or 
   training step so layer is not skipped."
-  (is (keras/load-sidecar-and-verify simple_archf simple_weightf simple_outf)))
+  (is (keras/import-model simple_archf simple_weightf simple_outf)))

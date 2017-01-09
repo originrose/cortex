@@ -18,7 +18,7 @@
 (set! *unchecked-math* true)
 
 
-(defn read-model
+(defn read-json-model
   "Reads a JSON keras model into a Clojure map. Just a literal representation
   with no additional munging at this point."
   [fname]
@@ -395,7 +395,7 @@ produce a new array of double values in the order desired"
 (defn json-weight-file->network
   "Given a json model and weight hdf5 file load model into a cortex description layer."
   [model-json-fname weight-hdf5-fname]
-  (let [model-desc (-> (read-model model-json-fname)
+  (let [model-desc (-> (read-json-model model-json-fname)
                        model->simple-description)]
     (description-weight-file->network model-desc weight-hdf5-fname)))
 
@@ -551,7 +551,7 @@ produce a new array of double values in the order desired"
   export utils provided by cortex-keras), attempt to load model and, if
   failing, throw an ex-info that includes a report of model<->weight mismatched
   dimensions."
-  [json-file weights-h5-file output-file]
+  [json-file weights-h5-file]
   (resource/with-resource-context
     (try
       (json-weight-file->network json-file weights-h5-file)
@@ -559,11 +559,10 @@ produce a new array of double values in the order desired"
         (throw (ex-info "Cannot create model, returning diagnostics."
                   {:cause  :model-weight-mismatch
                    :report (let [model-desc (-> json-file
-                                                read-model
+                                                read-json-model
                                                 model->simple-description)
-                                 network (network/build-network model-desc)
-                                 outputs (network-output-file->outputs network output-file)]
-                             (check-output-dims network outputs))}))))))
+                                 network (network/build-network model-desc)])}))))))
+
 
 (defn network-output-file->test-image
   "Given a network output h5 file, read in the test image."
@@ -587,7 +586,7 @@ produce a new array of double values in the order desired"
        :layer-outputs outputs})))
 
 
-(defn load-sidecar-and-verify
+(defn import-model
   "Loads a Keras model with json-file, h5 weights file, and h5 output generated
   by provided Python export scripts if it passes verification. If it does not,
   throws ex-info with a report containing layers which did not pass verification."
