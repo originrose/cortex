@@ -49,15 +49,12 @@
 
 (deftest read-outputs-correctly
   "Ensures that we read in output arrays for all layers that have them."
-  (let [keras-model (keras/read-json-model simple_archf)
-        model-desc  (keras/model->simple-description keras-model)
-        built-net   (network/build-network model-desc)
-        outputs     (keras/network-output-file->outputs built-net simple_outf)
-        arrs        (for [[lyr out-arr] outputs] out-arr)]
+  (let [outputs  (keras/hdf5-layer-outputs simple_outf)
+        out-arrs (for [[lyr arr] outputs] arr)]
     ;; all outputs are double arrays
-    (is (every? #(instance? (Class/forName "[D") %) arrs))
+    (is (every? #(instance? (Class/forName "[D") %) out-arrs))
     ;; just one spot check on dims of an output for now
-    (is (= 12544 (m/shape (:convolution2d_2 outputs))))))
+    (is (= [12544] (m/shape (:convolution2d_2 outputs))))))
 
 
 (deftest verify-simple-mnist
