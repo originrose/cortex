@@ -19,11 +19,28 @@
   (is (= [1 2] (keras/match-padding {:padding [1 2]}))))
 
 
+(deftest keras-json-load
+  "This test ensures that we get back a model we can load into a valid cortex
+  description."
+  (let [keras-model (keras/read-model simple_archf)
+        model-desc  (keras/model->simple-description keras-model)]
+    ;; these are known properties of simple model, if model changes,
+    ;; update this part of test.
+    (is (= "1.1.2" (:keras_version keras-model)))
+    (is (= 12 (count (:config keras-model)) (count model-desc)))
+    ;; within intersection of layer types both keras and cortex use,
+    ;; the models should each contain those in the same order.
+    (is (= (remove #(.contains ^String (str %) "flatten")
+                   (map (comp keyword :name :config) (:config keras-model)))
+           (rest (map :id model-desc))))))
+
+
+
 (deftest verify-simple-mnist
   "This is a basic model which has no ambiguity introduced by uneven strides,
   where frameworks start to differ. A failure here indicates a very basic
   problem in the Keras importer.
 
   Model does, however, inclue Dropout, so requires handling in inference or 
-  trainin step so layer is not skipped."
+  training step so layer is not skipped."
   (is (keras/load-sidecar-and-verify simple_archf simple_weightf simple_outf)))
