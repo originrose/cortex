@@ -25,7 +25,7 @@
   "This test ensures that we get back a model we can load into a valid cortex
   description."
   (let [keras-model (keras/read-json-model simple_archf)
-        model-desc  (keras/model->simple-description keras-model)]
+        model-desc  (keras/keras-json->cortex-desc simple_archf)]
     ;; these are known properties of simple model, if model changes,
     ;; update this part of test.
     (is (= "1.1.2" (:keras_version keras-model)))
@@ -40,8 +40,7 @@
 (deftest network-builds
   "Ensure that the model we read in from Keras can actually be built, and
   that built result is correct."
-  (let [keras-model (keras/read-json-model simple_archf)
-        model-desc  (keras/model->simple-description keras-model)
+  (let [model-desc (keras/keras-json->cortex-desc simple_archf)
         built-net   (network/build-network model-desc)]
     (is (= 1630602 (:parameter-count built-net)))
     (is (nil? (:verification-failures built-net)))))
@@ -49,7 +48,7 @@
 
 (deftest read-outputs-correctly
   "Ensures that we read in output arrays for all layers that have them."
-  (let [outputs  (keras/hdf5-layer-outputs simple_outf)
+  (let [outputs  (keras/network-output-file->layer-outputs simple_outf)
         out-arrs (for [[lyr arr] outputs] arr)]
     ;; all outputs are double arrays
     (is (every? #(instance? (Class/forName "[D") %) out-arrs))
