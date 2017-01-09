@@ -1,6 +1,8 @@
 (ns think.cortex.keras.core-test
   (:require [clojure.test :refer :all]
             [think.cortex.keras.core :as keras]
+            [cortex.nn.network :as network]
+            [clojure.core.matrix :as m]
             [cortex.verify.nn.import :as import]
             [think.compute.nn.compute-execute :as ce]))
 
@@ -34,6 +36,28 @@
                    (map (comp keyword :name :config) (:config keras-model)))
            (rest (map :id model-desc))))))
 
+
+(deftest network-builds
+  "Ensure that the model we read in from Keras can actually be built, and
+  that built result is correct."
+  (let [keras-model (keras/read-model simple_archf)
+        model-desc  (keras/model->simple-description keras-model)
+        built-net   (network/build-network model-desc)]
+    (is (= 1630602 (:parameter-count built-net)))
+    (is (nil? (:verification-failures built-net)))))
+
+
+(deftest read-outputs-correctly
+  "Ensures that we read in output arrays for all layers that have them."
+  (let [keras-model (keras/read-model simple_archf)
+        model-desc  (keras/model->simple-description keras-model)
+        built-net   (network/build-network model-desc)
+        outputs     (keras/network-output-file->outputs built-net simple_outf)
+        arrs        (for [[lyr out-arr] outputs] out-arr)]
+    ;; all outputs are double arrays
+    (is (every? #(instance? (Class/forName "[D") %) arrs))
+    ;; just one spot check on dims of an output for now
+    (is (= 12544 (m/shape (:convolution2d_2 outputs))))))
 
 
 (deftest verify-simple-mnist
