@@ -226,7 +226,7 @@ pre-built framework) and ensuring that:
 things out a lot.
 
 This uses the think.parallel library so that we have infinite (augmented) data for training and that data loaded
-up to 1000 images ahead of where we are right now thus we get some ability to train and use the cpu to prepare
+up to 2000 images ahead of where we are right now thus we get some ability to train and use the cpu to prepare
 data in parallel efficiently without putting much thought into it.  Using the infinite training data does imply
 a shutdown function to stop those threads at some point; but this is only really necessary if you are going to
 create a bunch of datasets.
