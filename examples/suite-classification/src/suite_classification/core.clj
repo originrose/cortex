@@ -16,7 +16,9 @@
             [cortex.suite.io :as suite-io]
             [cortex.suite.train :as suite-train]
             [cortex.loss :as loss]
-            [think.gate.core :as gate]))
+            [think.gate.core :as gate]
+            [think.parallel.core :as parallel])
+  (:import [java.io File]))
 
 
 (def image-size 28)
@@ -163,12 +165,18 @@ to avoid overfitting the network to the training data."
           (repeat label))))
 
 
-(def create-dataset
+(defonce ensure-dataset-is-created
+  (memoize
+   (fn []
+     (println "checking that we have produced all images")
+     (build-image-data))))
+
+
+(defonce create-dataset
   (memoize
    (fn
      []
-     (println "checking that we have produced all images")
-     (build-image-data)
+     (ensure-dataset-is-created)
      (println "building dataset")
      (classification/create-classification-dataset-from-labeled-data-subdirs
       "mnist/training" "mnist/testing"
@@ -177,6 +185,56 @@ to avoid overfitting the network to the training data."
       (partial observation-label-pairs false datatype)
       :epoch-element-count 60000
       :shuffle-training-epochs? (> *num-augmented-images-per-file* 2)))))
+
+
+(defn- walk-directory-and-create-path-label-pairs
+  [dataset-dir]
+  (->> (.listFiles (io/file dataset-dir))
+       (mapcat (fn [^File sub-file]
+                 (->> (.listFiles sub-file)
+                      (map (fn [sample]
+                             {:data (.getCanonicalPath sample)
+                              :labels (.getName sub-file)})))))))
+
+
+(defn- balance-classes
+  [map-seq & {:keys [class-key]
+              :or {class-key :labels}}]
+  (->> (group-by class-key map-seq)
+       (map (fn [[k v]]
+              (->> (repeatedly #(shuffle v))
+                   (mapcat identity))))
+       (apply interleave)))
+
+
+(defn create-map-load-fn
+  [image->obs label->vec]
+  (let [image->obs (fn [img-path]
+                       (-> (imagez/load-image img-path)
+                           image->obs))]
+    (fn [{:keys [data labels]}]
+      {:data (image->obs data)
+       :labels (label->vec labels)})))
+
+
+(defn create-nippy-dataset
+  []
+  (ensure-dataset-is-created)
+  (when-not (.exists (io/file "mnist-dataset.nippy"))
+    (suite-io/write-nippy-file "mnist-dataset.nippy"
+                               {:testing (vec (shuffle (walk-directory-and-create-path-label-pairs "mnist/testing")))
+                                :training (vec (walk-directory-and-create-path-label-pairs "mnist/training"))}))
+  (let [{:keys [testing training]} (suite-io/read-nippy-file "mnist-dataset.nippy")
+        classes (classification/get-class-names-from-directory "mnist/training")
+        label->vec (classification/create-label->vec-fn classes)
+        train-load-fn (create-map-load-fn (partial mnist-png->observation datatype true) label->vec)
+        test-load-fn (create-map-load-fn (partial mnist-png->observation datatype false) label->vec)
+        cv-seq (parallel/queued-pmap 1000 test-load-fn testing)
+        train-seq-data (parallel/queued-sequence train-load-fn [(balance-classes training)] :queue-depth 2000)
+        train-seq (get train-seq-data :sequence)
+        shutdown-fn (get train-seq-data :shutdown-fn)]
+    (-> (ds/map-sequence->dataset train-seq 60000 :cv-map-seq cv-seq :shutdown-fn shutdown-fn)
+        (assoc :class-names classes))))
 
 
 (defn load-trained-network
@@ -211,10 +269,14 @@ to avoid overfitting the network to the training data."
   ([]
    (display-dataset-and-model (create-dataset))))
 
+(def ^:dynamic *run-from-nippy* true)
+
 
 (defn train-forever
   []
-  (let [dataset (create-dataset)
+  (let [dataset (if *run-from-nippy*
+                  (create-nippy-dataset)
+                  (create-dataset))
         confusion-matrix-atom (display-dataset-and-model dataset)]
     (classification/train-forever dataset mnist-observation->image
                                   initial-network
