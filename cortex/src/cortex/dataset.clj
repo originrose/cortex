@@ -317,3 +317,58 @@ data."
                         (parallel/create-next-item-fn training-epoch-seq)
                         sequence->map-fn
                         shutdown-fn))))
+
+
+(defn- item-map->shape-map
+  [item]
+  (->> item
+   (map (fn [[k v]]
+          [k {:shape (m/ecount v)}]))
+   (into {})))
+
+
+(defn- check-first-shape
+  [shape-map item-seq]
+  (let [item-shape (item-map->shape-map (first item-seq))]
+   (when-not (= shape-map item-shape)
+     (throw (ex-info "First item's shape does not match specified shape"
+                     {:shape-map shape-map
+                      :first-item-shape item-shape})))))
+
+
+(defn- seq-of-map->map-of-seq
+  [seq-of-maps]
+  (->> (keys (first seq-of-maps))
+       (map (fn [item-key]
+              [item-key (map #(get % item-key) seq-of-maps)]))
+       (into {})))
+
+
+(defn map-sequence->dataset
+  "Given sequences of maps (one of them infinite for training
+and the number of elements in an epoch construct an infinite dataset.
+Uses m/ecount to divine the shape from the first item in the infinite sequence.
+If a cross-validation sequence is not provided one will be created.  IF a holdout
+sequence is not create one with be created from the original infinite sequence."
+  [infinite-map-seq num-epoch-elements & {:keys [cv-map-seq holdout-map-seq
+                                                 use-cv-for-holdout? shutdown-fn]
+                                          :or {use-cv-for-holdout? true}}]
+  (let [[cv-map-seq infinite-map-seq] (if cv-map-seq
+                                        [cv-map-seq infinite-map-seq]
+                                        [(take num-epoch-elements infinite-map-seq)
+                                         (drop num-epoch-elements infinite-map-seq)])
+        [holdout-map-seq infinite-map-seq] (if holdout-map-seq
+                                             [holdout-map-seq infinite-map-seq]
+                                             (if use-cv-for-holdout?
+                                               [cv-map-seq infinite-map-seq]
+                                               [(take num-epoch-elements infinite-map-seq)
+                                                (drop num-epoch-elements infinite-map-seq)]))
+        shape-map (item-map->shape-map (first cv-map-seq))]
+    (check-first-shape shape-map holdout-map-seq)
+    (check-first-shape shape-map infinite-map-seq)
+    (let [cv-fn (parallel/create-next-item-fn (repeat cv-map-seq))
+          holdout-fn (if (identical? holdout-map-seq cv-map-seq)
+                       cv-fn
+                       (parallel/create-next-item-fn (repeat holdout-map-seq)))
+          train-fn (parallel/create-next-item-fn (partition num-epoch-elements infinite-map-seq))]
+     (->InfiniteDataset shape-map cv-fn holdout-fn train-fn seq-of-map->map-of-seq shutdown-fn))))

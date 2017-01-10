@@ -3,8 +3,6 @@
             [clojure.test :refer :all]))
 
 
-
-
 (deftest in-memory-dataset
   (let [test-ds (ds/create-in-memory-dataset {:data {:data (vec (repeat 1000 [1 2 3 4 5]))
                                                      :shape 5}
@@ -53,3 +51,21 @@
              (first (get-in column-data [:data]))))
       (is (= [1 2]
              (first (get-in column-data [:label])))))))
+
+
+
+
+(deftest infinite-sequence->infinite-dataset
+  (let [sequence (->> (range)
+                      (map (fn [idx]
+                             {:a (repeat 10 idx)
+                              :b (repeat 10 [(rem (long idx) 5) (rem (long idx) 4) (rem (long idx) 3)])
+                              :c (repeat 2 (quot (long idx) 5))})))
+        test-ds (ds/map-sequence->dataset sequence 200)
+        cv-item (first (ds/get-batches test-ds 5 :cross-validation [:a :b :c]))
+        holdout-item (first (ds/get-batches test-ds 5 :holdout [:a :b :c]))
+        training-item (first (ds/get-batches test-ds 5 :holdout [:a :b :c]))]
+    (is (= {:a {:shape 10}, :b {:shape 30}, :c {:shape 2}}
+           (ds/shapes test-ds)))
+    (is (= [0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3 3 4 4 4 4 4 4 4 4 4 4]
+           (vec (flatten (get cv-item :a)))))))
