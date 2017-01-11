@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex-datasets "0.3.1-SNAPSHOT"
+(defproject thinktopic/cortex-datasets "0.4.0-SNAPSHOT"
   :description "Library to provide datasets and to encapsulate persistent storage for cortex."
   :url "https://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
