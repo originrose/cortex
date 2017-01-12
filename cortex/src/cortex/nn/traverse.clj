@@ -55,7 +55,9 @@ while training no stream or loss is necessary"
   (assoc-in network [:traversal :output-bindings node-id]
             {:output-stream stream
              :loss (or loss
-                       (layers/get-layer-default-loss (network/network->node network node-id)))}))
+                       (layers/get-layer-default-loss
+                        (network/network->node network node-id)))}))
+
 
 (defn ->output-binding
   "Create a stand-along output-binding"
@@ -95,7 +97,7 @@ while training no stream or loss is necessary"
 (defn auto-bind-io
   "Auto bind the network's roots and leaves to either :data :labels if there
 are exactly 1 root and leaf or to :data-x where x is a one-based index of the
-root and labels-x where labels are a 1-based index of the leaf.x"
+root and labels-x where labels are a 1-based index of the leaf."
   [network]
   (let [[roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
         input-name-fn (if (> (count roots) 1)

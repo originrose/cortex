@@ -120,7 +120,8 @@
                  (update-in [:parameter-buffers]
                             (fn [param-buffers]
                               (bind-node-parameter-buffers param-buffers node built-network
-                                                           backend gradients? numeric-gradients?))))))
+                                                           backend gradients?
+                                                           numeric-gradients?))))))
          (get-in built-network [:compute-binding])
          (get traversal :forward))
         compute-binding
@@ -133,20 +134,25 @@
                                   gradients? (and gradients?
                                                   (contains? backward-buffers buffer-key))
                                   numeric-gradients? (and numeric-gradients?
-                                                          (contains? backward-buffers buffer-key))]
-                              (cond-> {:buffer (backend/new-array backend [buffer-size] batch-size)}
+                                                          (contains? backward-buffers
+                                                                     buffer-key))]
+                              (cond-> {:buffer (backend/new-array backend [buffer-size]
+                                                                  batch-size)}
                                 gradients?
-                                (assoc :gradient (backend/new-array backend [buffer-size] batch-size))
+                                (assoc :gradient (backend/new-array backend [buffer-size]
+                                                                    batch-size))
                                 numeric-gradients?
                                 (assoc :numeric-gradient (alloc-host (* buffer-size batch-size))
-                                       :host-buffer (alloc-host (* buffer-size batch-size)))))))))
+                                       :host-buffer (alloc-host (* buffer-size
+                                                                   batch-size)))))))))
          compute-binding
          (keys (get traversal :buffers)))
         network (assoc built-network
                        :compute-binding
                        (assoc compute-binding
                               :backend backend
-                              :batching-system (create-batching-system backend built-network batch-size)))
+                              :batching-system (create-batching-system backend built-network
+                                                                       batch-size)))
         trainable-parameters (load-training-parameters network)
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
@@ -182,15 +188,16 @@
     (-> network
         (update-in [:layer-graph :buffers]
                    (fn [buffers]
-                     (reduce (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
-                               (update buffers buf-id
-                                       (fn [result-buffer]
-                                         (cond-> (assoc result-buffer :buffer (core-m buffer))
-                                           (and save-gradients? gradient)
-                                           (assoc :gradient (core-m gradient)
-                                                  :numeric-gradient (->doubles numeric-gradient))))))
-                             buffers
-                             (get-in network [:compute-binding :parameter-buffers]))))
+                     (reduce
+                      (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
+                        (update buffers buf-id
+                                (fn [result-buffer]
+                                  (cond-> (assoc result-buffer :buffer (core-m buffer))
+                                    (and save-gradients? gradient)
+                                    (assoc :gradient (core-m gradient)
+                                           :numeric-gradient (->doubles numeric-gradient))))))
+                      buffers
+                      (get-in network [:compute-binding :parameter-buffers]))))
         (assoc-in [:traversal :buffers]
                   (if save-gradients?
                     (reduce (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
@@ -243,8 +250,9 @@
         backend (get-in network [:compute-binding :backend])
         traversal-buffers (->> (get-in network [:compute-binding :traversal-buffers])
                                (map (fn [[map-key buffer-entry]]
-                                      ;;Assoc the input buffers into the appropriate spots if they are
-                                      ;;passed in.
+                                      ;;Assoc the input buffers into
+                                      ;;the appropriate spots if they
+                                      ;;are passed in.
                                       (let [input-buffer (get id->input-buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
@@ -364,7 +372,56 @@ to the device."
       (math/mul-rows (drv/get-stream backend) num-w-rows num-w-cols
                      (math/device-buffer buffer) num-w-cols
                      (math/device-buffer weight-magnitude-temp) 1
-                                          (math/device-buffer buffer) num-w-cols))))
+                     (math/device-buffer buffer) num-w-cols))))
+
+(defn- optimise-network
+  [network parameters]
+  (let [backend (get-in network [:compute-binding :backend])
+        stream (drv/get-stream backend)
+        driver (drv/get-driver backend)
+        optimiser (compute-optimise/batch-update (get-in network [:compute-binding
+                                                                  :optimiser]))
+        buffer-alpha (/ 1.0 (double (get network :batch-size)))]
+    (reduce (fn [offset {:keys [buffer gradient
+                                learning-attenuation non-trainable?] :as parameter}]
+              (let [elem-count (long (m/ecount buffer))
+                    l2-reg (double (get parameter :l2-regularization 0))
+                    l1-reg (double (get parameter :l1-regularization 0))
+                    l2-max-constraint (double (get parameter :l2-max-constraint 0))
+                    ;;For some things it is easier to just
+                    ;;work at the flat buffer level and
+                    ;;not at the device array level.
+                    gradient-buf (math/device-buffer gradient)
+                    param-buf (math/device-buffer buffer)]
+                (when-not non-trainable?
+                  (when (> l2-reg 0.0)
+                    (math/sum stream l2-reg param-buf 1.0 gradient-buf gradient-buf))
+                  (when (> l1-reg 0.0)
+                    (let [l1-buffer (get-in network [:compute-binding :l1-buffer])]
+                      (when-not (and l1-buffer
+                                     (>= (long (m/ecount l1-buffer))
+                                         elem-count))
+                        (throw (ex-info "l1 reg buffer missing or too small"
+                                        {:l1-buffer-size (m/ecount l1-buffer)})))
+                      (let [l1-buffer (drv/sub-buffer driver l1-buffer 0 elem-count)]
+                        ;;The derivative of the absolute value function is either -1 or 1
+                        ;;depending on the value of the parameter.
+                        (math/select stream param-buf l1-buffer -1 1)
+                        ;;Add derivatives to gradient
+                        (math/sum stream l1-reg l1-buffer 1.0 gradient-buf gradient-buf))))
+                  (compute-optimise/compute-parameters! optimiser
+                                                        (* buffer-alpha learning-attenuation)
+                                                        offset gradient buffer)
+                  (when (is-l2-max-constraint-valid? parameter)
+                    (apply-l2-max-constraint backend parameter)))
+                (when gradient
+                  (drv/memset stream gradient-buf 0 0 elem-count))
+                (+ offset elem-count)))
+            0
+            parameters)
+    (assoc-in network
+              [:compute-binding :optimiser]
+              optimiser)))
 
 
 (defn- recur-train-sequence
@@ -372,77 +429,39 @@ to the device."
   [network parameters output-bindings optimise? batch-seq]
   (when-let [stream->buffer-map (first batch-seq)]
     ;;Sometimes you have to print the entire batch out to see what is going on.
-    (comment
-      (clojure.pprint/pprint (mapv (fn [[k v]]
-                                     [k (vec (take 10
-                                                   (backend/to-double-array
-                                                    (get-in network [:compute-binding :backend])
-                                                    v)))])
-                                   stream->buffer-map)))
-    (let [network (do-traverse network stream->buffer-map :forward)
-          buffer-alpha (/ 1.0 (double (get network :batch-size)))
-          backend (get-in network [:compute-binding :backend])
+    (let [backend (get-in network [:compute-binding :backend])
           stream (drv/get-stream backend)
-          driver (drv/get-driver backend)]
-      (doseq [{:keys [buffers loss stream] :as entry} output-bindings]
-        (let [{:keys [buffer gradient]} buffers
-              answer (get stream->buffer-map stream)]
-          ;;If the entire backward pass was nixed then there was no
-          (when gradient
-            (compute-loss/compute-loss-gradient loss backend buffer answer gradient))
-          (comment
-            (clojure.pprint/pprint {:loss loss
-                                    :buffer (vec (take 10 (backend/to-double-array backend buffer)))
-                                    :answer (vec (take 10 (backend/to-double-array backend answer)))
-                                    :gradient (vec (take 10 (backend/to-double-array backend gradient)))}))))
-      ;;Backward traverse uses existing buffers and doesn't need any id->buffer remapping
-      (do-traverse network {} :backward)
-      (let [network
-            (if optimise?
-              (let [optimiser (compute-optimise/batch-update (get-in network [:compute-binding :optimiser]))]
-                (reduce (fn [offset {:keys [buffer gradient learning-attenuation non-trainable?] :as parameter}]
-                          (let [elem-count (long (m/ecount buffer))
-                                l2-reg (double (get parameter :l2-regularization 0))
-                                l1-reg (double (get parameter :l1-regularization 0))
-                                l2-max-constraint (double (get parameter :l2-max-constraint 0))
-                                ;;For some things it is easier to just work at the flat buffer level and not
-                                ;;at the device array level.
-                                gradient-buf (math/device-buffer gradient)
-                                param-buf (math/device-buffer buffer)]
-                            (when-not non-trainable?
-                              (when (> l2-reg 0.0)
-                                (math/sum stream l2-reg param-buf 1.0 gradient-buf gradient-buf))
-                              (when (> l1-reg 0.0)
-                                (let [l1-buffer (get-in network [:compute-binding :l1-buffer])]
-                                  (when-not (and l1-buffer
-                                                 (>= (long (m/ecount l1-buffer))
-                                                     elem-count))
-                                    (throw (ex-info "l1 reg buffer missing or too small"
-                                                    {:l1-buffer-size (m/ecount l1-buffer)})))
-                                  (let [l1-buffer (drv/sub-buffer driver l1-buffer 0 elem-count)]
-                                    ;;The derivative of the absolute value function is either -1 or 1
-                                    ;;depending on the value of the parameter.
-                                    (math/select stream param-buf l1-buffer -1 1)
-                                    ;;Add derivatives to gradient
-                                    (math/sum stream l1-reg l1-buffer 1.0 gradient-buf gradient-buf))))
-                              (compute-optimise/compute-parameters! optimiser
-                                                                    (* buffer-alpha learning-attenuation)
-                                                                    offset gradient buffer)
-                              (when (is-l2-max-constraint-valid? parameter)
-                                (apply-l2-max-constraint backend parameter)))
-                            (when gradient
-                              (drv/memset stream gradient-buf 0 0 elem-count))
-                            (+ offset elem-count)))
-                        0
-                        parameters)
-                (assoc-in network
-                          [:compute-binding :optimiser]
-                          optimiser))
-              network)]
-        (cons network
-              (lazy-seq (recur-train-sequence network parameters
-                                              output-bindings optimise?
-                                              (rest batch-seq))))))))
+          driver (drv/get-driver backend)
+          ten-doubles #(vec (take 10 (backend/to-double-array backend %)))]
+      (comment
+        (clojure.pprint/pprint (mapv (fn [[k v]]
+                                       [k (ten-doubles v)])
+                                     stream->buffer-map)))
+      (let [network (do-traverse network stream->buffer-map :forward)
+            backend (get-in network [:compute-binding :backend])
+            stream (drv/get-stream backend)
+            driver (drv/get-driver backend)]
+        (doseq [{:keys [buffers loss stream] :as entry} output-bindings]
+          (let [{:keys [buffer gradient]} buffers
+                answer (get stream->buffer-map stream)]
+            ;;If the entire backward pass was nixed then there was no
+            (when gradient
+              (compute-loss/compute-loss-gradient loss backend buffer answer gradient))
+            (comment
+              (clojure.pprint/pprint {:loss loss
+                                      :buffer (ten-doubles buffer)
+                                      :answer (ten-doubles answer)
+                                      :gradient (ten-doubles gradient)}))))
+        ;;Backward traverse uses existing buffers and doesn't need any id->buffer remapping
+        (do-traverse network {} :backward)
+        (let [network
+              (if optimise?
+                (optimise-network network parameters)
+                network)]
+          (cons network
+                (lazy-seq (recur-train-sequence network parameters
+                                                output-bindings optimise?
+                                                (rest batch-seq)))))))))
 
 (defn- train-sequence
   [network batch-map-sequence options]

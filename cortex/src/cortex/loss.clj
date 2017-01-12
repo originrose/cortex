@@ -114,3 +114,19 @@ the actual log-loss of the softmax unit."
                                  answers)
         correct (count (filter #(m/equals (first %) (second %)) results-answer-seq))]
     (double (/ correct (count results-answer-seq)))))
+
+(defn center-loss
+  "Center loss is a way of specializing an activation for use as a grouping/sorting
+mechanism.  It groups activations by class and develops centers for the activations
+over the course of training.  Alpha is a number between 1,0 that stands for the exponential
+decay factor of the running centers (essentially running means).  The network is penalized
+for the distance of the current activations from their respective centers.  The result is that
+the activation itself becomes very grouped by class and thus make far better candidates for
+LSH or a distance/sorting system.  Note that this is a loss used in the middle of the graph,
+not at the edges.
+http://ydwen.github.io/papers/WenECCV16.pdf"
+  [{:keys [alpha lambda] :as arg-map
+    :or {alpha 0.5 lambda 0.01}}]
+  (merge {:type :center-loss
+          :alpha alpha
+          :lambda lambda}))
