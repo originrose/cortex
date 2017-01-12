@@ -326,17 +326,16 @@
   #vectorz/vector [-0.013839740893427578,-0.014110179325547643,-0.0025868279787373397]
 
   Here is one way to look at the full map passed to the termination
-  function. Since this is a fairly nonstandard thing, we define
-  a termination function transformation inline. After calling the
+  function. Since this is a fairly nonstandard thing, we define a
+  termination function transformation inline. After calling the
   original termination function, it pretty-prints the state map.
   Notice that some values are marked as <unrealized> in the printed
-  map. This is because the returned map is lazy. To avoid forcing
-  the lazy map when we pretty-print it, we have to use the
-  lazy map pprint dispatch function defined in util. (Of course,
-  if you want to see everything, you can just pprint it, with no
-  special dispatch, but computing e.g. the function value might
-  take a long time, which is why the map is lazy in the first
-  place.)
+  map. This is because the returned map is lazy. To avoid forcing the
+  lazy map when we pretty-print it, we have to use the special lazy
+  map pprint dispatch function. (Of course, if you want to see
+  everything, you can just pprint it, with no special dispatch, but
+  computing e.g. the function value might take a long time, which is
+  why the map is lazy in the first place.)
 
   cortex.optimise.descent> (do-study
                              function/cross-paraboloid
@@ -348,7 +347,7 @@
                                   (fn [state]
                                     (or (terminate? state)
                                         (clojure.pprint/with-pprint-dispatch
-                                          util/lazy-map-dispatch
+                                          lm/lazy-map-dispatch
                                           (clojure.pprint/pprint
                                             state))))))
                                (limit-steps 2)))
@@ -414,7 +413,8 @@
             [cortex.optimise.protocols :as cp]
             [cortex.optimise.functions :as function]
             [cortex.optimise.optimisers :as opts]
-            [cortex.optimise.util :as util :refer [defonce]]))
+            [cortex.optimise.util :as util :refer [defonce]]
+            [lazy-map.core :as lm]))
 
 ;;;; Config
 
@@ -559,7 +559,7 @@
          initial-step true]
     (let [function (cp/update-parameters function params)
           gradient (cp/gradient function)
-          state (util/->?LazyMap
+          state (lm/->?LazyMap
                   (merge
                     (if-not initial-step
                       (merge
@@ -598,7 +598,7 @@
       optimiser
       initial-params
       (fn [state]
-        (swap! log* conj (util/force-map state))
+        (swap! log* conj (lm/force-map state))
         (terminate? state)))
     @log*))
 

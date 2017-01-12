@@ -6,5 +6,6 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/cortex "0.4.0-SNAPSHOT"]
                  [net.mikera/vectorz-clj "0.45.0"]
-                 [net.mikera/core.matrix "0.57.0"]]
+                 [net.mikera/core.matrix "0.57.0"]
+                 [thinktopic/lazy-map "0.1.0"]]
   :main cortex.optimise.descent)
