@@ -15,7 +15,7 @@ The basic function used for instrumented gradient descent is `study`.
 It takes a function, an optimiser, an initial parameter vector, and a
 termination function. Termination functions are simply functions that
 are called with a data structure to determine whether or not to stop,
-but it is most convenient to use the 'term' macro to construct
+but it is most convenient to use the `term` macro to construct
 termination functions as compositions of the termination function
 transformations defined in this namespace.
 
@@ -418,3 +418,30 @@ investigation of a run without continually restarting it.
 
 Other useful functions are `util/check-gradient` and
 `export-for-mathematica`.
+
+## Organization
+
+All the Clojure source is in `src/cortex/optimise`.
+
+* `cortex.optimise.protocols` has the definitions of a few protocols
+  that are left over from when `cortex.optimise` was part of the main
+  `cortex` library. Each one is implemented for functions and/or maps.
+  They could probably be eliminated for simplicity, since
+  `cortex.optimise` does not make performance a priority.
+
+* `cortex.optimise.parameters` provides an implementation of the
+  `PParameters` protocol for functions.
+
+* `cortex.optimise.functions` provides implementations of the
+  `PModule` and `PGradient` protocols for functions. It also contains
+  several sample functions and a gradient checker.
+
+* `cortex.optimise.optimisers` provides implementations of the
+  `PParameters`, `PGradientOptimiser`, and `PIntrospection` protocols
+  for gradient optimisers. It also contains several sample optimisers.
+
+* `cortex.optimise.descent` provides REPL-friendly tools for
+  manipulating functions and optimisers to better understand their
+  behavior.
+
+* `cortex.optimise.util` contains miscellaneous utility functions.
