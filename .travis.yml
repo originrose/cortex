@@ -10,6 +10,7 @@ env:
   - TEST_DIR=datasets
   - TEST_DIR=compute
   - TEST_DIR=caffe
+  - TEST_DIR=keras
   - TEST_DIR=optimise
 
 branches:
