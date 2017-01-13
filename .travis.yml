@@ -1,4 +1,4 @@
-language: clojure
+language: generic
 requires: sudo
 services:
   - docker
