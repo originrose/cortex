@@ -27,8 +27,8 @@ is 1."
   "Get the metadata for a particular loss function.
 
 There are some standard argument definitions:
-:output - loss-fn contains? :node-id and this is the output of the node.
-:stream - loss-fn contains? :stream and this is the data coming from the data stream.
+:output - loss-fn contains? :node-id output of the node.
+:stream - loss-fn contains? :stream the data coming from the data stream.
 :parameter - loss-fn contains? :node-id :parameter and this is the value of the parameter of the node.
 
 In addition loss functions themselves can have parameters in that the network stores in its
@@ -163,9 +163,11 @@ containing the buffer coming from the network.
 
 
 (defmethod loss :mse-loss
-  [loss-fn v target]
-  (/ (double (m/magnitude-squared (m/sub v target)))
-     (m/ecount v)))
+  [loss-fn buffer-map]
+  (let [v (get buffer-map :output)
+        target (get buffer-map :stream)]
+   (/ (double (m/magnitude-squared (m/sub v target)))
+      (m/ecount v))))
 
 
 (defn log-likelihood-softmax-loss
@@ -175,8 +177,10 @@ containing the buffer coming from the network.
 
 
 (defmethod loss :softmax-loss
-  [loss-fn v target]
-  (let [output-channels (long (get loss-fn :output-channels 1))]
+  [loss-fn buffer-map]
+  (let [output-channels (long (get loss-fn :output-channels 1))
+        v (get buffer-map :output)
+        target (get buffer-map :stream)]
       (if (= output-channels 1)
         (log-likelihood-softmax-loss v target)
         (let [n-pixels (quot (long (m/ecount v)) output-channels)]
@@ -196,8 +200,12 @@ containing the buffer coming from the network.
 across all inferences and labels."
   ^double [loss-fn v-seq target-seq]
   (double
-   (/ (->> (map (partial loss loss-fn) v-seq target-seq)
-           (reduce +))
+   (/ (->> (map (fn [v target]
+                  {:output v
+                   :stream target})
+                v-seq target-seq)
+       (map (partial loss loss-fn))
+       (reduce +))
       (count v-seq))))
 
 
