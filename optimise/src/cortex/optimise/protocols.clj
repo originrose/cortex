@@ -1,5 +1,23 @@
-(ns cortex.optimise.protocols)
+(ns cortex.optimise.protocols
+  "This namespace contains the protocols that define pure
+  functions (see cortex.optimise.functions) and gradient
+  optimisers (see cortex.optimise.optimisers).
 
+  They were originally generic cortex protocols (mostly relevant to
+  neural networks) and can probably be eliminated someday, in favor of
+  a simpler solution better suited to the specific purpose of
+  cortex.optimise.
+
+  PParameters is used for both functions and optimisers, in order to
+  support passing parameters to functions and retrieving updated
+  parameters from optimisers.
+
+  PModule and PGradient are both used for functions to allow for
+  retrieving their return values and gradients.
+
+  PGradientOptimiser and PIntrospection are both used for optimisers
+  to allow for passing in parameter and gradient vectors and
+  retrieving the internal states of optimisers.")
 
 (defprotocol PModule
   "Protocol for a generic module. All cortex.nn modules must implement this."

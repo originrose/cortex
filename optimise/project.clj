@@ -3,6 +3,10 @@
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
+  :think/meta {:type :library
+               :tags [:clojure :optimization :gradient-descent
+                      :machine-learning :exploratory :mathematica
+                      :repl]}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/cortex "0.4.0-SNAPSHOT"]
                  [net.mikera/vectorz-clj "0.45.0"]

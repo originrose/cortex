@@ -1,4 +1,5 @@
 (ns cortex.optimise.util
+  "Miscellaneous utility functions."
   (:refer-clojure :exclude [defonce])
   (:require [clojure
              [string :as str]]
@@ -82,9 +83,13 @@
 
 ;;;; Random number generation
 
-(def ^Random RAND-GENERATOR (Random.))
+(def ^Random RAND-GENERATOR
+  "A random number generator used `rand-gaussian`."
+  (Random.))
 
-(defn rand-gaussian ^double []
+(defn rand-gaussian
+  "Get a random number from the standard normal distribution."
+  ^double []
   (.nextGaussian RAND-GENERATOR))
 
 ;;;; Sequences
@@ -141,6 +146,8 @@
              map))
 
 (defn map-entry
+  "Create a map entry. (map-entry k v) is the same as (first {k v}),
+  but faster."
   [k v]
   (clojure.lang.MapEntry/create k v))
 
