@@ -27,9 +27,9 @@ is 1."
   "Get the metadata for a particular loss function.
 
 There are some standard argument definitions:
-:output - loss-fn contains? :node-id output of the node.
-:stream - loss-fn contains? :stream the data coming from the data stream.
-:parameter - loss-fn contains? :node-id :parameter and this is the value of the parameter of the node.
+:output - loss-term contains? :node-id output of the node.
+:stream - loss-term contains? :stream the data coming from the data stream.
+:parameter - loss-term contains? :node-id :parameter and this is the value of the parameter of the node.
 
 In addition loss functions themselves can have parameters in that the network stores in its
 definition in parameter buffers.  This is useful in the case where the loss itself has some running
@@ -47,10 +47,56 @@ to the loss function.
 
 
 (defmethod loss-metadata :default
-  [loss-fn]
+  [loss-term]
   {:arguments #{:output :stream}
    :lambda 1.0})
 
+(defn get-loss-lambda
+  [loss-term]
+  (get (loss-metadata loss-term) :lambda 1.0))
+
+(defn get-loss-term-arguments
+  [loss-term]
+  (get (loss-metadata loss-term) :arguments #{:output :stream}))
+
+(defn get-loss-parameters
+  [loss-term]
+  (->> (get (loss-metadata loss-term) :parameters)
+       (map (fn [{:keys [key] :as param}]
+              (merge param
+                     (get loss-term param))))))
+
+
+(defmulti generate-loss-term
+  "Given a map and a specific key, generate a loss term or return nil.  Used for auto
+generating the loss terms from analyzing the graph nodes."
+  (fn [item-key]
+    item-key))
+
+
+(defmethod generate-loss-term :default
+  [& args]
+  nil)
+
+
+(defn generic-loss-term
+  "Generate a generic loss term from a loss type"
+  [loss-type]
+  {:type loss-type
+   :lambda (get-loss-lambda {:type loss-type})})
+
+
+(defmulti get-stream-size
+  "Get the stream size we expect for a node.  Defaults to the output size of the node.
+Can be nil in which case it is assumed that the loss term cannot decifer the valid
+output size from information in the graph node."
+  (fn [loss-term node]
+    (get loss-term :type)))
+
+
+(defmethod get-stream-size :default
+  [loss-term node]
+  (get node :output-size))
 
 (defn mse-loss
   "Mean squared error loss.  Applied to a node and a matching-size output stream."
@@ -60,6 +106,11 @@ to the loss function.
    args))
 
 
+(defmethod generate-loss-term :mse-loss
+  [item-key]
+  (generic-loss-term item-key))
+
+
 (defn softmax-loss
   "Softmax loss.  Applied to a node and a softmax (1-hot encoded) output stream."
   [& args]
@@ -67,6 +118,9 @@ to the loss function.
    {:type :softmax-loss}
    args))
 
+(defmethod generate-loss-term :softmax-loss
+  [item-key]
+  (generic-loss-term item-key))
 
 (defn l1-regularization
   "Penalize the network for the sum of the absolute values of a given buffer.  This pushes all entries of the buffer
@@ -83,17 +137,23 @@ to either a trainable parameter or to a node in which case it will be applied to
 will be no parameter entry in the loss function and the output of the node is assumed
 or to a parameter buffer (like weights) in which case the function should have a parameter
 entry in addition to a node-id."
-  [loss-fn]
-  (let [arguments (if (contains? loss-fn :parameter)
-                    #{{:parameter (get loss-fn :parameter)}}
+  [loss-term]
+  (let [arguments (if (contains? loss-term :parameter)
+                    #{{:parameter (get loss-term :parameter)}}
                     #{:output})]
     {:arguments arguments
      :lambda 0.001}))
 
 
 (defmethod loss-metadata :l1-regularization
-  [loss-fn]
-  (reg-loss-metadata loss-fn))
+  [loss-term]
+  (reg-loss-metadata loss-term))
+
+
+
+(defmethod generate-loss-term :l1-regularization
+  [item-key]
+  (generic-loss-term item-key))
 
 
 (defn l2-regularization
@@ -107,22 +167,28 @@ entry in addition to a node-id."
    args))
 
 (defmethod loss-metadata :l2-regularization
-  [loss-fn]
-  (reg-loss-metadata loss-fn))
+  [loss-term]
+  (reg-loss-metadata loss-term))
+
+
+(defmethod generate-loss-term :l1-regularization
+  [item-key]
+  (generic-loss-term item-key))
 
 
 (defn center-loss
   "Center loss is a way of specializing an activation for use as a grouping/sorting
 mechanism.  It groups activations by class and develops centers for the activations
 over the course of training.  Alpha is a number between 1,0 that stands for the exponential
-decay factor of the running centers (essentially running means).  The network is penalized
-for the distance of the current activations from their respective centers.  The result is that
-the activation itself becomes very grouped by class and thus make far better candidates for
-LSH or a distance/sorting system.  Note that this is a loss used in the middle of the graph,
-not at the edges.  This is applied to a given node and needs an softmax-type output stream.
+decay factor of the running centers (essentially running means).  The equation to update a mean
+is alpha*current + (1 - alpha)*new-mean.  The network is penalized for the distance of the current
+activations from their respective centers.  The result is that the activation itself becomes very
+grouped by class and thus make far better candidates for LSH or a distance/sorting system.  Note
+that this is a loss used in the middle of the graph, not at the edges.  This is applied to a
+given node and needs an softmax-type output stream.
 http://ydwen.github.io/papers/WenECCV16.pdf"
-  [{:keys [alpha] :as arg-map
-    :or {alpha 0.5}}]
+  [& {:keys [alpha] :as arg-map
+      :or {alpha 0.5}}]
   (merge {:type :center-loss
           :alpha alpha}
          arg-map))
@@ -131,13 +197,13 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
 (defn- get-center-loss-center-buffer-shape
   "Get the shape of the centers of the network.  The network must be built and enough
 information must be known about the dataset to make a stream->size map."
-  [loss-fn node-id->node-map stream->size-map]
-  (let [node-output-size (get-in node-id->node-map [(get loss-fn :node-id) :output-size])
-        stream-size (get stream->size-map (get loss-fn :stream))]
+  [loss-term node-id->node-map stream->size-map]
+  (let [node-output-size (get-in node-id->node-map [(get loss-term :node-id) :output-size])
+        stream-size (get stream->size-map (get loss-term :stream))]
     (when-not (and node-output-size
                    stream-size)
       (throw (ex-info "Center loss failed to find either node output size or stream size"
-                      {:loss-function loss-fn
+                      {:loss-function loss-term
                        :output-size node-output-size
                        :stream-size stream-size})))
     ;;We keep track of stream-size centers each of node output size.
@@ -145,12 +211,23 @@ information must be known about the dataset to make a stream->size map."
 
 
 (defmethod loss-metadata :center-loss
-  [loss-fn]
-  {:parameters {:centers {:shape-fn get-center-loss-center-buffer-shape
-                          :initialization {:type :constant
-                                           :value 0}}}
+  [loss-term]
+  {:parameters [{:key :centers
+                 :shape-fn get-center-loss-center-buffer-shape
+                 :initialization {:type :constant
+                                  :value 0}}]
    :arguments #{:output :stream}
    :lambda 0.1})
+
+
+(defmethod generate-loss-term :center-loss
+  [item-key]
+  (generic-loss-term item-key))
+
+
+(defmethod get-stream-size :center-loss
+  [loss-term node]
+  nil)
 
 
 (defmulti loss
@@ -158,12 +235,12 @@ information must be known about the dataset to make a stream->size map."
 containing the buffer coming from the network.
 {:output output
  :target stream}"
-  (fn [loss-fn buffer-map]
-    (:type loss-fn)))
+  (fn [loss-term buffer-map]
+    (:type loss-term)))
 
 
 (defmethod loss :mse-loss
-  [loss-fn buffer-map]
+  [loss-term buffer-map]
   (let [v (get buffer-map :output)
         target (get buffer-map :stream)]
    (/ (double (m/magnitude-squared (m/sub v target)))
@@ -177,8 +254,8 @@ containing the buffer coming from the network.
 
 
 (defmethod loss :softmax-loss
-  [loss-fn buffer-map]
-  (let [output-channels (long (get loss-fn :output-channels 1))
+  [loss-term buffer-map]
+  (let [output-channels (long (get loss-term :output-channels 1))
         v (get buffer-map :output)
         target (get buffer-map :stream)]
       (if (= output-channels 1)
@@ -198,13 +275,13 @@ containing the buffer coming from the network.
 (defn average-loss
   "V is inferences, target is labels.  Calculate the average loss
 across all inferences and labels."
-  ^double [loss-fn v-seq target-seq]
+  ^double [loss-term v-seq target-seq]
   (double
    (/ (->> (map (fn [v target]
                   {:output v
                    :stream target})
                 v-seq target-seq)
-       (map (partial loss loss-fn))
+       (map (partial loss loss-term))
        (reduce +))
       (count v-seq))))
 

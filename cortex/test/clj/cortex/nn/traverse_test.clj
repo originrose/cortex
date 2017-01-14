@@ -11,7 +11,7 @@
 (def mnist-description-with-toys
   [(layers/input 28 28 1)
    (layers/multiplicative-dropout 0.1)
-   (layers/convolutional 5 0 1 20)
+   (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.001})
    (layers/max-pooling 2 0 2)
    (layers/relu)
    (layers/dropout 0.75)
@@ -20,7 +20,8 @@
    (layers/relu)
    (layers/dropout 0.75)
    (layers/batch-normalization 0.9)
-   (layers/linear->relu 500) ;;If you use this description put that at 1000
+   (layers/linear 500 :l2-regularization 0.01) ;;If you use this description put that at 1000
+   (layers/relu :id :feature)
    (layers/dropout 0.5)
    (layers/linear->softmax 10)])
 
@@ -55,11 +56,16 @@
 
 (deftest build-big-description
   (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))]
+        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))
+                         (traverse/->output-binding :feature
+                                                    :stream :labels
+                                                    :loss (loss/center-loss :alpha 0.9 :lambda 0.05))]
+        stream->size-map {:data 768
+                          :labels 10}
         network (-> (network/build-network mnist-description-with-toys)
                     (traverse/bind-input-bindings input-bindings)
                     (traverse/bind-output-bindings output-bindings))
-        gradient-descent (->> (traverse/network->training-traversal network)
+        gradient-descent (->> (traverse/network->training-traversal network stream->size-map)
                               :traversal
                               realize-traversals)
         inference-mem (->> (traverse/network->inference-traversal network)
@@ -69,6 +75,9 @@
     (is (= 434280 (->> (get-in network [:layer-graph :buffers])
                        (map (comp m/ecount :buffer second))
                        (reduce +))))
+    (println (->> (get gradient-descent :loss-function)
+                  (mapv #(dissoc % :centers))))
+    (clojure.pprint/pprint (get gradient-descent :forward))
     (is (= [nil nil]
            (minimal-diff
             [{:id :dropout-1, :incoming [{:input-stream :data}], :outgoing [{:id :convolutional-1}]}
@@ -81,8 +90,8 @@
              {:id :relu-2, :incoming [{:id :relu-2}], :outgoing [{:id :dropout-3}]}
              {:id :dropout-3, :incoming [{:id :dropout-3}], :outgoing [{:id :batch-normalization-1}]}
              {:id :batch-normalization-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
-             {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :relu-3}]}
-             {:id :relu-3, :incoming [{:id :relu-3}], :outgoing [{:id :dropout-4}]}
+             {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :feature}]}
+             {:id :feature, :incoming [{:id :feature}], :outgoing [{:id :dropout-4}]}
              {:id :dropout-4, :incoming [{:id :dropout-4}], :outgoing [{:id :linear-2}]}
              {:id :linear-2, :incoming [{:id :linear-2}], :outgoing [{:id :softmax-1}]}
              {:id :softmax-1,
@@ -99,7 +108,7 @@
              {:id :dropout-3} {:id :dropout-3, :size 800},
              {:id :linear-2} {:id :linear-2, :size 500},
              {:id :softmax-1} {:id :softmax-1, :size 10},
-             {:id :relu-3} {:id :relu-3, :size 500},
+             {:id :feature} {:id :feature, :size 500},
              {:input-stream :data} {:input-stream :data, :size 784},
              {:id :dropout-4} {:id :dropout-4, :size 500},
              {:id :max-pooling-1} {:id :max-pooling-1, :size 11520},
@@ -122,8 +131,8 @@
              {:id :max-pooling-2, :incoming [{:id :max-pooling-2}], :outgoing [{:id :relu-2}]}
              {:id :relu-2, :incoming [{:id :relu-2}], :outgoing [{:id :batch-normalization-1}]}
              {:id :batch-normalization-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
-             {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :relu-3}]}
-             {:id :relu-3, :incoming [{:id :relu-3}], :outgoing [{:id :linear-2}]}
+             {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :feature}]}
+             {:id :feature, :incoming [{:id :feature}], :outgoing [{:id :linear-2}]}
              {:id :linear-2, :incoming [{:id :linear-2}], :outgoing [{:id :softmax-1}]}
              {:id :softmax-1,
               :incoming [{:id :softmax-1}],
@@ -135,7 +144,7 @@
             {:id :relu-2} {:id :relu-2, :size 800},
             {:id :linear-2} {:id :linear-2, :size 500},
             {:id :softmax-1} {:id :softmax-1, :size 10},
-            {:id :relu-3} {:id :relu-3, :size 500},
+            {:id :feature} {:id :feature, :size 500},
             {:input-stream :data} {:input-stream :data, :size 784},
             {:id :max-pooling-1} {:id :max-pooling-1, :size 11520},
             {:id :linear-1} {:id :linear-1, :size 800},
@@ -166,8 +175,8 @@
             [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :softmax-1}]}
              {:id :linear-2, :incoming [{:id :softmax-1}], :outgoing [{:id :linear-2}]}
              {:id :dropout-4, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
-             {:id :relu-3, :incoming [{:id :dropout-4}], :outgoing [{:id :relu-3}]}
-             {:id :linear-1, :incoming [{:id :relu-3}], :outgoing [{:id :linear-1}]}
+             {:id :feature, :incoming [{:id :dropout-4}], :outgoing [{:id :feature}]}
+             {:id :linear-1, :incoming [{:id :feature}], :outgoing [{:id :linear-1}]}
              {:id :batch-normalization-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}]
             (get traversal :backward))))))
 
@@ -189,7 +198,7 @@
             [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :softmax-1}]}
              {:id :linear-2, :incoming [{:id :softmax-1}], :outgoing [{:id :linear-2}]}
              {:id :dropout-4, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
-             {:id :relu-3, :incoming [{:id :dropout-4}], :outgoing [{:id :relu-3}]}
-             {:id :linear-1, :incoming [{:id :relu-3}], :outgoing [{:id :linear-1}]}
+             {:id :feature, :incoming [{:id :dropout-4}], :outgoing [{:id :feature}]}
+             {:id :linear-1, :incoming [{:id :feature}], :outgoing [{:id :linear-1}]}
              {:id :batch-normalization-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}]
             (get traversal :backward))))))

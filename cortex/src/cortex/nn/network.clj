@@ -345,15 +345,19 @@ the edge list."
   (get-in network [:layer-graph :id->node-map node-id]))
 
 
-(defn get-node-parameters
-  "Get a flattened form of the parameters for a given node.  The list of returned parameters
-will be a merged map of the parameter meta data, the parameter and the parameter buffer(s) should
-they exist.  Some transformations such as setting non-trainable? on the parameter level if the learning
-attenuation is 0 will happen."
-  [network node-id]
-  (let [node (network->node network node-id)
-        node-parameter (select-keys node [:learning-attenuation :l1-regularization
-                                          :l2-regularization :non-trainable?
+(defn network->nodes
+  [network]
+  (->> (-> (network->edges network)
+           edges->dfs-seq)
+       distinct
+       (map (partial network->node network))
+       (remove nil?)))
+
+
+(defn node->node-parameters
+  [network node]
+  (let [node-parameter (select-keys node [:learning-attenuation
+                                          :non-trainable?
                                           :l2-max-constraint])]
     (->> (layers/get-parameter-descriptions node)
          (mapv (fn [{:keys [key] :as param-desc}]
@@ -365,6 +369,15 @@ attenuation is 0 will happen."
                           :learning-attenuation learning-attenuation
                           :non-trainable? (or (get retval :non-trainable?)
                                               (= 0.0 learning-attenuation)))))))))
+
+
+(defn network->node-parameters
+  "Get a flattened form of the parameters for a given node.  The list of returned parameters
+will be a merged map of the parameter meta data, the parameter and the parameter buffer(s) should
+they exist.  Some transformations such as setting non-trainable? on the parameter level if the learning
+attenuation is 0 will happen."
+  [network node-id]
+  (node->node-parameters network (network->node network node-id)))
 
 
 (defn any-trainable-parameters?
