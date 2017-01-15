@@ -194,12 +194,17 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
           :alpha alpha}
          arg-map))
 
+(defn stream-map-entry->size
+  ^long [entry]
+  (long
+   (if (number? entry)
+     (long entry)
+     (get entry :size))))
+
 (defn stream->size
   [stream-map stream]
   (if-let [entry (get stream-map stream)]
-    (if (number? entry)
-      (long entry)
-      (get entry :size))
+    (stream-map-entry->size entry)
     (throw (ex-info "Failed to find stream:"
                     {:stream stream
                      :stream-map stream-map}))))

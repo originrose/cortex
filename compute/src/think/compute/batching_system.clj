@@ -3,6 +3,7 @@
             [think.compute.math :as math]
             [think.datatype.core :as dtype]
             [cortex.dataset :as ds]
+            [cortex.loss :as loss]
             [clojure.set :as c-set]
             [clojure.core.matrix :as m]))
 
@@ -64,11 +65,17 @@
 
 
 (defn create
-  [backend stream->size-map batch-size]
-  (let [stream->size-map
-        (reduce (fn [stream->size-map [stream {:keys [size]}]]
-                  (assoc-in stream->size-map [stream :batch-buffers]
-                            (create-batch-buffers backend size batch-size)))
-                stream->size-map
-                stream->size-map)]
-    (->DatasetBatchingSystem backend stream->size-map)))
+  [backend stream-map batch-size]
+  (let [stream-map
+        (reduce (fn [stream-map [stream entry]]
+                  (let [entry (if (map? entry)
+                                entry
+                                {:size entry})]
+                    (assoc stream-map stream
+                              (assoc entry :batch-buffers
+                                     (create-batch-buffers backend
+                                                           (loss/stream-map-entry->size entry)
+                                                           batch-size)))))
+                stream-map
+                stream-map)]
+    (->DatasetBatchingSystem backend stream-map)))
