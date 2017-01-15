@@ -194,13 +194,23 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
           :alpha alpha}
          arg-map))
 
+(defn stream->size
+  [stream-map stream]
+  (if-let [entry (get stream-map stream)]
+    (if (number? entry)
+      (long entry)
+      (get entry :size))
+    (throw (ex-info "Failed to find stream:"
+                    {:stream stream
+                     :stream-map stream-map}))))
+
 
 (defn- get-center-loss-center-buffer-shape
   "Get the shape of the centers of the network.  The network must be built and enough
 information must be known about the dataset to make a stream->size map."
-  [loss-term node-id->node-map stream->size-map]
+  [loss-term node-id->node-map stream-map]
   (let [node-output-size (get-in node-id->node-map [(get loss-term :node-id) :output-size])
-        stream-size (get stream->size-map (get loss-term :stream))]
+        stream-size (stream->size stream-map (get loss-term :stream))]
     (when-not (and node-output-size
                    stream-size)
       (throw (ex-info "Center loss failed to find either node output size or stream size"

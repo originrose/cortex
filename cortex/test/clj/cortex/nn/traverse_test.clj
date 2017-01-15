@@ -75,7 +75,7 @@
         gradient-descent (->> (traverse/network->training-traversal network stream->size-map)
                               :traversal
                               realize-traversals)
-        inference-mem (->> (traverse/network->inference-traversal network)
+        inference-mem (->> (traverse/network->inference-traversal network stream->size-map)
                            :traversal
                            realize-traversals)]
     (is (= 434280 (get network :parameter-count)))

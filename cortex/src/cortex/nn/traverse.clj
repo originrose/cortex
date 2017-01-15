@@ -382,8 +382,8 @@ which means removing extra information from them."
   [{:keys [initialization shape-fn] :as param}
    loss-term
    node-id->output-size-map
-   stream->size-map]
-  (let [param-shape (shape-fn loss-term node-id->output-size-map stream->size-map)]
+   stream-map]
+  (let [param-shape (shape-fn loss-term node-id->output-size-map stream-map)]
     (when-not (= (get initialization :type)
                  :constant)
       (throw (ex-info "Only constant intialization is support for loss term parameters"
@@ -396,7 +396,7 @@ which means removing extra information from them."
 
 
 (defn- generate-loss-term-parameters
-  [network stream->size-map loss-term-vec]
+  [network stream-map loss-term-vec]
   (let [node-id->node-map (get-in network [:layer-graph :id->node-map])]
    (->> loss-term-vec
         (map (fn [loss-term]
@@ -407,7 +407,7 @@ which means removing extra information from them."
                                       (generate-param-initial-buffer param
                                                                      loss-term
                                                                      node-id->node-map
-                                                                     stream->size-map)))))
+                                                                     stream-map)))))
                     (reduce (fn [loss-term param]
                               (update loss-term
                                       (get param :key)
@@ -440,7 +440,7 @@ datastructure describing the final loss function.
 {:buffers map id->{:size}
  :forward where incoming/outgoing maps to buffer id
  :backward where incoming/outgoing maps to buffer id}"
-  [network stream->size-map
+  [network stream-map
    & {:keys [optimiser keep-non-trainable? loss-fn]
       :or {optimiser (optimise/adam) loss-function []}}]
 
@@ -459,7 +459,7 @@ datastructure describing the final loss function.
                                              forward-traversal-nodes
                                              (get-output-bindings network)
                                              loss-fn)
-                     (generate-loss-term-parameters network stream->size-map))]
+                     (generate-loss-term-parameters network stream-map))]
     (update network
             :traversal
             #(merge %
@@ -472,6 +472,7 @@ datastructure describing the final loss function.
                                    clean-traversal-incoming-outgoing)
                      :buffers (forward-traversal->buffer-map network forward-with-buffers)
                      :type :training
+                     :stream-map stream-map
                      :optimiser optimiser
                      :loss-function loss-fn}))))
 
@@ -482,7 +483,7 @@ datastructure describing the final loss function.
   optimising for speed in which case the result is the forward pass of gradient descent
   and we expect implementations to have multiple batches in flight simultaneously.  We
   default to optimising for memory because this avoids OOM situations with large networks."
-  [{:keys [layer-graph] :as network}]
+  [{:keys [layer-graph] :as network} stream-map]
   (check-for-io-bindings network)
   (let [forward-traversal (->> (create-forward-traversal network)
                                (filter-traversal network :inference)
@@ -493,7 +494,8 @@ datastructure describing the final loss function.
             #(merge %
                     {:forward (clean-traversal-incoming-outgoing forward-traversal)
                      :buffers (forward-traversal->buffer-map network forward-traversal)
-                     :type :inference}))))
+                     :type :inference
+                     :stream-map stream-map}))))
 
 
 (defn- traversal->buffer-set

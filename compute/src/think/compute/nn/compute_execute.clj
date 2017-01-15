@@ -62,20 +62,20 @@
                                   (is-l2-max-constraint-valid? parameter)
                                   (merge (allocate-l2-temp-data graph-buffer backend)))))))))
             compute-buffers
-            (network/get-node-parameters network (get node :id)))))
+            (network/network->node-parameters network (get node :id)))))
 
 
 (defn- create-batching-system
-  [backend built-network batch-size]
+  [backend built-network stream-map batch-size]
   (batching-system/create backend
-                          (traverse/network->stream->size-map built-network)
+                          stream-map
                           batch-size))
 
 
 (defn- get-node-parameters
   "Get a combined form of the node parameters"
   [network id]
-  (->> (network/get-node-parameters network id)
+  (->> (network/network->node-parameters network id)
        (map (fn [{:keys [buffer-id key] :as parameter}]
               [key
                (merge parameter (get-in network [:compute-binding
@@ -98,6 +98,7 @@
   [backend-fn {:keys [batch-size layer-graph traversal] :as built-network}
    {:keys [gradients? numeric-gradients?] :as options}]
   (let [backend (backend-fn)
+        stream-map (get traversal :stream-map)
         id->node-map (get layer-graph :id->node-map)
         traverse-type (get traversal :type)
         gradients? (or gradients? (= traverse-type :training))
@@ -152,6 +153,7 @@
                        (assoc compute-binding
                               :backend backend
                               :batching-system (create-batching-system backend built-network
+                                                                       stream-map
                                                                        batch-size)))
         trainable-parameters (load-training-parameters network)
         trainable-param-count (->> trainable-parameters
