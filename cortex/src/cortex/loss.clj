@@ -53,7 +53,8 @@ to the loss function.
 
 (defn get-loss-lambda
   [loss-term]
-  (get (loss-metadata loss-term) :lambda 1.0))
+  (or (get loss-term :lambda)
+      (get (loss-metadata loss-term) :lambda 1.0)))
 
 (defn get-loss-term-arguments
   [loss-term]
@@ -171,7 +172,7 @@ entry in addition to a node-id."
   (reg-loss-metadata loss-term))
 
 
-(defmethod generate-loss-term :l1-regularization
+(defmethod generate-loss-term :l2-regularization
   [item-key]
   (generic-loss-term item-key))
 

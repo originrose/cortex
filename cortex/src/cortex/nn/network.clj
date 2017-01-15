@@ -382,7 +382,7 @@ attenuation is 0 will happen."
 
 (defn any-trainable-parameters?
   [network node-id]
-  (->> (get-node-parameters network node-id)
+  (->> (network->node-parameters network node-id)
        (remove :non-trainable?)
        seq))
 

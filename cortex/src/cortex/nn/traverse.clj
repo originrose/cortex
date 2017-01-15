@@ -188,23 +188,22 @@ Each item in the sequence is a map of:
         child->parent-map (network/edges->child->parent-map edges)]
     (->> (network/edges->dfs-seq edges :roots parent->child-map)
          (drop 1)
-         (map (fn [id]
-                {:incoming (concat
-                            (->> [id]
-                                 (map input-bindings)
-                                 (remove nil?))
-                            (->> (get child->parent-map id)
-                                 (map (fn [id]
-                                        {:id id}))))
-                 :id id
-                 :outgoing (concat (->> (get parent->child-map id)
-                                        (map (fn [id] {:id id})))
-                                   (->> [id]
-                                        (map (fn [id]
-                                               (when-let [output-binding (get output-bindings id)]
-                                                 (merge {:output-id id}
-                                                        output-binding))))
-                                        (remove nil?)))})))))
+         (reduce (fn [[retval id->buffer-map] id]
+                   (let [node-buffer (if-let [output-binding (get output-bindings id)]
+                                       (merge {:output-id id} output-binding)
+                                       {:id id})]
+                     [(conj retval {:incoming (concat
+                                               (->> [id]
+                                                    (map input-bindings)
+                                                    (remove nil?))
+                                               (->> (get child->parent-map id)
+                                                    (map (fn [id]
+                                                           (get id->buffer-map id)))))
+                                    :id id
+                                    :outgoing [node-buffer]})
+                      (assoc id->buffer-map id node-buffer)]))
+                 [[] {}])
+         first)))
 
 
 (defn filter-traversal
@@ -452,7 +451,8 @@ datastructure describing the final loss function.
         backward-pass (if keep-non-trainable?
                         forward-traversal
                         (remove-non-trainable network forward-traversal))
-        forward-traversal-nodes (->> forward-traversal
+        forward-traversal-nodes (->> backward-pass
+                                     reverse
                                      (map :id)
                                      (map #(network/network->node network %)))
         loss-fn (->> (generate-loss-function network
