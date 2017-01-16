@@ -1,3 +1,4 @@
+
 (ns cortex.nn.layers
   "Descriptions are the canonical representation of layers in cortex.  Implementations
 are expected to work with descriptions that are annotated with special information

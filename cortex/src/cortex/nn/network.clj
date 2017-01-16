@@ -11,7 +11,8 @@ The build step is responsible for
             [clojure.set :as c-set]
             [clojure.core.matrix :as m]
             [cortex.core-matrix-backends :as b]
-            [cortex.util :as util])
+            [cortex.util :as util]
+            [cortex.buffer-initialization :as buf-init])
   (:import [java.util UUID]))
 
 
@@ -167,28 +168,42 @@ The build step is responsible for
     :relu
     :xavier))
 
+(defmulti get-default-initialization-for-param-type
+  "If no parameter initialization is specified "
+  (fn [param-desc node-id id->node-map edges]
+    (get param-desc :type)))
+
+
+(defmethod get-default-initialization-for-param-type :default
+  [& args]
+  {:type :constant
+   :value 0})
+
+
+(defmethod get-default-initialization-for-param-type :scale
+  [& args]
+  {:type :constant
+   :value 1})
+
+
+(defmethod get-default-initialization-for-param-type :weight
+  [_ node-id id->node-map edges]
+  (let [initialization-type (activation->weight-initialization
+                             (find-next-activation node-id id->node-map edges))]
+    {:type initialization-type}))
+
+
 (defn- generate-param-buffer
   "Generate a parameter buffer.
   Returns pair of [parameter-buffer initialization-type]"
-  [{:keys [type shape-fn key] :as param-desc} node-id id->node-map edges]
-  (let [node (get id->node-map node-id)
-        param-data (get node key)
-        initialization-type (or (when (map? param-data)
-                                  (get param-data :initialization-type))
-                                (activation->weight-initialization
-                                 (find-next-activation node-id id->node-map edges)))]
-    (condp = type
-      :scale
-      [(m/assign! (b/new-array (shape-fn node)) 1.0)
-       {:initialization :constant
-        :value 1}]
-      :weight
-      [(apply util/weight-matrix (concat (shape-fn node)
-                                         [initialization-type]))
-       initialization-type]
-      [(b/new-array (shape-fn node))
-       {:initialization :constant
-        :value 0}])))
+  [{:keys [shape-fn initialization] :as param-desc} node-id id->node-map edges]
+  (let [init
+        (->
+         (or initialization
+             (get-default-initialization-for-param-type
+              param-desc node-id id->node-map edges))
+         (assoc :shape (shape-fn (get id->node-map node-id))))]
+    [(buf-init/initialize-buffer init) init]))
 
 
 (defn- build-desc-seq-or-graph
@@ -247,6 +262,7 @@ The build step is responsible for
                           (if-not buffer
                             (let [[buffer init-type] (generate-param-buffer param-desc id
                                                                             id->node-map edges)]
+                              ;;(println (m/ecount buffer) init-type)
                               (assoc param-entry
                                      :buffer buffer
                                      :initialization init-type))
