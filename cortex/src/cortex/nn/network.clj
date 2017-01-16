@@ -402,6 +402,23 @@ attenuation is 0 will happen."
        (remove :non-trainable?)
        seq))
 
+
+(defn network->node-id->name->shape-map
+  "Given a network produce a map of node-id->name and each [name]
+  is linked to a shape(s).  default names are [input,output] and each
+  parameter get's a name."
+  [network]
+  (->> (get-in network [:layer-graph :id->node-map])
+       (map (fn [[id node]]
+              (merge
+               {:input [(get node :input-size)]
+                :output [(get node :output-size)]}
+               (->> (network->node-parameters network (get node :id))
+                    (map (fn [{:keys [key shape-fn]}]
+                           [key (shape-fn node)]))
+                    (into {})))))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Print Layer Summary
 (defn- network->parameter-keys

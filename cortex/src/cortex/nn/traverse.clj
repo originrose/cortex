@@ -348,20 +348,17 @@ which means removing extra information from them."
 (defn- generate-node-loss-terms
   [network node]
   (let [node-losses (->> (map->loss-term-seq node)
-                         (map #(assoc % :node-id (get node :id))))
+                         (map #(loss/set-loss-term-arg-node-output % :output (get node :id))))
         trainable-parameters (->> (network/node->node-parameters network node)
                                   (remove #(get % :non-trainable?)))
         parameter-losses (->> trainable-parameters
                               (map map->loss-term-seq)
                               (mapcat (fn [parameter loss-term-seq]
-                                        (map (fn [loss-term]
-                                               (assoc loss-term
-                                                      :node-id (get node :id)
-                                                      :parameter (get parameter :key)))
+                                        (map #(loss/set-loss-term-arg-node-parameter
+                                               % :output (get node :id) (get parameter :key))
                                              loss-term-seq))
                                       trainable-parameters))]
-    (concat node-losses
-            parameter-losses)))
+    (concat node-losses parameter-losses)))
 
 
 (defn- generate-loss-function
@@ -372,42 +369,40 @@ which means removing extra information from them."
                            (filter #(and (get % :loss)
                                          (get % :stream)))
                            (map (fn [{:keys [node-id stream loss]}]
-                                  (assoc loss
-                                         :node-id node-id
-                                         :stream stream
-                                         :lambda (loss/get-loss-lambda loss)))))]
+                                  (-> loss
+                                      (loss/set-loss-term-arg-node-output :output node-id)
+                                      (loss/set-loss-term-arg-stream :labels stream)))))]
     (concat loss output-losses node-losses)))
 
 
 (defn- generate-param-initial-buffer
-  [{:keys [initialization shape-fn] :as param}
-   loss-term
-   node-id->output-size-map
-   stream-map]
-  (let [param-shape (shape-fn loss-term node-id->output-size-map stream-map)]
+  [loss-term
+   {:keys [data] :as loss-arg}
+   node-id->name->shape-map
+   stream->size-map]
+  (let [{:keys [initialization shape-fn]} data
+        param-shape (shape-fn loss-term loss-arg node-id->name->shape-map stream->size-map)]
     (buf-init/initialize-buffer (assoc initialization :shape param-shape))))
 
 
 (defn- generate-loss-term-parameters
   [network stream-map loss-term-vec]
-  (let [node-id->node-map (get-in network [:layer-graph :id->node-map])]
+  (let [node-id->name->shape-map (network/network->node-id->name->shape-map network)
+        stream->size-map (loss/stream->data->stream->size stream-map)]
    (->> loss-term-vec
         (map (fn [loss-term]
-               (->> (loss/get-loss-parameters loss-term)
-                    (map (fn [param]
-                           (assoc param :buffer
-                                  (or (get param :buffer)
-                                      (generate-param-initial-buffer param
-                                                                     loss-term
-                                                                     node-id->node-map
-                                                                     stream-map)))))
-                    (reduce (fn [loss-term param]
+               (->> (loss/get-loss-term-parameters loss-term)
+                    (map (fn [arg]
+                           (assoc arg :buffer
+                                  (or (get arg :buffer)
+                                      (generate-param-initial-buffer loss-term
+                                                                     arg
+                                                                     node-id->name->shape-map
+                                                                     stream->size-map)))))
+                    (reduce (fn [loss-term {:keys [key buffer]}]
                               (update loss-term
-                                      (get param :key)
-                                      (fn [loss-param]
-                                        (assoc loss-param
-                                               :buffer
-                                               (get param :buffer)))))
+                                      key
+                                      #(assoc % :buffer buffer)))
                             loss-term))))
         vec)))
 

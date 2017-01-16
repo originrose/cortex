@@ -94,6 +94,27 @@
        vec))
 
 
+(defn- load-loss-function
+  "Return a map of node-id->loaded loss terms associated with that node."
+  [network backend loss-function]
+  (let [id->node-map (get-in network [:layer-graph :id->node-map])
+        stream-map (get-in network [:traversal :stream-map])
+        batch-size (get network :batch-size)]
+    (->> loss-function
+         (mapv (fn [loss-term]
+                 (let [term-params (->> (cortex-loss/get-loss-parameters loss-term)
+                                        (map (fn [{:keys [key buffer] :as param}]
+                                               [key (update param
+                                                            :buffer
+                                                            #(backend/array backend %))]))
+                                        (into {}))]
+                   {:compute-term (compute-loss/create-compute-loss-term loss-term backend id->node-map stream-map)
+                    :parameters term-params
+                    :loss-term loss-term
+                    :gradient (backend/new-array backend [(layers/get-loss-term-size loss-term)] (long batch-size))})))
+         (group-by #(get-in % [:loss-term :node-id])))))
+
+
 (defn- bind
   [backend-fn {:keys [batch-size layer-graph traversal] :as built-network}
    {:keys [gradients? numeric-gradients?] :as options}]
@@ -159,21 +180,15 @@
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
                                    (apply +))
-        l1-buffer-size (long (->> trainable-parameters
-                                  (filter #(> (get % :l1-regularization 0) 0))
-                                  (map #(m/ecount (get % :buffer)))
-                                  (apply max 0)))
-        network (if (> l1-buffer-size 0)
-                  (assoc-in network [:compute-binding :l1-buffer]
-                            (drv/allocate-device-buffer driver l1-buffer-size datatype))
-                  network)]
+        loss-function (load-loss-function (get traversal :loss-function))]
     (-> network
         (assoc-in [:compute-binding :optimiser]
                   (when-let [optimiser (get traversal :optimiser)]
                     (compute-optimise/create-compute-optimiser backend
                                                                optimiser
                                                                trainable-param-count)))
-     (assoc-in [:compute-binding :trainable-parameters] trainable-parameters))))
+        (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
+        (assoc-in [:compute-binding :loss-function loss-function]))))
 
 
 (defn- save
@@ -282,6 +297,96 @@
    network))
 
 
+(defmulti pre-traverse
+  "The backward traverse needs to have particular gradient buffers cleared."
+  (fn [pass-direction network mapped-pass]
+    pass-direction))
+
+
+(defmethod pre-traverse :default
+  [_ network mapped-pass]
+  network)
+
+
+(defmulti perform-pass
+  (fn [pass-direction network pass-function pass-entry]
+    pass-direction))
+
+
+(defmethod perform-pass :default
+  [_ network pass-function {:keys [incoming id outgoing]}]
+  (pass-function
+   (get-in network [:compute-binding :id->node-map id])
+   (get-node-parameters network id)
+   incoming outgoing))
+
+
+(defmethod pre-traverse :backward
+  [_ network mapped-pass]
+  ;;Zero all gradients we are likely to come across in the backward pass.
+  (->> mapped-pass
+       (mapcat (fn [{:keys [incoming id]}]
+                 (map :gradient incoming)))
+       (remove nil?)
+       (map math/device-buffer)
+       (backend/zero-many! (get-in network [:compute-binding :backend]))
+       dorun)
+  network)
+
+
+;;for the backward pass we also need to generate losses.
+(defmethod perform-pass :backward
+  [_ network pass-function {:keys [incoming id outgoing] :as entry}]
+  (let [loss-nodes (get-in network [:compute-binding :loss-function id])
+        stream->buffer-map (get-in network [:compute-binding :stream->buffer-map])
+        loss-buffer-map {:output (first incoming)}
+        backend (get-in network [:compute-binding :backend])
+        stream (drv/get-stream backend)
+        node-params (get-node-parameters network id)]
+    ;;output losses are evaluated first and added to the node's output gradients.
+    ;;output gradients are the incoming buffers when doing the backward pass...
+    (when-not (= 1 (count incoming))
+      (throw (ex-info "Not sure how to handle multiple output gradients and loss functions"
+                      {:output-gradient-count (count incoming)
+                       :node-id id})))
+    (->> (remove #(contains? % :parameter) loss-nodes)
+         (map (fn [{:keys [compute-term loss-term parameters gradient]}]
+                (let [incoming-buffer (first incoming)
+                      incoming-gradient (get incoming-buffer :gradient)
+                      ;;Replace the gradient so we can apply lambda and add it back.
+                      term-buffers (merge {:output (assoc incoming-buffer
+                                                          :gradient gradient)}
+                                          parameters
+                                          (if (contains? loss-term :stream)
+                                            {:stream {:buffer (get stream->buffer-map
+                                                                   (get loss-term :stream))}}
+                                            {}))]
+                  (compute-loss/compute-loss-gradient compute-term term-buffers)
+                  (math/sum stream
+                            (cortex-loss/get-loss-lambda loss-term) gradient
+                            1.0 incoming-gradient))))
+         dorun)
+    (let [network
+          (perform-pass :default network pass-function entry)]
+      ;;parameter losses are evaluate second and added to the target parameter's gradients
+      (->> (filter #(contains? % :parameter) loss-nodes)
+           (map (fn [{:keys [compute-term loss-term parameters gradient]}]
+                  (let [param (get node-params (get loss-term :parameter))
+                        incoming-gradient (get param :gradient)
+                        term-buffers (merge {:parameter (assoc param :gradient gradient)}
+                                            parameters
+                                            (if (contains? loss-term :stream)
+                                              {:stream {:buffer (get stream->buffer-map
+                                                                     (get loss-term :stream))}}
+                                              {}))]
+                    (compute-loss/compute-loss-gradient compute-term term-buffers)
+                    (math/sum stream
+                              (cortex-loss/get-loss-lambda loss-term) gradient
+                              1.0 incoming-gradient))))
+           dorun)
+      network)))
+
+
 (defn- do-traverse
   [network id->buffer-map pass-direction]
   (let [[network mapped-pass] (map-pass-to-buffers network
@@ -289,14 +394,10 @@
                                                    pass-direction)]
     (reduce (fn [network pass-function]
               (->> mapped-pass
-                   (map (fn [{:keys [incoming id outgoing]}]
-                          (pass-function
-                           (get-in network [:compute-binding :id->node-map id])
-                           (get-node-parameters network id)
-                           incoming outgoing)))
+                   (map (partial perform-pass pass-direction network pass-function))
                    dorun)
               network)
-            network
+            (pre-traverse pass-direction network mapped-pass)
             (get-in pass-metadata [pass-direction :pass-functions]))))
 
 
@@ -377,53 +478,38 @@ to the device."
                      (math/device-buffer buffer) num-w-cols))))
 
 (defn- optimise-network
-  [network parameters]
-  (let [backend (get-in network [:compute-binding :backend])
-        stream (drv/get-stream backend)
-        driver (drv/get-driver backend)
-        optimiser (compute-optimise/batch-update (get-in network [:compute-binding
-                                                                  :optimiser]))
-        buffer-alpha (/ 1.0 (double (get network :batch-size)))]
-    (reduce (fn [offset {:keys [buffer gradient
-                                learning-attenuation non-trainable?] :as parameter}]
-              (let [elem-count (long (m/ecount buffer))
-                    l2-reg (double (get parameter :l2-regularization 0))
-                    l1-reg (double (get parameter :l1-regularization 0))
-                    l2-max-constraint (double (get parameter :l2-max-constraint 0))
-                    ;;For some things it is easier to just
-                    ;;work at the flat buffer level and
-                    ;;not at the device array level.
-                    gradient-buf (math/device-buffer gradient)
-                    param-buf (math/device-buffer buffer)]
-                (when-not non-trainable?
-                  (when (> l2-reg 0.0)
-                    (math/sum stream l2-reg param-buf 1.0 gradient-buf gradient-buf))
-                  (when (> l1-reg 0.0)
-                    (let [l1-buffer (get-in network [:compute-binding :l1-buffer])]
-                      (when-not (and l1-buffer
-                                     (>= (long (m/ecount l1-buffer))
-                                         elem-count))
-                        (throw (ex-info "l1 reg buffer missing or too small"
-                                        {:l1-buffer-size (m/ecount l1-buffer)})))
-                      (let [l1-buffer (drv/sub-buffer driver l1-buffer 0 elem-count)]
-                        ;;The derivative of the absolute value function is either -1 or 1
-                        ;;depending on the value of the parameter.
-                        (math/select stream param-buf l1-buffer -1 1)
-                        ;;Add derivatives to gradient
-                        (math/sum stream l1-reg l1-buffer 1.0 gradient-buf gradient-buf))))
-                  (compute-optimise/compute-parameters! optimiser
-                                                        (* buffer-alpha learning-attenuation)
-                                                        offset gradient buffer)
-                  (when (is-l2-max-constraint-valid? parameter)
-                    (apply-l2-max-constraint backend parameter)))
-                (when gradient
-                  (drv/memset stream gradient-buf 0 0 elem-count))
-                (+ offset elem-count)))
-            0
-            parameters)
-    (assoc-in network
-              [:compute-binding :optimiser]
-              optimiser)))
+  [network parameters optimise?]
+  (if optimise?
+    (let [backend (get-in network [:compute-binding :backend])
+          stream (drv/get-stream backend)
+          driver (drv/get-driver backend)
+          optimiser (compute-optimise/batch-update (get-in network [:compute-binding
+                                                                    :optimiser]))
+          buffer-alpha (/ 1.0 (double (get network :batch-size)))]
+      (reduce (fn [offset {:keys [buffer gradient
+                                  learning-attenuation non-trainable?] :as parameter}]
+                (let [elem-count (long (m/ecount buffer))
+                      l2-max-constraint (double (get parameter :l2-max-constraint 0))
+                      ;;For some things it is easier to just
+                      ;;work at the flat buffer level and
+                      ;;not at the device array level.
+                      gradient-buf (math/device-buffer gradient)
+                      param-buf (math/device-buffer buffer)]
+                  (when-not non-trainable?
+                    (compute-optimise/compute-parameters! optimiser
+                                                          (* buffer-alpha learning-attenuation)
+                                                          offset gradient buffer)
+                    (when (is-l2-max-constraint-valid? parameter)
+                      (apply-l2-max-constraint backend parameter)))
+                  (when gradient
+                    (drv/memset stream gradient-buf 0 0 elem-count))
+                  (+ offset elem-count)))
+              0
+              parameters)
+      (assoc-in network
+                [:compute-binding :optimiser]
+                optimiser))
+    network))
 
 
 (defn- recur-train-sequence
@@ -439,31 +525,15 @@ to the device."
         (clojure.pprint/pprint (mapv (fn [[k v]]
                                        [k (ten-doubles v)])
                                      stream->buffer-map)))
-      (let [network (do-traverse network stream->buffer-map :forward)
-            backend (get-in network [:compute-binding :backend])
-            stream (drv/get-stream backend)
-            driver (drv/get-driver backend)]
-        (doseq [{:keys [buffers loss stream] :as entry} output-bindings]
-          (let [{:keys [buffer gradient]} buffers
-                answer (get stream->buffer-map stream)]
-            ;;If the entire backward pass was nixed then there was no
-            (when gradient
-              (compute-loss/compute-loss-gradient loss backend buffer answer gradient))
-            (comment
-              (clojure.pprint/pprint {:loss loss
-                                      :buffer (ten-doubles buffer)
-                                      :answer (ten-doubles answer)
-                                      :gradient (ten-doubles gradient)}))))
-        ;;Backward traverse uses existing buffers and doesn't need any id->buffer remapping
-        (do-traverse network {} :backward)
-        (let [network
-              (if optimise?
-                (optimise-network network parameters)
-                network)]
-          (cons network
-                (lazy-seq (recur-train-sequence network parameters
-                                                output-bindings optimise?
-                                                (rest batch-seq)))))))))
+      (let [network
+            (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
+                (do-traverse stream->buffer-map :forward)
+                (do-traverse {} :backward)
+                (optimise-network parameters optimise?))]
+        (cons network
+              (lazy-seq (recur-train-sequence network parameters
+                                              output-bindings optimise?
+                                              (rest batch-seq))))))))
 
 (defn- train-sequence
   [network batch-map-sequence options]

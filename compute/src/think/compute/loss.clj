@@ -86,7 +86,7 @@ buffer is expected to be entirely overwritten by operation."
         datatype (dtype/get-datatype backend)
         node (->> (get loss-term :node-id)
                   (get id->node-map))
-        term-size (layers/get-regularization-term-size loss-term id->node-map)]
+        term-size (layers/get-loss-term-size loss-term id->node-map)]
     (->L1RegularizationLoss loss-term backend (drv/allocate-device-buffer driver term-size datatype))))
 
 

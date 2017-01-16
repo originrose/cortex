@@ -472,18 +472,6 @@ network graph description."
     network-desc-or-vec))
 
 
-;;An appendage here because there is not another great place to put it.
-(defn get-regularization-term-size
-  "If you have a regularization term it can apply either to the output of a node or
-  a parameter buffer.  This discerns between those and gives you the size of the gradient
-buffer one would expect."
-  [loss-term id->node-map]
-  (let [node (get id->node-map (get loss-term :node-id))]
-    (if-let [param-key (get loss-term :parameter)]
-      (apply * (get-parameter-shape node param-key))
-      (get node :output-size))))
-
-
 (def example-mnist-description
   [(input 28 28 1)
    (convolutional 5 0 1 20)
