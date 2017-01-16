@@ -8,20 +8,24 @@ You will need to have CUDA installed to be able to run this example. Please foll
 
 _If you have CUDA-8.0 installed before you run the example, please uncomment the needed lib `[org.bytedeco.javacpp-presets/cuda "8.0-1.2"]` in the project.clj_
 
-Run `lein run`
+
+You might need to install the versions of the snapshots locally for the projects. If you do, you can do it from the main project directory. Run `local-install.sh`
+
+
+Then run `lein run`
 
 ```
 13:02 $ lein run
 checking that we have produced all images
 building dataset
-Figwheel: Starting server at http://0.0.0.0:3449
+Figwheel: Starting server at http://0.0.0.0:8091
 Figwheel: Watching build - dev
 Figwheel: Cleaning build - dev
 Compiling "resources/public/js/app.js" from ["cljs"]...
 Successfully compiled "resources/public/js/app.js" in 3.552 seconds.
 ```
 
-You will see output about building the image sets, then you will see figwheel starting and compiling some ClojureScript files. This is for the confusion matrix visualization. After you see `Successfully compiled`, go ahead and open a web page at [http://localhost:8090/](http://localhost:8090/).  This will load the confusion matrix visualization.
+You will see output about building the image sets, then you will see figwheel starting and compiling some ClojureScript files. This is for the confusion matrix visualization. After you see `Successfully compiled`, go ahead and open a web page at [http://localhost:8091/](http://localhost:8091/).  This will load the confusion matrix visualization.
   
 Notice the log in the console
 
