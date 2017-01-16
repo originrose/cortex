@@ -10,7 +10,8 @@ while output bindings are maps from node-id to {:stream :loss}."
             [cortex.optimise :as optimise]
             [cortex.loss :as loss]
             [cortex.core-matrix-backends :as b]
-            [clojure.core.matrix :as m]))
+            [clojure.core.matrix :as m]
+            [cortex.buffer-initialization :as buf-init]))
 
 
 (defn- check-node-id
@@ -384,15 +385,7 @@ which means removing extra information from them."
    node-id->output-size-map
    stream-map]
   (let [param-shape (shape-fn loss-term node-id->output-size-map stream-map)]
-    (when-not (= (get initialization :type)
-                 :constant)
-      (throw (ex-info "Only constant intialization is support for loss term parameters"
-                      {:loss-term loss-term
-                       :parameter param})))
-    (let [new-buffer (b/new-array param-shape)]
-      (when-not (= 0 (double (get initialization :value)))
-        (m/assign! new-buffer (double (get initialization :value))))
-      new-buffer)))
+    (buf-init/initialize-buffer (assoc initialization :shape param-shape))))
 
 
 (defn- generate-loss-term-parameters
