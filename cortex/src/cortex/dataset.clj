@@ -343,13 +343,15 @@ data."
               [item-key (map #(get % item-key) seq-of-maps)]))
        (into {})))
 
-
 (defn map-sequence->dataset
-  "Given sequences of maps (one of them infinite for training
-and the number of elements in an epoch construct an infinite dataset.
-Uses m/ecount to divine the shape from the first item in the infinite sequence.
-If a cross-validation sequence is not provided one will be created.  IF a holdout
-sequence is not create one with be created from the original infinite sequence."
+  "Turns an infinite training sequence of observation maps (and optionally
+  sequences of cv and holdout observation maps) into a dataset. The caller also
+  must provide the number of observations processed per epoch.
+
+  Uses m/ecount to divine a shape from the first item in the infinite sequence.
+
+  If a cross-validation sequence is not provided one will be created. If a
+  holdout sequence is not provided it will be created similarly."
   [infinite-map-seq num-epoch-elements & {:keys [cv-map-seq holdout-map-seq
                                                  use-cv-for-holdout? shutdown-fn]
                                           :or {use-cv-for-holdout? true}}]
