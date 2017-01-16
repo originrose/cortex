@@ -7,7 +7,7 @@
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
             [cortex.verify.utils :as utils]
-            [cortex.util :as cu]
+            [cortex.gaussian :as cu]
             [think.resource.core :as resource]
             [cortex.nn.protocols :as cp]))
 

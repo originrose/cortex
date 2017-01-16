@@ -128,7 +128,9 @@ in a single map you still need to call cortex-dataset/batches->columns."
                    #(train-seq context % dataset)
                    #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
     (-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/network->training-traversal % :optimiser optimiser))
+                       #(traverse/network->training-traversal %
+                                                              (ds/dataset->stream->size-map dataset)
+                                                              :optimiser optimiser))
       train-fn)))
 
 
@@ -140,7 +142,8 @@ call cortex-dataset/batches->columns"
    & {:keys [batch-size infer-batch-type]
       :or {batch-size 128 infer-batch-type :holdout}}]
   (as-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/network->inference-traversal %)) network-or-seq
+                       #(traverse/network->inference-traversal
+                         % (ds/dataset->stream->size-map dataset))) network-or-seq
     (cp/infer-batch-sequence context network-or-seq
                              (ds/get-batches dataset
                                              batch-size

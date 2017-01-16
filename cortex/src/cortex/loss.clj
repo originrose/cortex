@@ -3,7 +3,8 @@
 for a network is a weighted summation across a vector of terms.  The weight on any term is :lambda
 and is defined with a per-term-default in the loss metadata for that function type.  The default
 is 1."
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m]
+            [cortex.nn.layers :as layers]))
 
 
 ;;Utilities for dealing with map constructors
@@ -21,6 +22,26 @@ is 1."
 (defn merge-args
   [desc args]
   (merge desc (arg-list->arg-map args)))
+
+
+(defn stream-map-entry->size
+  "Given a stream map entry return the size of a given stream."
+  ^long [entry]
+  (long
+   (if (number? entry)
+     (long entry)
+     (get entry :size))))
+
+
+(defn stream->size
+  "Given a map of stream->size-or-map return the size
+of a given stream."
+  [stream-map stream]
+  (if-let [entry (get stream-map stream)]
+    (stream-map-entry->size entry)
+    (throw (ex-info "Failed to find stream:"
+                    {:stream stream
+                     :stream-map stream-map}))))
 
 
 (defmulti loss-metadata
@@ -87,7 +108,7 @@ generating the loss terms from analyzing the graph nodes."
    :lambda (get-loss-lambda {:type loss-type})})
 
 
-(defmulti get-stream-size
+(defmulti expected-loss-term-stream-size
   "Get the stream size we expect for a node.  Defaults to the output size of the node.
 Can be nil in which case it is assumed that the loss term cannot decifer the valid
 output size from information in the graph node."
@@ -95,9 +116,42 @@ output size from information in the graph node."
     (get loss-term :type)))
 
 
-(defmethod get-stream-size :default
+(defmethod expected-loss-term-stream-size :default
   [loss-term node]
   (get node :output-size))
+
+
+(defmulti loss
+  "Implement a specific loss based on the type of the loss function.  They are passed map
+containing the buffer coming from the network.
+{:output output
+ :target stream}"
+  (fn [loss-term buffer-map]
+    (:type loss-term)))
+
+
+(defn average-loss
+  "V is inferences, target is labels.  Calculate the average loss
+across all inferences and labels."
+  ^double [loss-term v-seq target-seq]
+  (double
+   (* (double (get-loss-lambda loss-term))
+      (/ (->> (map (fn [v target]
+                     {:output v
+                      :stream target})
+                   v-seq target-seq)
+              (map (partial loss loss-term))
+              (reduce +))
+         (count v-seq)))))
+
+
+(defmethod loss :mse-loss
+  [loss-term buffer-map]
+  (let [v (get buffer-map :output)
+        target (get buffer-map :stream)]
+   (/ (double (m/magnitude-squared (m/sub v target)))
+      (m/ecount v))))
+
 
 (defn mse-loss
   "Mean squared error loss.  Applied to a node and a matching-size output stream."
@@ -119,9 +173,86 @@ output size from information in the graph node."
    {:type :softmax-loss}
    args))
 
+(defn log-likelihood-softmax-loss
+  ^double [softmax-output answer]
+  (let [answer-num (m/esum (m/mul softmax-output answer))]
+    (- (Math/log answer-num))))
+
+
+(defmethod loss :softmax-loss
+  [loss-term buffer-map]
+  (let [output-channels (long (get loss-term :output-channels 1))
+        v (get buffer-map :output)
+        target (get buffer-map :stream)]
+      (if (= output-channels 1)
+        (log-likelihood-softmax-loss v target)
+        (let [n-pixels (quot (long (m/ecount v)) output-channels)]
+          (loop [pix 0
+                 sum 0.0]
+            (if (< pix n-pixels)
+              (recur (inc pix)
+                     (double (+ sum
+                                (log-likelihood-softmax-loss
+                                 (m/subvector v (* pix output-channels) output-channels)
+                                 (m/subvector target (* pix output-channels) output-channels)))))
+              (double (/ sum n-pixels))))))))
+
+
 (defmethod generate-loss-term :softmax-loss
   [item-key]
   (generic-loss-term item-key))
+
+
+(defn max-index
+  [coll]
+  (second (reduce (fn [[max-val max-idx] idx]
+                    (if (or (nil? max-val)
+                            (> (coll idx) max-val))
+                      [(coll idx) idx]
+                      [max-val max-idx]))
+                  [nil nil]
+                  (range (count coll)))))
+
+
+(defn softmax-result-to-unit-vector
+  [result]
+  (let [zeros (apply vector (repeat (first (m/shape result)) 0))]
+    (assoc zeros (max-index (into [] (seq result))) 1.0)))
+
+
+(defn softmax-results-to-unit-vectors
+  [results]
+  (let [zeros (apply vector (repeat (first (m/shape (first results))) 0))]
+    (mapv #(assoc zeros (max-index (into [] (seq  %))) 1.0)
+          results)))
+
+
+(defn evaluate-softmax
+  "Provide a percentage correct for softmax.  This is much easier to interpret than
+the actual log-loss of the softmax unit."
+  [guesses answers]
+  (if (or (not (pos? (count guesses)))
+          (not (pos? (count answers)))
+          (not= (count guesses) (count answers)))
+    (throw (Exception. (format "evaluate-softmax: guesses [%d] and answers [%d] count must both be positive and equal."
+                               (count guesses)
+                               (count answers)))))
+  (let [results-answer-seq (mapv vector
+                                 (softmax-results-to-unit-vectors guesses)
+                                 answers)
+        correct (count (filter #(m/equals (first %) (second %)) results-answer-seq))]
+    (double (/ correct (count results-answer-seq)))))
+
+
+
+(defn get-regularization-target
+  "Get the target buffer for this regularization term.  It could either be a node
+output or a particular node parameter."
+  [loss-term buffer-map]
+  (if (contains? loss-term :parameter)
+    (get buffer-map :parameter)
+    (get buffer-map :output)))
+
 
 (defn l1-regularization
   "Penalize the network for the sum of the absolute values of a given buffer.  This pushes all entries of the buffer
@@ -131,6 +262,13 @@ to either a trainable parameter or to a node in which case it will be applied to
   (merge-args
    {:type :l1-regularization}
    args))
+
+
+(defmethod loss :l1-regularization
+  [loss-term buffer-map]
+  (-> (get-regularization-target loss-term buffer-map)
+      m/abs
+      m/esum))
 
 
 (defn- reg-loss-metadata
@@ -149,7 +287,6 @@ entry in addition to a node-id."
 (defmethod loss-metadata :l1-regularization
   [loss-term]
   (reg-loss-metadata loss-term))
-
 
 
 (defmethod generate-loss-term :l1-regularization
@@ -177,6 +314,14 @@ entry in addition to a node-id."
   (generic-loss-term item-key))
 
 
+(defmethod loss :l2-regularization
+  [loss-term buffer-map]
+  ;;divide by 2 to make the gradient's work out correctly.
+  (/ (-> (get-regularization-target loss-term buffer-map)
+         m/magnitude)
+     2.0))
+
+
 (defn center-loss
   "Center loss is a way of specializing an activation for use as a grouping/sorting
 mechanism.  It groups activations by class and develops centers for the activations
@@ -194,20 +339,20 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
           :alpha alpha}
          arg-map))
 
-(defn stream-map-entry->size
-  ^long [entry]
-  (long
-   (if (number? entry)
-     (long entry)
-     (get entry :size))))
 
-(defn stream->size
-  [stream-map stream]
-  (if-let [entry (get stream-map stream)]
-    (stream-map-entry->size entry)
-    (throw (ex-info "Failed to find stream:"
-                    {:stream stream
-                     :stream-map stream-map}))))
+(defmethod loss :center-loss
+  [loss-term buffer-map]
+  ;;Penalize the network for outputing something a distance from the center
+  ;;associated with this label.
+  (let [centers (get buffer-map :centers)
+        output (get buffer-map :output)
+        label (get buffer-map :stream)]
+    ;;Divide by 2 to eliminate the *2 in the derivative.
+    (/ (-> (max-index label)
+           centers
+           (#(m/sub output %))
+           m/magnitude)
+       2.0)))
 
 
 (defn- get-center-loss-center-buffer-shape
@@ -241,101 +386,6 @@ information must be known about the dataset to make a stream->size map."
   (generic-loss-term item-key))
 
 
-(defmethod get-stream-size :center-loss
+(defmethod expected-loss-term-stream-size :center-loss
   [loss-term node]
   nil)
-
-
-(defmulti loss
-  "Implement a specific loss based on the type of the loss function.  They are passed map
-containing the buffer coming from the network.
-{:output output
- :target stream}"
-  (fn [loss-term buffer-map]
-    (:type loss-term)))
-
-
-(defmethod loss :mse-loss
-  [loss-term buffer-map]
-  (let [v (get buffer-map :output)
-        target (get buffer-map :stream)]
-   (/ (double (m/magnitude-squared (m/sub v target)))
-      (m/ecount v))))
-
-
-(defn log-likelihood-softmax-loss
-  ^double [softmax-output answer]
-  (let [answer-num (m/esum (m/mul softmax-output answer))]
-    (- (Math/log answer-num))))
-
-
-(defmethod loss :softmax-loss
-  [loss-term buffer-map]
-  (let [output-channels (long (get loss-term :output-channels 1))
-        v (get buffer-map :output)
-        target (get buffer-map :stream)]
-      (if (= output-channels 1)
-        (log-likelihood-softmax-loss v target)
-        (let [n-pixels (quot (long (m/ecount v)) output-channels)]
-          (loop [pix 0
-                 sum 0.0]
-            (if (< pix n-pixels)
-              (recur (inc pix)
-                     (double (+ sum
-                                (log-likelihood-softmax-loss
-                                 (m/subvector v (* pix output-channels) output-channels)
-                                 (m/subvector target (* pix output-channels) output-channels)))))
-              (double (/ sum n-pixels))))))))
-
-
-(defn average-loss
-  "V is inferences, target is labels.  Calculate the average loss
-across all inferences and labels."
-  ^double [loss-term v-seq target-seq]
-  (double
-   (/ (->> (map (fn [v target]
-                  {:output v
-                   :stream target})
-                v-seq target-seq)
-       (map (partial loss loss-term))
-       (reduce +))
-      (count v-seq))))
-
-
-(defn max-index
-  [coll]
-  (second (reduce (fn [[max-val max-idx] idx]
-                    (if (or (nil? max-val)
-                            (> (coll idx) max-val))
-                      [(coll idx) idx]
-                      [max-val max-idx]))
-                  [nil nil]
-                  (range (count coll)))))
-
-(defn softmax-result-to-unit-vector
-  [result]
-  (let [zeros (apply vector (repeat (first (m/shape result)) 0))]
-    (assoc zeros (max-index (into [] (seq result))) 1.0)))
-
-
-(defn softmax-results-to-unit-vectors
-  [results]
-  (let [zeros (apply vector (repeat (first (m/shape (first results))) 0))]
-    (mapv #(assoc zeros (max-index (into [] (seq  %))) 1.0)
-          results)))
-
-(defn evaluate-softmax
-  "Provide a percentage correct for softmax.  This is much easier to interpret than
-the actual log-loss of the softmax unit."
-  [guesses answers]
-  (if (or (not (pos? (count guesses)))
-          (not (pos? (count answers)))
-          (not= (count guesses) (count answers)))
-    (throw (Exception. (format "evaluate-softmax: guesses [%d] and answers [%d] count must both be positive and equal."
-                               (count guesses)
-                               (count answers)))))
-  (let [results-answer-seq (mapv vector
-                                 (softmax-results-to-unit-vectors guesses)
-                                 answers)
-        correct (count (filter #(m/equals (first %) (second %)) results-answer-seq))]
-    (double (/ correct (count results-answer-seq)))))

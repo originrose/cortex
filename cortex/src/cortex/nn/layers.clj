@@ -101,6 +101,18 @@ at least:
   (get (get-layer-metadata layer) :parameter-descriptions))
 
 
+(defn get-parameter-shape
+  "Get the shape of a given parameter."
+  [layer param-key]
+  (if-let [layer-param (->> (get-parameter-descriptions layer)
+                            (filter #(= param-key (get % :key)))
+                            first)]
+    ((get layer-param :shape-fn) layer)
+    (throw (ex-info "Parameter was not found on layer."
+                    {:layer layer
+                     :parameter param-key}))))
+
+
 (defn get-pass-set
   "Get the pass types the layer is used in.  The set can be empty
 if the layer is a placeholder to help building graphs (input,output)
@@ -458,6 +470,18 @@ network graph description."
   (if-not (map? network-desc-or-vec)
     {:layer-graph network-desc-or-vec}
     network-desc-or-vec))
+
+
+;;An appendage here because there is not another great place to put it.
+(defn get-regularization-term-size
+  "If you have a regularization term it can apply either to the output of a node or
+  a parameter buffer.  This discerns between those and gives you the size of the gradient
+buffer one would expect."
+  [loss-term id->node-map]
+  (let [node (get id->node-map (get loss-term :node-id))]
+    (if-let [param-key (get loss-term :parameter)]
+      (apply * (get-parameter-shape node param-key))
+      (get node :output-size))))
 
 
 (def example-mnist-description
