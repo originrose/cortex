@@ -9,13 +9,6 @@ You will need to have CUDA installed to be able to run this example. Please foll
 _If you have CUDA-8.0 installed before you run the example, please uncomment the needed lib `[org.bytedeco.javacpp-presets/cuda "8.0-1.2"]` in the project.clj_
 
 
-You will also need to compile the front end assets to see the web interface confusion matrix:
-
-```
-lein garden once
-lein cljsbuild once
-```
-
 You might need to install the versions of the snapshots locally for the projects. If you do, you can do it from the main project directory. Run `local-install.sh`
 
 
