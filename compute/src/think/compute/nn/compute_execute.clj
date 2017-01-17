@@ -101,30 +101,28 @@
         stream-map (get-in network [:traversal :stream-map])
         stream->size (cortex-loss/stream->data->stream->size stream-map)
         batch-size (get network :batch-size)]
+    (println id->node-map)
     (->> loss-function
          (mapv (fn [loss-term]
                  (let [term-args
                        (->> (cortex-loss/get-loss-term-arguments loss-term)
-                            (map (fn [{:keys [key data] :as arg}]
-                                   [key
+                            (mapv (fn [{:keys [key data] :as arg}]
                                     (cond-> arg
                                       (= :loss-term-parameter (get data :type))
                                       (update :buffer #(backend/array backend %))
                                       (get arg :gradients?)
                                       ;;We create a temporary buffer so that the loss term's gradient step
                                       ;;can be decoupled from it's lambda value.
-                                      (assoc :gradient #(backend/new-array backend
-                                                                           (cortex-loss/get-loss-term-argument-shape
-                                                                            loss-term
-                                                                            arg
-                                                                            id->node-map
-                                                                            stream->size)
-                                                                           batch-size)))]))
-                            (into {}))]
+                                      (assoc :gradient (backend/new-array backend
+                                                                          (cortex-loss/get-loss-term-argument-shape
+                                                                           loss-term
+                                                                           arg
+                                                                           id->node-map
+                                                                           stream->size)
+                                                                          batch-size))))))]
                    {:compute-term (compute-loss/create-compute-loss-term loss-term backend id->node-map stream->size)
                     :arguments term-args
-                    :loss-term loss-term})))
-         (group-by #(get-in % [:loss-term :node-id])))))
+                    :loss-term loss-term}))))))
 
 
 (defn- bind
@@ -192,7 +190,7 @@
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
                                    (apply +))
-        loss-function (load-loss-function (get traversal :loss-function))]
+        loss-function (load-loss-function network backend (get traversal :loss-function))]
     (-> network
         (assoc-in [:compute-binding :optimiser]
                   (when-let [optimiser (get traversal :optimiser)]
@@ -200,7 +198,7 @@
                                                                optimiser
                                                                trainable-param-count)))
         (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
-        (assoc-in [:compute-binding :loss-function loss-function]))))
+        (assoc-in [:compute-binding :loss-function] loss-function))))
 
 
 (defn- save
@@ -309,16 +307,6 @@
    network))
 
 
-(defmulti pre-traverse
-  "The backward traverse needs to have particular gradient buffers cleared."
-  (fn [pass-direction network mapped-pass]
-    pass-direction))
-
-
-(defmethod pre-traverse :default
-  [_ network mapped-pass]
-  network)
-
 
 (defmulti perform-pass
   (fn [pass-direction network pass-function pass-entry]
@@ -326,75 +314,163 @@
 
 
 (defmethod perform-pass :default
-  [_ network pass-function {:keys [incoming id outgoing]}]
+  [pass-direction network pass-function {:keys [incoming id outgoing]}]
   (pass-function
    (get-in network [:compute-binding :id->node-map id])
    (get-node-parameters network id)
    incoming outgoing))
 
 
-(defmethod pre-traverse :backward
-  [_ network mapped-pass]
-  ;;Zero all gradients we are likely to come across in the backward pass.
-  (->> mapped-pass
-       (mapcat (fn [{:keys [incoming id]}]
-                 (map :gradient incoming)))
-       (remove nil?)
-       (map math/device-buffer)
-       (backend/zero-many! (get-in network [:compute-binding :backend]))
-       dorun)
-  network)
+(defn- any-loss-term-node-outputs?
+  [compute-loss-term]
+  (->> compute-loss-term
+       :loss-term
+       cortex-loss/get-loss-term-node-outputs
+       seq))
+
+
+(defn- any-loss-term-node-parameters?
+  [compute-loss-term]
+  (->> compute-loss-term
+       :loss-term
+       cortex-loss/get-loss-term-node-parameters
+       seq))
+
+
+(defmulti load-loss-term-argument
+  "Load any buffers or gradients into the argument under either :buffer
+or :gradient."
+  (fn [network argument]
+    (cortex-loss/get-loss-term-argument-type argument)))
+
+
+;;Bind the running system to the loss term
+(defmethod load-loss-term-argument :default
+  [network argument]
+  (throw (ex-info "Unrecognized loss term argument type"
+                  {:argument argument})))
+
+
+(defmethod load-loss-term-argument :node-output
+  [network argument]
+  (let [node-pass-map (get-in network [:compute-binding :node-pass-map])
+        node-id (get-in argument [:data :node-id])
+        node-pass (first (get node-pass-map node-id))
+        ;;note this is the backward pass so the incoming buffers are the outputs of the node.
+        pass-buffers (get node-pass :incoming)]
+    (when-not (= 1 (count (get node-pass-map node-id)))
+      (throw (ex-info "Failed to find node for loss function in backward pass"
+                      {:argument argument
+                       :node-id node-id
+                       :pass-nodes (vec (keys node-pass-map))})))
+    (when-not (= 1 (count (get node-pass :incoming)))
+      (throw (ex-info "Node has multiple outputs confusion loss term binding"
+                      {:argument argument
+                       :node-id node-id
+                       :num-outputs (count (get node-pass :incoming))})))
+    (merge argument (first (get-in node-pass [:incoming])))))
+
+
+(defmethod load-loss-term-argument :node-parameter
+  [network argument]
+  (let [node-id (get-in argument [:data :node-id])
+        param-key (get-in argument [:data :parameter])
+        node-params (get-node-parameters network node-id)]
+    (when-not (contains? node-params param-key)
+      (throw (ex-info "Failed to find node parameter for loss term binding"
+                      {:node-id node-id
+                       :param-key param-key
+                       :node-params (vec (keys node-params))
+                       :argument argument})))
+    (merge argument (get-in node-params [param-key :buffer]))))
+
+
+(defmethod load-loss-term-argument :stream
+  [network argument]
+  (let [stream->buffer-map (get-in network [:compute-binding :stream->buffer-map])
+        stream-name (get-in argument [:data :stream])]
+    (when-not (contains? stream->buffer-map stream-name)
+      (throw (ex-info "Failed to bind stream to loss term"
+                      {:stream-name stream-name
+                       :argument argument
+                       :valid-streams (vec (keys stream->buffer-map))})))
+    (assoc argument :buffer (get stream->buffer-map stream-name))))
+
+
+(defmethod load-loss-term-argument :loss-term-parameter
+  [network argument]
+  argument)
+
+
+(defn- execute-loss-term
+  [network {:keys [compute-term loss-term arguments]}]
+  (let [buffer-map (->> arguments
+                        (map (partial load-loss-term-argument network))
+                        (map (fn [{:keys [key] :as arg}]
+                               [key arg]))
+                        (into {}))]
+    (compute-loss/compute-loss-gradient compute-term buffer-map)))
 
 
 ;;for the backward pass we also need to generate losses.
 (defmethod perform-pass :backward
   [_ network pass-function {:keys [incoming id outgoing] :as entry}]
-  (let [loss-nodes (get-in network [:compute-binding :loss-function id])
+  (let [loss-terms (get-in network [:compute-binding :loss-function])
         stream->buffer-map (get-in network [:compute-binding :stream->buffer-map])
         loss-buffer-map {:output (first incoming)}
         backend (get-in network [:compute-binding :backend])
         stream (drv/get-stream backend)
-        node-params (get-node-parameters network id)]
+        node-params (get-node-parameters network id)
+        incoming-buffer (first incoming)
+        incoming-gradient (get incoming-buffer :gradient)
+        ;;coalesce all the loss term arguments that apply to this node.  Note we do not know
+        ;;if they apply to the output buffer or a parameter of this node.
+        node-term-arguments (->> loss-terms
+                                 (mapcat (fn [{:keys [compute-term arguments loss-term]}]
+                                           (println "arguments" arguments)
+                                           (->> arguments
+                                                (filter #(and (= id (get-in % [:data :node-id]))
+                                                              (get % :gradients?)))
+                                                (map #(assoc % :lambda (cortex-loss/get-loss-lambda loss-term)))))))
+        output-arguments (filter #(= :node-output (cortex-loss/get-loss-term-argument-type %))
+                                 node-term-arguments)
+        parameter-arguments  (filter #(= :node-parameter (cortex-loss/get-loss-term-argument-type %))
+                                     node-term-arguments)]
+    (println "num-output-arguments" (count output-arguments))
+    (println "num-parameter-arguments" (count parameter-arguments))
     ;;output losses are evaluated first and added to the node's output gradients.
     ;;output gradients are the incoming buffers when doing the backward pass...
-    (when-not (= 1 (count incoming))
+    (when-not (or (= 0 (count node-term-arguments))
+                  (= 1 (count incoming)))
       (throw (ex-info "Not sure how to handle multiple output gradients and loss functions"
                       {:output-gradient-count (count incoming)
                        :node-id id})))
-    (->> (remove #(contains? % :parameter) loss-nodes)
-         (map (fn [{:keys [compute-term loss-term parameters gradient]}]
-                (let [incoming-buffer (first incoming)
-                      incoming-gradient (get incoming-buffer :gradient)
-                      ;;Replace the gradient so we can apply lambda and add it back.
-                      term-buffers (merge {:output (assoc incoming-buffer
-                                                          :gradient gradient)}
-                                          parameters
-                                          (if (contains? loss-term :stream)
-                                            {:stream {:buffer (get stream->buffer-map
-                                                                   (get loss-term :stream))}}
-                                            {}))]
-                  (compute-loss/compute-loss-gradient compute-term term-buffers)
-                  (math/sum stream
-                            (cortex-loss/get-loss-lambda loss-term) gradient
-                            1.0 incoming-gradient))))
+    ;;Sum any node outputs from any loss terms if they apply to this node's incoming gradient (which is it's
+    ;;output gradient).
+    ;;This is so that node implementations can be as simple as possible; they don't need to sum into their
+    ;;input gradient buffers as this oculd imply secondary buffers in some cases as not all math operations
+    ;;have a cumulative summation step at the end.
+    (->> output-arguments
+         (map #(math/sum stream
+                         (double (get % :lambda)) (get % :gradient)
+                         1.0 incoming-gradient))
          dorun)
-    (let [network
-          (perform-pass :default network pass-function entry)]
+    ;;Perform this node's backward pass.
+    (let [network (perform-pass :default network pass-function entry)]
       ;;parameter losses are evaluate second and added to the target parameter's gradients
-      (->> (filter #(contains? % :parameter) loss-nodes)
-           (map (fn [{:keys [compute-term loss-term parameters gradient]}]
-                  (let [param (get node-params (get loss-term :parameter))
-                        incoming-gradient (get param :gradient)
-                        term-buffers (merge {:parameter (assoc param :gradient gradient)}
-                                            parameters
-                                            (if (contains? loss-term :stream)
-                                              {:stream {:buffer (get stream->buffer-map
-                                                                     (get loss-term :stream))}}
-                                              {}))]
-                    (compute-loss/compute-loss-gradient compute-term term-buffers)
+      ;;This is so that the actual node implementations can be as simple as possible; they don't
+      ;;have to sum into their parameter gradients which could imply secondary buffers in some
+      ;;cases.
+      (->> parameter-arguments
+           (map (fn [argument]
+                  (let [node-parameter (get node-params [(get-in argument [:data :parameter])])]
+                    (when-not node-parameter
+                      (throw (ex-info "Failed to find node parameter to sum gradient into"
+                                      {:loss-term-param (get-in argument [:data :parameter])
+                                       :node-parameters (vec (keys node-params))})))
                     (math/sum stream
-                              (cortex-loss/get-loss-lambda loss-term) gradient
-                              1.0 incoming-gradient))))
+                              (double (get argument :lambda)) (get argument :gradient)
+                              1.0 (get node-parameter :gradient)))))
            dorun)
       network)))
 
@@ -403,13 +479,15 @@
   [network id->buffer-map pass-direction]
   (let [[network mapped-pass] (map-pass-to-buffers network
                                                    id->buffer-map
-                                                   pass-direction)]
+                                                   pass-direction)
+        node-pass-map (group-by :id mapped-pass)
+        network (assoc-in network [:compute-binding :node-pass-map] node-pass-map)]
     (reduce (fn [network pass-function]
               (->> mapped-pass
                    (map (partial perform-pass pass-direction network pass-function))
                    dorun)
               network)
-            (pre-traverse pass-direction network mapped-pass)
+            network
             (get-in pass-metadata [pass-direction :pass-functions]))))
 
 
@@ -524,6 +602,39 @@ to the device."
     network))
 
 
+(defn- zero-traverse-gradients
+  "Zero io gradients before performing the backward pass.  We only need to zero gradient
+buffers that the loss terms write into because this is a summation and won't reset the buffer.
+The nodes are expected to overwrite their buffers entirely.  The only io gradient buffers a loss
+can write into are node-loss buffers.  Node parameter buffers are cleared as part of the optimization
+process, stream's do not have gradient buffers, and the loss function itself is responsible for managing
+any loss-specific parameter buffers."
+  [network]
+  (let [id->input-buffers (->> (map-pass-to-buffers network {} :backward)
+                               second
+                               (group-by :id)
+                               (map (fn [[k items]]
+                                      [k (mapcat :incoming items)]))
+                               (into {}))]
+    (->> (get-in network [:traversal :loss-function])
+         (mapcat cortex-loss/get-loss-term-node-outputs)
+         (map #(get-in % [:data :node-id]))
+         (distinct)
+         (mapcat id->input-buffers)
+         (map :gradient)
+         (backend/zero-many! (get-in network [:compute-binding :backend]))
+         dorun)
+    network))
+
+
+(defn- compute-loss-term-gradients
+  [network]
+  ;;potential for parallelization
+  (doseq [compute-loss-term (get-in network [:compute-binding :loss-function])]
+    (execute-loss-term network compute-loss-term))
+  network)
+
+
 (defn- recur-train-sequence
   "Training is a lazy sequence of these operations."
   [network parameters output-bindings optimise? batch-seq]
@@ -540,6 +651,8 @@ to the device."
       (let [network
             (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
                 (do-traverse stream->buffer-map :forward)
+                (zero-traverse-gradients)
+                (compute-loss-term-gradients)
                 (do-traverse {} :backward)
                 (optimise-network parameters optimise?))]
         (cons network

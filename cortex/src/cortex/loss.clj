@@ -70,8 +70,8 @@ to the loss function.
 
 
 ;;Arguments can have a an indicator if the loss term produces gradients.
-(defonce default-loss-term-arguments
-  {:output {:gradient? true}
+(def default-loss-term-arguments
+  {:output {:gradients? true}
    :labels {}})
 
 
@@ -92,6 +92,11 @@ to the loss function.
   (assoc-in loss-term [arg-key :data] data-source))
 
 
+(defn get-loss-term-argument-type
+  [argument]
+  (get-in argument [:data :type]))
+
+
 (defn set-loss-term-arg-node-output
   [loss-term arg-key node-id]
   (set-loss-term-argument-data loss-term arg-key {:type :node-output
@@ -106,7 +111,7 @@ to the loss function.
 (defn set-loss-term-arg-stream
   [loss-term arg-key stream]
   (set-loss-term-argument-data loss-term arg-key {:type :stream
-                                                  :name stream}))
+                                                  :stream stream}))
 
 
 (defn set-loss-term-arg-param
@@ -123,21 +128,36 @@ either the above arguments without a custom function."
 (defmulti get-loss-term-argument-shape
   "Given a loss term argument infer it's desired shape from it's binding."
   (fn [loss-term argument node-id->name->shape-map stream->size]
-    (get argument :type)))
+    (get-in argument [:data :type])))
 
 
 (defmethod get-loss-term-argument-shape :node-output
-  [loss-term {:keys [node-id]} node-id->name->shape-map stream->size]
-  (get-in node-id->name->shape-map [node-id :output]))
+  [loss-term {:keys [data]} node-id->name->shape-map stream->size]
+  (let [node-id (get data :node-id)]
+   (if-let [retval (get-in node-id->name->shape-map [node-id :output])]
+     retval
+     (throw (ex-info "Failed to find node output shape"
+                     {:node-id node-id
+                      :shape-map node-id->name->shape-map})))))
 
 
 (defmethod get-loss-term-argument-shape :node-parameter
-  [loss-term {:keys [node-id parameter]} node-id->name->shape-map stream->size]
-  (get-in node-id->name->shape-map [node-id parameter]))
+  [loss-term {:keys [data]} node-id->name->shape-map stream->size]
+  (let [{:keys [node-id parameter]} data]
+    (if-let [retval (get-in node-id->name->shape-map [node-id parameter])]
+      retval
+      (throw (ex-info "Failed to find node parameter shape"
+                      {:node-id node-id
+                       :parameter parameter
+                       :node-id->name->shape-mape node-id->name->shape-map})))))
 
 
 (defmethod get-loss-term-argument-shape :stream
   [loss-term {:keys [stream]} node-id->name->shape-map stream->size]
+  (when-not (contains? stream->size stream)
+    (throw (ex-info "Failed to find stream size"
+                    {:stream stream
+                     :stream->size stream->size})))
   [(get stream->size stream)])
 
 
@@ -188,17 +208,17 @@ two or more of them."
 (defn get-loss-term-node-outputs
   "Get loss term arguments that connect to node outputs."
   [loss-term]
-  (get-loss-term-args-of-type :node-output))
+  (get-loss-term-args-of-type loss-term :node-output))
 
 (defn get-loss-term-node-parameters
   "Get loss term arguments that connect to node parameters."
   [loss-term]
-  (get-loss-term-args-of-type :node-parameter))
+  (get-loss-term-args-of-type loss-term :node-parameter))
 
 (defn get-loss-term-streams
   "Get loss term arguments that connect to data streams."
   [loss-term]
-  (get-loss-term-args-of-type :stream))
+  (get-loss-term-args-of-type loss-term :stream))
 
 
 (defmulti generate-loss-term
@@ -373,7 +393,7 @@ will be no parameter entry in the loss function and the output of the node is as
 or to a parameter buffer (like weights) in which case the function should have a parameter
 entry in addition to a node-id."
   [loss-term]
-  {:arguments {:output {:gradient? true}}
+  {:arguments {:output {:gradients? true}}
    :lambda 0.001})
 
 
