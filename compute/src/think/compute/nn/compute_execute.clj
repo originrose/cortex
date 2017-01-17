@@ -97,21 +97,33 @@
 (defn- load-loss-function
   "Return a map of node-id->loaded loss terms associated with that node."
   [network backend loss-function]
-  (let [id->node-map (get-in network [:layer-graph :id->node-map])
+  (let [id->node-map (network/network->node-id->name->shape-map network)
         stream-map (get-in network [:traversal :stream-map])
+        stream->size (cortex-loss/stream->data->stream->size stream-map)
         batch-size (get network :batch-size)]
     (->> loss-function
          (mapv (fn [loss-term]
-                 (let [term-params (->> (cortex-loss/get-loss-parameters loss-term)
-                                        (map (fn [{:keys [key buffer] :as param}]
-                                               [key (update param
-                                                            :buffer
-                                                            #(backend/array backend %))]))
-                                        (into {}))]
-                   {:compute-term (compute-loss/create-compute-loss-term loss-term backend id->node-map stream-map)
-                    :parameters term-params
-                    :loss-term loss-term
-                    :gradient (backend/new-array backend [(layers/get-loss-term-size loss-term)] (long batch-size))})))
+                 (let [term-args
+                       (->> (cortex-loss/get-loss-term-arguments loss-term)
+                            (map (fn [{:keys [key data] :as arg}]
+                                   [key
+                                    (cond-> arg
+                                      (= :loss-term-parameter (get data :type))
+                                      (update :buffer #(backend/array backend %))
+                                      (get arg :gradients?)
+                                      ;;We create a temporary buffer so that the loss term's gradient step
+                                      ;;can be decoupled from it's lambda value.
+                                      (assoc :gradient #(backend/new-array backend
+                                                                           (cortex-loss/get-loss-term-argument-shape
+                                                                            loss-term
+                                                                            arg
+                                                                            id->node-map
+                                                                            stream->size)
+                                                                           batch-size)))]))
+                            (into {}))]
+                   {:compute-term (compute-loss/create-compute-loss-term loss-term backend id->node-map stream->size)
+                    :arguments term-args
+                    :loss-term loss-term})))
          (group-by #(get-in % [:loss-term :node-id])))))
 
 

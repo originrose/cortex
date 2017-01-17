@@ -66,16 +66,18 @@
 
 (defn create
   [backend stream-map batch-size]
-  (let [stream-map
-        (reduce (fn [stream-map [stream entry]]
-                  (let [entry (if (map? entry)
-                                entry
-                                {:size entry})]
-                    (assoc stream-map stream
-                              (assoc entry :batch-buffers
-                                     (create-batch-buffers backend
-                                                           (loss/stream-map-entry->size entry)
-                                                           batch-size)))))
-                stream-map
-                stream-map)]
-    (->DatasetBatchingSystem backend stream-map)))
+  (->DatasetBatchingSystem backend (->> stream-map
+                                        (map (fn [[k v]]
+                                               (let [item-size (if (map? v)
+                                                                 (get v :shape)
+                                                                 (long v))
+                                                     v (if (map? v)
+                                                         v
+                                                         {})]
+                                                 [k (assoc v
+                                                           :size item-size
+                                                           :batch-buffers
+                                                           (create-batch-buffers backend
+                                                                                 item-size
+                                                                                 batch-size))])))
+                                        (into {}))))

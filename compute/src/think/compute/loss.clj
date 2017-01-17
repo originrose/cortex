@@ -26,7 +26,7 @@ buffer is expected to be entirely overwritten by operation."
   (compute-loss-gradient [this buffer-map]
     (let [v (get-in buffer-map [:output :buffer])
           gradient (get-in buffer-map [:output :gradient])
-          target (get-in buffer-map [:stream :buffer])
+          target (get-in buffer-map [:labels :buffer])
           stream (drv/get-stream backend)
           [batch-size output-size] (math/batch-shape v)
           alpha (/ 2.0 (double output-size))]
@@ -37,7 +37,7 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :mse-loss
-  [loss-term backend id->node-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map]
   (->MSELoss loss-term backend))
 
 
@@ -57,12 +57,12 @@ buffer is expected to be entirely overwritten by operation."
   (compute-loss-gradient [this buffer-map]
     (calculate-cross-entropy-gradient backend
                                       (get-in buffer-map [:output :buffer])
-                                      (get-in buffer-map [:stream :buffer])
+                                      (get-in buffer-map [:labels :buffer])
                                       (get-in buffer-map [:output :gradient]))))
 
 
 (defmethod create-compute-loss-term :softmax-loss
-  [loss-term backend id->node-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map]
   (->SoftmaxLoss loss-term backend))
 
 
@@ -81,13 +81,19 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :l1-regularization
-  [loss-term backend id->node-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map]
   (let [driver (drv/get-driver backend)
         datatype (dtype/get-datatype backend)
         node (->> (get loss-term :node-id)
-                  (get id->node-map))
-        term-size (layers/get-loss-term-size loss-term id->node-map)]
-    (->L1RegularizationLoss loss-term backend (drv/allocate-device-buffer driver term-size datatype))))
+                  (get id->name->shape-map))
+        term-size (-> (loss/get-loss-term-argument-shape loss-term
+                                                         (loss/get-loss-term-argument :output)
+                                                         id->name->shape-map
+                                                         stream->size-map)
+                      (apply *))]
+    (->L1RegularizationLoss loss-term backend (drv/allocate-device-buffer driver
+                                                                          (long term-size)
+                                                                          datatype))))
 
 
 (defrecord L2RegularizationLoss [loss-term backend]
@@ -101,5 +107,5 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :l2-regularization
-  [loss-term backend id->node-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map]
   (->L2RegularizationLoss loss-term backend))
