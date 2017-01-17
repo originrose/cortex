@@ -47,7 +47,7 @@
                            (drv/copy-host->device (drv/get-stream backend) host-buffer 0
                                                   (math/device-buffer device-array) 0
                                                   (m/ecount host-buffer))
-                           (catch Exception e (throw (ex-info "Networking batching Raw Copy Failed: "
+                           (catch Exception e (throw (ex-info "Network batching - Raw Copy Failed: "
                                                               {:buffer-size (m/ecount host-buffer)
                                                                :incoming-stream-size (m/ecount (get batch-map stream))
                                                                :stream stream}))))
