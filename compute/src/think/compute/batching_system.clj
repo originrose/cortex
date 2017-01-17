@@ -42,10 +42,15 @@
             (->> necessary-buffers
                  (map (fn [[stream {:keys [batch-buffers size]}]]
                         (let [{:keys [device-array host-buffer]} batch-buffers]
-                          (dtype/copy-raw->item! (get batch-map stream) host-buffer 0)
-                          (drv/copy-host->device (drv/get-stream backend) host-buffer 0
-                                                 (math/device-buffer device-array) 0
-                                                 (m/ecount host-buffer))
+                          (try
+                           (dtype/copy-raw->item! (get batch-map stream) host-buffer 0)
+                           (drv/copy-host->device (drv/get-stream backend) host-buffer 0
+                                                  (math/device-buffer device-array) 0
+                                                  (m/ecount host-buffer))
+                           (catch Exception e (throw (ex-info "Networking batching Raw Copy Failed: "
+                                                              {:buffer-size (m/ecount host-buffer)
+                                                               :incoming-stream-size (m/ecount (get batch-map stream))
+                                                               :stream stream}))))
                           [stream device-array])))
                  (into {})))
           batch-map-sequence))))
