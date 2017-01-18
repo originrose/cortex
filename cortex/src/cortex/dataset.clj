@@ -134,7 +134,6 @@ or a more complex shape definition a layout, num-channels, width and height")
 (defn dataset->stream->size-map
   "Given a dataset produce a stream->size mapping for the dataset."
   [dataset]
-  (println (shapes dataset))
   (->> (shapes dataset)
        (map (fn [[k v]]
               (let [entry-size (let [item-shape v]

@@ -251,25 +251,17 @@ containing the buffer coming from the network.
 
 (defn average-loss
   "output is inferences, target is labels.  Calculate the average loss
-across all inferences and labels."
+  across all inferences and labels."
   ^double [loss-term output-seq label-seq]
-  (double
-   (* (double (get-loss-lambda loss-term))
-      (/ (->> (map (fn [v target]
-                     {:output v
-                      :labels target})
-                   output-seq label-seq)
-              (map (partial loss loss-term))
-              (reduce +))
-         (count output-seq)))))
-
-
-(defmethod loss :mse-loss
-  [loss-term buffer-map]
-  (let [v (get buffer-map :output)
-        target (get buffer-map :labels)]
-   (/ (double (m/magnitude-squared (m/sub v target)))
-      (m/ecount v))))
+  (let [loss-sequence (map (fn [v target]
+                             (loss loss-term
+                                   {:output v
+                                    :labels target}))
+                           output-seq label-seq)]
+    (double
+     (* (double (get-loss-lambda loss-term))
+        (/ (apply + loss-sequence)
+           (count output-seq))))))
 
 
 (defn mse-loss
@@ -278,6 +270,14 @@ across all inferences and labels."
   (merge-args
    {:type :mse-loss}
    args))
+
+
+(defmethod loss :mse-loss
+  [loss-term buffer-map]
+  (let [v (get buffer-map :output)
+        target (get buffer-map :labels)]
+   (/ (double (m/magnitude-squared (m/sub v target)))
+      (m/ecount v))))
 
 
 (defmethod generate-loss-term :mse-loss

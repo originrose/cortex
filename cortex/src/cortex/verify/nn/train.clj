@@ -8,7 +8,8 @@
             [cortex-datasets.mnist :as mnist]
             [cortex.optimise :as opt]
             [clojure.test :refer :all]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [clojure.core.matrix :as m]))
 
 
 
@@ -77,6 +78,15 @@
                                                        :cv-split cv-split
                                                        :randimize? false))))
 
+(defn- print-layer-weights
+  [network]
+  (clojure.pprint/pprint (->> (get-in network [:layer-graph :buffers])
+                              (map (fn [[k v]]
+                                     [k
+                                      (vec (take 10 (m/eseq (get v :buffer))))]))
+                              (into {})))
+  network)
+
 
 (defn- train-and-get-results
   [context network input-bindings output-bindings
@@ -124,7 +134,7 @@
         results (train-and-get-results context [(layers/input 2 1 1 :id :input)
                                                 (layers/linear 1 :id :output)]
                                        input-bindings output-bindings 1 dataset
-                                       (opt/adadelta) true nil 5 identity)
+                                       (opt/adadelta) true nil 5000 identity)
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))
 
