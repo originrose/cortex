@@ -129,12 +129,12 @@
            (minimal-diff
             [{:type :softmax-loss,
               :output {:data {:type :node-output, :node-id :softmax-1}},
-              :labels {:data {:type :stream, :name :labels}}}
+              :labels {:data {:type :stream, :stream :labels}}}
              {:type :center-loss,
               :alpha 0.9,
               :lambda 0.05,
               :output {:data {:type :node-output, :node-id :feature}},
-              :labels {:data {:type :stream, :name :labels}}}
+              :labels {:data {:type :stream, :stream :labels}}}
              {:type :l2-regularization,
               :lambda 0.01,
               :output {:data {:type :node-output, :node-id :convolutional-2}}}
@@ -214,7 +214,7 @@
     ;;for previous layers.
     (is (= [nil nil]
            (minimal-diff
-            [{:labels {:data {:name :labels, :type :stream}},
+            [{:labels {:data {:stream :labels, :type :stream}},
               :output {:data {:node-id :softmax-1, :type :node-output}},
               :type :softmax-loss}]
             (get traversal :loss-function))))))
@@ -245,7 +245,7 @@
             (get traversal :backward))))
     (is (= [nil nil]
            (minimal-diff
-            [{:labels {:data {:name :labels, :type :stream}},
+            [{:labels {:data {:stream :labels, :type :stream}},
               :output {:data {:node-id :softmax-1, :type :node-output}},
               :type :softmax-loss}]
             (get traversal :loss-function))))))

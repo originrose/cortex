@@ -23,39 +23,35 @@
   ;;}
   ;;There is an option to skip the upload steps to the output buffers which
   ;;aren't necessary if you aren't doing gradient descent (e.g. any inference).
-  (get-batches [bs batch-map-sequence upload-output-buffers?]))
+  (get-batches [bs batch-map-sequence required-keys]))
 
 
 (defrecord DatasetBatchingSystem [backend stream->batch-info-map]
   PBatchingSystem
-  (get-batches [bs batch-map-sequence upload-output-buffers?]
-    (let [necessary-buffers (if upload-output-buffers?
-                              (seq stream->batch-info-map)
-                              (->> stream->batch-info-map
-                                   (filter (fn [[k v]]
-                                             (contains? (get v :direction) :input)))))
-          necessary-keys (mapv first necessary-buffers)]
-      (when (= 0 (count necessary-keys))
-        (throw (ex-info "Batching system did not find any keys to upload"
-                        {:batch-info-map (->> (mapv (fn [[k v]]
-                                                      [k
-                                                       (dissoc v :batch-buffers)]))
-                                              (into {}))})))
-      (map (fn [batch-map]
-             (when-not (every? #(contains? batch-map %) necessary-keys)
-               (throw (ex-info "Network batching Missing streams:"
-                               {:dataset-streams (keys batch-map)
-                                :network-streams necessary-keys})))
-             (->> necessary-buffers
-                  (map (fn [[stream {:keys [batch-buffers size]}]]
-                         (let [{:keys [device-array host-buffer]} batch-buffers]
-                           (dtype/copy-raw->item! (get batch-map stream) host-buffer 0)
-                           (drv/copy-host->device (drv/get-stream backend) host-buffer 0
-                                                  (math/device-buffer device-array) 0
-                                                  (m/ecount host-buffer))
-                           [stream device-array])))
-                  (into {})))
-           batch-map-sequence))))
+  (get-batches [bs batch-map-sequence required-keys]
+    (when (= 0 (count required-keys))
+      (throw (ex-info "Batching system did not find any keys to upload"
+                      {:batch-info-map (->> (mapv (fn [[k v]]
+                                                    [k
+                                                     (dissoc v :batch-buffers)]))
+                                            (into {}))
+                       :required-keys (vec required-keys)})))
+    (map (fn [batch-map]
+           (when-not (every? #(contains? batch-map %) required-keys)
+             (throw (ex-info "Network batching Missing streams:"
+                             {:dataset-streams (keys batch-map)
+                              :network-streams required-keys})))
+           (->> required-keys
+                (map (fn [stream]
+                       (let [{:keys [batch-buffers size]} (get stream->batch-info-map stream)
+                             {:keys [device-array host-buffer]} batch-buffers]
+                         (dtype/copy-raw->item! (get batch-map stream) host-buffer 0)
+                         (drv/copy-host->device (drv/get-stream backend) host-buffer 0
+                                                (math/device-buffer device-array) 0
+                                                (m/ecount host-buffer))
+                         [stream device-array])))
+                (into {})))
+         batch-map-sequence)))
 
 
 (defn- create-batch-buffers

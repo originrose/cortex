@@ -9,7 +9,8 @@
             [cortex.optimise :as opt]
             [clojure.test :refer :all]
             [think.resource.core :as resource]
-            [clojure.core.matrix :as m]))
+            [clojure.core.matrix :as m]
+            [clojure.pprint :as pprint]))
 
 
 
@@ -38,16 +39,16 @@
 
 (def mnist-network
   [(layers/input 28 28 1 :id :input)
-   (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.001})
+   (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.0001})
    (layers/max-pooling 2 0 2)
    (layers/dropout 0.9)
    (layers/relu)
    (layers/local-response-normalization)
-   (layers/convolutional 5 0 1 50 :weights {:l2-regularization 0.001})
+   (layers/convolutional 5 0 1 50)
    (layers/max-pooling 2 0 2)
    (layers/batch-normalization 0.9)
    (layers/linear 500 :l2-max-constraint 4.0)
-   (layers/relu)
+   (layers/relu :l2-regularization 0.001)
    (layers/linear 10)
    (layers/softmax :id :output)])
 
@@ -161,14 +162,16 @@
         results (train-and-get-results context mnist-network input-bindings output-bindings batch-size
                                        dataset (opt/adam) false inference-batch-type 4
                                        (fn [{:keys [network inferences] :as entry}]
-                                         (println (format "Loss for epoch %s: %s"
-                                                          (get network :epoch-count)
-                                                          (execute/inferences->node-id-loss-pairs
-                                                           network inferences
-                                                           (ds/get-batches dataset batch-size
-                                                                           inference-batch-type
-                                                                           (traverse/get-output-streams
-                                                                            network)))))
+                                         (let [loss-fn (execute/inferences->node-id-loss-pairs
+                                                        context network inferences
+                                                        (ds/get-batches dataset batch-size
+                                                                        inference-batch-type
+                                                                        (traverse/get-output-streams
+                                                                         network)))]
+                                          (println (format "Loss for epoch %s: %s%s\n\n"
+                                                           (get network :epoch-count)
+                                                           (apply + (map :value loss-fn))
+                                                           (execute/pprint-executed-loss-fn loss-fn))))
                                          entry))
         score (loss/evaluate-softmax results answers)]
     (is (> score 0.6))))

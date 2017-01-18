@@ -71,10 +71,8 @@ buffer is expected to be entirely overwritten by operation."
   (compute-loss-gradient [this buffer-map]
     (let [stream (drv/get-stream backend)
           param-entry (loss/get-regularization-target loss-term buffer-map)
-          param-buf (-> (get param-entry :buffer)
-                        math/device-buffer)
-          gradient (-> (get param-entry :gradient)
-                       math/device-buffer)]
+          param-buf (get param-entry :buffer)
+          gradient (get param-entry :gradient)]
       (math/select stream param-buf l1-buffer -1 1)
       (math/sum stream 1.0 l1-buffer 0.0 gradient gradient))))
 
@@ -86,11 +84,11 @@ buffer is expected to be entirely overwritten by operation."
         datatype (dtype/get-datatype backend)
         node (->> (get loss-term :node-id)
                   (get id->name->shape-map))
-        term-size (-> (loss/get-loss-term-argument-shape loss-term
-                                                         (loss/get-loss-term-argument :output)
+        term-size (->> (loss/get-loss-term-argument-shape loss-term
+                                                         (loss/get-loss-term-argument loss-term :output)
                                                          id->name->shape-map
                                                          stream->size-map)
-                      (apply *))]
+                       (apply *))]
     (->L1RegularizationLoss loss-term backend (drv/allocate-device-buffer driver
                                                                           (long term-size)
                                                                           datatype))))
@@ -99,7 +97,7 @@ buffer is expected to be entirely overwritten by operation."
 (defrecord L2RegularizationLoss [loss-term backend]
   PComputeLoss
   (compute-loss-gradient [this buffer-map]
-    (let [param-entry (loss/get-regularization-target loss-term)
+    (let [param-entry (loss/get-regularization-target loss-term buffer-map)
           stream (drv/get-stream backend)
           target (math/device-buffer (get param-entry :buffer))
           gradient (math/device-buffer (get param-entry :gradient))]

@@ -190,7 +190,10 @@ dest-buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;"))
   (batch-shape [ary] (batch-shape (.tensor ary)))
   (batch-size [ary] (batch-size (.tensor ary)))
   PGetDeviceBuffer
-  (device-buffer [ary] (.device-buffer ary)))
+  (device-buffer [ary] (.device-buffer ary))
+  dtype/PView
+  (->view-impl [ary offset length]
+    (dtype/->view (.device-buffer ary) offset length)))
 
 
 (defn array

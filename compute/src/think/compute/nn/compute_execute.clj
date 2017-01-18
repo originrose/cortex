@@ -255,6 +255,17 @@
         (dissoc :compute-binding))))
 
 
+(defn- get-parameter
+  [network node-id param-key]
+  (let [parameters (get-node-parameters network node-id)
+        backend (get-in network [:compute-binding :backend])]
+    (if-let [param-data (get-in parameters [param-key :buffer])]
+      (backend/to-core-matrix backend param-data)
+      (throw (ex-info "Failed to find parameter"
+                      {:node-id node-id
+                       :param-key param-key})))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Specific traversal implementation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -428,7 +439,6 @@ or :gradient."
                         (map (fn [{:keys [key] :as arg}]
                                [key arg]))
                         (into {}))]
-
     ;;Useful debugging tool.
     (compute-loss/compute-loss-gradient compute-term buffer-map)
     (comment
@@ -491,7 +501,7 @@ or :gradient."
       ;;cases.
       (->> parameter-arguments
            (map (fn [argument]
-                  (let [node-parameter (get node-params [(get-in argument [:data :parameter])])]
+                  (let [node-parameter (get node-params (get-in argument [:data :parameter]))]
                     (when-not node-parameter
                       (throw (ex-info "Failed to find node parameter to sum gradient into"
                                       {:loss-term-param (get-in argument [:data :parameter])
@@ -541,20 +551,45 @@ to the device."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Training
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn- get-output-bindings
+
+(defn- get-loss-function-output-bindings
   [network]
-  (->> (traverse/get-output-bindings network)
-       (filter #(get % :stream))
-       (map (fn [{:keys [node-id] :as entry}]
-              (assoc entry
-                     :buffers
-                     (get-in network [:compute-binding
-                                      :traversal-buffers
-                                      {:output-id node-id}])
-                     :output-size (get-in network [:layer-graph
-                                                   :id->node-map
-                                                   node-id
-                                                   :output-size]))))))
+  (->> (get-in network [:traversal :loss-function])
+       (mapcat cortex-loss/get-loss-term-node-outputs)
+       (map :data)))
+
+
+(defn- get-output-bindings
+  "Return the outputs of the network.  Anything explicity marked with an output binding
+and anything that has a loss term attached to it's output becomes an output binding."
+  [network]
+  (let [forward-pass (get-in network [:traversal :forward])
+        id->pass (->> (group-by :id forward-pass)
+                      (map (fn [[k v]]
+                             (when-not (= 1 (count v))
+                               (throw (ex-info "Node mapped to multiple pass operations"
+                                               {:node-id k
+                                                :passes v})))
+                             [k (first v)]))
+                      (into {}))]
+   (->> (concat (traverse/get-output-bindings network)
+                (get-loss-function-output-bindings network))
+        (map :node-id)
+        distinct
+        (map (fn [node-id]
+               (when-not (= 1 (count (get-in id->pass [node-id :outgoing])))
+                 (throw (ex-info "Output nodes must have a single output."
+                                 {:node-id node-id
+                                  :pass (get id->pass node-id)})))
+               (let [output-id (first (get-in id->pass [node-id :outgoing]))]
+                 {:node-id node-id
+                  :buffers (get-in network [:compute-binding
+                                            :traversal-buffers
+                                            output-id])
+                  :output-size (get-in network [:layer-graph
+                                                :id->node-map
+                                                node-id
+                                                :output-size])}))))))
 
 
 (defn- get-input-bindings
@@ -665,7 +700,7 @@ any loss-specific parameter buffers."
 
 (defn- recur-train-sequence
   "Training is a lazy sequence of these operations."
-  [network parameters output-bindings optimise? batch-seq]
+  [network parameters optimise? batch-seq]
   (when-let [stream->buffer-map (first batch-seq)]
     ;;Sometimes you have to print the entire batch out to see what is going on.
     (let [backend (get-in network [:compute-binding :backend])
@@ -684,23 +719,24 @@ any loss-specific parameter buffers."
                 (do-traverse {} :backward)
                 (optimise-network parameters optimise?))]
         (cons network
-              (lazy-seq (recur-train-sequence network parameters
-                                              output-bindings optimise?
+              (lazy-seq (recur-train-sequence network parameters optimise?
                                               (rest batch-seq))))))))
 
 (defn- train-sequence
   [network batch-map-sequence options]
   (let [bs (get-in network [:compute-binding :batching-system])
         backend (get-in network [:compute-binding :backend])
-        output-bindings (get-output-bindings network)
         ;;These are the things we are ultimately optimizing
         parameters (get-in network [:compute-binding :trainable-parameters])
         ;;The buffers do not change going backward so we can pre-map this pass.
         [network backward-mapped-pass] (map-pass-to-buffers network
                                                             {}
-                                                            :backward)]
-    (->> (batching-system/get-batches bs batch-map-sequence true)
-         (recur-train-sequence network parameters output-bindings true))))
+                                                            :backward)
+        required-keys (->> (traverse/get-io-bindings network)
+                           (map :stream)
+                           distinct)]
+    (->> (batching-system/get-batches bs batch-map-sequence required-keys)
+         (recur-train-sequence network parameters true))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -769,8 +805,11 @@ any loss-specific parameter buffers."
 (defn- batch-infer
   [network batch-map-sequence options]
   (let [bs (get-in network [:compute-binding :batching-system])
-        support-data (create-infer-seq-support-data network)]
-    (->> (batching-system/get-batches bs batch-map-sequence false)
+        support-data (create-infer-seq-support-data network)
+        required-keys (->> (traverse/get-input-bindings network)
+                           (map :stream)
+                           distinct)]
+    (->> (batching-system/get-batches bs batch-map-sequence required-keys)
          (do-infer-seq network support-data :inference))))
 
 
@@ -784,7 +823,6 @@ any loss-specific parameter buffers."
         ;;plus backward and loss gradient to generate calculated gradients
         network (first (recur-train-sequence network
                                              parameters
-                                             output-bindings
                                              false
                                              [stream->data-map]))
         ;;generate a sequence of buffers in order to generate the numeric gradients.
@@ -805,7 +843,20 @@ any loss-specific parameter buffers."
                      (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
                      ;;Raw-forward is used here to avoid calling prepare-forward again.  But this
                      ;;is not an inference pass; it is an actual forward pass.
-                     (first (do-infer-seq network support-data :raw-forward [{}])))]
+                     (first (do-infer-seq network support-data :raw-forward [{}])))
+        batch-size (long (get network :batch-size))
+        stream->batches-map (->> stream->input-map
+                                 (map (fn [[k v]]
+                                        [k (->> v
+                                                m/eseq
+                                                (partition (/ (m/ecount v)
+                                                              batch-size))
+                                                (mapv vec))]))
+                                 (into {}))
+        data->loss (fn [inference-data]
+                     (execute/execute-live-loss-fn context network
+                                                   inference-data
+                                                   stream->batches-map))]
     (doseq [{:keys [buffer numeric-gradient host-buffer] :as entry} numeric-buffers]
       (let [device-buffer (math/device-buffer buffer)]
        (when-not (and numeric-gradient host-buffer)
@@ -818,27 +869,12 @@ any loss-specific parameter buffers."
            (let [param-value (double (dtype/get-value host-buffer idx))
                  positive (forward-fn (+ param-value epsilon) host-buffer device-buffer elem-count idx)
                  negative (forward-fn (- param-value epsilon) host-buffer device-buffer elem-count idx)
-                 gradient (->> (keys positive)
-                               (map (fn [node-id]
-                                      (let [pos-data (get positive node-id)
-                                            neg-data (get negative node-id)
-                                            {:keys [loss stream output-size]}
-                                            (get node-id->output-binding node-id)
-                                            ;;Partition stream into batches
-                                            stream-data (->> (get stream->input-map stream)
-                                                             m/eseq
-                                                             (partition output-size))]
-                                        (->>
-                                         (map (fn [pos neg answer]
-                                                (/
-                                                 (- (double (cortex-loss/loss loss {:output pos
-                                                                                    :labels answer}))
-                                                    (double (cortex-loss/loss loss {:output neg
-                                                                                    :labels answer})))
-                                                 (* 2 epsilon)))
-                                              pos-data neg-data stream-data)
-                                         (apply +)))))
-                               (apply +))]
+                 ;;The loss is normally divided by the batch size to get an average loss
+                 ;;but in our case we don't want the average; we want the actual loss.
+                 gradient (/ (* (- (double (data->loss positive))
+                                   (double (data->loss negative)))
+                                batch-size)
+                             (* 2 epsilon))]
              (dtype/set-value! host-buffer idx param-value)
              ;;Reset device buffer to original value.
              (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
@@ -856,6 +892,8 @@ any loss-specific parameter buffers."
     (batch-infer built-network batch-map-sequence options))
   (save-to-network [context built-network options]
     (save built-network options))
+  (get-node-parameter [context network node-id param-key]
+    (get-parameter network node-id param-key))
   (traverse [context bound-network id->input-map direction]
     (traverse bound-network id->input-map direction))
   (generate-numeric-gradients [context built-network stream->data-map epsilon]

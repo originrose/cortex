@@ -13,7 +13,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
             [think.resource.core :as resource]
             [cortex.loss :as loss]
             [cortex.nn.protocols :as cp]
-            [cortex.optimise :as optimise]))
+            [cortex.optimise :as optimise]
+            [clojure.pprint :as pprint]))
 
 
 (defn- safe-inc
@@ -77,13 +78,120 @@ Returns map of:
                                                                            input-streams)
                                                            {})))))))
 
+(defmulti bind-loss-term-argument
+  "Bind the argument into actual data for executing the loss term."
+  (fn
+    [context network argument inference-columns dataset-columns]
+    (loss/get-loss-term-argument-type argument)))
+
+
+(defmethod bind-loss-term-argument :node-output
+  [context network argument inference-columns dataset-columns]
+  (if-let [retval (get inference-columns (get-in argument [:data :node-id]))]
+    retval
+    (throw (ex-info "Failed to bind to node output:"
+                    {:argument argument
+                     :available-outputs (keys inference-columns)}))))
+
+(defmethod bind-loss-term-argument :node-parameter
+  [context network argument inference-columns dataset-columns]
+  (let [{:keys [node-id parameter]} (get argument :data)]
+    (if-let [retval (cp/get-node-parameter context network node-id parameter)]
+      [retval]
+      (throw (ex-info "Failed to bind to node parameter:"
+                      {:argument argument})))))
+
+(defmethod bind-loss-term-argument :stream
+  [context network argument inference-columns dataset-columns]
+  (if-let [retval (get dataset-columns (get-in argument [:data :stream]))]
+    retval
+    (throw (ex-info "Failed to bind to dataset stream"
+                    {:argument argument
+                     :available-streams (vec (keys dataset-columns))}))))
+
+
+(defmethod bind-loss-term-argument :loss-term-parameter
+  [context network argument inference-columns dataset-columns]
+  (cp/get-loss-term-parameter context network argument))
+
+
+(defn execute-live-loss-term
+  "Execute a loss term.  This uses the context to find node and loss parameters."
+  [context network loss-term inference-columns dataset-columns]
+  (let [arguments (->> (loss/get-loss-term-arguments loss-term)
+                     (map (fn [{:keys [key] :as argument}]
+                            (let [buffer (bind-loss-term-argument context network argument
+                                                                  inference-columns dataset-columns)]
+                              (assoc argument
+                                     :buffer buffer
+                                     :count (count buffer))))))
+        distinct-count (->> arguments
+                            (map :count)
+                            distinct)
+        _ (when-not (< (count distinct-count)
+                       3)
+            (throw (ex-info "There should be at most 2 distinct argument buffer counts"
+                            {:buffer-counts (vec distinct-count)})))
+        max-argument-num-items (apply max (->> arguments
+                                               (map :count)))
+        even-arguments (->> arguments
+                            (map (fn [argument]
+                                   (update argument :buffer
+                                           (fn [buffer]
+                                             (->> (repeat buffer)
+                                                  (apply concat)
+                                                  (take max-argument-num-items)
+                                                  vec))))))
+        argument-keys (map :key arguments)
+        partitioned-buffers (->> even-arguments
+                                 (map :buffer)
+                                 (apply interleave)
+                                 (partition (count even-arguments)))
+        buffer-map-seq (map (fn [key-seq buf-seq]
+                              (->> (map vector key-seq buf-seq)
+                                   (into {})))
+                            (repeat argument-keys) partitioned-buffers)]
+    (* (double (loss/get-loss-lambda loss-term))
+       (/ (->> buffer-map-seq
+               (map #(loss/loss loss-term %))
+               (apply +))
+          (count buffer-map-seq)))))
+
+
+(defn pprint-executed-loss-fn
+  [loss-fn]
+  (with-out-str
+    (pprint/print-table [:type :value :lambda :node-id :parameter]
+                        (mapv (fn [loss-term]
+                                (assoc loss-term
+                                       :lambda
+                                       (loss/get-loss-lambda
+                                        loss-term)
+                                       :node-id
+                                       (get-in loss-term
+                                               [:output :data
+                                                :node-id])
+                                       :parameter
+                                       (get-in loss-term
+                                               [:output :data
+                                                :parameter])))
+                              loss-fn))))
+
+
+(defn execute-live-loss-fn
+  "Execute a loss function against a running network returning the loss value as a double.  Inferences
+and dataset outputs are expected to be maps of columns of data."
+  [context network inferences dataset-outputs]
+  (apply + (->> (get-in network [:traversal :loss-function])
+                (map #(execute-live-loss-term context network % inferences dataset-outputs)))))
+
 
 (defn inferences->node-id-loss-pairs
   "Given the set of inferences from an inference run of the network
 and the set of labels along with the bindings (traverse/get-io-bindings built-network)
 return a map of node-id -> loss.  Note that inferences are map of node-id->batches
 while labels is a map of stream->data."
-  [network inferences dataset-outputs]
+  [context network inferences dataset-outputs]
   (let [inference-columns (ds/batches->columns inferences)
         label-columns (ds/batches->columns dataset-outputs)
         output-bindings (traverse/get-output-training-bindings network)
@@ -98,10 +206,11 @@ while labels is a map of stream->data."
                                           [node-id [(get inference-columns node-id)
                                                     (get label-columns (get node-id->output-streams node-id))]]))
                                    (into {}))]
-    (->> output-bindings
-         (mapv (fn [{:keys [node-id loss]}]
-                 (let [[inferences outputs] (get inference-label-pairs node-id)]
-                   [node-id (loss/average-loss loss inferences outputs)]))))))
+    (->> (get-in network [:traversal :loss-function])
+         (mapv (fn [loss-term]
+                 (assoc loss-term
+                        :value
+                        (execute-live-loss-term context network loss-term inference-columns label-columns)))))))
 
 
 (defn- setup-network
