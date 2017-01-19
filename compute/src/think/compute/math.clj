@@ -68,10 +68,15 @@ a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
   (select [stream src-buf dest-buf less-zero-value equal-or-greater-val]
     "Check buffer value against zero and set it to one value if it is less than zero
 and another value if it is greater or equal to zero:
-dest-buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;"))
+dest-buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;")
+  (indirect-add [stream alpha x x-indexes beta y y-indexes result res-indexes n-elems-per-idx]
+    "Indirect indexed add.  Unlike sum there is no index wrapping so the index vectors
+need to be setup correctly.  Like sum, however, res could be either x or y and thus you
+could use this to accumulate particular results in addition to adding into a separate vector.
+result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];"))
 
 
-  (defmacro math-error
+(defmacro math-error
   [msg]
   `(throw (Exception. ~msg)))
 

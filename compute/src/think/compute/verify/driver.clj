@@ -163,3 +163,30 @@
                       values)]
      (math/select stream buf-a buf-b -1.0 1.0)
      (is (m/equals answer (vec (->array buf-b)))))))
+
+
+(defn indirect-add
+  [device datatype]
+  (backend-test-pre
+   device datatype
+   (let [n-elems 1000
+         vec-len 10
+         n-vecs (/ n-elems vec-len)
+         values (range n-elems)
+         buf-a (make-buffer values)
+         src-indexes (int-array (range n-vecs))
+         buf-b (make-buffer (/ n-elems 2))
+         dst-indexes (int-array (flatten (repeat 2 (range (/ n-vecs 2)))))
+         answer (->> values
+                     (partition vec-len)
+                     ((fn [item-seq]
+                        (mapv m/add
+                              (take (/ n-vecs 2) item-seq)
+                              (drop (/ n-vecs 2) item-seq)))))]
+     (math/indirect-add stream 1.0 buf-a src-indexes
+                        1.0 buf-b dst-indexes
+                        buf-b dst-indexes vec-len)
+     (is (m/equals answer
+                   (->> (->array buf-b)
+                        (partition vec-len)
+                        (mapv vec)))))))

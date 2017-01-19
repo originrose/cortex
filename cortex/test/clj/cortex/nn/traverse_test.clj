@@ -45,7 +45,7 @@
   (assoc traversal
          :forward (realize-traversal-pass forward)
          :backward (realize-traversal-pass backward)
-         :loss-function (mapv #(dissoc % :centers) (get traversal :loss-function))))
+         :loss-function (vec (get traversal :loss-function))))
 
 
 (defn minimal-diff
@@ -134,7 +134,8 @@
               :alpha 0.9,
               :lambda 0.05,
               :output {:data {:type :node-output, :node-id :feature}},
-              :labels {:data {:type :stream, :stream :labels}}}
+              :labels {:data {:type :stream, :stream :labels}}
+              :centers {:buffer-id :center-loss-1}}
              {:type :l2-regularization,
               :lambda 0.01,
               :output {:data {:type :node-output, :node-id :convolutional-2}}}

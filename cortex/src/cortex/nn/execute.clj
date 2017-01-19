@@ -81,28 +81,30 @@ Returns map of:
 (defmulti bind-loss-term-argument
   "Bind the argument into actual data for executing the loss term."
   (fn
-    [context network argument inference-columns dataset-columns]
+    [context network loss-term argument inference-columns dataset-columns]
     (loss/get-loss-term-argument-type argument)))
 
 
 (defmethod bind-loss-term-argument :node-output
-  [context network argument inference-columns dataset-columns]
+  [context network loss-term argument inference-columns dataset-columns]
   (if-let [retval (get inference-columns (get-in argument [:data :node-id]))]
     retval
     (throw (ex-info "Failed to bind to node output:"
                     {:argument argument
                      :available-outputs (keys inference-columns)}))))
 
+
 (defmethod bind-loss-term-argument :node-parameter
-  [context network argument inference-columns dataset-columns]
+  [context network loss-term argument inference-columns dataset-columns]
   (let [{:keys [node-id parameter]} (get argument :data)]
     (if-let [retval (cp/get-node-parameter context network node-id parameter)]
       [retval]
       (throw (ex-info "Failed to bind to node parameter:"
                       {:argument argument})))))
 
+
 (defmethod bind-loss-term-argument :stream
-  [context network argument inference-columns dataset-columns]
+  [context network loss-term argument inference-columns dataset-columns]
   (if-let [retval (get dataset-columns (get-in argument [:data :stream]))]
     retval
     (throw (ex-info "Failed to bind to dataset stream"
@@ -111,8 +113,13 @@ Returns map of:
 
 
 (defmethod bind-loss-term-argument :loss-term-parameter
-  [context network argument inference-columns dataset-columns]
+  [context network loss-term argument inference-columns dataset-columns]
   (cp/get-loss-term-parameter context network argument))
+
+
+(defmethod bind-loss-term-argument :stream-augmentation
+  [context network loss-term argument inference-columns dataset-columns]
+  (loss/get-loss-term-stream-augment loss-term argument dataset-columns))
 
 
 (defn execute-live-loss-term
@@ -120,7 +127,7 @@ Returns map of:
   [context network loss-term inference-columns dataset-columns]
   (let [arguments (->> (loss/get-loss-term-arguments loss-term)
                      (map (fn [{:keys [key] :as argument}]
-                            (let [buffer (bind-loss-term-argument context network argument
+                            (let [buffer (bind-loss-term-argument context network loss-term argument
                                                                   inference-columns dataset-columns)]
                               (assoc argument
                                      :buffer buffer

@@ -6,12 +6,13 @@
             [think.resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
-            [think.compute.array-view-math :as avm])
+            [think.compute.array-view-math :as avm]
+            [think.datatype.marshal :as marshal])
   (:import [java.nio ByteBuffer IntBuffer ShortBuffer LongBuffer
             FloatBuffer DoubleBuffer Buffer]
            [com.github.fommil.netlib BLAS]
            [java.util Random]
-           [think.datatype ArrayView]))
+           [think.datatype ArrayView IntArrayView]))
 
 
 (set! *warn-on-reflection* true)
@@ -85,6 +86,20 @@ Use with care; the synchonization primitives will just hang with this stream."
 
 (defrecord CPUEvent [input-chan])
 
+
+(defn- to-int-array
+  ^ints [item]
+  (when-not (= :int (dtype/get-datatype item))
+    (throw (ex-info "Incorrect datatype of index array"
+                    {:datatype (dtype/get-datatype item)})))
+  (let [int-data (marshal/view->array item)
+        item-offset (marshal/view->array-offset item 0)]
+    (when-not (= 0 item-offset)
+      (throw (ex-info "index arrays cannot be offset."
+                      {:item-offset item-offset})))
+    int-data))
+
+
 (extend-type CPUStream
   drv/PStream
   (copy-host->device [stream host-buffer host-offset
@@ -107,7 +122,12 @@ Use with care; the synchonization primitives will just hang with this stream."
       event))
   (sync-event [stream event]
     (with-stream-dispatch stream
-      (drv/wait-for-event event))))
+      (drv/wait-for-event event)))
+  (indexed-copy [stream dev-a dev-a-indexes dev-b dev-b-indexes n-elems-per-idx]
+    (with-stream-dispatch stream
+      (dtype/indexed-copy! (dtype/->view dev-a) 0 (to-int-array dev-a-indexes)
+                           (dtype/->view dev-b) 0 (to-int-array dev-b-indexes)
+                           (long n-elems-per-idx)))))
 
 (extend-type CPUEvent
   drv/PEvent
@@ -173,7 +193,21 @@ Use with care; the synchonization primitives will just hang with this stream."
   (select [stream src-buf buffer less-zero-value equal-or-greater-val]
     (with-stream-dispatch stream
       (avm/select (dtype/->view src-buf) (dtype/->view buffer)
-                  less-zero-value equal-or-greater-val))))
+                  less-zero-value equal-or-greater-val)))
+  (indirect-add [stream alpha x x-indexes beta y y-indexes result res-indexes n-elems-per-idx]
+    (when-not (and (= (m/ecount x-indexes)
+                      (m/ecount y-indexes))
+                   (= (m/ecount x-indexes)
+                      (m/ecount res-indexes)))
+      (throw (ex-info "Index counts differ between x, y result"
+                      {:x-count (m/ecount x-indexes)
+                       :y-count (m/ecount y-indexes)
+                       :res-count (m/ecount res-indexes)})))
+    (with-stream-dispatch stream
+      (avm/indirect-add (dtype/->view x) alpha (dtype/->view x-indexes)
+                        beta (dtype/->view y) (dtype/->view y-indexes)
+                        (dtype/->view result) (dtype/->view res-indexes)
+                        n-elems-per-idx))))
 
 
 (extend-type Buffer

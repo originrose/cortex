@@ -385,26 +385,40 @@ which means removing extra information from them."
     (buf-init/initialize-buffer (assoc initialization :shape param-shape))))
 
 
+(defn- generate-buffer-id [network loss-term-type]
+  (let [existing-keys (set (keys (get-in network [:layer-graph :buffers])))]
+    (loop [idx 1]
+      (let [new-key (keyword (str (name loss-term-type) "-" idx))]
+        (if (contains? existing-keys new-key)
+          (recur (inc idx))
+          new-key)))))
+
+
 (defn- generate-loss-term-parameters
   [network stream-map loss-term-vec]
   (let [node-id->name->shape-map (network/network->node-id->name->shape-map network)
         stream->size-map (loss/stream->data->stream->size stream-map)]
-   (->> loss-term-vec
-        (map (fn [loss-term]
-               (->> (loss/get-loss-term-parameters loss-term)
-                    (map (fn [arg]
-                           (assoc arg :buffer
-                                  (or (get arg :buffer)
-                                      (generate-param-initial-buffer loss-term
-                                                                     arg
-                                                                     node-id->name->shape-map
-                                                                     stream->size-map)))))
-                    (reduce (fn [loss-term {:keys [key buffer]}]
-                              (update loss-term
-                                      key
-                                      #(assoc % :buffer buffer)))
-                            loss-term))))
-        vec)))
+    (reduce (fn [[network loss-term-vec] loss-term]
+              (let [[network arguments]
+                    (reduce (fn [[network arguments] arg]
+                              (let [buffer-id (generate-buffer-id network (get loss-term :type))]
+                                [(assoc-in network [:layer-graph :buffers buffer-id]
+                                           (or (get arg :buffer)
+                                               (generate-param-initial-buffer loss-term
+                                                                              arg
+                                                                              node-id->name->shape-map
+                                                                              stream->size-map)))
+                                 (conj arguments (assoc (dissoc arg :buffer)
+                                                        :buffer-id buffer-id))]))
+                            [network []]
+                            (loss/get-loss-term-parameters loss-term))
+                    loss-term (reduce (fn [loss-term {:keys [key buffer-id]}]
+                                        (assoc-in loss-term [key :buffer-id] buffer-id))
+                                      loss-term
+                                      arguments)]
+                [network (conj loss-term-vec loss-term)]))
+            [network []]
+            loss-term-vec)))
 
 
 (defn network->training-traversal
@@ -443,11 +457,11 @@ datastructure describing the final loss function.
                                      reverse
                                      (map :id)
                                      (map #(network/network->node network %)))
-        loss-fn (->> (generate-loss-function network
-                                             forward-traversal-nodes
-                                             (get-output-bindings network)
-                                             loss-fn)
-                     (generate-loss-term-parameters network stream-map))]
+        [network loss-fn] (->> (generate-loss-function network
+                                                       forward-traversal-nodes
+                                                       (get-output-bindings network)
+                                                       loss-fn)
+                               (generate-loss-term-parameters network stream-map))]
     (update network
             :traversal
             #(merge %

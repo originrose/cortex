@@ -153,12 +153,13 @@ either the above arguments without a custom function."
 
 
 (defmethod get-loss-term-argument-shape :stream
-  [loss-term {:keys [stream]} node-id->name->shape-map stream->size]
-  (when-not (contains? stream->size stream)
-    (throw (ex-info "Failed to find stream size"
-                    {:stream stream
-                     :stream->size stream->size})))
-  [(get stream->size stream)])
+  [loss-term {:keys [data] :as argument} node-id->name->shape-map stream->size]
+  (let [stream (get data :stream)]
+    (when-not (contains? stream->size stream)
+      (throw (ex-info "Failed to find stream size"
+                      {:stream stream
+                       :stream->size stream->size})))
+    [(get stream->size stream)]))
 
 
 (defmethod get-loss-term-argument-shape :loss-term-parameter
@@ -220,6 +221,11 @@ two or more of them."
   [loss-term]
   (get-loss-term-args-of-type loss-term :stream))
 
+(defn get-loss-term-augmented-streams
+  "Loss loss term arguments that are formed from augmented streams of data"
+  [loss-term]
+  (get-loss-term-args-of-type loss-term :stream-augmentation))
+
 
 (defmulti generate-loss-term
   "Given a map and a specific key, generate a loss term or return nil.  Used for auto
@@ -262,6 +268,42 @@ containing the buffer coming from the network.
      (* (double (get-loss-lambda loss-term))
         (/ (apply + loss-sequence)
            (count output-seq))))))
+
+
+(defn max-index
+  [coll]
+  (second (reduce (fn [[max-val max-idx] idx]
+                    (if (or (nil? max-val)
+                            (> (coll idx) max-val))
+                      [(coll idx) idx]
+                      [max-val max-idx]))
+                  [nil nil]
+                  (range (count coll)))))
+
+
+
+(defmulti get-stream-augmentation-metadata
+  (fn [argument]
+    (get-in argument [:data :augmentation])))
+
+
+(defmethod get-stream-augmentation-metadata :labels->indexes
+  [argument]
+  {:fn (partial mapv max-index)})
+
+
+(defmethod get-stream-augmentation-metadata :labels->inverse-counts
+  [argument]
+  {:fn (fn [batch-label-vec]
+         (let [n-classes (m/ecount (first batch-label-vec))]
+           (->> (map max-index batch-label-vec)
+                (reduce #(update %1 %2 inc)
+                        (vec (repeat n-classes 0)))
+                (mapv (fn [val]
+                        (if (zero? val)
+                          0.0
+                          (/ 1.0 (double val))))))))})
+
 
 
 (defn mse-loss
@@ -320,17 +362,6 @@ containing the buffer coming from the network.
 (defmethod generate-loss-term :softmax-loss
   [item-key]
   (generic-loss-term item-key))
-
-
-(defn max-index
-  [coll]
-  (second (reduce (fn [[max-val max-idx] idx]
-                    (if (or (nil? max-val)
-                            (> (coll idx) max-val))
-                      [(coll idx) idx]
-                      [max-val max-idx]))
-                  [nil nil]
-                  (range (count coll)))))
 
 
 (defn softmax-result-to-unit-vector
@@ -484,13 +515,34 @@ information must be known about the dataset to make a stream->size map."
     [labels-size output-size]))
 
 
+(defn get-loss-term-stream-augment
+  [loss-term argument stream->buffer-map]
+  (let [src-arg (get-loss-term-argument loss-term (get-in argument [:data :argument]))
+        data-stream (get-in src-arg [:data :stream])
+        arg-augmentation (get-stream-augmentation-metadata (get-in argument [:data :augmentation]))
+        augment-fn (get arg-augmentation :fn)]
+    (if-let [data (stream->buffer-map data-stream)]
+      (augment-fn (get stream->buffer-map data-stream))
+      (throw (ex-info "Failed to find stream to for augmented argument"
+                      {:argument argument
+                       :loss-term loss-term
+                       :streams (vec (keys stream->buffer-map))})))))
+
+
 (defmethod loss-metadata :center-loss
   [loss-term]
   {:arguments {:output {:gradients? true}
                :labels {}
-               :centers {:shape-fn get-center-loss-center-buffer-shape
-                         :initialization {:type :constant
-                                          :value 0}}}
+               :label-indexes {:data {:type :stream-augmentation
+                                      :argument :labels
+                                      :augmentation :labels->indexes}}
+               :label-inverse-counts {:data {:type :stream-augmentation
+                                             :argument :labels
+                                             :augmentation :labels->inverse-counts}}
+               :centers {:data {:type :loss-term-parameter
+                                :shape-fn get-center-loss-center-buffer-shape
+                                :initialization {:type :constant
+                                                 :value 0}}}}
    :lambda 0.1})
 
 

@@ -39,3 +39,6 @@
 
 (def-double-float-test select
   (verify-driver/select static-device test-utils/*datatype*))
+
+(def-double-float-test indirect-add
+  (verify-driver/indirect-add static-device test-utils/*datatype*))
