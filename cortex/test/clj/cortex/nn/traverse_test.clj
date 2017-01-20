@@ -21,7 +21,9 @@
    (layers/dropout 0.75)
    (layers/batch-normalization 0.9)
    (layers/linear 500) ;;If you use this description put that at 1000
-   (layers/relu :id :feature)
+   (layers/relu :id :feature :center-loss {:labels {:stream :labels}
+                                           :lambda 0.05
+                                           :alpha 0.9})
    (layers/dropout 0.5)
    (layers/linear->softmax 10)])
 
@@ -58,10 +60,7 @@
 (defn build-big-description
   []
   (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))
-                         (traverse/->output-binding :feature
-                                                    :stream :labels
-                                                    :loss (loss/center-loss :alpha 0.9 :lambda 0.05))]]
+        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))]]
     (-> (network/build-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
@@ -95,8 +94,8 @@
              {:id :dropout-3, :incoming [{:id :relu-2}], :outgoing [{:id :dropout-3}]}
              {:id :batch-normalization-1, :incoming [{:id :dropout-3}], :outgoing [{:id :batch-normalization-1}]}
              {:id :linear-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
-             {:id :feature, :incoming [{:id :linear-1}], :outgoing [{:output-id :feature}]}
-             {:id :dropout-4, :incoming [{:output-id :feature}], :outgoing [{:id :dropout-4}]}
+             {:id :feature, :incoming [{:id :linear-1}], :outgoing [{:id :feature}]}
+             {:id :dropout-4, :incoming [{:id :feature}], :outgoing [{:id :dropout-4}]}
              {:id :linear-2, :incoming [{:id :dropout-4}], :outgoing [{:id :linear-2}]}
              {:id :softmax-1, :incoming [{:id :linear-2}], :outgoing [{:output-id :softmax-1}]}]
             (get gradient-descent :forward))))
@@ -116,10 +115,7 @@
              {:id :relu-1} {:id :relu-1, :size 2880},
              {:id :relu-2} {:id :relu-2, :size 800},
              {:input-stream :data} {:input-stream :data, :size 784},
-             {:output-id :feature} {:loss {:alpha 0.9, :lambda 0.05, :type :center-loss},
-                                    :output-id :feature,
-                                    :output-stream :labels,
-                                    :size 500},
+             {:id :feature} {:id :feature :size 500},
              {:output-id :softmax-1} {:loss {:type :softmax-loss},
                                       :output-id :softmax-1,
                                       :output-stream :labels,
@@ -128,24 +124,25 @@
     (is (= [nil nil]
            (minimal-diff
             [{:type :softmax-loss,
-              :output {:data {:type :node-output, :node-id :softmax-1}},
-              :labels {:data {:type :stream, :stream :labels}}}
+              :output {:type :node-output, :node-id :softmax-1},
+              :labels {:type :stream, :stream :labels}}
              {:type :center-loss,
               :alpha 0.9,
               :lambda 0.05,
-              :output {:data {:type :node-output, :node-id :feature}},
-              :labels {:data {:type :stream, :stream :labels}}
-              :centers {:buffer-id :center-loss-1}}
+              :output {:type :node-output, :node-id :feature},
+              :labels {:stream :labels}
+              :centers {:buffer-id :center-loss-1}
+              :label-indexes {:id :center-loss-1-label-indexes-1}
+              :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}
              {:type :l2-regularization,
               :lambda 0.01,
-              :output {:data {:type :node-output, :node-id :convolutional-2}}}
+              :output {:type :node-output, :node-id :convolutional-2}}
              {:type :l1-regularization,
               :lambda 0.001,
               :output
-              {:data
-               {:type :node-parameter,
-                :node-id :convolutional-1,
-                :parameter :weights}}}]
+              {:type :node-parameter,
+               :node-id :convolutional-1,
+               :parameter :weights}}]
             (get gradient-descent :loss-function))))
     (is (= [nil nil]
            (minimal-diff
@@ -157,8 +154,8 @@
              {:id :relu-2, :incoming [{:id :max-pooling-2}], :outgoing [{:id :relu-2}]}
              {:id :batch-normalization-1, :incoming [{:id :relu-2}], :outgoing [{:id :batch-normalization-1}]}
              {:id :linear-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
-             {:id :feature, :incoming [{:id :linear-1}], :outgoing [{:output-id :feature}]}
-             {:id :linear-2, :incoming [{:output-id :feature}], :outgoing [{:id :linear-2}]}
+             {:id :feature, :incoming [{:id :linear-1}], :outgoing [{:id :feature}]}
+             {:id :linear-2, :incoming [{:id :feature}], :outgoing [{:id :linear-2}]}
              {:id :softmax-1, :incoming [{:id :linear-2}], :outgoing [{:output-id :softmax-1}]}]
             (get inference-mem :forward))))
     (is (= [nil nil]
@@ -173,10 +170,7 @@
              {:id :relu-1} {:id :relu-1, :size 2880},
              {:id :relu-2} {:id :relu-2, :size 800},
              {:input-stream :data} {:input-stream :data, :size 784},
-             {:output-id :feature} {:loss {:alpha 0.9, :lambda 0.05, :type :center-loss},
-                                    :output-id :feature,
-                                    :output-stream :labels,
-                                    :size 500},
+             {:id :feature} {:id :feature :size 500},
              {:output-id :softmax-1} {:loss {:type :softmax-loss},
                                       :output-id :softmax-1,
                                       :output-stream :labels,
@@ -215,9 +209,17 @@
     ;;for previous layers.
     (is (= [nil nil]
            (minimal-diff
-            [{:labels {:data {:stream :labels, :type :stream}},
-              :output {:data {:node-id :softmax-1, :type :node-output}},
-              :type :softmax-loss}]
+            [{:labels {:stream :labels, :type :stream},
+              :output {:node-id :softmax-1, :type :node-output},
+              :type :softmax-loss}
+             {:type :center-loss,
+              :alpha 0.9,
+              :labels {:stream :labels},
+              :lambda 0.05,
+              :output {:type :node-output, :node-id :feature},
+              :centers {:buffer-id :center-loss-1}
+              :label-indexes {:id :center-loss-1-label-indexes-1}
+              :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}]
             (get traversal :loss-function))))))
 
 
@@ -246,7 +248,15 @@
             (get traversal :backward))))
     (is (= [nil nil]
            (minimal-diff
-            [{:labels {:data {:stream :labels, :type :stream}},
-              :output {:data {:node-id :softmax-1, :type :node-output}},
-              :type :softmax-loss}]
+            [{:labels {:stream :labels, :type :stream},
+              :output{ :node-id :softmax-1, :type :node-output},
+              :type :softmax-loss}
+             {:type :center-loss,
+              :alpha 0.9,
+              :labels {:stream :labels},
+              :lambda 0.05,
+              :output {:type :node-output, :node-id :feature},
+              :centers {:buffer-id :center-loss-1}
+              :label-indexes {:id :center-loss-1-label-indexes-1}
+              :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}]
             (get traversal :loss-function))))))

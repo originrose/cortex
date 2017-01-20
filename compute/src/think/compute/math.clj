@@ -213,7 +213,7 @@ argument for creating an array storing a batch of data."
          n-elems (m/ecount data-ary)
          tensor (core-mat-shape->tensor data-shape batch-size)]
      (->DeviceArray data-ptr tensor)))
-  ([device stream datatype data] (array device stream datatype 1)))
+  ([device stream datatype data] (array device stream datatype data 1)))
 
 (defn new-array
   "Create a new array with a given core-matrix shape and batch size."

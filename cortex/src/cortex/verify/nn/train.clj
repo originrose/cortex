@@ -39,7 +39,7 @@
 
 (def mnist-network
   [(layers/input 28 28 1 :id :input)
-   (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.0001})
+   (layers/convolutional 5 0 1 20)
    (layers/max-pooling 2 0 2)
    (layers/dropout 0.9)
    (layers/relu)
@@ -48,7 +48,7 @@
    (layers/max-pooling 2 0 2)
    (layers/batch-normalization 0.9)
    (layers/linear 500 :l2-max-constraint 4.0)
-   (layers/relu :l2-regularization 0.001)
+   (layers/relu)
    (layers/linear 10)
    (layers/softmax :id :output)])
 

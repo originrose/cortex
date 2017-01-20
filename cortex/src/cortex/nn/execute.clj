@@ -86,8 +86,9 @@ Returns map of:
 
 
 (defmethod bind-loss-term-argument :node-output
-  [context network loss-term argument inference-columns dataset-columns]
-  (if-let [retval (get inference-columns (get-in argument [:data :node-id]))]
+  [context network loss-term {:keys [node-id] :as argument}
+   inference-columns dataset-columns]
+  (if-let [retval (get inference-columns node-id)]
     retval
     (throw (ex-info "Failed to bind to node output:"
                     {:argument argument
@@ -95,17 +96,17 @@ Returns map of:
 
 
 (defmethod bind-loss-term-argument :node-parameter
-  [context network loss-term argument inference-columns dataset-columns]
-  (let [{:keys [node-id parameter]} (get argument :data)]
-    (if-let [retval (cp/get-node-parameter context network node-id parameter)]
-      [retval]
-      (throw (ex-info "Failed to bind to node parameter:"
-                      {:argument argument})))))
+  [context network loss-term {:keys [node-id parameter] :as argument}
+   inference-columns dataset-columns]
+  (if-let [retval (cp/get-node-parameter context network node-id parameter)]
+    [retval]
+    (throw (ex-info "Failed to bind to node parameter:"
+                    {:argument argument}))))
 
 
 (defmethod bind-loss-term-argument :stream
-  [context network loss-term argument inference-columns dataset-columns]
-  (if-let [retval (get dataset-columns (get-in argument [:data :stream]))]
+  [context network loss-term {:keys [stream] :as argument} inference-columns dataset-columns]
+  (if-let [retval (get dataset-columns stream)]
     retval
     (throw (ex-info "Failed to bind to dataset stream"
                     {:argument argument
@@ -114,7 +115,7 @@ Returns map of:
 
 (defmethod bind-loss-term-argument :loss-term-parameter
   [context network loss-term argument inference-columns dataset-columns]
-  (cp/get-loss-term-parameter context network argument))
+  [(cp/get-loss-term-parameter context network argument)])
 
 
 (defmethod bind-loss-term-argument :stream-augmentation
@@ -158,6 +159,9 @@ Returns map of:
                               (->> (map vector key-seq buf-seq)
                                    (into {})))
                             (repeat argument-keys) partitioned-buffers)]
+    (clojure.pprint/pprint (->> (first buffer-map-seq)
+                                (mapv (fn [[k v]]
+                                        [k (vec (take 10 v))]))))
     (* (double (loss/get-loss-lambda loss-term))
        (/ (->> buffer-map-seq
                (map #(loss/loss loss-term %))
@@ -176,11 +180,11 @@ Returns map of:
                                         loss-term)
                                        :node-id
                                        (get-in loss-term
-                                               [:output :data
+                                               [:output
                                                 :node-id])
                                        :parameter
                                        (get-in loss-term
-                                               [:output :data
+                                               [:output
                                                 :parameter])))
                               loss-fn))))
 

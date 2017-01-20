@@ -331,17 +331,7 @@ which means removing extra information from them."
   [item-map]
   (->> (keys item-map)
        (map (fn [loss-key]
-              (when-let [retval (loss/generate-loss-term loss-key)]
-                (let [loss-val (get item-map loss-key)]
-                  (when-not (or (map? loss-val)
-                                (number? loss-val))
-                    (throw (ex-info "Loss values in nodes or parameters must be either maps or values"
-                                    {:map item-map
-                                     :key loss-key
-                                     :value loss-val})))
-                  (if (map? loss-val)
-                    (merge retval loss-val)
-                    (assoc retval :lambda (double loss-val)))))))
+              (loss/loss-term-from-map-key-val loss-key (get item-map loss-key))))
        (remove nil?)))
 
 
@@ -377,11 +367,10 @@ which means removing extra information from them."
 
 (defn- generate-param-initial-buffer
   [loss-term
-   {:keys [data] :as loss-arg}
+   {:keys [initialization shape-fn] :as loss-arg}
    node-id->name->shape-map
    stream->size-map]
-  (let [{:keys [initialization shape-fn]} data
-        param-shape (shape-fn loss-term loss-arg node-id->name->shape-map stream->size-map)]
+  (let [param-shape (shape-fn loss-term loss-arg node-id->name->shape-map stream->size-map)]
     (buf-init/initialize-buffer (assoc initialization :shape param-shape))))
 
 
@@ -402,7 +391,7 @@ which means removing extra information from them."
               (let [[network arguments]
                     (reduce (fn [[network arguments] arg]
                               (let [buffer-id (generate-buffer-id network (get loss-term :type))]
-                                [(assoc-in network [:layer-graph :buffers buffer-id]
+                                [(assoc-in network [:layer-graph :buffers buffer-id :buffer]
                                            (or (get arg :buffer)
                                                (generate-param-initial-buffer loss-term
                                                                               arg
@@ -461,7 +450,8 @@ datastructure describing the final loss function.
                                                        forward-traversal-nodes
                                                        (get-output-bindings network)
                                                        loss-fn)
-                               (generate-loss-term-parameters network stream-map))]
+                               (generate-loss-term-parameters network stream-map))
+        loss-fn (loss/generate-augmented-argument-ids loss-fn)]
     (update network
             :traversal
             #(merge %

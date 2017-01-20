@@ -5,13 +5,14 @@
             [think.compute.driver :as drv]
             [cortex.nn.layers :as layers]
             [cortex.loss :as loss]
-            [think.datatype.core :as dtype]))
+            [think.datatype.core :as dtype]
+            [think.compute.nn.backend :as backend]))
 
 
 (defmulti create-compute-loss-term
   "Multi method to allow pluggable loss terms.  Note that formally defined parameters are
 taken care of for you."
-  (fn [loss-term backend id->node-map stream->size-map]
+  (fn [loss-term backend id->node-map stream->size-map batch-size]
     (:type loss-term)))
 
 
@@ -37,7 +38,7 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :mse-loss
-  [loss-term backend id->name->shape-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map batch-size]
   (->MSELoss loss-term backend))
 
 
@@ -62,7 +63,7 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :softmax-loss
-  [loss-term backend id->name->shape-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map batch-size]
   (->SoftmaxLoss loss-term backend))
 
 
@@ -79,7 +80,7 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :l1-regularization
-  [loss-term backend id->name->shape-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map batch-size]
   (let [driver (drv/get-driver backend)
         datatype (dtype/get-datatype backend)
         node (->> (get loss-term :node-id)
@@ -105,5 +106,75 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :l2-regularization
-  [loss-term backend id->name->shape-map stream->size-map]
+  [loss-term backend id->name->shape-map stream->size-map batch-size]
   (->L2RegularizationLoss loss-term backend))
+
+
+(defrecord CenterLoss [loss-term backend batch-centers monotonic-indexes temp-centers]
+  PComputeLoss
+  (compute-loss-gradient [this buffer-map]
+    (let [output-buffer (get-in buffer-map [:output :buffer])
+          [batch-size n-elems] (math/batch-shape output-buffer)
+          output-gradient (get-in buffer-map [:output :gradient])
+          labels (get-in buffer-map [:labels :buffer])
+          label-indexes (get-in buffer-map [:label-indexes :buffer])
+          label-inverse-counts (get-in buffer-map [:label-inverse-counts :buffer])
+          centers (get-in buffer-map [:centers :buffer])
+          stream (drv/get-stream backend)
+          alpha (double (get loss-term :alpha))
+          label-indexes (math/device-buffer label-indexes)
+          monotonic-indexes (math/device-buffer monotonic-indexes)
+          beta (- 1.0 alpha)]
+      ;;First distribute centers according to labels
+      (drv/indexed-copy stream centers label-indexes
+                        batch-centers monotonic-indexes n-elems)
+      ;;gradient = feature - center
+      (math/subtract stream 1.0 output-buffer 1.0 batch-centers output-gradient)
+      ;;copy features to batch-centers to start to calculate new centers
+
+
+      ;;c' = a*c + b*sum(x)/n
+      ;;c' = sum(a*c + b*x)/n
+      ;;c' = c - c + sum(a*c + b*x)/n
+      ;;c' = c + sum(a*c - c + b*x)/n
+      ;;c  = a*c + b*c
+      ;;c - b*c = a*c
+      ;;-b*c = a*c - c
+      ;;c' = c + sum(b*x - b*c)/n
+      ;;subtract centers from features
+      (math/subtract stream beta output-buffer beta batch-centers batch-centers)
+
+      ;;scale subtracted quantities according to inverse counts
+      (math/mul-rows (drv/get-stream backend) batch-size n-elems
+                     (math/device-buffer batch-centers) n-elems
+                     (math/device-buffer label-inverse-counts) 1
+                     (math/device-buffer batch-centers) n-elems)
+
+      (math/indirect-add stream
+                         1.0 batch-centers monotonic-indexes
+                         1.0 centers label-indexes
+                         centers label-indexes
+                         n-elems))))
+
+
+(defmethod create-compute-loss-term :center-loss
+  [loss-term backend id->name->shape-map stream->size-map batch-size]
+  (let [output-shape (loss/get-loss-term-argument-shape loss-term
+                                                        (loss/get-loss-term-argument loss-term :output)
+                                                        id->name->shape-map
+                                                        stream->size-map)
+        labels-shape (loss/get-loss-term-argument-shape loss-term
+                                                        (loss/get-loss-term-argument loss-term :labels)
+                                                        id->name->shape-map
+                                                        stream->size-map)
+        batch-centers (backend/new-array backend output-shape batch-size)
+        monotonic-indexes (math/array (drv/get-driver backend)
+                                      (drv/get-stream backend)
+                                      :int
+                                      (range batch-size))
+        label-indexes (math/new-array (drv/get-driver backend)
+                                      (drv/get-stream backend)
+                                      :int
+                                      [batch-size])
+        temp-centers (backend/new-array backend [(apply * labels-shape) (apply * output-shape)])]
+   (->CenterLoss loss-term backend batch-centers monotonic-indexes temp-centers)))
