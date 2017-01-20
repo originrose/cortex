@@ -283,6 +283,7 @@ containing the buffer coming from the network.
 
 
 (defmulti get-stream-augmentation-metadata
+  "loss arguments that are functions of other arguments (but should be uploaded to the gpu)."
   (fn [argument]
     (get-in argument [:data :augmentation])))
 
@@ -304,6 +305,19 @@ containing the buffer coming from the network.
                           0.0
                           (/ 1.0 (double val))))))))})
 
+
+(defn get-loss-term-stream-augment
+  [loss-term argument stream->buffer-map]
+  (let [src-arg (get-loss-term-argument loss-term (get-in argument [:data :argument]))
+        data-stream (get-in src-arg [:data :stream])
+        arg-augmentation (get-stream-augmentation-metadata (get-in argument [:data :augmentation]))
+        augment-fn (get arg-augmentation :fn)]
+    (if-let [data (stream->buffer-map data-stream)]
+      (augment-fn (get stream->buffer-map data-stream))
+      (throw (ex-info "Failed to find stream to for augmented argument"
+                      {:argument argument
+                       :loss-term loss-term
+                       :streams (vec (keys stream->buffer-map))})))))
 
 
 (defn mse-loss
@@ -513,20 +527,6 @@ information must be known about the dataset to make a stream->size map."
         labels-size (long (apply * labels-shape))]
     ;;We keep track of stream-size centers each of node output size.
     [labels-size output-size]))
-
-
-(defn get-loss-term-stream-augment
-  [loss-term argument stream->buffer-map]
-  (let [src-arg (get-loss-term-argument loss-term (get-in argument [:data :argument]))
-        data-stream (get-in src-arg [:data :stream])
-        arg-augmentation (get-stream-augmentation-metadata (get-in argument [:data :augmentation]))
-        augment-fn (get arg-augmentation :fn)]
-    (if-let [data (stream->buffer-map data-stream)]
-      (augment-fn (get stream->buffer-map data-stream))
-      (throw (ex-info "Failed to find stream to for augmented argument"
-                      {:argument argument
-                       :loss-term loss-term
-                       :streams (vec (keys stream->buffer-map))})))))
 
 
 (defmethod loss-metadata :center-loss
