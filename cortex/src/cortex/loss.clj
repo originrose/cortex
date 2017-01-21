@@ -565,6 +565,7 @@ entry in addition to a node-id."
   [loss-term buffer-map]
   ;;divide by 2 to make the gradient's work out correctly.
   (/ (-> (get-regularization-target loss-term buffer-map)
+         m/as-vector
          m/magnitude)
      2.0))
 

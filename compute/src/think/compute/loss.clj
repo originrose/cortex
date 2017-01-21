@@ -85,13 +85,18 @@ buffer is expected to be entirely overwritten by operation."
         datatype (dtype/get-datatype backend)
         node (->> (get loss-term :node-id)
                   (get id->name->shape-map))
+        argument (loss/get-loss-term-argument loss-term :output)
         term-size (->> (loss/get-loss-term-argument-shape loss-term
                                                          (loss/get-loss-term-argument loss-term :output)
                                                          id->name->shape-map
                                                          stream->size-map)
-                       (apply *))]
+                       (apply *))
+        term-size (if (= (get argument :type)
+                         :node-output)
+                    (* term-size batch-size)
+                    term-size)]
     (->L1RegularizationLoss loss-term backend (drv/allocate-device-buffer driver
-                                                                          (long term-size)
+                                                                          term-size
                                                                           datatype))))
 
 
