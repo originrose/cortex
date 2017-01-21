@@ -40,6 +40,22 @@
      ~@body
      ))
 
+
+(defn indexed-copy
+  [device datatype]
+  (backend-test-pre
+   device datatype
+   (let [n-elems 100
+         src-data (make-buffer (range n-elems))
+         src-indexes (->> (math/array device stream :int (range n-elems))
+                          (math/device-buffer))
+         dest-indexes (->> (math/array device stream :int (reverse (range n-elems)))
+                           (math/device-buffer))
+         dest-data (make-buffer n-elems)]
+     (drv/indexed-copy stream src-data src-indexes dest-data dest-indexes 1)
+     (is (m/equals (vec (reverse (range n-elems)))
+                   (vec (->array dest-data)))))))
+
 (defn gemm
   [device datatype]
   (backend-test-pre device datatype
@@ -174,9 +190,11 @@
          n-vecs (/ n-elems vec-len)
          values (range n-elems)
          buf-a (make-buffer values)
-         src-indexes (int-array (range n-vecs))
+         src-indexes (->> (math/array device stream :int (range n-vecs))
+                          math/device-buffer)
          buf-b (make-buffer (/ n-elems 2))
-         dst-indexes (int-array (flatten (repeat 2 (range (/ n-vecs 2)))))
+         dst-indexes (->> (math/array device stream :int (flatten (repeat 2 (range (/ n-vecs 2)))))
+                          math/device-buffer)
          answer (->> values
                      (partition vec-len)
                      ((fn [item-seq]

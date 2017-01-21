@@ -17,9 +17,9 @@
    #(cpu-backend/create-cpu-backend test-utils/*datatype*)))
 
 
-(deftest corn
+(def-double-float-test corn
   (verify-train/test-corn (create-context)))
 
 
-(deftest mnist
+(def-double-float-test mnist
   (verify-train/train-mnist (create-context)))
