@@ -132,9 +132,11 @@
         output-bindings [(traverse/->output-binding :output
                                                     :stream :labels
                                                     :loss loss-fn)]
+        batch-size 2
         results (train-and-get-results context [(layers/input 2 1 1 :id :input)
                                                 (layers/linear 1 :id :output)]
-                                       input-bindings output-bindings 1 dataset
+                                       input-bindings output-bindings batch-size
+                                       dataset
                                        (opt/adadelta) true nil 5000 identity)
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))

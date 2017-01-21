@@ -159,9 +159,6 @@ Returns map of:
                               (->> (map vector key-seq buf-seq)
                                    (into {})))
                             (repeat argument-keys) partitioned-buffers)]
-    (clojure.pprint/pprint (->> (first buffer-map-seq)
-                                (mapv (fn [[k v]]
-                                        [k (vec (take 10 v))]))))
     (* (double (loss/get-loss-lambda loss-term))
        (/ (->> buffer-map-seq
                (map #(loss/loss loss-term %))

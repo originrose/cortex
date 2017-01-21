@@ -37,12 +37,13 @@ Returns a new batching system.")
         datatype (get size-entry :datatype (dtype/get-datatype backend))
         batch-size (or batch-size 1)
         item-size (get size-entry :size)
-        size (* item-size batch-size)]
+        size item-size]
     {:device-array (math/new-array driver
                                    (drv/get-stream backend)
                                    datatype
-                                   [size])
-     :host-buffer (drv/allocate-host-buffer driver size datatype)}))
+                                   [size]
+                                   batch-size)
+     :host-buffer (drv/allocate-host-buffer driver (* size batch-size) datatype)}))
 
 
 (defrecord DatasetBatchingSystem [backend stream->batch-info-map]
@@ -91,7 +92,12 @@ Returns a new batching system.")
                                            (get stream-entry :data)
                                            stream-entry)]
                          (try
-                           (dtype/copy-raw->item! stream-data host-buffer 0)
+                           (let [item-count (->> (dtype/copy-raw->item! stream-data host-buffer 0)
+                                                 second)]
+                             (when-not (= item-count (m/ecount host-buffer))
+                               (throw (ex-info "Failed to copy correct number of items into buffer"
+                                               {:copy-count item-count
+                                                :buffer-size (m/ecount host-buffer)}))))
                            (catch Exception e
                              (throw (ex-info "Failed to load stream entry:"
                                              {:stream stream
