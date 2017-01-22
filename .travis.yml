@@ -1,38 +1,7 @@
-language: clojure
+language: generic
 requires: sudo
 services:
   - docker
 
-env:
-  global:
-  matrix:
-  - TEST_DIR=cortex
-  - TEST_DIR=datasets
-  - TEST_DIR=compute
-  - TEST_DIR=caffe
-
-branches:
-  only:
-  - master
-
-jdk: oraclejdk8
-
-before_install:
-- openssl aes-256-cbc -K $encrypted_4e2073fd950b_key -iv $encrypted_4e2073fd950b_iv -in profiles.clj.enc -out profiles.clj -d
-- wget https://releases.hashicorp.com/vault/0.6.1/vault_0.6.1_linux_amd64.zip -O vault.zip
-- unzip vault.zip
-- export PATH=$PATH:$PWD
-- mkdir -p ~/.lein && cp profiles.clj ~/.lein/profiles.clj
-- mkdir -p compute/checkouts && ln -s `pwd`/cortex compute/checkouts/cortex
-- mkdir -p keras/checkouts && ln -s `pwd`/cortex keras/checkouts/cortex && ln -s `pwd`/compute keras/checkouts/compute
-- mkdir -p caffe/checkouts && ln -s `pwd`/cortex caffe/checkouts/cortex && ln -s `pwd`/compute caffe/checkouts/compute
-
-
-install:
-  - echo "install"
-
-before_script:
-  - echo "before_script"
-
 script:
-- cd $TEST_DIR && GIT_IS_MASTER=`git branch --contains HEAD | grep -q master ; echo $?` ./build-and-deploy.sh
+ ./build-docker-and-test.sh

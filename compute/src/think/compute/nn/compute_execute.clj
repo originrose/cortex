@@ -781,13 +781,7 @@ any loss-specific parameter buffers."
         bs (-> (get-in network [:compute-binding :batching-system])
                ;;In a late binding way, ensure the stream sizes match with the actual streams.
                (batching-system/add-streams (->> batch-map-sequence
-                                                 first
-                                                 (map (fn [[k v]]
-                                                        (let [v (if-not (map? v)
-                                                                  {:data v}
-                                                                  v)]
-                                                          [k (assoc v :size (m/ecount (get v :data)))])))
-                                                 (into {}))))
+                                                 first)))
         backend (get-in network [:compute-binding :backend])
         ;;These are the things we are ultimately optimizing
         parameters (get-in network [:compute-binding :trainable-parameters])

@@ -104,7 +104,3 @@ Once downloaded and unzipping, moving the files:
 ### See also:
 
 [Roadmap](ROADMAP.md)
-
-## Gradient descent
-
-`cortex` contains a sub-library for performing instrumented gradient descent, which is located in the `cortex.optimise.*` namespaces. See the namespace docstring for `cortex.optimise.descent` for example usage.

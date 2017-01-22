@@ -17,23 +17,19 @@
 
 
 (defprotocol PBatchingSystem
-  (add-streams [bs stream->size-map]
-    "Add streams to the batching system.  This is for late binding augmented data streams
-and the size in this case *includes* the batch size if necessary.
+  (add-streams [bs batch-map]
+    "Add streams to the batching system.  If the system has a matching entry,
+checks all data in the batch map, ensures the allocated size matches the incoming
+data size and that the datatypes map.  If not, a new entry is created.
 Returns a new batching system.")
+  (get-batches [bs batch-map-sequence upload-output-buffers?]
+"Returns a map of stream-name->array where array has 2 dimensions;
+[batch-size item-total-size]"))
 
-  (get-batches [bs batch-map-sequence required-keys]
-    "Returns a sequence where each item of the sequence contains:
-{:input-buffers - vector of buffers used for input
- :output-buffers - vector of buffers used for output
-}"))
 
 (defn- create-batch-buffers
   [backend size-entry & [batch-size]]
   (let [driver (drv/get-driver backend)
-        size-entry (if-not (map? size-entry)
-                     {:size size-entry}
-                     size-entry)
         datatype (get size-entry :datatype (dtype/get-datatype backend))
         batch-size (or batch-size 1)
         item-size (get size-entry :size)
@@ -46,30 +42,42 @@ Returns a new batching system.")
      :host-buffer (drv/allocate-host-buffer driver (* size batch-size) datatype)}))
 
 
-(defrecord DatasetBatchingSystem [backend stream->batch-info-map]
+(defrecord DatasetBatchingSystem [backend ^long batch-size stream->batch-info-map]
   PBatchingSystem
-  (add-streams [bs stream->size-map]
-    ;;Note that for this case we assume the batch size is included in the size
-    ;;if necessary.  There are some streams that are of fixed size requiredless of batch
-    ;;size such as a stream aggregating label counts.
+  (add-streams [bs batch-map]
     (assoc bs :stream->batch-info-map
-           (->> stream->size-map
-                (reduce (fn [stream->batch-info-map [stream size]]
-                          (update stream->batch-info-map stream
-                                  (fn [entry]
-                                    (if entry
-                                      (let [declared-size (m/ecount (get-in entry [:batch-buffers :host-buffer]))
-                                            size (if (map? size)
-                                                   (get size :size)
-                                                   size)]
-                                        (when-not (= size declared-size)
-                                          (throw (ex-info "Stream size does not match batching system declared size"
-                                                          {:stream stream
-                                                           :buffer-size declared-size
-                                                           :data-size size})))
-                                        entry)
-                                      {:batch-buffers (create-batch-buffers backend size 1)}))))
-                        stream->batch-info-map))))
+     (merge stream->batch-info-map
+            (->> batch-map
+                 (map (fn [[k v]]
+                        (let [v (if (map? v)
+                                  v
+                                  {:data v})
+                              data-size (long (m/ecount (get v :data)))
+                              item-size (quot data-size batch-size)]
+                          (when-not (= 0 (rem data-size (long batch-size)))
+                            (throw (ex-info "Data coming from batch is not multiple of batch-size"
+                                            {:data-size data-size
+                                             :batch-size batch-size
+                                             :stream k})))
+                          (if-let [existing (get stream->batch-info-map k)]
+                            (do
+                              (let [incoming-size (quot (-> (get-in existing [:batch-buffers :host-buffer])
+                                                            (m/ecount))
+                                                        batch-size)]
+                                (when-not (= incoming-size
+                                             item-size)
+                                  (throw (ex-info "Incoming data size mismatch from expected size"
+                                                  {:incoming-size item-size
+                                                   :expected-size incoming-size
+                                                   :stream k}))))
+                              [k existing])
+                            [k
+                             (assoc (dissoc v :data)
+                                    :batch-buffers (create-batch-buffers backend
+                                                                         (assoc v :size item-size)
+                                                                         batch-size))]))))
+                 (into {})))))
+
   (get-batches [bs batch-map-sequence required-keys]
     (when (= 0 (count required-keys))
       (throw (ex-info "Batching system did not find any keys to upload"
@@ -113,9 +121,10 @@ Returns a new batching system.")
 
 (defn create
   [backend stream-map batch-size]
-  (->DatasetBatchingSystem backend (->> stream-map
-                                        (map (fn [[k v]]
-                                               [k (assoc v
-                                                         :batch-buffers
-                                                         (create-batch-buffers backend v batch-size))]))
-                                        (into {}))))
+  (->DatasetBatchingSystem backend batch-size
+                           (->> stream-map
+                                (map (fn [[k v]]
+                                       [k (assoc v
+                                                 :batch-buffers
+                                                 (create-batch-buffers backend v batch-size))]))
+                                (into {}))))
