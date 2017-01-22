@@ -793,7 +793,7 @@ any loss-specific parameter buffers."
                            (map :stream)
                            (concat initial-keys)
                            distinct)
-        network (assoc network [:compute-binding :batching-system] bs)]
+        network (assoc-in network [:compute-binding :batching-system] bs)]
     (->> (batching-system/get-batches bs batch-map-sequence required-keys)
          (recur-train-sequence network parameters true))))
 

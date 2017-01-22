@@ -338,7 +338,7 @@ data."
   [item]
   (->> item
    (map (fn [[k v]]
-          [k {:shape (m/ecount v)}]))
+          [k (m/ecount v)]))
    (into {})))
 
 

@@ -41,10 +41,7 @@ in initial description.  Else returns the initial description"
    {:keys [network inferences]}]
   (let [loss-fn (execute/network->applied-loss-fn
                  context network inferences
-                 (ds/get-batches dataset batch-size
-                                 inference-batch-type
-                                 (traverse/get-output-streams
-                                  network)))
+                 cv-output)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
                             (when (sequential? best-loss)
@@ -66,7 +63,7 @@ in initial description.  Else returns the initial description"
         (best-network-function {:inferences (ds/batches->columnsv inferences)
                                 :labels (ds/batches->columnsv cv-output)
                                 :data cv-columnar-input
-                                :loss node-loss-map}))))
+                                :loss-fn loss-fn}))))
   true)
 
 
@@ -166,7 +163,10 @@ we continue to train forever.
                                    best-network-atom network-filename initial-description
                                    best-network-fn cv-columnar-input cv-labels)]
       (println "Training network:")
-      (network/print-layer-summary network)
+      (network/print-layer-summary (-> network
+                                       traverse/auto-bind-io
+                                       (traverse/network->training-traversal
+                                        (ds/dataset->stream->size-map dataset))))
       (->> (if epoch-count
              (take epoch-count train-sequence)
              train-sequence)
