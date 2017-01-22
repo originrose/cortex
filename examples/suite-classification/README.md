@@ -1,3 +1,4 @@
+
 # suite-classification
 
 This example shows of some use of the continual training with a convolutional neural network with visualization as well as inference with a random image from the dataset. It uses the classic MNIST handwritten digit corpus. The training of the dataset using augmentation, to slightly change the image, for continual training.
@@ -12,7 +13,7 @@ _If you have CUDA-8.0 installed before you run the example, please uncomment the
 You might need to install the versions of the snapshots locally for the projects. If you do, you can do it from the main project directory. Run `local-install.sh`
 
 
-Then run `lein run`
+Then run `lein run live-updates`
 
 ```
 13:02 $ lein run
