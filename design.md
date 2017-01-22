@@ -1,6 +1,6 @@
 # Cortex Design
 
-## Rational
+## Rationale
 
 Cortex has recently been redesigned and vetted in order to
 satisfy a few constraints (some conflicting).
