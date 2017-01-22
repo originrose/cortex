@@ -414,7 +414,8 @@
   "Given a network return a list of nodes in forward pass order"
   [network]
   (let [forward-pass (-> (traverse/auto-bind-io network)
-                         traverse/network->training-traversal
+                         (traverse/network->training-traversal
+                          {})
                          (get-in [:traversal :forward]))]
     (->> (map :id forward-pass)
          (map #(get-in network [:layer-graph :id->node-map %])))))
