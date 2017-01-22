@@ -16,6 +16,9 @@
 (def-double-float-test simple-stream
   (verify-driver/simple-stream static-device test-utils/*datatype*))
 
+(def-double-float-test indexed-copy
+  (verify-driver/indexed-copy static-device test-utils/*datatype*))
+
 (def-double-float-test gemm
   (verify-driver/gemm static-device test-utils/*datatype*))
 
@@ -39,3 +42,6 @@
 
 (def-double-float-test select
   (verify-driver/select static-device test-utils/*datatype*))
+
+(def-double-float-test indirect-add
+  (verify-driver/indirect-add static-device test-utils/*datatype*))

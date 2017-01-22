@@ -26,7 +26,7 @@
                                 (into {}))
            network
            (as-> (traverse/auto-bind-io network) network
-             (traverse/network->inference-traversal network)
+             (traverse/network->inference-traversal network {:data (m/ecount input)})
              (assoc network :batch-size 1)
              (cp/bind-to-network context network {})
              (cp/traverse context network {:data input} :inference)

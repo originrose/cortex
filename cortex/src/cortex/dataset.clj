@@ -131,6 +131,21 @@ or a more complex shape definition a layout, num-channels, width and height")
   Put another way, within each batch the data is columnar labled by stream (shape) name"))
 
 
+(defn dataset->stream->size-map
+  "Given a dataset produce a stream->size mapping for the dataset."
+  [dataset]
+  (->> (shapes dataset)
+       (map (fn [[k v]]
+              (let [entry-size (let [item-shape v]
+                                 (if (number? item-shape)
+                                   (long item-shape)
+                                   (* (long (get v :channel-count))
+                                      (long (get v :height))
+                                      (long (get v :width)))))]
+                [k entry-size])))
+       (into {})))
+
+
 (defn batches->columns
   "Given a batch sequence from get-batches
 transform it so that it is a vector of columnar data,
@@ -323,7 +338,7 @@ data."
   [item]
   (->> item
    (map (fn [[k v]]
-          [k {:shape (m/ecount v)}]))
+          [k (m/ecount v)]))
    (into {})))
 
 
@@ -373,4 +388,4 @@ data."
                        cv-fn
                        (parallel/create-next-item-fn (repeat holdout-map-seq)))
           train-fn (parallel/create-next-item-fn (partition num-epoch-elements infinite-map-seq))]
-     (->InfiniteDataset shape-map cv-fn holdout-fn train-fn seq-of-map->map-of-seq shutdown-fn))))
+      (->InfiniteDataset shape-map cv-fn holdout-fn train-fn seq-of-map->map-of-seq shutdown-fn))))

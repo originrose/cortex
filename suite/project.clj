@@ -4,8 +4,8 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
+                 [thinktopic/think.image "0.4.6"]
                  [thinktopic/gpu-compute "0.4.0-SNAPSHOT"]
-                 [thinktopic/think.image "0.4.5"]
                  [com.taoensso/nippy "2.12.2"]
                  [garden "1.3.2"]]
   :resource-paths ["cljs"]

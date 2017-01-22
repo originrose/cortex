@@ -1,3 +1,4 @@
+
 (ns cortex.nn.layers
   "Descriptions are the canonical representation of layers in cortex.  Implementations
 are expected to work with descriptions that are annotated with special information
@@ -98,6 +99,18 @@ at least:
             core matrix parameter shape for this particular buffer."
   [layer]
   (get (get-layer-metadata layer) :parameter-descriptions))
+
+
+(defn get-parameter-shape
+  "Get the shape of a given parameter."
+  [layer param-key]
+  (if-let [layer-param (->> (get-parameter-descriptions layer)
+                            (filter #(= param-key (get % :key)))
+                            first)]
+    ((get layer-param :shape-fn) layer)
+    (throw (ex-info "Parameter was not found on layer."
+                    {:layer layer
+                     :parameter param-key}))))
 
 
 (defn get-pass-set

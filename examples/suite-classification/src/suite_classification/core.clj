@@ -91,18 +91,21 @@
 
 
 (def initial-network
-  [(layers/input image-size image-size num-channels)
+  [(layers/input 28 28 1 :id :input)
    (layers/convolutional 5 0 1 20)
    (layers/max-pooling 2 0 2)
+   (layers/dropout 0.9)
    (layers/relu)
    (layers/convolutional 5 0 1 50)
    (layers/max-pooling 2 0 2)
-   (layers/relu)
-   (layers/convolutional 1 0 1 50)
-   (layers/relu)
-   (layers/linear->relu 1000)
+   (layers/batch-normalization 0.9)
+   (layers/linear 1000)
+   (layers/relu :center-loss {:labels {:stream :labels}
+                              :alpha 0.9
+                              :lambda 1e-4})
    (layers/dropout 0.5)
-   (layers/linear->softmax num-classes)])
+   (layers/linear 10)
+   (layers/softmax :id :output)])
 
 
 (def max-image-rotation-degrees 25)
