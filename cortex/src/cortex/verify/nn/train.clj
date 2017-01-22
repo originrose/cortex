@@ -166,7 +166,7 @@
         results (train-and-get-results context mnist-network input-bindings output-bindings batch-size
                                        dataset (opt/adam) false inference-batch-type 4
                                        (fn [{:keys [network inferences] :as entry}]
-                                         (let [loss-fn (execute/inferences->node-id-loss-pairs
+                                         (let [loss-fn (execute/network->applied-loss-fn
                                                         context network inferences
                                                         (ds/get-batches dataset batch-size
                                                                         inference-batch-type

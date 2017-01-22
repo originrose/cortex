@@ -39,21 +39,26 @@ in initial description.  Else returns the initial description"
   [context best-network-atom network-filename initial-description
    best-network-function cv-columnar-input cv-output
    {:keys [network inferences]}]
-  (let [node-loss-map (->> (execute/inferences->node-id-loss-pairs network inferences cv-output)
-                           (into {}))
+  (let [loss-fn (execute/network->applied-loss-fn
+                 context network inferences
+                 (ds/get-batches dataset batch-size
+                                 inference-batch-type
+                                 (traverse/get-output-streams
+                                  network)))
+        loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
-                            (when (map? best-loss)
-                              best-loss)
-                            {})]
-    (println (format "Loss for epoch %s: %s" (get network :epoch-count) node-loss-map))
-    (when (every? (fn [[id ave-loss]]
-                    (if-let [best (get current-best-loss id)]
-                      (< ave-loss best)
-                      true))
-                  node-loss-map)
+                            (when (sequential? best-loss)
+                              (apply + (map :value best-loss))))]
+    (println (format "Loss for epoch %s: %s%s\n\n"
+                     (get network :epoch-count)
+                     loss-val
+                     (execute/pprint-executed-loss-fn loss-fn)))
+    (when (or (nil? current-best-loss)
+              (< (double loss-val) (double current-best-loss)))
       (println "Saving network")
       (reset! best-network-atom
-              (save-network context network node-loss-map initial-description network-filename))
+              (save-network context network loss-fn
+                            initial-description network-filename))
       (when best-network-function
         ;;We use the same format here as the output of the evaluate network function below
         ;;so that clients can use the same network display system.  This is why we have data

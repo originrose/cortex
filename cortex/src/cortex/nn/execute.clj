@@ -194,11 +194,11 @@ and dataset outputs are expected to be maps of columns of data."
                 (map #(execute-live-loss-term context network % inferences dataset-outputs)))))
 
 
-(defn inferences->node-id-loss-pairs
+(defn network->applied-loss-fn
   "Given the set of inferences from an inference run of the network
 and the set of labels along with the bindings (traverse/get-io-bindings built-network)
-return a map of node-id -> loss.  Note that inferences are map of node-id->batches
-while labels is a map of stream->data."
+return the loss function from the traverse where each term has a :value member with it's
+post-lambda-multiplied value."
   [context network inferences dataset-outputs]
   (let [inference-columns (ds/batches->columns inferences)
         label-columns (ds/batches->columns dataset-outputs)
