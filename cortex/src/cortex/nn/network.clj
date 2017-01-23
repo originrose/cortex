@@ -11,7 +11,8 @@ The build step is responsible for
             [clojure.set :as c-set]
             [clojure.core.matrix :as m]
             [cortex.core-matrix-backends :as b]
-            [cortex.util :as util])
+            [cortex.util :as util]
+            [cortex.buffer-initialization :as buf-init])
   (:import [java.util UUID]))
 
 
@@ -167,28 +168,42 @@ The build step is responsible for
     :relu
     :xavier))
 
+(defmulti get-default-initialization-for-param-type
+  "If no parameter initialization is specified "
+  (fn [param-desc node-id id->node-map edges]
+    (get param-desc :type)))
+
+
+(defmethod get-default-initialization-for-param-type :default
+  [& args]
+  {:type :constant
+   :value 0})
+
+
+(defmethod get-default-initialization-for-param-type :scale
+  [& args]
+  {:type :constant
+   :value 1})
+
+
+(defmethod get-default-initialization-for-param-type :weight
+  [_ node-id id->node-map edges]
+  (let [initialization-type (activation->weight-initialization
+                             (find-next-activation node-id id->node-map edges))]
+    {:type initialization-type}))
+
+
 (defn- generate-param-buffer
   "Generate a parameter buffer.
   Returns pair of [parameter-buffer initialization-type]"
-  [{:keys [type shape-fn key] :as param-desc} node-id id->node-map edges]
-  (let [node (get id->node-map node-id)
-        param-data (get node key)
-        initialization-type (or (when (map? param-data)
-                                  (get param-data :initialization-type))
-                                (activation->weight-initialization
-                                 (find-next-activation node-id id->node-map edges)))]
-    (condp = type
-      :scale
-      [(m/assign! (b/new-array (shape-fn node)) 1.0)
-       {:initialization :constant
-        :value 1}]
-      :weight
-      [(apply util/weight-matrix (concat (shape-fn node)
-                                         [initialization-type]))
-       initialization-type]
-      [(b/new-array (shape-fn node))
-       {:initialization :constant
-        :value 0}])))
+  [{:keys [shape-fn initialization] :as param-desc} node-id id->node-map edges]
+  (let [init
+        (->
+         (or initialization
+             (get-default-initialization-for-param-type
+              param-desc node-id id->node-map edges))
+         (assoc :shape (shape-fn (get id->node-map node-id))))]
+    [(buf-init/initialize-buffer init) init]))
 
 
 (defn- build-desc-seq-or-graph
@@ -247,6 +262,7 @@ The build step is responsible for
                           (if-not buffer
                             (let [[buffer init-type] (generate-param-buffer param-desc id
                                                                             id->node-map edges)]
+                              ;;(println (m/ecount buffer) init-type)
                               (assoc param-entry
                                      :buffer buffer
                                      :initialization init-type))
@@ -345,15 +361,19 @@ the edge list."
   (get-in network [:layer-graph :id->node-map node-id]))
 
 
-(defn get-node-parameters
-  "Get a flattened form of the parameters for a given node.  The list of returned parameters
-will be a merged map of the parameter meta data, the parameter and the parameter buffer(s) should
-they exist.  Some transformations such as setting non-trainable? on the parameter level if the learning
-attenuation is 0 will happen."
-  [network node-id]
-  (let [node (network->node network node-id)
-        node-parameter (select-keys node [:learning-attenuation :l1-regularization
-                                          :l2-regularization :non-trainable?
+(defn network->nodes
+  [network]
+  (->> (-> (network->edges network)
+           edges->dfs-seq)
+       distinct
+       (map (partial network->node network))
+       (remove nil?)))
+
+
+(defn node->node-parameters
+  [network node]
+  (let [node-parameter (select-keys node [:learning-attenuation
+                                          :non-trainable?
                                           :l2-max-constraint])]
     (->> (layers/get-parameter-descriptions node)
          (mapv (fn [{:keys [key] :as param-desc}]
@@ -367,11 +387,39 @@ attenuation is 0 will happen."
                                               (= 0.0 learning-attenuation)))))))))
 
 
+(defn network->node-parameters
+  "Get a flattened form of the parameters for a given node.  The list of returned parameters
+will be a merged map of the parameter meta data, the parameter and the parameter buffer(s) should
+they exist.  Some transformations such as setting non-trainable? on the parameter level if the learning
+attenuation is 0 will happen."
+  [network node-id]
+  (node->node-parameters network (network->node network node-id)))
+
+
 (defn any-trainable-parameters?
   [network node-id]
-  (->> (get-node-parameters network node-id)
+  (->> (network->node-parameters network node-id)
        (remove :non-trainable?)
        seq))
+
+
+(defn network->node-id->name->shape-map
+  "Given a network produce a map of node-id->name and each [name]
+  is linked to a shape(s).  default names are [input,output] and each
+  parameter gets a name."
+  [network]
+  (->> (get-in network [:layer-graph :id->node-map])
+       (map (fn [[id node]]
+              [id
+               (merge
+                {:input [(get node :input-size)]
+                 :output [(get node :output-size)]}
+                (->> (network->node-parameters network (get node :id))
+                     (map (fn [{:keys [key shape-fn]}]
+                            [key (shape-fn node)]))
+                     (into {})))]))
+       (into {})))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Print Layer Summary

@@ -26,7 +26,9 @@
   ;;l2 constraint or (/ l2-max-constraint row-len) otherwise.
   (l2-constraint-scale [a inc-a l2-max-constraint])
   (generate-rands [rand-buffer distribution])
-  (select [a res lt-zero ge-zero]))
+  (select [a res lt-zero ge-zero])
+  (indirect-add [x alpha x-indexes beta y y-indexes
+                 result res-indexes n-elems-per-idx]))
 
 
 (defmacro sum-impl
@@ -108,6 +110,30 @@
                        lt-zero#))))))
 
 
+(defmacro indirect-add-impl
+  [x alpha x-indexes beta y y-indexes result res-indexes n-elems-per-idx cast-fn]
+  `(let [x# (ArrayView/toView ~x)
+         alpha# (double ~alpha)
+         x-indexes# (ArrayView/toView ~x-indexes)
+         beta# (double ~beta)
+         y# (ArrayView/toView ~y)
+         y-indexes# (ArrayView/toView ~y-indexes)
+         result# (ArrayView/toView ~result)
+         res-indexes# (ArrayView/toView ~res-indexes)
+         n-elems-per-idx# (long ~n-elems-per-idx)
+         n-elems# (.length y-indexes#)]
+     (c-for
+      [idx# 0 (< idx# n-elems#) (inc idx#)]
+      (let [x-offset# (* n-elems-per-idx# (v-aget x-indexes# idx#))
+            y-offset# (* n-elems-per-idx# (v-aget y-indexes# idx#))
+            res-offset# (* n-elems-per-idx# (v-aget res-indexes# idx#))]
+        (c-for
+         [elem-idx# 0 (< elem-idx# n-elems-per-idx#) (inc elem-idx#)]
+         (v-aset result# (+ res-offset# elem-idx#)
+                 (~cast-fn (+ (* alpha# (v-aget x# (+ x-offset# elem-idx#)))
+                              (* beta# (v-aget y# (+ y-offset# elem-idx#)))))))))))
+
+
 (extend-protocol PCPUMathImpl
   DoubleArrayView
   (gemm [^DoubleArrayView A a-colstride
@@ -185,6 +211,14 @@
     (throw (Exception. "Random generation operates on float buffers for CUDA compatibility")))
   (select [^DoubleArrayView a ^DoubleArrayView res lt-zero ge-zero]
     (select-impl a res lt-zero ge-zero double))
+  (indirect-add [^DoubleArrayView x alpha ^IntArrayView x-indexes
+                 beta ^DoubleArrayView y ^IntArrayView y-indexes
+                 ^DoubleArrayView result ^IntArrayView res-indexes
+                 n-elems-per-idx]
+    (indirect-add-impl x alpha x-indexes
+                       beta y y-indexes
+                       result res-indexes
+                       n-elems-per-idx double))
 
   FloatArrayView
   (gemm [^FloatArrayView A a-colstride
@@ -289,7 +323,15 @@
         :else
         (throw (Exception. (str "Unrecognized distribution: " distribution))))))
   (select [^FloatArrayView a ^FloatArrayView res lt-zero ge-zero]
-    (select-impl a res lt-zero ge-zero float)))
+    (select-impl a res lt-zero ge-zero float))
+  (indirect-add [^FloatArrayView x alpha ^IntArrayView x-indexes
+                 beta ^FloatArrayView y ^IntArrayView y-indexes
+                 ^FloatArrayView result ^IntArrayView res-indexes
+                 n-elems-per-idx]
+    (indirect-add-impl x alpha x-indexes
+                       beta y y-indexes
+                       result res-indexes
+                       n-elems-per-idx float)))
 
 
 (extend-protocol resource/PResource

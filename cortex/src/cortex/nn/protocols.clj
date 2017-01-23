@@ -23,6 +23,11 @@ to transform sequence into specific sequences.")
 (like parameters) updated.  This may be called multiple times during the training process.
 Options is map that may contain:
 save-gradients? - save the gradients *and* the io buffers.")
+  (get-node-parameter [context network node-id param-key]
+    "Get a specific parameter's value from the network.  This is necessary for the cortex layer to
+generate loss terms during training.  Should return a map containing at least :buffer")
+  (get-loss-term-parameter [context network argument]
+    "Get a parameter for a loss term.  Needed in order to calculate loss.")
 
   ;;Test/verification interfaces
   (traverse [context bound-network id->input-map traverse-type]

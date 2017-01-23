@@ -65,7 +65,7 @@
         cv-item (first (ds/get-batches test-ds 5 :cross-validation [:a :b :c]))
         holdout-item (first (ds/get-batches test-ds 5 :holdout [:a :b :c]))
         training-item (first (ds/get-batches test-ds 5 :holdout [:a :b :c]))]
-    (is (= {:a {:shape 10}, :b {:shape 30}, :c {:shape 2}}
+    (is (= {:a 10, :b 30, :c 2}
            (ds/shapes test-ds)))
     (is (= [0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3 3 3 3 3 3 3 3 3 4 4 4 4 4 4 4 4 4 4]
            (vec (flatten (get cv-item :a)))))))

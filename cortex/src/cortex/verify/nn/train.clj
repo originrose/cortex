@@ -8,7 +8,9 @@
             [cortex-datasets.mnist :as mnist]
             [cortex.optimise :as opt]
             [clojure.test :refer :all]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [clojure.core.matrix :as m]
+            [clojure.pprint :as pprint]))
 
 
 
@@ -37,16 +39,18 @@
 
 (def mnist-network
   [(layers/input 28 28 1 :id :input)
-   (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.001})
+   (layers/convolutional 5 0 1 20 :weights {:l2-regularization 1e-3})
    (layers/max-pooling 2 0 2)
    (layers/dropout 0.9)
    (layers/relu)
    (layers/local-response-normalization)
-   (layers/convolutional 5 0 1 50 :weights {:l2-regularization 0.001})
+   (layers/convolutional 5 0 1 50)
    (layers/max-pooling 2 0 2)
-   (layers/batch-normalization 0.9)
+   (layers/batch-normalization 0.9 :l1-regularization 1e-4)
    (layers/linear 500 :l2-max-constraint 4.0)
-   (layers/relu)
+   (layers/relu :center-loss {:labels {:stream :labels}
+                              :alpha 0.9
+                              :lambda 1e-4})
    (layers/linear 10)
    (layers/softmax :id :output)])
 
@@ -77,6 +81,15 @@
                                                        :cv-split cv-split
                                                        :randimize? false))))
 
+(defn- print-layer-weights
+  [network]
+  (clojure.pprint/pprint (->> (get-in network [:layer-graph :buffers])
+                              (map (fn [[k v]]
+                                     [k
+                                      (vec (take 10 (m/eseq (get v :buffer))))]))
+                              (into {})))
+  network)
+
 
 (defn- train-and-get-results
   [context network input-bindings output-bindings
@@ -87,7 +100,8 @@
       (network/print-layer-summary (-> network
                                        network/build-network
                                        traverse/auto-bind-io
-                                       traverse/network->training-traversal))
+                                       (traverse/network->training-traversal
+                                        (ds/dataset->stream->size-map dataset))))
       (as-> (network/build-network network) net-or-seq
         (execute/train context net-or-seq dataset input-bindings output-bindings
                        :batch-size batch-size
@@ -120,9 +134,11 @@
         output-bindings [(traverse/->output-binding :output
                                                     :stream :labels
                                                     :loss loss-fn)]
+        batch-size 2
         results (train-and-get-results context [(layers/input 2 1 1 :id :input)
                                                 (layers/linear 1 :id :output)]
-                                       input-bindings output-bindings 1 dataset
+                                       input-bindings output-bindings batch-size
+                                       dataset
                                        (opt/adadelta) true nil 5000 identity)
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))
@@ -150,14 +166,16 @@
         results (train-and-get-results context mnist-network input-bindings output-bindings batch-size
                                        dataset (opt/adam) false inference-batch-type 4
                                        (fn [{:keys [network inferences] :as entry}]
-                                         (println (format "Loss for epoch %s: %s"
-                                                          (get network :epoch-count)
-                                                          (execute/inferences->node-id-loss-pairs
-                                                           network inferences
-                                                           (ds/get-batches dataset batch-size
-                                                                           inference-batch-type
-                                                                           (traverse/get-output-streams
-                                                                            network)))))
+                                         (let [loss-fn (execute/network->applied-loss-fn
+                                                        context network inferences
+                                                        (ds/get-batches dataset batch-size
+                                                                        inference-batch-type
+                                                                        (traverse/get-output-streams
+                                                                         network)))]
+                                          (println (format "Loss for epoch %s: %s%s\n\n"
+                                                           (get network :epoch-count)
+                                                           (apply + (map :value loss-fn))
+                                                           (execute/pprint-executed-loss-fn loss-fn))))
                                          entry))
         score (loss/evaluate-softmax results answers)]
     (is (> score 0.6))))

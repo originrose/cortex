@@ -40,6 +40,22 @@
      ~@body
      ))
 
+
+(defn indexed-copy
+  [device datatype]
+  (backend-test-pre
+   device datatype
+   (let [n-elems 100
+         src-data (make-buffer (range n-elems))
+         src-indexes (->> (math/array device stream :int (range n-elems))
+                          (math/device-buffer))
+         dest-indexes (->> (math/array device stream :int (reverse (range n-elems)))
+                           (math/device-buffer))
+         dest-data (make-buffer n-elems)]
+     (drv/indexed-copy stream src-data src-indexes dest-data dest-indexes 1)
+     (is (m/equals (vec (reverse (range n-elems)))
+                   (vec (->array dest-data)))))))
+
 (defn gemm
   [device datatype]
   (backend-test-pre device datatype
@@ -163,3 +179,32 @@
                       values)]
      (math/select stream buf-a buf-b -1.0 1.0)
      (is (m/equals answer (vec (->array buf-b)))))))
+
+
+(defn indirect-add
+  [device datatype]
+  (backend-test-pre
+   device datatype
+   (let [n-elems 1000
+         vec-len 10
+         n-vecs (/ n-elems vec-len)
+         values (range n-elems)
+         buf-a (make-buffer values)
+         src-indexes (->> (math/array device stream :int (range n-vecs))
+                          math/device-buffer)
+         buf-b (make-buffer (/ n-elems 2))
+         dst-indexes (->> (math/array device stream :int (flatten (repeat 2 (range (/ n-vecs 2)))))
+                          math/device-buffer)
+         answer (->> values
+                     (partition vec-len)
+                     ((fn [item-seq]
+                        (mapv m/add
+                              (take (/ n-vecs 2) item-seq)
+                              (drop (/ n-vecs 2) item-seq)))))]
+     (math/indirect-add stream 1.0 buf-a src-indexes
+                        1.0 buf-b dst-indexes
+                        buf-b dst-indexes vec-len)
+     (is (m/equals answer
+                   (->> (->array buf-b)
+                        (partition vec-len)
+                        (mapv vec)))))))
