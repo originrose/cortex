@@ -67,21 +67,18 @@ in initial description.  Else returns the initial description"
 
 (defn create-context
   "Attempt to create a gpu context.  If that fails create a cpu context."
-  [& {:keys [datatype force-cpu? force-gpu?]
-      :or {datatype :float}}]
+  [& {:keys [datatype force-gpu?]
+      :or {datatype :float force-gpu? false}}]
   (ce/create-context (fn []
-                       (or (when-not force-cpu?
-                             (try
+                       (if force-gpu?
+                         (try
                                (require 'think.compute.nn.cuda-backend)
                                ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
                                (catch Exception e
-                                 (println (format "Failed to create cuda backend (%s); will use cpu backend"
-                                                  e))
-                                 (when force-gpu?
-                                   (throw e))
-                                 nil)))
-                           (cpu-backend/create-cpu-backend datatype)))))
-
+                                 (println (format "Failed to create cuda backend (%s); will use cpu backend" e))
+                                   (throw e) 
+                                 nil))
+                       (cpu-backend/create-cpu-backend datatype)))))
 
 (defn backup-trained-network
   [network-filestem]
