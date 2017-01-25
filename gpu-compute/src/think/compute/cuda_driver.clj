@@ -226,7 +226,8 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 
 (defn load-multiple-datatype-function
   ([module-name fn-name dtype-seq]
-   (println "loading function" fn-name)
+   (comment
+    (println "loading function" fn-name))
    (try
     (let [module (load-module (io/input-stream (io/resource module-name)))]
       (into {} (map (fn [dt]
@@ -934,8 +935,8 @@ relies only on blockDim.x block.x and thread.x"
                                                      #(load-float-double-function "select"))
                             elem-count 0
                             (->ptr src-buf) (->ptr dest-buf)
-                            (dtype-cast datatype lt-zero)
-                            (dtype-cast ge-zero)
+                            (dtype-cast lt-zero datatype)
+                            (dtype-cast ge-zero datatype)
                             elem-count)))
   (indirect-add [stream
                  alpha x x-indexes

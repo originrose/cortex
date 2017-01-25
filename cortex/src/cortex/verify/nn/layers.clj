@@ -583,7 +583,6 @@ for that network."
                            (mapv #(if (< % 0)
                                     -0.25
                                     1.0)))]
-    (println (m/ecount input))
     (is (= output-answer
            (vec (m/eseq output))))
     (is (= [-10.0 10.0 -10.0 10.0]

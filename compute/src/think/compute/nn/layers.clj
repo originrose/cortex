@@ -9,7 +9,8 @@ implementation as possible."
             [clojure.core.matrix :as m]
             [cortex.util :as util]
             [think.compute.nn.protocols :as compute-protocols]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [think.datatype.core :as dtype]))
 
 
 (set! *warn-on-reflection* true)
@@ -173,44 +174,6 @@ and then forward many times for every parameter of the network."
                         (nn-backend/create backend layer batch-size)))
 
 
-(defonce crap-atom (atom {}))
-
-(defn run-on-cpu
-  []
-  (let [monotonic-indexes (int-array (get @crap-atom :monotonic-indexes))
-        neg-scale-indexes (int-array (get @crap-atom :neg-scale-indexes))]
-    (dtype/set-constant! (get @crap-atom :neg-scale-gradient) 0 0 (m/ecount (get @crap-atom :neg-scale-gradient)))
-    (think.compute.array-view-math/indirect-add (dtype/->view (get @crap-atom :input-gradient))
-                                                1.0
-                                                (dtype/->view monotonic-indexes)
-                                                1.0 (dtype/->view (get @crap-atom :neg-scale-gradient))
-                                                (dtype/->view neg-scale-indexes)
-                                                (dtype/->view (get @crap-atom :neg-scale-gradient))
-                                                (dtype/->view neg-scale-indexes) 1)
-    (println (vec (get @crap-atom :neg-scale-gradient)))))
-
-(defn run-on-gpu
-  []
-  (resource/with-resource-context
-    (let [cuda-backend (think.compute.nn.cuda-backend/create-backend :double)
-          {:keys [monotonic-indexes neg-scale-indexes
-                  neg-scale-gradient input-gradient]} @crap-atom
-          driver (drv/get-driver cuda-backend)
-          stream (drv/get-stream cuda-backend)
-          monotonic-indexes (math/array driver stream :int (vec monotonic-indexes))
-          neg-scale-indexes (math/array driver stream :int (vec neg-scale-indexes))
-          neg-scale-gradient (nn-backend/array cuda-backend neg-scale-gradient)
-          input-gradient (nn-backend/array cuda-backend input-gradient)]
-
-
-      (dotimes [iter 100]
-        (drv/memset stream (math/device-buffer neg-scale-gradient) 0 0 (m/ecount neg-scale-gradient))
-        (math/indirect-add stream 1.0 input-gradient monotonic-indexes
-                           1.0 neg-scale-gradient neg-scale-indexes
-                           neg-scale-gradient neg-scale-indexes
-                           1)
-        (println (vec (nn-backend/to-double-array cuda-backend neg-scale-gradient)))))))
-
 (defrecord Prelu [backend layer select-buffer
                   neg-scale-indexes neg-scale-expanded
                   monotonic-indexes scale-buffer]
@@ -242,10 +205,6 @@ and then forward many times for every parameter of the network."
       (drv/memset stream (math/device-buffer neg-scale-gradient) 0 0 (m/ecount neg-scale-gradient))
       ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output anyway
       (math/elem-mul stream 1.0 output-gradient 1 input 1 select-buffer 1)
-      (reset! crap-atom {:input-gradient (nn-backend/to-double-array backend select-buffer)
-                         :monotonic-indexes (nn-backend/to-double-array backend monotonic-indexes)
-                         :neg-scale-gradient (nn-backend/to-double-array backend neg-scale-gradient)
-                         :neg-scale-indexes (nn-backend/to-double-array backend neg-scale-indexes)})
       ;;sum into center gradient
       (math/indirect-add stream
                          1.0 select-buffer monotonic-indexes

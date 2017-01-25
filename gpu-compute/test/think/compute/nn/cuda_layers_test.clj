@@ -65,6 +65,6 @@
 (def-double-float-test local-response-normalization-forward
   (verify-layers/lrn-forward (create-context)))
 
-(deftest prelu
+(def-double-float-test prelu
   (with-bindings {#'verify-utils/*datatype* :float}
    (verify-layers/prelu (create-context))))
