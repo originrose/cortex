@@ -121,3 +121,20 @@
                        input output (loss/mse-loss)
                        1e-4 batch-size)
         check-gradients)))
+
+
+(defn prelu-gradient
+  [context]
+  (let [batch-size 10
+        input-dim 3
+        n-channels 4
+        input-num-pixels (* input-dim input-dim)
+        n-input (* input-num-pixels n-channels)
+        input (flatten (repeat batch-size (repeat (quot n-input 2) [-1 1])))
+        output input]
+    (-> (get-gradients context
+                       [(layers/input input-dim input-dim n-channels)
+                        (layers/prelu)]
+                       input output (loss/mse-loss)
+                       1e-4 batch-size)
+        check-gradients)))

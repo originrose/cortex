@@ -65,3 +65,6 @@
 
 (def-double-float-test local-response-normalization-forward
   (verify-layers/lrn-forward (create-context)))
+
+(def-double-float-test prelu
+  (verify-layers/prelu (create-context)))

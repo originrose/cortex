@@ -207,4 +207,17 @@
      (is (m/equals answer
                    (->> (->array buf-b)
                         (partition vec-len)
-                        (mapv vec)))))))
+                        (mapv vec)))))
+   (let [n-elems 10000
+         buf-a (make-buffer (repeat n-elems 1))
+         src-indexes (->> (math/array device stream :int (range n-elems))
+                          math/device-buffer)
+         buf-b (make-buffer (repeat 4 0))
+         dst-indexes (->> (math/array device stream :int (flatten (repeat 2500 [0 1 2 3])))
+                          math/device-buffer)
+         answer [2500.0 2500.0 2500.0 2500.0]]
+     (math/indirect-add stream 1.0 buf-a src-indexes
+                        1.0 buf-b dst-indexes
+                        buf-b dst-indexes 1)
+     (is (= answer
+            (vec (m/eseq (->array buf-b))))))))

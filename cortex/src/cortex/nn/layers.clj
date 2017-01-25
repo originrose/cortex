@@ -455,6 +455,25 @@ This is for cudnn compatibility.")))
     (dissoc arg-map :k :n :alpha :beta))])
 
 
+(defmethod get-layer-metadata :prelu
+  [desc]
+  {:parameter-descriptions
+   [{:key :neg-scale
+     :type :scale
+     :shape-fn (fn [desc]
+                 [(get desc :input-channels 1)])
+     :initialization {:type :constant
+                      :value 0.25}}]
+   :pass-set #{:training :inference}})
+
+
+(defn prelu
+  "https://arxiv.org/pdf/1502.01852.pdf
+At this point we only support per-channel scale, not across channel scale."
+  []
+  {:type :prelu})
+
+
 (defn network-description
   "A network description must have 1 key and that is the actual
 network graph description."

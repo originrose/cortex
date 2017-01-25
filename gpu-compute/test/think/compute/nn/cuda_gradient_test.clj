@@ -24,3 +24,6 @@
 
 (deftest lrn-gradient
   (verify-gradient/lrn-gradient (create-context)))
+
+(deftest prelu-gradient
+  (verify-gradient/prelu-gradient (create-context)))

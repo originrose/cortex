@@ -27,8 +27,9 @@ complex-parameter = <whitespace> word <(':')?> <whitespace> <begin-bracket>
 <whitespace> model <whitespace> <end-bracket>
 <value> = (word | <quote> word <quote>)
 quote = '\"'
-<word> = #'[\\w\\.]+'
+<word> = #'[\\w\\.-]+'
 whitespace = #'\\s*'") parse-str)]
+    (println parse-str retval)
     retval))
 
 (defn- add-value-to-map
