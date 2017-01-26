@@ -243,14 +243,14 @@ The build step is responsible for
                  full-parameters
                  (map (fn [{:keys [key] :as param-desc}]
                         (let [param-entry (get node key)
-                              buffer (if (map? param-entry) ;; Case 1: Buffer exists for this node-key pair
+                              buffer (if (map? param-entry)
                                        (or (get param-entry :buffer)
                                            (get buffers (get param-entry
                                                              :buffer-id)))
                                        ;;If the parameter-entry is not associative
                                        ;;and is non-nil then we assume it is the desired
                                        ;;buffer.
-                                       param-entry) ;; Case 2: Buffer is either non-associative or is nil
+                                       param-entry)
                               buffer-id (or (when (map? param-entry)
                                               (get param-entry :buffer-id))
                                             (generate-param-id id key))
@@ -260,13 +260,13 @@ The build step is responsible for
                                                    :key key)
                                             {:buffer-id buffer-id
                                              :key key})]
-                          (if-not buffer ;; Case 2a: Buffer is nil
+                          (if-not buffer
                             (let [[buffer init-type] (generate-param-buffer param-desc id
                                                                             id->node-map edges)]
                               (assoc param-entry
-                                     :buffer buffer
+                                     :buffer {:buffer buffer}
                                      :initialization init-type))
-                            (assoc param-entry :buffer buffer)))) ;; Case 2b: Buffer is not associative
+                            (assoc param-entry :buffer buffer))))
                       parameter-descs)
                  buffers (reduce (fn [buffers {:keys [buffer-id buffer]}]
                                    (assoc buffers buffer-id {:buffer buffer}))

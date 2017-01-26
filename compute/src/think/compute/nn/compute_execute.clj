@@ -51,16 +51,22 @@
                 (update compute-buffers buffer-id
                         (fn [compute-buffer]
                           (or compute-buffer
-                              (let [graph-buffer (get parameter :buffer)]
-                                (cond-> {:buffer (backend/array backend graph-buffer)}
-                                  gradients?
-                                  (assoc :gradient (backend/new-array backend
-                                                                      (m/shape graph-buffer)))
-                                  numeric-gradients?
-                                  (assoc :numeric-gradient (alloc-host (m/ecount graph-buffer))
-                                         :host-buffer (alloc-host (m/ecount graph-buffer)))
-                                  (is-l2-max-constraint-valid? parameter)
-                                  (merge (allocate-l2-temp-data graph-buffer backend)))))))))
+                              (let [_ (println parameter)
+                                    graph-buffer (get-in parameter [:buffer :buffer])]
+                                (try
+                                  (cond-> {:buffer (backend/array backend graph-buffer)}
+                                    gradients?
+                                    (assoc :gradient (backend/new-array backend
+                                                                        (m/shape graph-buffer)))
+                                    numeric-gradients?
+                                    (assoc :numeric-gradient (alloc-host (m/ecount graph-buffer))
+                                           :host-buffer (alloc-host (m/ecount graph-buffer)))
+                                    (is-l2-max-constraint-valid? parameter)
+                                    (merge (allocate-l2-temp-data graph-buffer backend)))
+                                  (catch Exception e (throw (ex-info "graph-buffer is corrupt: " {:type (type graph-buffer)
+                                                                                                  :buffer-id buffer-id
+                                                                                                  :buffer graph-buffer
+                                                                                                  :parameter parameter}))))))))))
             compute-buffers
             (network/get-node-parameters network (get node :id)))))
 

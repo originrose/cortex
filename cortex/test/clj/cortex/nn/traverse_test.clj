@@ -67,7 +67,7 @@
                            realize-traversals)]
     (is (= 434280 (get network :parameter-count)))
     (is (= 434280 (->> (get-in network [:layer-graph :buffers])
-                       (map (comp m/ecount :buffer second))
+                       (map (comp m/ecount :buffer :buffer second))
                        (reduce +))))
     (is (= [nil nil]
            (minimal-diff
