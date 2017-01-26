@@ -128,17 +128,21 @@ we continue to train forever.
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
              optimiser
+             reset-score
              force-gpu?]
       :or {batch-size 128
            network-filestem default-network-filestem
            optimiser (cortex-opt/adam)
+           reset-score false
            force-gpu? true}}]
   (resource/with-resource-context
     (let [network-filename (str network-filestem ".nippy")
           ;;Backup the trained network if we haven't already
           network (if-let [loaded-network (load-network network-filename
                                                         initial-description)]
-                    loaded-network
+                    (if reset-score
+                      (assoc loaded-network :cv-loss {})
+                      loaded-network)
                     (do
                       (backup-trained-network network-filestem)
                       (merge network
