@@ -245,8 +245,9 @@ The build step is responsible for
                         (let [param-entry (get node key)
                               buffer (if (map? param-entry)
                                        (or (get param-entry :buffer)
-                                           (get buffers (get param-entry
-                                                             :buffer-id)))
+                                           (get-in buffers [(get param-entry
+                                                                 :buffer-id)
+                                                            :buffer]))
                                        ;;If the parameter-entry is not associative
                                        ;;and is non-nil then we assume it is the desired
                                        ;;buffer.
@@ -264,7 +265,7 @@ The build step is responsible for
                             (let [[buffer init-type] (generate-param-buffer param-desc id
                                                                             id->node-map edges)]
                               (assoc param-entry
-                                     :buffer {:buffer buffer}
+                                     :buffer buffer
                                      :initialization init-type))
                             (assoc param-entry :buffer buffer))))
                       parameter-descs)
