@@ -10,15 +10,34 @@
             [cortex.verify.nn.import :as verify-import]
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
-            [think.compute.nn.compute-execute :as compute-execute])
-  (:import [java.io StringReader]))
+            [think.compute.nn.compute-execute :as compute-execute]
+            [taoensso.nippy :as nippy]
+            [cortex.nn.traverse :as traverse])
+  (:import [java.io StringReader FileOutputStream]))
+
+
+(defn- trim-till-end
+  [^String line]
+  (let [octothorpe-index (.indexOf line "#")]
+    (if-not (= octothorpe-index -1)
+      (.substring line 0 octothorpe-index)
+      line)))
+
+
+(defn- strip-comments
+  [parse-str]
+  (let [retval
+        (->> parse-str
+             string/split-lines
+             (map trim-till-end)
+             (string/join "\n"))]
+    retval))
 
 
 (defn- parse-prototxt
   [parse-str]
-  (let [retval
-        ((insta/parser
-          "<model> = parameter (parameter)* <whitespace>
+  (let [parser (insta/parser
+           "<model> = parameter (parameter)* <whitespace>
 <parameter> = <whitespace> (param-with-value | complex-parameter)
 param-with-value = word <(':')?> <whitespace> value
 begin-bracket = '{'
@@ -28,7 +47,13 @@ complex-parameter = <whitespace> word <(':')?> <whitespace> <begin-bracket>
 <value> = (word | <quote> word <quote>)
 quote = '\"'
 <word> = #'[\\w\\.-]+'
-whitespace = #'\\s*'") parse-str)]
+whitespace = #'\\s*'")
+        retval (-> parse-str
+                   strip-comments
+                   parser)]
+    (when (map? retval)
+      (throw (ex-info "parse-error"
+                      retval)))
     retval))
 
 (defn- add-value-to-map
@@ -45,7 +70,6 @@ whitespace = #'\\s*'") parse-str)]
   [retval value]
   (let [param-name (second value)]
     (if (= (first value) :complex-parameter)
-
       (add-value-to-map
        retval (keyword param-name)
        (reduce recurse-parse-prototxt
@@ -64,7 +88,6 @@ whitespace = #'\\s*'") parse-str)]
 
 (defn- add-layer-data-to-desc
   [layer desc]
-  (println desc)
   (let [retval
         (assoc desc
                :id (keyword (:name layer))
@@ -221,8 +244,21 @@ whitespace = #'\\s*'") parse-str)]
     (throw (Exception. (format "Unexpected weight shape: %s" weight-shape)))))
 
 
+(defn- check-for-input-params
+  [prototxt]
+  (when (and (contains? prototxt :input)
+             (contains? prototxt :input_dim))
+    (let [dimensions (get prototxt :input_dim)
+          input-name (get prototxt :input)
+          [batch channels height width] (mapv read-string dimensions)]
+      (layers/input width height channels
+                    :id (keyword input-name)
+                    :caffe-bottom (keyword input-name)
+                    :caffe-top (keyword input-name)))))
+
+
 (defn caffe-h5->model
-  [fname]
+  [fname & {:keys [trim]}]
   (resource/with-resource-context
     (let [file-node (hdf5/open-file fname)
           file-children (hdf5/child-map file-node)
@@ -232,11 +268,13 @@ whitespace = #'\\s*'") parse-str)]
                         first
                         parse-prototxt
                         (reduce recurse-parse-prototxt {}))
-          _ (clojure.pprint/pprint prototxt)
-          layer-list (mapv prototxt-layer->desc (:layer prototxt))
-          layer-map (into {} (map-indexed (fn [idx desc]
-                                            [(:id desc) (assoc desc :layer-index idx)])
-                                          layer-list))
+          layer-list (vec (concat (check-for-input-params prototxt)
+                                  (map prototxt-layer->desc (:layer prototxt))))
+          layer-map (->> (map-indexed (fn [idx desc]
+                                        [(:id desc) (assoc desc :layer-index idx)])
+                                      layer-list)
+                         (into {})
+                         (#(apply dissoc % trim)))
           weight-children (hdf5/child-map (:model_weights file-children))
           layer-map (reduce
                      (fn [layer-map [layer-id weights-data]]
@@ -250,7 +288,6 @@ whitespace = #'\\s*'") parse-str)]
                                weight-key (if (= (get target-desc :type) :prelu)
                                             :neg-scale
                                             :weights)]
-                           (println "adding parameter" weight-key)
                            (assoc layer-map layer-id
                                   (cond-> (assoc target-desc
                                                  weight-key (to-core-matrix
@@ -272,7 +309,8 @@ whitespace = #'\\s*'") parse-str)]
                      weight-children)
           ;;caffe layers flow bottom to top (despite being listed top to bottom)
           ;;so a layer takes bottom and produces top.
-          layer-output-map (group-by :caffe-top layer-list)
+          layer-output-map (group-by #(or (get % :caffe-top)
+                                          (get % :caffe-bottom)) layer-list)
           layer-outputs (hdf5/child-map (:layer_outputs file-children))
           layer-id->output (reduce (fn [retval [layer-id node]]
                                      (if-let [output-group (get layer-output-map layer-id)]
@@ -285,24 +323,41 @@ whitespace = #'\\s*'") parse-str)]
                                    {}
                                    layer-outputs)
           model (vec (sort-by :layer-index (map second layer-map)))
-          input-id (:id (first model))
-          input (layer-id->output input-id)
-          layer-outputs (mapv (fn [desc]
-                                (layer-id->output (:id desc)))
-                              (drop 1 model))
           model (mapv (fn [desc]
                         (if-let [output-vec (layer-id->output (:id desc))]
                           (assoc desc :caffe-output-size (count output-vec))
                           desc))
-                      model)]
+                      model)
+          network (network/build-network model)]
+      (when-let [failures (seq (get network :verification-failures))]
+        (let [ordered-nodes (->> network
+                                 traverse/auto-bind-io
+                                 (#(traverse/network->inference-traversal % {}))
+                                 (#(get-in % [:traversal :forward]))
+                                 (mapv (fn [{:keys [incoming id outgoing]}]
+                                         (get-in network [:layer-graph :id->node-map id]))))]
+         (throw (ex-info "Verification failures detected:"
+                         {:verification-failures (vec failures)
+                          :layers ordered-nodes}))))
       {:prototxt prototxt
-       :model (network/build-network model)
-       :input input
-       :layer-outputs layer-outputs})))
+       :model network
+       :layer-id->output layer-id->output})))
 
 
 (defn test-caffe-file
-  [fname]
-  (let [import-result (caffe-h5->model fname)]
-    (println (format "Verifying %d layers" (count (:model import-result))))
+  [fname & args]
+  (let [import-result (apply caffe-h5->model fname args)]
+    (println (format "Verifying %d layers" (count (get-in import-result [:model :layer-graph :id->node-map]))))
     (verify-import/verify-model (compute-execute/create-context) import-result)))
+
+
+(defn import-and-write
+  [^String fname & args]
+  (let [import-result (apply caffe-h5->model fname args)]
+    (if-let [failures (seq (verify-import/verify-model (compute-execute/create-context) import-result))]
+      (throw (ex-info "import verification failures: " (vec failures)))
+      (let [f-stem (.substring fname 0 (.lastIndexOf fname "."))
+            output-file (str f-stem ".nippy")
+            nippy-data (nippy/freeze (get import-result :model))]
+        (with-open [out-stream (FileOutputStream. output-file)]
+          (.write out-stream nippy-data))))))

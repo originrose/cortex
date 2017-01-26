@@ -379,11 +379,16 @@
                                     :weights weight-double-data
                                     :bias (ensure-doubles (:data (hdf5/->clj bias-ds))))))
                          desc))))
-             network/build-network)]
-    (when-let [verify-seq (seq (get network :verification-failures))]
-      (throw (ex-info "Built items failed verification"
-                      {:verification-failures  (vec verify-seq)})))
-    (reduce reshape-weights network (keys (get-in network [:layer-graph :id->node-map])))))
+             network/build-network)
+        network (reduce reshape-weights network
+                        (keys (get-in network [:layer-graph :id->node-map])))
+        ;;Replace the verification failures from before with valid ones after the reshape operation.
+        verification-failures (network/verify-layer-graph network)
+        network (assoc network :verification-failures verification-failures)]
+    (when-let [failures (seq (get network :verification-failures))]
+      (throw (ex-info "Model failed verifcation"
+                      {:verification-failures verification-failures})))
+    network))
 
 
 (defn description-weight-file->network
@@ -446,20 +451,22 @@
   (when (every? #(% node) [:output-channels :output-height :output-width])
     [(:output-height node) (:output-width node) (:output-channels node)]))
 
+
 (defn- reshape-layer-output
   "For outputs that aren't flat, reshape layer weights to use Cortex ordering
   instead of Keras dim ordering."
-  [[node data]]
+  [[{:keys [id] :as node} data]]
   (when data
-   (if-let [keras-dims (node->keras-output-dims node)]
-     (do
-       (println "Reshaping output for: " (:id node) keras-dims (count data))
-       ;;keras: 0 height 1 width 2 n-channels
-       ;;cortex: 0 n-channels 1 height 2 width
-       (reshape-data data keras-dims [2 0 1]))
-     (do
-       (println "No reshape required for: " (:id node))
-       data))))
+    [id
+     (if-let [keras-dims (node->keras-output-dims node)]
+       (do
+         (println "Reshaping output for: " id keras-dims (count data))
+         ;;keras: 0 height 1 width 2 n-channels
+         ;;cortex: 0 n-channels 1 height 2 width
+         (reshape-data data keras-dims [2 0 1]))
+       (do
+         (println "No reshape required for:" id)
+         data))]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -526,10 +533,14 @@
         test-image  (network-output-file->test-image output-h5-file)
         output-map  (network-output-file->layer-outputs output-h5-file)
         assoc-out   (associate-layer-outputs network output-map)
-        reshaped    (mapv reshape-layer-output assoc-out)
+        reshaped    (->> (mapv reshape-layer-output assoc-out)
+                         (remove nil?)
+                         (into {}))
+        [roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
         for-verify  {:model network
-                     :input test-image
-                     :layer-outputs reshaped}
+                     :layer-id->output (assoc reshaped
+                                              (first roots)
+                                              test-image)}
         verified     (compute-verify/verify-model (compute-execute/create-context) for-verify)]
     (if (empty? verified)
       network

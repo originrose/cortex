@@ -461,7 +461,7 @@ This is for cudnn compatibility.")))
    [{:key :neg-scale
      :type :scale
      :shape-fn (fn [desc]
-                 [(get desc :input-channels 1)])
+                 [(get desc :input-channels (get desc :input-size))])
      :initialization {:type :constant
                       :value 0.25}}]
    :pass-set #{:training :inference}})
@@ -469,7 +469,8 @@ This is for cudnn compatibility.")))
 
 (defn prelu
   "https://arxiv.org/pdf/1502.01852.pdf
-At this point we only support per-channel scale, not across channel scale."
+At this point we only support per-channel scale, not across channel scale.
+If the input contains no channels then you get a scale factor per input parameter."
   []
   [{:type :prelu}])
 
