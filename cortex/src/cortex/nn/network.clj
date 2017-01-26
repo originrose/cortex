@@ -315,26 +315,28 @@ The build step is responsible for
 
 
 (defn- verify-graph-node
-  [node]
+  [network node]
   (let [parameter-descriptions (layers/get-parameter-descriptions node)]
     (->>
      (map (fn [{:keys [key shape-fn]}]
             (let [node-shape (shape-fn node)
-                  parameter-data (get node key)]
-              (when-let [buffer-data (get parameter-data :buffer)]
-                (when-not (= node-shape
-                             (m/shape buffer-data))
-                  {:node node
-                   :parameter key
-                   :desired-shape node-shape
-                   :actual-shape (m/shape buffer-data)}))))
+                  buffer-data (get-in network [:layer-graph
+                                               :buffers
+                                               (get-in node [key :buffer-id])
+                                               :buffer])]
+              (when-not (= node-shape
+                           (m/shape buffer-data))
+                {:node node
+                 :parameter key
+                 :desired-shape node-shape
+                 :actual-shape (m/shape buffer-data)})))
           parameter-descriptions)
      (remove nil?))))
 
 
-(defn- verify-layer-graph
-  [{:keys [nodes]}]
-  (mapcat verify-graph-node nodes))
+(defn verify-layer-graph
+  [network]
+  (mapcat (partial verify-graph-node network) (vals (get-in network [:layer-graph :id->node-map]))))
 
 
 (defn build-network
@@ -344,7 +346,7 @@ along with failure reasons."
   [network-desc]
   (let [{:keys [layer-graph] :as built-network} (build-layer-graph network-desc)]
     (assoc built-network
-           :verification-failures (seq (verify-layer-graph layer-graph))
+           :verification-failures (seq (verify-layer-graph built-network))
            :parameter-count (get-layer-graph-parameter-count layer-graph))))
 
 

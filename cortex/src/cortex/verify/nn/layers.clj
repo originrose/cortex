@@ -562,3 +562,28 @@ for that network."
                                   0.19075144508670522 ])))
                   (:output lrn-data)
                   1e-4))))
+
+
+(defn prelu
+  [context]
+  (let [batch-size 10
+        channel-count 4
+        input-dim 3
+        input-size (* input-dim input-dim channel-count)
+        input (flatten (repeat batch-size (repeat (quot input-size 2) [-1 1])))
+        output-gradient (repeat (* batch-size input-size) 1)
+        {:keys [output input-gradient parameters]}
+        (forward-backward-test context
+                               [(layers/input input-dim input-dim channel-count)
+                                (layers/prelu)]
+                               batch-size
+                               input
+                               output-gradient)
+        output-answer (->> input
+                           (mapv #(if (< % 0)
+                                    -0.25
+                                    1.0)))]
+    (is (= output-answer
+           (vec (m/eseq output))))
+    (is (= [-10.0 10.0 -10.0 10.0]
+           (vec (m/eseq (get-in parameters [:neg-scale :buffer :gradient])))))))
