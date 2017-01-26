@@ -67,7 +67,7 @@
                            realize-traversals)]
     (is (= 434280 (get network :parameter-count)))
     (is (= 434280 (->> (get-in network [:layer-graph :buffers])
-                       (map (comp m/ecount :buffer :buffer second))
+                       (map (comp m/ecount :buffer second))
                        (reduce +))))
     (is (= [nil nil]
            (minimal-diff
@@ -235,7 +235,8 @@
 
         gradient-descent-original (->> (traverse/network->training-traversal original-network)
                            :traversal
-                           realize-traversals)]
+                           realize-traversals)
+        layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
     (is (= [nil nil]
            (minimal-diff
              (get original-traversal :backward)
@@ -253,7 +254,9 @@
              (get gradient-descent-top :buffers)
              (get gradient-descent-original :buffers))))
     (is (nil? (:verification-failures top-network)))
-    (is (= (:parameter-count top-network) (:parameter-count original-network)))))
+    (is (= (:parameter-count top-network) (:parameter-count original-network)))
+    (is (= (layer-graph->buffer-id-size-fn (get-in top-network [:layer-graph :buffers]))
+           (layer-graph->buffer-id-size-fn (get-in original-network [:layer-graph :buffers]))))))
 
 
 (deftest remove-layers-from-network
