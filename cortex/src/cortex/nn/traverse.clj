@@ -92,12 +92,23 @@ while training no stream or loss is necessary"
                :loss loss}))))
 
 
+(defn clear-io-bindings
+  "Remove all io bindings (if any exist) from the network."
+  [network]
+  (update network :traversal
+          (fn [traversal]
+            (-> traversal
+                (dissoc :input-bindings)
+                (dissoc :output-bindings)))))
+
+
 (defn auto-bind-io
   "Auto bind the network's roots and leaves to either :data :labels if there
 are exactly 1 root and leaf or to :data-x where x is a one-based index of the
 root and labels-x where labels are a 1-based index of the leaf.x"
   [network]
-  (let [[roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
+  (let [network (clear-io-bindings network)
+        [roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
         input-name-fn (if (> (count roots) 1)
                         (fn [network]
                           (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
@@ -115,16 +126,6 @@ root and labels-x where labels are a 1-based index of the leaf.x"
                 (bind-output-train network leaf (output-name-fn network)))
               network
               leaves))))
-
-
-(defn clear-io-bindings
-  "Remove all io bindings (if any exist) from the network."
-  [network]
-  (update network :traversal
-          (fn [traversal]
-            (-> traversal
-                (dissoc :input-bindings)
-                (dissoc :output-bindings)))))
 
 
 (defn get-io-bindings

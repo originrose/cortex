@@ -17,7 +17,9 @@
             [cortex.suite.train :as suite-train]
             [cortex.loss :as loss]
             [think.gate.core :as gate]
-            [think.parallel.core :as parallel])
+            [think.parallel.core :as parallel]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.network :as network])
   (:import [java.io File]))
 
 
@@ -319,3 +321,28 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
                                                                        image-size
                                                                        image-size)
                                     (classification/get-class-names-from-directory "mnist/testing"))))
+
+(defn fine-tuning-example
+  "This is an example of how to use cortex to fine tune an existing network."
+  []
+  (let [mnist-dataset (create-dataset)
+        mnist-network (load-trained-network)
+        initial-description (:initial-description mnist-network)
+        ;; To figure out at which point you'd like to split the network,
+        ;; you can use (get-in mnist-net [:layer-graph :edges]) or (get-in mnist-net [:layer-graph :id->node-map])
+        ;; to guide your decision.
+        ;;
+        ;; Removing the fully connected layers and beyond.
+        network-bottleneck (network/dissoc-layers-from-network mnist-network :linear-1)
+        layers-to-add [(layers/linear->relu 500)
+                       (layers/dropout 0.5)
+                       (layers/linear->relu 500)
+                       (layers/dropout 0.5)
+                       (layers/linear->softmax num-classes)]
+        modified-description (vec (concat (drop-last 3 initial-description) layers-to-add))
+        modified-network (network/assoc-layers-to-network network-bottleneck layers-to-add)
+        modified-network (dissoc modified-network :traversal)
+        modified-network (-> (network/build-network modified-network)
+                           (traverse/auto-bind-io)
+                           (traverse/network->training-traversal))]
+    (suite-train/train-n mnist-dataset modified-description modified-network :batch-size 128 :epoch-count 1)))

@@ -193,3 +193,83 @@
              {:id :linear-1, :incoming [{:id :relu-3}], :outgoing [{:id :linear-1}]}
              {:id :batch-normalization-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}]
             (get traversal :backward))))))
+
+(deftest appending-layers-to-network
+  "This test ensures that a network built by piecing together a built-network
+  and set of layers is effectively equal to building a network with a complete description"
+  (let [layer-split 9
+        src-desc (flatten mnist-description-with-toys)
+        bottom-layers (take layer-split src-desc)
+        bottom-network (-> (network/build-network bottom-layers)
+                         traverse/auto-bind-io
+                         traverse/network->training-traversal)
+        ;; Added io binding and traversals to make sure that when
+        ;; the network is modified and rebuilt, these 2 steps are also rebuilt correctly
+
+        top-layers (drop layer-split src-desc)
+        top-network-desc (network/assoc-layers-to-network bottom-network top-layers)
+        top-network (-> (network/build-network top-network-desc)
+                      traverse/auto-bind-io
+                      traverse/network->training-traversal)
+
+        traversal-after-stacking (-> (get top-network :traversal)
+                    realize-traversals)
+
+        original-network (-> (network/build-network mnist-description-with-toys)
+                  traverse/auto-bind-io
+                  traverse/network->training-traversal)
+        original-traversal (-> (get original-network :traversal)
+                             realize-traversals)
+
+        inference-mem-top (->> (traverse/network->inference-traversal top-network)
+                        :traversal
+                        realize-traversals)
+
+        inference-mem-original (->> (traverse/network->inference-traversal original-network)
+                        :traversal
+                        realize-traversals)
+
+        gradient-descent-top (->> (traverse/network->training-traversal top-network)
+                           :traversal
+                           realize-traversals)
+
+        gradient-descent-original (->> (traverse/network->training-traversal original-network)
+                           :traversal
+                           realize-traversals)]
+    (is (= [nil nil]
+           (minimal-diff
+             (get original-traversal :backward)
+             (get traversal-after-stacking :backward))))
+    (is (= [nil nil]
+           (minimal-diff
+             (get original-traversal :forward)
+             (get traversal-after-stacking :forward))))
+    (is (= [nil nil]
+           (minimal-diff
+             (get inference-mem-top :buffers)
+             (get inference-mem-original :buffers))))
+    (is (= [nil nil]
+           (minimal-diff
+             (get gradient-descent-top :buffers)
+             (get gradient-descent-original :buffers))))
+    (is (nil? (:verification-failures top-network)))
+    (is (= (:parameter-count top-network) (:parameter-count original-network)))))
+
+
+(deftest remove-layers-from-network
+  (let [mnist-net (-> (network/build-network mnist-description-with-toys)
+                  traverse/auto-bind-io
+                  traverse/network->training-traversal)
+        chopped-net (network/dissoc-layers-from-network mnist-net :relu-3)]
+    (is (= #{:softmax-1 :linear-2 :dropout-4 :relu-3}
+           (clojure.set/difference
+             (set (keys (get-in mnist-net [:layer-graph :id->node-map])))
+             (set (keys (get-in chopped-net [:layer-graph :id->node-map]))))))
+    (is (= #{[:relu-3 :dropout-4] [:dropout-4 :linear-2] [:linear-2 :softmax-1] [:linear-1 :relu-3]}
+           (clojure.set/difference
+             (set (get-in mnist-net [:layer-graph :edges]))
+             (set (get-in chopped-net [:layer-graph :edges])))))
+    (is (= #{:linear-2-bias :linear-2-weights}
+           (clojure.set/difference
+             (set (keys (get-in mnist-net [:layer-graph :buffers])))
+             (set (keys (get-in chopped-net [:layer-graph :buffers]))))))))
