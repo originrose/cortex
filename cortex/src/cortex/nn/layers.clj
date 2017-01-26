@@ -45,8 +45,8 @@ at least:
 
 (defn- ensure-single-parent
   [previous-nodes node]
-  (when-not (= 1 (count previous-nodes))
-    (throw (ex-info "Node only takes a single node of input."
+  (when-not (> (count previous-nodes) 1)
+    '(throw (ex-info "Node only takes a single node of input."
                     {:node node
                      :previous previous-nodes})))
   (first previous-nodes))
@@ -471,7 +471,7 @@ This is for cudnn compatibility.")))
   "https://arxiv.org/pdf/1502.01852.pdf
 At this point we only support per-channel scale, not across channel scale."
   []
-  {:type :prelu})
+  [{:type :prelu}])
 
 
 (defn network-description

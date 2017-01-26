@@ -29,7 +29,6 @@ complex-parameter = <whitespace> word <(':')?> <whitespace> <begin-bracket>
 quote = '\"'
 <word> = #'[\\w\\.-]+'
 whitespace = #'\\s*'") parse-str)]
-    (println parse-str retval)
     retval))
 
 (defn- add-value-to-map
@@ -65,6 +64,7 @@ whitespace = #'\\s*'") parse-str)]
 
 (defn- add-layer-data-to-desc
   [layer desc]
+  (println desc)
   (let [retval
         (assoc desc
                :id (keyword (:name layer))
@@ -163,6 +163,13 @@ whitespace = #'\\s*'") parse-str)]
        (add-layer-data-to-desc layer)))
 
 
+(defmethod prototxt-layer->desc :PReLU
+  [layer]
+  (->> (layers/prelu)
+       first
+       (add-layer-data-to-desc layer)))
+
+
 (defmethod prototxt-layer->desc :default
   [layer]
   {:type :error
@@ -225,6 +232,7 @@ whitespace = #'\\s*'") parse-str)]
                         first
                         parse-prototxt
                         (reduce recurse-parse-prototxt {}))
+          _ (clojure.pprint/pprint prototxt)
           layer-list (mapv prototxt-layer->desc (:layer prototxt))
           layer-map (into {} (map-indexed (fn [idx desc]
                                             [(:id desc) (assoc desc :layer-index idx)])
@@ -237,18 +245,26 @@ whitespace = #'\\s*'") parse-str)]
                                weight-id (keyword (str (name layer-id) "_W"))
                                bias-id (keyword (str (name layer-id) "_b"))
                                weights (hdf5/->clj (get weight-children weight-id))
-                               bias (hdf5/->clj (get weight-children bias-id))]
+                               bias (when-let [bias-child (get weight-children bias-id)]
+                                      (hdf5/->clj bias-child))
+                               weight-key (if (= (get target-desc :type) :prelu)
+                                            :neg-scale
+                                            :weights)]
+                           (println "adding parameter" weight-key)
                            (assoc layer-map layer-id
-                                  (assoc target-desc
-                                         :weights (to-core-matrix
-                                                   (ensure-doubles (:data weights))
-                                                   (dim-shape->core-m-shape
-                                                    (:dimensions weights))
-                                                   (long (or (:group target-desc) 1)))
-                                         :bias (to-core-matrix
-                                                (ensure-doubles (:data bias))
-                                                (dim-shape->core-m-shape
-                                                 (:dimensions bias))))))
+                                  (cond-> (assoc target-desc
+                                                 weight-key (to-core-matrix
+                                                             (ensure-doubles (:data weights))
+                                                             (dim-shape->core-m-shape
+                                                              (:dimensions weights))
+                                                             (long (or (:group target-desc) 1))))
+                                    bias
+                                    (assoc
+                                           :bias
+                                           (to-core-matrix
+                                            (ensure-doubles (:data bias))
+                                            (dim-shape->core-m-shape
+                                             (:dimensions bias)))))))
                          (do
                            (println "Failed to find node for" layer-id)
                            layer-map)))
