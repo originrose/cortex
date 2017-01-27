@@ -39,21 +39,23 @@ in initial description.  Else returns the initial description"
   [context best-network-atom network-filename initial-description
    best-network-function cv-columnar-input cv-output
    {:keys [network inferences]}]
-  (let [node-loss-map (->> (execute/inferences->node-id-loss-pairs network inferences cv-output)
-                           (into {}))
+  (let [loss-fn (execute/network->applied-loss-fn
+                 context network inferences
+                 cv-output)
+        loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
-                            (when (map? best-loss)
-                              best-loss)
-                            {})]
-    (println (format "Loss for epoch %s: %s" (get network :epoch-count) node-loss-map))
-    (when (every? (fn [[id ave-loss]]
-                    (if-let [best (get current-best-loss id)]
-                      (< ave-loss best)
-                      true))
-                  node-loss-map)
+                            (when (sequential? best-loss)
+                              (apply + (map :value best-loss))))]
+    (println (format "Loss for epoch %s: %s%s\n\n"
+                     (get network :epoch-count)
+                     loss-val
+                     (execute/pprint-executed-loss-fn loss-fn)))
+    (when (or (nil? current-best-loss)
+              (< (double loss-val) (double current-best-loss)))
       (println "Saving network")
       (reset! best-network-atom
-              (save-network context network node-loss-map initial-description network-filename))
+              (save-network context network loss-fn
+                            initial-description network-filename))
       (when best-network-function
         ;;We use the same format here as the output of the evaluate network function below
         ;;so that clients can use the same network display system.  This is why we have data
@@ -61,27 +63,24 @@ in initial description.  Else returns the initial description"
         (best-network-function {:inferences (ds/batches->columnsv inferences)
                                 :labels (ds/batches->columnsv cv-output)
                                 :data cv-columnar-input
-                                :loss node-loss-map}))))
+                                :loss-fn loss-fn}))))
   true)
 
 
 (defn create-context
   "Attempt to create a gpu context.  If that fails create a cpu context."
-  [& {:keys [datatype force-cpu? force-gpu?]
-      :or {datatype :float}}]
+  [& {:keys [datatype force-gpu?]
+      :or {datatype :float force-gpu? false}}]
   (ce/create-context (fn []
-                       (or (when-not force-cpu?
-                             (try
+                       (if force-gpu?
+                         (try
                                (require 'think.compute.nn.cuda-backend)
                                ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
                                (catch Exception e
-                                 (println (format "Failed to create cuda backend (%s); will use cpu backend"
-                                                  e))
-                                 (when force-gpu?
-                                   (throw e))
-                                 nil)))
-                           (cpu-backend/create-cpu-backend datatype)))))
-
+                                 (println (format "Failed to create cuda backend (%s); will use cpu backend" e))
+                                   (throw e) 
+                                 nil))
+                       (cpu-backend/create-cpu-backend datatype)))))
 
 (defn backup-trained-network
   [network-filestem]
@@ -129,17 +128,21 @@ we continue to train forever.
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
              optimiser
+             reset-score
              force-gpu?]
       :or {batch-size 128
            network-filestem default-network-filestem
            optimiser (cortex-opt/adam)
+           reset-score false
            force-gpu? true}}]
   (resource/with-resource-context
     (let [network-filename (str network-filestem ".nippy")
           ;;Backup the trained network if we haven't already
           network (if-let [loaded-network (load-network network-filename
                                                         initial-description)]
-                    loaded-network
+                    (if reset-score
+                      (assoc loaded-network :cv-loss {})
+                      loaded-network)
                     (do
                       (backup-trained-network network-filestem)
                       (merge network
@@ -161,7 +164,10 @@ we continue to train forever.
                                    best-network-atom network-filename initial-description
                                    best-network-fn cv-columnar-input cv-labels)]
       (println "Training network:")
-      (network/print-layer-summary network)
+      (network/print-layer-summary (-> network
+                                       traverse/auto-bind-io
+                                       (traverse/network->training-traversal
+                                        (ds/dataset->stream->size-map dataset))))
       (->> (if epoch-count
              (take epoch-count train-sequence)
              train-sequence)

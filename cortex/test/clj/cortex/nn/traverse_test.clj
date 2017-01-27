@@ -11,16 +11,19 @@
 (def mnist-description-with-toys
   [(layers/input 28 28 1)
    (layers/multiplicative-dropout 0.1)
-   (layers/convolutional 5 0 1 20)
+   (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.001})
    (layers/max-pooling 2 0 2)
    (layers/relu)
    (layers/dropout 0.75)
-   (layers/convolutional 5 0 1 50)
+   (layers/convolutional 5 0 1 50 :l2-regularization 0.01)
    (layers/max-pooling 2 0 2)
    (layers/relu)
    (layers/dropout 0.75)
    (layers/batch-normalization 0.9)
-   (layers/linear->relu 500) ;;If you use this description put that at 1000
+   (layers/linear 500) ;;If you use this description put that at 1000
+   (layers/relu :id :feature :center-loss {:labels {:stream :labels}
+                                           :lambda 0.05
+                                           :alpha 0.9})
    (layers/dropout 0.5)
    (layers/linear->softmax 10)])
 
@@ -43,7 +46,8 @@
   [{:keys [forward backward] :as traversal}]
   (assoc traversal
          :forward (realize-traversal-pass forward)
-         :backward (realize-traversal-pass backward)))
+         :backward (realize-traversal-pass backward)
+         :loss-function (vec (get traversal :loss-function))))
 
 
 (defn minimal-diff
@@ -53,16 +57,24 @@
        vec))
 
 
-(deftest build-big-description
+(defn build-big-description
+  []
   (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))]
-        network (-> (network/build-network mnist-description-with-toys)
-                    (traverse/bind-input-bindings input-bindings)
-                    (traverse/bind-output-bindings output-bindings))
-        gradient-descent (->> (traverse/network->training-traversal network)
+        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))]]
+    (-> (network/build-network mnist-description-with-toys)
+        (traverse/bind-input-bindings input-bindings)
+        (traverse/bind-output-bindings output-bindings))))
+
+(def stream->size-map {:data 768
+                       :labels 10})
+
+
+(deftest big-description
+  (let [network (build-big-description)
+        gradient-descent (->> (traverse/network->training-traversal network stream->size-map)
                               :traversal
                               realize-traversals)
-        inference-mem (->> (traverse/network->inference-traversal network)
+        inference-mem (->> (traverse/network->inference-traversal network stream->size-map)
                            :traversal
                            realize-traversals)]
     (is (= 434280 (get network :parameter-count)))
@@ -71,82 +83,101 @@
                        (reduce +))))
     (is (= [nil nil]
            (minimal-diff
-            [{:id :dropout-1, :incoming [{:input-stream :data}], :outgoing [{:id :convolutional-1}]}
-             {:id :convolutional-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]}
-             {:id :max-pooling-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :relu-1}]}
-             {:id :relu-1, :incoming [{:id :relu-1}], :outgoing [{:id :dropout-2}]}
-             {:id :dropout-2, :incoming [{:id :dropout-2}], :outgoing [{:id :convolutional-2}]}
-             {:id :convolutional-2, :incoming [{:id :convolutional-2}], :outgoing [{:id :max-pooling-2}]}
-             {:id :max-pooling-2, :incoming [{:id :max-pooling-2}], :outgoing [{:id :relu-2}]}
-             {:id :relu-2, :incoming [{:id :relu-2}], :outgoing [{:id :dropout-3}]}
-             {:id :dropout-3, :incoming [{:id :dropout-3}], :outgoing [{:id :batch-normalization-1}]}
-             {:id :batch-normalization-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
-             {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :relu-3}]}
-             {:id :relu-3, :incoming [{:id :relu-3}], :outgoing [{:id :dropout-4}]}
-             {:id :dropout-4, :incoming [{:id :dropout-4}], :outgoing [{:id :linear-2}]}
-             {:id :linear-2, :incoming [{:id :linear-2}], :outgoing [{:id :softmax-1}]}
-             {:id :softmax-1,
-              :incoming [{:id :softmax-1}],
-              :outgoing [{:output-id :softmax-1}]}]
+            [{:id :dropout-1, :incoming [{:input-stream :data}], :outgoing [{:id :dropout-1}]}
+             {:id :convolutional-1, :incoming [{:id :dropout-1}], :outgoing [{:id :convolutional-1}]}
+             {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]}
+             {:id :relu-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :relu-1}]}
+             {:id :dropout-2, :incoming [{:id :relu-1}], :outgoing [{:id :dropout-2}]}
+             {:id :convolutional-2, :incoming [{:id :dropout-2}], :outgoing [{:id :convolutional-2}]}
+             {:id :max-pooling-2, :incoming [{:id :convolutional-2}], :outgoing [{:id :max-pooling-2}]}
+             {:id :relu-2, :incoming [{:id :max-pooling-2}], :outgoing [{:id :relu-2}]}
+             {:id :dropout-3, :incoming [{:id :relu-2}], :outgoing [{:id :dropout-3}]}
+             {:id :batch-normalization-1, :incoming [{:id :dropout-3}], :outgoing [{:id :batch-normalization-1}]}
+             {:id :linear-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
+             {:id :feature, :incoming [{:id :linear-1}], :outgoing [{:id :feature}]}
+             {:id :dropout-4, :incoming [{:id :feature}], :outgoing [{:id :dropout-4}]}
+             {:id :linear-2, :incoming [{:id :dropout-4}], :outgoing [{:id :linear-2}]}
+             {:id :softmax-1, :incoming [{:id :linear-2}], :outgoing [{:output-id :softmax-1}]}]
             (get gradient-descent :forward))))
     (is (= [nil nil]
            (minimal-diff
-            {{:id :max-pooling-2} {:id :max-pooling-2, :size 3200},
-             {:id :convolutional-1} {:id :convolutional-1, :size 784},
-             {:id :batch-normalization-1}
-             {:id :batch-normalization-1, :size 800},
-             {:id :relu-2} {:id :relu-2, :size 800},
-             {:id :dropout-3} {:id :dropout-3, :size 800},
-             {:id :linear-2} {:id :linear-2, :size 500},
-             {:id :softmax-1} {:id :softmax-1, :size 10},
-             {:id :relu-3} {:id :relu-3, :size 500},
-             {:input-stream :data} {:input-stream :data, :size 784},
-             {:id :dropout-4} {:id :dropout-4, :size 500},
-             {:id :max-pooling-1} {:id :max-pooling-1, :size 11520},
-             {:id :linear-1} {:id :linear-1, :size 800},
-             {:id :relu-1} {:id :relu-1, :size 2880},
+            {{:id :batch-normalization-1} {:id :batch-normalization-1, :size 800},
+             {:id :convolutional-1} {:id :convolutional-1, :size 11520},
+             {:id :convolutional-2} {:id :convolutional-2, :size 3200},
+             {:id :dropout-1} {:id :dropout-1, :size 784},
              {:id :dropout-2} {:id :dropout-2, :size 2880},
-             {:output-id :softmax-1}
-             {:output-id :softmax-1,
-              :output-stream :labels,
-              :loss {:type :softmax-loss }
-              :size 10},
-             {:id :convolutional-2} {:id :convolutional-2, :size 2880}}
+             {:id :dropout-3} {:id :dropout-3, :size 800},
+             {:id :dropout-4} {:id :dropout-4, :size 500},
+             {:id :linear-1} {:id :linear-1, :size 500},
+             {:id :linear-2} {:id :linear-2, :size 10},
+             {:id :max-pooling-1} {:id :max-pooling-1, :size 2880},
+             {:id :max-pooling-2} {:id :max-pooling-2, :size 800},
+             {:id :relu-1} {:id :relu-1, :size 2880},
+             {:id :relu-2} {:id :relu-2, :size 800},
+             {:input-stream :data} {:input-stream :data, :size 784},
+             {:id :feature} {:id :feature :size 500},
+             {:output-id :softmax-1} {:loss {:type :softmax-loss},
+                                      :output-id :softmax-1,
+                                      :output-stream :labels,
+                                      :size 10}}
             (get gradient-descent :buffers))))
     (is (= [nil nil]
            (minimal-diff
-            [{:id :convolutional-1, :incoming [{:input-stream :data}], :outgoing [{:id :max-pooling-1}]}
-             {:id :max-pooling-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :relu-1}]}
-             {:id :relu-1, :incoming [{:id :relu-1}], :outgoing [{:id :convolutional-2}]}
-             {:id :convolutional-2, :incoming [{:id :convolutional-2}], :outgoing [{:id :max-pooling-2}]}
-             {:id :max-pooling-2, :incoming [{:id :max-pooling-2}], :outgoing [{:id :relu-2}]}
-             {:id :relu-2, :incoming [{:id :relu-2}], :outgoing [{:id :batch-normalization-1}]}
-             {:id :batch-normalization-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
-             {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :relu-3}]}
-             {:id :relu-3, :incoming [{:id :relu-3}], :outgoing [{:id :linear-2}]}
-             {:id :linear-2, :incoming [{:id :linear-2}], :outgoing [{:id :softmax-1}]}
-             {:id :softmax-1,
-              :incoming [{:id :softmax-1}],
-              :outgoing [{:output-id :softmax-1}]}]
+            [{:type :softmax-loss,
+              :output {:type :node-output, :node-id :softmax-1},
+              :labels {:type :stream, :stream :labels}}
+             {:type :center-loss,
+              :alpha 0.9,
+              :lambda 0.05,
+              :output {:type :node-output, :node-id :feature},
+              :labels {:stream :labels}
+              :centers {:buffer-id :center-loss-1}
+              :label-indexes {:id :center-loss-1-label-indexes-1}
+              :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}
+             {:type :l2-regularization,
+              :lambda 0.01,
+              :output {:type :node-output, :node-id :convolutional-2}}
+             {:type :l1-regularization,
+              :lambda 0.001,
+              :output
+              {:type :node-parameter,
+               :node-id :convolutional-1,
+               :parameter :weights}}]
+            (get gradient-descent :loss-function))))
+    (is (= [nil nil]
+           (minimal-diff
+            [{:id :convolutional-1, :incoming [{:input-stream :data}], :outgoing [{:id :convolutional-1}]}
+             {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]}
+             {:id :relu-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :relu-1}]}
+             {:id :convolutional-2, :incoming [{:id :relu-1}], :outgoing [{:id :convolutional-2}]}
+             {:id :max-pooling-2, :incoming [{:id :convolutional-2}], :outgoing [{:id :max-pooling-2}]}
+             {:id :relu-2, :incoming [{:id :max-pooling-2}], :outgoing [{:id :relu-2}]}
+             {:id :batch-normalization-1, :incoming [{:id :relu-2}], :outgoing [{:id :batch-normalization-1}]}
+             {:id :linear-1, :incoming [{:id :batch-normalization-1}], :outgoing [{:id :linear-1}]}
+             {:id :feature, :incoming [{:id :linear-1}], :outgoing [{:id :feature}]}
+             {:id :linear-2, :incoming [{:id :feature}], :outgoing [{:id :linear-2}]}
+             {:id :softmax-1, :incoming [{:id :linear-2}], :outgoing [{:output-id :softmax-1}]}]
             (get inference-mem :forward))))
-    (is (= {{:id :max-pooling-2} {:id :max-pooling-2, :size 3200},
-            {:id :batch-normalization-1}
-            {:id :batch-normalization-1, :size 800},
-            {:id :relu-2} {:id :relu-2, :size 800},
-            {:id :linear-2} {:id :linear-2, :size 500},
-            {:id :softmax-1} {:id :softmax-1, :size 10},
-            {:id :relu-3} {:id :relu-3, :size 500},
-            {:input-stream :data} {:input-stream :data, :size 784},
-            {:id :max-pooling-1} {:id :max-pooling-1, :size 11520},
-            {:id :linear-1} {:id :linear-1, :size 800},
-            {:id :relu-1} {:id :relu-1, :size 2880},
-            {:output-id :softmax-1}
-            {:output-id :softmax-1,
-             :output-stream :labels,
-             :loss {:type :softmax-loss}
-             :size 10},
-            {:id :convolutional-2} {:id :convolutional-2, :size 2880}}
-           (get inference-mem :buffers)))))
+    (is (= [nil nil]
+           (minimal-diff
+            {{:id :batch-normalization-1} {:id :batch-normalization-1, :size 800},
+             {:id :convolutional-1} {:id :convolutional-1, :size 11520},
+             {:id :convolutional-2} {:id :convolutional-2, :size 3200},
+             {:id :linear-1} {:id :linear-1, :size 500},
+             {:id :linear-2} {:id :linear-2, :size 10},
+             {:id :max-pooling-1} {:id :max-pooling-1, :size 2880},
+             {:id :max-pooling-2} {:id :max-pooling-2, :size 800},
+             {:id :relu-1} {:id :relu-1, :size 2880},
+             {:id :relu-2} {:id :relu-2, :size 800},
+             {:input-stream :data} {:input-stream :data, :size 784},
+             {:id :feature} {:id :feature :size 500},
+             {:output-id :softmax-1} {:loss {:type :softmax-loss},
+                                      :output-id :softmax-1,
+                                      :output-stream :labels,
+                                      :size 10}}
+            (get inference-mem :buffers))))))
+
+(def test-data (atom nil))
 
 
 (deftest non-trainable-zero-attenuation
@@ -158,18 +189,38 @@
                          trainable-layers)
         network (-> (network/build-network new-desc)
                     traverse/auto-bind-io
-                    traverse/network->training-traversal)
+                    (traverse/network->training-traversal stream->size-map))
         traversal (-> (get network :traversal)
                       realize-traversals)]
+    (reset! test-data traversal)
     (is (= [nil nil]
            (minimal-diff
-            [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :softmax-1}]}
-             {:id :linear-2, :incoming [{:id :softmax-1}], :outgoing [{:id :linear-2}]}
-             {:id :dropout-4, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
-             {:id :relu-3, :incoming [{:id :dropout-4}], :outgoing [{:id :relu-3}]}
-             {:id :linear-1, :incoming [{:id :relu-3}], :outgoing [{:id :linear-1}]}
-             {:id :batch-normalization-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}]
-            (get traversal :backward))))))
+            [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :linear-2}]}
+             {:id :linear-2, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
+             {:id :dropout-4, :incoming [{:id :dropout-4}], :outgoing [{:id :feature}]}
+             {:id :feature, :incoming [{:id :feature}], :outgoing [{:id :linear-1}]}
+             {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}
+             {:id :batch-normalization-1,
+              :incoming [{:id :batch-normalization-1}],
+              :outgoing [{:id :dropout-3}]}]
+            (get traversal :backward))))
+    ;;Note that loss functions on non-trainable 'parameters' do not survive however
+    ;;loss functions on non-trainable 'layers' do because they change the input gradients
+    ;;for previous layers.
+    (is (= [nil nil]
+           (minimal-diff
+            [{:labels {:stream :labels, :type :stream},
+              :output {:node-id :softmax-1, :type :node-output},
+              :type :softmax-loss}
+             {:type :center-loss,
+              :alpha 0.9,
+              :labels {:stream :labels},
+              :lambda 0.05,
+              :output {:type :node-output, :node-id :feature},
+              :centers {:buffer-id :center-loss-1}
+              :label-indexes {:id :center-loss-1-label-indexes-1}
+              :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}]
+            (get traversal :loss-function))))))
 
 
 (deftest non-trainable-node-non-trainable
@@ -181,18 +232,34 @@
                          trainable-layers)
         network (-> (network/build-network new-desc)
                     traverse/auto-bind-io
-                    traverse/network->training-traversal)
+                    (traverse/network->training-traversal stream->size-map))
         traversal (-> (get network :traversal)
                       realize-traversals)]
     (is (= [nil nil]
            (minimal-diff
-            [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :softmax-1}]}
-             {:id :linear-2, :incoming [{:id :softmax-1}], :outgoing [{:id :linear-2}]}
-             {:id :dropout-4, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
-             {:id :relu-3, :incoming [{:id :dropout-4}], :outgoing [{:id :relu-3}]}
-             {:id :linear-1, :incoming [{:id :relu-3}], :outgoing [{:id :linear-1}]}
-             {:id :batch-normalization-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}]
-            (get traversal :backward))))))
+             [{:id :softmax-1, :incoming [{:output-id :softmax-1}], :outgoing [{:id :linear-2}]}
+              {:id :linear-2, :incoming [{:id :linear-2}], :outgoing [{:id :dropout-4}]}
+              {:id :dropout-4, :incoming [{:id :dropout-4}], :outgoing [{:id :feature}]}
+              {:id :feature, :incoming [{:id :feature}], :outgoing [{:id :linear-1}]}
+              {:id :linear-1, :incoming [{:id :linear-1}], :outgoing [{:id :batch-normalization-1}]}
+              {:id :batch-normalization-1,
+               :incoming [{:id :batch-normalization-1}],
+               :outgoing [{:id :dropout-3}]}]
+             (get traversal :backward))))
+    (is (= [nil nil]
+           (minimal-diff
+             [{:labels {:stream :labels, :type :stream},
+               :output{ :node-id :softmax-1, :type :node-output},
+              :type :softmax-loss}
+              {:type :center-loss,
+               :alpha 0.9,
+               :labels {:stream :labels},
+               :lambda 0.05,
+               :output {:type :node-output, :node-id :feature},
+               :centers {:buffer-id :center-loss-1}
+               :label-indexes {:id :center-loss-1-label-indexes-1}
+               :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}]
+             (get traversal :loss-function))))))
 
 (deftest appending-layers-to-network
   "This test ensures that a network built by piecing together a built-network
@@ -201,41 +268,39 @@
         src-desc (flatten mnist-description-with-toys)
         bottom-layers (take layer-split src-desc)
         bottom-network (-> (network/build-network bottom-layers)
-                         traverse/auto-bind-io
-                         traverse/network->training-traversal)
+                         traverse/auto-bind-io)
         ;; Added io binding and traversals to make sure that when
         ;; the network is modified and rebuilt, these 2 steps are also rebuilt correctly
 
         top-layers (drop layer-split src-desc)
         top-network-desc (network/assoc-layers-to-network bottom-network top-layers)
         top-network (-> (network/build-network top-network-desc)
-                      traverse/auto-bind-io
-                      traverse/network->training-traversal)
+                      traverse/auto-bind-io)
 
         traversal-after-stacking (-> (get top-network :traversal)
                     realize-traversals)
 
         original-network (-> (network/build-network mnist-description-with-toys)
-                  traverse/auto-bind-io
-                  traverse/network->training-traversal)
+                           traverse/auto-bind-io)
+
         original-traversal (-> (get original-network :traversal)
                              realize-traversals)
 
-        inference-mem-top (->> (traverse/network->inference-traversal top-network)
-                        :traversal
-                        realize-traversals)
+        inference-mem-top (->> (traverse/network->inference-traversal top-network stream->size-map)
+                            :traversal
+                            realize-traversals)
 
-        inference-mem-original (->> (traverse/network->inference-traversal original-network)
-                        :traversal
-                        realize-traversals)
+        inference-mem-original (->> (traverse/network->inference-traversal original-network stream->size-map)
+                                 :traversal
+                                 realize-traversals)
 
-        gradient-descent-top (->> (traverse/network->training-traversal top-network)
-                           :traversal
-                           realize-traversals)
+        gradient-descent-top (->> (traverse/network->training-traversal top-network stream->size-map)
+                               :traversal
+                               realize-traversals)
 
-        gradient-descent-original (->> (traverse/network->training-traversal original-network)
-                           :traversal
-                           realize-traversals)
+        gradient-descent-original (->> (traverse/network->training-traversal original-network stream->size-map)
+                                    :traversal
+                                    realize-traversals)
         layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
     (is (= [nil nil]
            (minimal-diff
@@ -261,14 +326,14 @@
 
 (deftest remove-layers-from-network
   (let [mnist-net (-> (network/build-network mnist-description-with-toys)
-                  traverse/auto-bind-io
-                  traverse/network->training-traversal)
-        chopped-net (network/dissoc-layers-from-network mnist-net :relu-3)]
-    (is (= #{:softmax-1 :linear-2 :dropout-4 :relu-3}
+                    traverse/auto-bind-io
+                    (traverse/network->training-traversal stream->size-map))
+        chopped-net (network/dissoc-layers-from-network mnist-net :dropout-4)]
+    (is (= #{:softmax-1 :linear-2 :dropout-4}
            (clojure.set/difference
              (set (keys (get-in mnist-net [:layer-graph :id->node-map])))
              (set (keys (get-in chopped-net [:layer-graph :id->node-map]))))))
-    (is (= #{[:relu-3 :dropout-4] [:dropout-4 :linear-2] [:linear-2 :softmax-1] [:linear-1 :relu-3]}
+    (is (= #{[:feature :dropout-4] [:dropout-4 :linear-2] [:linear-2 :softmax-1]}
            (clojure.set/difference
              (set (get-in mnist-net [:layer-graph :edges]))
              (set (get-in chopped-net [:layer-graph :edges])))))

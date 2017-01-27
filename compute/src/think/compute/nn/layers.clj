@@ -8,7 +8,9 @@ implementation as possible."
             [think.compute.driver :as drv]
             [clojure.core.matrix :as m]
             [cortex.util :as util]
-            [think.compute.nn.protocols :as compute-protocols]))
+            [think.compute.nn.protocols :as compute-protocols]
+            [think.resource.core :as resource]
+            [think.datatype.core :as dtype]))
 
 
 (set! *warn-on-reflection* true)
@@ -170,3 +172,62 @@ and then forward many times for every parameter of the network."
                         (nn-backend/new-array backend [(get layer :input-size)])
                         (atom 1.0)
                         (nn-backend/create backend layer batch-size)))
+
+
+(defrecord Prelu [backend layer select-buffer
+                  neg-scale-indexes neg-scale-expanded
+                  monotonic-indexes scale-buffer]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (let [input (first-buffer input-buffers)
+          output (first-buffer output-buffers)
+          neg-scale (get-in parameter-buffers [:neg-scale :buffer])
+          stream (drv/get-stream backend)]
+
+
+      (math/select stream input select-buffer 1 0)
+      (drv/indexed-copy stream
+                        (math/device-buffer neg-scale)
+                        (math/device-buffer neg-scale-indexes)
+                        (math/device-buffer neg-scale-expanded)
+                        (math/device-buffer monotonic-indexes) 1)
+      (math/elem-mul stream 1.0 select-buffer 1 neg-scale-expanded 1 scale-buffer 1)
+      (math/select stream input select-buffer 0 1)
+      (math/sum stream 1.0 select-buffer 1.0 scale-buffer scale-buffer)
+      (math/elem-mul stream 1.0 scale-buffer 1 input 1 output 1)))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (let [input-gradient (first-gradient input-buffers)
+          input (first-buffer input-buffers)
+          output-gradient (first-gradient output-buffers)
+          stream (drv/get-stream backend)
+          neg-scale-gradient (get-in parameter-buffers [:neg-scale :gradient])]
+      (drv/memset stream (math/device-buffer neg-scale-gradient) 0 0 (m/ecount neg-scale-gradient))
+      ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output anyway
+      (math/elem-mul stream 1.0 output-gradient 1 input 1 select-buffer 1)
+      ;;sum into center gradient
+      (math/indirect-add stream
+                         1.0 select-buffer monotonic-indexes
+                         1.0 neg-scale-gradient neg-scale-indexes
+                         neg-scale-gradient neg-scale-indexes 1)
+      ;;Input gradient is just the same elem mul times output gradient
+      (math/elem-mul stream 1.0 scale-buffer 1 output-gradient 1 input-gradient 1))))
+
+
+(defmethod create :prelu
+  [backend layer batch-size]
+  (let [input-size (long (get layer :input-size))
+        n-channels (long (get layer :input-channels input-size))
+        n-pixels (quot input-size n-channels)
+        driver (drv/get-driver backend)
+        stream (drv/get-stream backend)]
+    (->Prelu backend layer
+             (nn-backend/new-array backend [input-size] batch-size)
+             (math/array driver stream :int (->> (range n-channels)
+                                                 (map #(repeat n-pixels %))
+                                                 (repeat batch-size)
+                                                 flatten)
+                         batch-size)
+             (nn-backend/new-array backend [input-size] batch-size)
+             (math/array driver stream :int (range (* input-size (long batch-size))) batch-size)
+             (nn-backend/new-array backend [input-size] batch-size))))

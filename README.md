@@ -75,10 +75,9 @@ https://github.com/thinktopic/cortex/tree/cuda-8.0
 
 
 #### Mac OS
-My install steps on Mac OSX were:
+These instructions follow the gpu setup from [Tensor Flow](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#optional-setup-gpu-for-mac), i.e.:
 
-Followed the instructions for gpu setup from Tensor Flow
-Brew install coreutils and CUDA toolkit
+Install coreutils and cuda:
 
     $ brew install coreutils
     $ brew tap caskroom/cask
@@ -90,16 +89,13 @@ Add CUDA Tool kit to bash profile
     export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$CUDA_HOME/lib"
     export PATH="$CUDA_HOME/bin:$PATH"
 
-Download the CUDA Deep Neural Network libraries
+Download the CUDA Deep Neural Network [libraries](https://developer.nvidia.com/cudnn).
 
-Once downloaded and unzipping, moving the files:
+Once downloaded and unzipped, moving the files:
 
-    $ sudo mv include/cudnn.h /Developer/NVIDIA/CUDA-8.0/include/
-    $ sudo mv lib/libcudnn* /Developer/NVIDIA/CUDA-8.0/lib
-    $ sudo ln -s /Developer/NVIDIA/CUDA-8.0/lib/libcudnn* /usr/local/cuda/lib/
-
-
-
+    $ sudo mv include/cudnn.h /Developer/NVIDIA/CUDA-7.5/include/
+    $ sudo mv lib/libcudnn* /Developer/NVIDIA/CUDA-7.5/lib
+    $ sudo ln -s /Developer/NVIDIA/CUDA-7.5/lib/libcudnn* /usr/local/cuda/lib/
 
 ### See also:
 

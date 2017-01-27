@@ -54,6 +54,10 @@ and can be synchonized with the host or with each other using events."
                       host-buffer host-offset elem-count])
   (copy-device->device [stream dev-a dev-a-off dev-b dev-b-off elem-count])
   (memset [stream device-buffer device-offset elem-val elem-count])
+  (indexed-copy [stream dev-src dev-src-indexes dev-dst dev-dst-indexes n-elems-per-idx]
+    "Perform an indexed copy operation where dev-a, dev-b are of same datatype (double,float)
+while dev-a-indexes, dev-b-indexes are integer buffers.  n-elems-per-idx allows you to copy
+vectors of data.")
   (create-event [stream]
     "Create an event for synchronization.  The event is triggered when the stream
 executes to the event.")

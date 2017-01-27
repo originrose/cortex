@@ -4,7 +4,6 @@
             [clojure.java.io :as io]
             [think.parallel.core :as parallel]
             [taoensso.nippy :as nippy]
-            [think.compute.nn.cuda-backend :as gpu-compute]
             [think.compute.nn.cpu-backend :as cpu-backend]
             [cortex.optimise :as opt]
             [think.resource.core :as resource]
@@ -186,19 +185,19 @@ observations in each cell instead of just a count."
   (reset! last-network-eval network-eval)
   (let [class-names (get dataset :class-names)
         vec->label #(class-names (loss/max-index (vec %)))
-        _ (when-not (and (= 1 (count inferences))
-                         (= 1 (count labels))
-                         (= 1 (count data)))
-            (throw (ex-info "Classification datasets should have 1 output, label, input."
+        _ (when-not (and (contains? inferences :output)
+                         (contains? labels :labels)
+                         (contains? data :data))
+            (throw (ex-info "Classification datasets should have :output :labels and :data."
                             {:input (keys data)
                              :labels (keys labels)
                              :inferences (keys inferences)})))
         ;;There are a lot of firsts here because generically out network could take
         ;;many inputs and produce many outputs.  When we are training classification
         ;;tasks however we know this isn't the case; we have one input and one output
-        inferences (first (vals inferences))
-        data (first (vals data))
-        labels (first (vals labels))
+        inferences (get inferences :output)
+        data (get data :data)
+        labels (get labels :labels)
         inference-answer-patch-pairs (->> (interleave inferences
                                                       (map vec->label labels)
                                                       data)
@@ -358,8 +357,9 @@ observations in each cell instead of just a count."
 is provided then the best network will be loaded after N epochs and the
 training will continue from there."
   [dataset observation->image-fn initial-description
-   & {:keys [epoch-count batch-size confusion-matrix-atom]
+   & {:keys [epoch-count batch-size confusion-matrix-atom force-gpu?]
       :or {batch-size 128
+           force-gpu? false
            confusion-matrix-atom (atom {})}}]
   (let [network (-> (network/build-network initial-description)
                     traverse/auto-bind-io)]
@@ -370,4 +370,5 @@ training will continue from there."
                                                               observation->image-fn
                                                               dataset)
                                     :epoch-count epoch-count
+                                    :force-gpu? force-gpu?
                                     :batch-size batch-size))])))

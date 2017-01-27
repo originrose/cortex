@@ -7,12 +7,12 @@
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
             [cortex.verify.utils :as utils]
-            [cortex.util :as cu]
+            [cortex.gaussian :as cu]
             [think.resource.core :as resource]
             [cortex.nn.protocols :as cp]))
 
 (defn bind-test-network
-  [context network batch-size test-layer-id]
+  [context network batch-size stream->size-map test-layer-id]
   (let [test-layer-id :test
         input-bindings [(traverse/->input-binding :input :data)]
         output-bindings [(traverse/->output-binding test-layer-id :stream :labels)]]
@@ -24,7 +24,7 @@
       (network/build-network network)
       (traverse/bind-input-bindings network input-bindings)
       (traverse/bind-output-bindings network output-bindings)
-      (traverse/network->training-traversal network :keep-non-trainable? true)
+      (traverse/network->training-traversal network stream->size-map :keep-non-trainable? true)
       (assoc network :batch-size batch-size)
       (cp/bind-to-network context network {}))))
 
@@ -75,8 +75,14 @@
 for that network."
   [context network batch-size input output-gradient]
   (resource/with-resource-context
-    (let [test-layer-id :test]
-     (as-> (bind-test-network context network batch-size test-layer-id) network
+    (let [test-layer-id :test
+          data-size (/ (m/ecount input)
+                       batch-size)
+          labels-size (/ (m/ecount output-gradient)
+                         batch-size)]
+      (as-> (bind-test-network context network batch-size {:data data-size
+                                                           :labels labels-size}
+                               test-layer-id) network
        (forward-backward-bound-network context network input output-gradient test-layer-id)))))
 
 
@@ -399,6 +405,8 @@ for that network."
                                             [(layers/input item-count)
                                              (layers/dropout 0.8)]
                                             batch-size
+                                            {:data item-count
+                                             :labels item-count}
                                             test-layer-id)
          answer-seq
          (doall
@@ -433,6 +441,8 @@ for that network."
                                            [(layers/input item-count)
                                             (layers/multiplicative-dropout 0.5)]
                                            batch-size
+                                           {:data item-count
+                                            :labels item-count}
                                            test-layer-id)
         answer-seq
         (doall
@@ -461,7 +471,10 @@ for that network."
                                                  (cu/ensure-gaussian! 5 20)))))
         network (bind-test-network context [(layers/input input-size)
                                             (layers/batch-normalization 0.8)]
-                                   batch-size :test)
+                                   batch-size
+                                   {:data input-size
+                                    :labels input-size}
+                                   :test)
 
         input (input-data-vector-fn)
         output-gradient (repeat (* batch-size
@@ -549,3 +562,28 @@ for that network."
                                   0.19075144508670522 ])))
                   (:output lrn-data)
                   1e-4))))
+
+
+(defn prelu
+  [context]
+  (let [batch-size 10
+        channel-count 4
+        input-dim 3
+        input-size (* input-dim input-dim channel-count)
+        input (flatten (repeat batch-size (repeat (quot input-size 2) [-1 1])))
+        output-gradient (repeat (* batch-size input-size) 1)
+        {:keys [output input-gradient parameters]}
+        (forward-backward-test context
+                               [(layers/input input-dim input-dim channel-count)
+                                (layers/prelu)]
+                               batch-size
+                               input
+                               output-gradient)
+        output-answer (->> input
+                           (mapv #(if (< % 0)
+                                    -0.25
+                                    1.0)))]
+    (is (= output-answer
+           (vec (m/eseq output))))
+    (is (= [-10.0 10.0 -10.0 10.0]
+           (vec (m/eseq (get-in parameters [:neg-scale :buffer :gradient])))))))

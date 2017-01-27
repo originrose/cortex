@@ -4,13 +4,13 @@
             [cortex.nn.execute :as execute]
             [cortex.nn.protocols :as cp]
             [think.resource.core :as resource]
-            [clojure.pprint]
+            [clojure.pprint :as pprint]
             [clojure.core.matrix :as m]))
 
 
 
 (defn verify-model
-  ([context network input layer-output-vec]
+  ([context network layer-id->output]
    (when-not (contains? network :layer-graph)
      (throw (ex-info "Network appears to not be built (cortex.nn.network/build-network)"
                      {:network-keys (try (keys network)
@@ -21,12 +21,13 @@
    (resource/with-resource-context
      (let [[roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
            input-bindings {(first roots) :data}
+           input (get layer-id->output (first roots))
            output-bindings (->> leaves
                                 (map #(vector % {}))
                                 (into {}))
            network
            (as-> (traverse/auto-bind-io network) network
-             (traverse/network->inference-traversal network)
+             (traverse/network->inference-traversal network {:data (m/ecount input)})
              (assoc network :batch-size 1)
              (cp/bind-to-network context network {})
              (cp/traverse context network {:data input} :inference)
@@ -34,19 +35,20 @@
              (cp/save-to-network context network {:save-gradients? true}))
            traversal (get-in network [:traversal :forward])
            io-buffers (get-in network [:traversal :buffers])]
-       (->> layer-output-vec
-            (map (fn [{:keys [incoming id outgoing]}  keras-output]
-                   (when keras-output
-                     (let [keras-output (m/as-vector keras-output)
+       (pprint/pprint traversal)
+       (->> traversal
+            (map (fn [{:keys [incoming id outgoing]}]
+                   (when-let [import-output (get layer-id->output id)]
+                     (println "verifying output for layer:" id)
+                     (let [import-output (m/as-vector import-output)
                            buffer-data (m/as-vector
                                         (get-in io-buffers [(first outgoing) :buffer]))]
-                       (when-not (m/equals keras-output buffer-data 1e-3)
+                       (when-not (m/equals import-output buffer-data 1e-3)
                          {:cortex-input (m/as-vector (get-in io-buffers [(first incoming) :buffer]))
-                          :import-output keras-output
+                          :import-output import-output
                           :cortex-output buffer-data
-                          :layer (get-in network [:layer-graph :id->node-map id])}))))
-                 traversal)
+                          :layer (get-in network [:layer-graph :id->node-map id])})))))
             (remove nil?)
             vec))))
-  ([context {:keys [model input layer-outputs]}]
-   (verify-model context model input layer-outputs)))
+  ([context {:keys [model layer-id->output]}]
+   (verify-model context model layer-id->output)))

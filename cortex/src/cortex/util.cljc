@@ -70,38 +70,6 @@
 
 ;;;; Random number generation
 
-#?(:clj
-   (do
-     (def ^Random RAND-GENERATOR (Random.))
-
-     (defn rand-normal ^double []
-       (.nextDouble RAND-GENERATOR))
-
-     (defn rand-gaussian ^double []
-       (.nextGaussian RAND-GENERATOR)))
-   :cljs
-   (do
-     (defn rand-gaussian* [mu sigma]
-       ;; This function implements the Kinderman-Monahan ratio method:
-       ;;  A.J. Kinderman & J.F. Monahan
-       ;;  Computer Generation of Random Variables Using the Ratio of Uniform Deviates
-       ;;  ACM Transactions on Mathematical Software 3(3) 257-260, 1977
-       (let [u1  (rand)
-             u2* (rand)
-             u2 (- 1. u2*)
-             s (* 4 (/ (Math/exp (- 0.5)) (Math/sqrt 2.)))
-             z (* s (/ (- u1 0.5) u2))
-             zz (+ (* 0.25 z z) (Math/log u2))]
-         (if (> zz 0)
-           (recur mu sigma)
-           (+ mu (* sigma z)))))
-
-     (defn rand-normal []
-       (rand))
-
-     (defn rand-gaussian []
-       (rand-gaussian* 0 1.0))))
-
 ;;;; Sequences
 
 (defn seq-like?
@@ -256,80 +224,6 @@
      (defmethod print-method ~class
        [obj# ^Writer writer#]
        (.write writer# ^String (~str-fn obj#)))))
-
-(defn calc-mean-variance
-  [data]
-  (let [num-elems (double (m/ecount data))
-        elem-sum (double (m/esum data))]
-    (if (= num-elems 0.0)
-      {:mean 0
-       :variance 0}
-      (let [mean (/ elem-sum num-elems)
-            variance (/ (double (m/ereduce (fn [^double sum val]
-                                             (let [temp-val (- mean (double val))]
-                                               (+ sum (* temp-val temp-val))))
-                                           0.0
-                                           data))
-                        num-elems)]
-        {:mean mean
-         :variance variance}))))
-
-
-(defn ensure-gaussian!
-  [data ^double mean ^double variance]
-  (let [actual-stats (calc-mean-variance data)
-        actual-variance (double (:variance actual-stats))
-        actual-mean (double (:mean actual-stats))
-        variance-fix (Math/sqrt (double (if (> actual-variance 0.0)
-                                          (/ variance actual-variance)
-                                          1.0)))
-        adjusted-mean (* actual-mean variance-fix)
-        mean-fix (- mean adjusted-mean)]
-    (doall (m/emap! (fn [^double data-var]
-                      (+ (* variance-fix data-var)
-                         mean-fix))
-                    data))))
-
-
-(defonce weight-initialization-types
-  [:xavier
-   :bengio-glorot
-   :relu])
-
-
-(defn weight-initialization-variance
-  "http://andyljones.tumblr.com/post/110998971763/an-explanation-of-xavier-initialization"
-  [^long n-inputs ^long n-outputs initialization-type]
-  (condp = initialization-type
-    :xavier (/ 1.0 n-inputs)
-    :bengio-glorot (/ 2.0 (+ n-inputs n-outputs))
-    :relu (/ 2.0 n-inputs)
-    (throw (Exception. (format "%s fails to match any initialization type."
-                               initialization-type)))))
-
-
-(defn weight-matrix
-  "Creates a randomised weight matrix.
-  Weights are gaussian values 0-centered with variance that is dependent upon
-  the type of initialization [xavier, bengio-glorot, relu].
-  http://andyljones.tumblr.com/post/110998971763/an-explanation-of-xavier-initialization.
-  Initialization defaults to xavier."
-  ([^long n-output ^long n-input initialization-type]
-   (let [mean 0.0
-         variance (weight-initialization-variance n-input n-output initialization-type)]
-     ;;Java's gaussian generated does not generate great gaussian values for small
-     ;;values of n (mean and variance will be > 20% off).  Even for large-ish (100-1000)
-     ;;ones the variance is usually off by around 10%.
-     (b/array (vec (repeatedly n-output
-                               #(ensure-gaussian! (double-array
-                                                   (vec (repeatedly
-                                                         n-input
-                                                         rand-gaussian)))
-                                                  mean variance))))))
-  ([^long n-output ^long n-input]
-   (if (= 1 n-output n-input)
-     (b/array [[0]])
-     (weight-matrix n-output n-input :xavier))))
 
 
 (defn identity-matrix

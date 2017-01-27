@@ -11,7 +11,7 @@
             [cortex.optimise :as opt]
             [cortex.loss :as loss]
             [clojure.core.matrix :as m]
-            [cortex.util :as cu]))
+            [cortex.gaussian :as gaussian]))
 
 
 (defn close-enough?
@@ -50,7 +50,11 @@
       (traverse/bind-input-bindings network input-bindings)
       (traverse/bind-output-bindings network output-bindings)
       (assoc network :batch-size batch-size)
-      (traverse/network->training-traversal network :keep-non-trainable? true)
+      (traverse/network->training-traversal network {:data (/ (m/ecount input)
+                                                              batch-size)
+                                                     :labels (/ (m/ecount output)
+                                                                batch-size)}
+                                            :keep-non-trainable? true)
       (cp/bind-to-network context network {:numeric-gradients? true})
       (cp/generate-numeric-gradients context network
                                      {:data input
@@ -89,9 +93,9 @@
   (let [batch-size 10
         input-size 20
         input (repeatedly batch-size
-                          #(-> (repeatedly input-size cu/rand-gaussian)
+                          #(-> (repeatedly input-size gaussian/rand-gaussian)
                                double-array
-                               (cu/ensure-gaussian! 5 20)))
+                               (gaussian/ensure-gaussian! 5 20)))
         output input]
     (-> (get-gradients context
                        [(layers/input input-size)
@@ -114,6 +118,23 @@
     (-> (get-gradients context
                        [(layers/input input-dim input-dim num-input-channels)
                         (layers/local-response-normalization :k 1 :n lrn-n :alpha 1.0 :beta 0.75)]
+                       input output (loss/mse-loss)
+                       1e-4 batch-size)
+        check-gradients)))
+
+
+(defn prelu-gradient
+  [context]
+  (let [batch-size 10
+        input-dim 3
+        n-channels 4
+        input-num-pixels (* input-dim input-dim)
+        n-input (* input-num-pixels n-channels)
+        input (flatten (repeat batch-size (repeat (quot n-input 2) [-1 1])))
+        output input]
+    (-> (get-gradients context
+                       [(layers/input input-dim input-dim n-channels)
+                        (layers/prelu)]
                        input output (loss/mse-loss)
                        1e-4 batch-size)
         check-gradients)))

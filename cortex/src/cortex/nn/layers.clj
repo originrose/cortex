@@ -1,3 +1,4 @@
+
 (ns cortex.nn.layers
   "Descriptions are the canonical representation of layers in cortex.  Implementations
 are expected to work with descriptions that are annotated with special information
@@ -44,8 +45,8 @@ at least:
 
 (defn- ensure-single-parent
   [previous-nodes node]
-  (when-not (= 1 (count previous-nodes))
-    (throw (ex-info "Node only takes a single node of input."
+  (when-not (> (count previous-nodes) 1)
+    '(throw (ex-info "Node only takes a single node of input."
                     {:node node
                      :previous previous-nodes})))
   (first previous-nodes))
@@ -98,6 +99,18 @@ at least:
             core matrix parameter shape for this particular buffer."
   [layer]
   (get (get-layer-metadata layer) :parameter-descriptions))
+
+
+(defn get-parameter-shape
+  "Get the shape of a given parameter."
+  [layer param-key]
+  (if-let [layer-param (->> (get-parameter-descriptions layer)
+                            (filter #(= param-key (get % :key)))
+                            first)]
+    ((get layer-param :shape-fn) layer)
+    (throw (ex-info "Parameter was not found on layer."
+                    {:layer layer
+                     :parameter param-key}))))
 
 
 (defn get-pass-set
@@ -443,6 +456,26 @@ This is for cudnn compatibility.")))
     {:type :local-response-normalization
      :k k :n n :alpha alpha :beta beta}
     (dissoc arg-map :k :n :alpha :beta))])
+
+
+(defmethod get-layer-metadata :prelu
+  [desc]
+  {:parameter-descriptions
+   [{:key :neg-scale
+     :type :scale
+     :shape-fn (fn [desc]
+                 [(get desc :input-channels (get desc :input-size))])
+     :initialization {:type :constant
+                      :value 0.25}}]
+   :pass-set #{:training :inference}})
+
+
+(defn prelu
+  "https://arxiv.org/pdf/1502.01852.pdf
+At this point we only support per-channel scale, not across channel scale.
+If the input contains no channels then you get a scale factor per input parameter."
+  []
+  [{:type :prelu}])
 
 
 (defn network-description

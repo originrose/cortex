@@ -31,7 +31,8 @@
             [clojure.string :as str]
             [cortex.optimise.protocols :as cp]
             [cortex.optimise.parameters]
-            [cortex.util :as util :refer [def-]]))
+            [cortex.util :as util :refer [def-]]
+            [cortex.gaussian :as gaussian]))
 
 ;;;; Protocol extensions
 
@@ -74,7 +75,7 @@
   ;; param-count-dimensional hypersphere, and then rescale it randomly.
   ;; See http://math.stackexchange.com/a/44701/160658 for information on generating
   ;; random unit vectors.
-  (->> (repeatedly (m/ecount center) util/rand-gaussian)
+  (->> (repeatedly (m/ecount center) gaussian/rand-gaussian)
     (m/array :vectorz)
     (m/normalise)
     ;; Not using (rand dist) allows for dist to be a vector.
