@@ -96,6 +96,19 @@ Once downloaded and unzipped, moving the files:
     $ sudo mv include/cudnn.h /Developer/NVIDIA/CUDA-8.0/include/
     $ sudo mv lib/libcudnn* /Developer/NVIDIA/CUDA-8.0/lib
     $ sudo ln -s /Developer/NVIDIA/CUDA-8.0/lib/libcudnn* /usr/local/cuda/lib/
+    
+Should you see a jni linking error similar to this
+
+```
+Retrieving org/bytedeco/javacpp-presets/cuda/8.0-1.2/cuda-8.0-1.2-macosx-x86_64.jar from central
+Exception in thread "main" java.lang.UnsatisfiedLinkError: no jnicudnn in java.library.path, compiling:(think/compute/nn/cuda_backend.c
+lj:82:28)
+        at clojure.lang.Compiler.analyze(Compiler.java:6688)
+        at clojure.lang.Compiler.analyze(Compiler.java:6625)
+        at clojure.lang.Compiler$HostExpr$Parser.parse(Compiler.java:1009)
+```
+
+Make sure you have installed the appropriate CUDNN for your version of CUDA. 
 
 ### See also:
 
