@@ -110,6 +110,8 @@ lj:82:28)
 
 Make sure you have installed the appropriate CUDNN for your version of CUDA. 
 
+If attempting a fresh install and run from `Master` you should also make sure to run `cortex/local-install.sh` before running an example (examples/suite-classification/trains.sh for example).
+
 ### See also:
 
 [Roadmap](ROADMAP.md)
