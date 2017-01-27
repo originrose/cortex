@@ -93,9 +93,9 @@ Download the CUDA Deep Neural Network [libraries](https://developer.nvidia.com/c
 
 Once downloaded and unzipped, moving the files:
 
-    $ sudo mv include/cudnn.h /Developer/NVIDIA/CUDA-7.5/include/
-    $ sudo mv lib/libcudnn* /Developer/NVIDIA/CUDA-7.5/lib
-    $ sudo ln -s /Developer/NVIDIA/CUDA-7.5/lib/libcudnn* /usr/local/cuda/lib/
+    $ sudo mv include/cudnn.h /Developer/NVIDIA/CUDA-8.0/include/
+    $ sudo mv lib/libcudnn* /Developer/NVIDIA/CUDA-8.0/lib
+    $ sudo ln -s /Developer/NVIDIA/CUDA-8.0/lib/libcudnn* /usr/local/cuda/lib/
 
 ### See also:
 
