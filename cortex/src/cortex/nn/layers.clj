@@ -222,8 +222,9 @@ channel 2 with n-outputs"
   [(merge-args {:type :relu} args)])
 (defn linear->relu
   [num-output & args]
-  (concat (apply linear num-output args)
-          (apply relu args)))
+  (vec
+    (concat (apply linear num-output args)
+            (apply relu args))))
 
 
 (defn logistic
@@ -231,8 +232,9 @@ channel 2 with n-outputs"
   [(merge-args {:type :logistic} args)])
 (defn linear->logistic
   [num-output & args]
-  (concat (apply linear num-output args)
-          (apply logistic args)))
+  (vec
+    (concat (apply linear num-output args)
+            (apply logistic args))))
 
 
 (defn tanh
@@ -240,8 +242,9 @@ channel 2 with n-outputs"
   [(merge-args {:type :tanh} args)])
 (defn linear->tanh
   [num-output & args]
-  (concat (apply linear num-output args)
-          (apply tanh args)))
+  (vec
+    (concat (apply linear num-output args)
+            (apply tanh args))))
 
 
 (defn dropout
