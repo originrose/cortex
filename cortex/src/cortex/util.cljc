@@ -30,6 +30,22 @@
   [name & decls]
   (list* `def (with-meta name (assoc (meta name) :private true)) decls))
 
+
+;;Utilities for dealing with map constructors
+(defn arg-list->arg-map
+  [args]
+  (when-not (= 0 (rem (count args) 2))
+    (throw (ex-info "Argument count must be evenly divisble by 2"
+                    {:arguments args})))
+  (->> (partition 2 args)
+       (map vec)
+       (into {})))
+
+
+(defn merge-args
+  [desc args]
+  (merge desc (arg-list->arg-map args)))
+
 ;;;; Timing
 
 (defmacro ctime*

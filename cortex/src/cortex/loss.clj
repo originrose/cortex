@@ -1,35 +1,23 @@
 (ns cortex.loss
-  "Definitions and implementations of cortex loss function terms.  A loss term is a function that takes
-a map of arguments and returns a single double number.  The loss function for a network is a weighted summation
-across a vector of terms.  The weight on any term is :lambda and is defined with a per-term-default in the loss
-metadata for that function type.  The default is 1.
+  "Definitions and implementations of cortex loss function terms.  A loss term is a function
+that takes a map of arguments and returns a single double number.  The loss function for a
+network is a weighted summation across a vector of terms.  The weight on any term is :lambda
+and is defined with a per-term-default in the loss metadata for that function type.  The
+default is 1.
 
-The loss terms can have any number of uniquely named arguments and each argument can bind to one of four
-different things.
+The loss terms can have any number of uniquely named arguments and each argument can bind to
+one of four different things.
 1.  A node output
 2.  A node parameter
 3.  A stream
 4.  Data tracked by the implementation with an initializer.
+5. An augmented stream.  A pure transformation from a source stream to another stream.
 
-The loss term can state which of it's arguments it produces gradients for when asked to produce gradients.
-This makes it a little easier for implementations to manage gradients when evaluating loss terms."
-  (:require [clojure.core.matrix :as m]))
-
-
-;;Utilities for dealing with map constructors
-(defn arg-list->arg-map
-  [args]
-  (when-not (= 0 (rem (count args) 2))
-    (throw (ex-info "Argument count must be evenly divisble by 2"
-                    {:arguments args})))
-  (->> (partition 2 args)
-       (map vec)
-       (into {})))
-
-
-(defn merge-args
-  [desc args]
-  (merge desc (arg-list->arg-map args)))
+The loss term can state which of it's arguments it produces gradients for when asked to produce
+gradients. This makes it a little easier for implementations to manage gradients when
+evaluating loss terms."
+  (:require [clojure.core.matrix :as m]
+            [cortex.util :refer [arg-list->arg-map merge-args]]))
 
 
 (defn stream->data->stream->size
@@ -51,11 +39,12 @@ to a stream->size member."
 There are some standard argument definitions:
 :output - loss-term contains? :node-id output of the node.
 :stream - loss-term contains? :stream the data coming from the data stream.
-:parameter - loss-term contains? :node-id :parameter and this is the value of the parameter of the node.
+:parameter - loss-term contains? :node-id :parameter and this is the value of the parameter of
+the node.
 
 In addition loss functions themselves can have parameters in that the network stores in its
-definition in parameter buffers.  This is useful in the case where the loss itself has some running
-means associated with it like in the form of center loss.
+definition in parameter buffers.  This is useful in the case where the loss itself has some
+running means associated with it like in the form of center loss.
 
 All losses have a default lambda which weights them against any other elements in the loss.
 
@@ -202,13 +191,11 @@ with the loss term itself."
 
 
 (defn get-loss-term-parameters
-  "A parameter for a loss term is an argument that has an initialization key.  This means it is data
-specific to that loss term that will be updated during the term's execution but it also needs to be
-saved if the network is saved.  Data specific to the loss term that does not need to be saved is
-expected to be created by the implementation of the term itself.  Note that there are at this time
-three sources of data for a loss term argument; it could be a parameter, it could be a network-path
-or it could be a stream.  These are mutually exlusive so we should never see a loss term with
-two or more of them."
+  "A parameter for a loss term is an argument that has an initialization key.  This means it is
+data specific to that loss term that will be updated during the term's execution but it also
+needs to be saved if the network is saved.  Data specific to the loss term that does not need to
+be saved is expected to be created by the implementation of the term itself.  These are mutually
+exlusive so we should never see a loss term with two or more of them."
   [loss-term]
   (get-loss-term-args-of-type loss-term :loss-term-parameter))
 
@@ -392,20 +379,22 @@ space of parameters."
   (->> loss-term-seq
        (reduce (fn [stream->buffer-map loss-term]
                  (->> (get-loss-term-augmented-streams loss-term)
-                      (reduce (fn [stream->buffer-map arg]
-                                (when-not (get arg :id)
-                                  (throw (ex-info "Augmented stream arguments must have unique ids"
-                                                  {:argument arg
-                                                   :loss-term loss-term})))
-                                (let [augmented-data (get-loss-term-stream-augment loss-term arg
-                                                                                   stream->buffer-map)]
-                                 (assoc stream->buffer-map
-                                        (get arg :id)
-                                        (if (contains? arg :datatype)
-                                          {:datatype (get arg :datatype)
-                                           :data augmented-data}
-                                          augmented-data))))
-                              stream->buffer-map)))
+                      (reduce
+                       (fn [stream->buffer-map arg]
+                         (when-not (get arg :id)
+                           (throw (ex-info "Augmented stream arguments must have unique ids"
+                                           {:argument arg
+                                            :loss-term loss-term})))
+                         (let [augmented-data (get-loss-term-stream-augment
+                                               loss-term arg
+                                               stream->buffer-map)]
+                           (assoc stream->buffer-map
+                                  (get arg :id)
+                                  (if (contains? arg :datatype)
+                                    {:datatype (get arg :datatype)
+                                     :data augmented-data}
+                                    augmented-data))))
+                       stream->buffer-map)))
                stream->buffer-map)))
 
 
@@ -498,9 +487,10 @@ the actual log-loss of the softmax unit."
 
 
 (defn l1-regularization
-  "Penalize the network for the sum of the absolute values of a given buffer.  This pushes all entries of the buffer
-at a constant rate towards zero and is purported to lead to more sparse representations.  This could be applied
-to either a trainable parameter or to a node in which case it will be applied to the node's output buffer."
+  "Penalize the network for the sum of the absolute values of a given buffer.
+This pushes all entries of the buffer at a constant rate towards zero and is purported
+to lead to more sparse representations.  This could be applied to either a trainable
+parameter or to a node in which case it will be applied to the node's output buffer."
   [& args]
   (merge-args
    {:type :l1-regularization}
@@ -542,10 +532,10 @@ entry in addition to a node-id."
 
 
 (defn l2-regularization
-  "Penalize the network for the magnitude of a given buffer.  This will penalize large entries in the buffer
-  exponentially more than smaller entries leading to a buffer that tends to produce an even distribution of small
-  entries.  Can be applied to either a trainable parameter or a node in which case it will be applied to
-  the node's output buffer."
+  "Penalize the network for the magnitude of a given buffer.  This will penalize large entries
+in the buffer exponentially more than smaller entries leading to a buffer that tends to produce
+an even distribution of small  entries.  Can be applied to either a trainable parameter or a
+node in which case it will be applied to the node's output buffer."
   [& args]
   (merge-args
    {:type :l2-regularization}
