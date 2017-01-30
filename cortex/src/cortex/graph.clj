@@ -7,7 +7,10 @@ taking a map of arguments.  Layers are functions which also have implicit input 
   arguments which correspond to the edges of the graph the layers attach to."
   (:require [cortex.util :as util]
             [clojure.set :as c-set]
-            [cortex.keyword-fn :as keyword-fn]))
+            [cortex.keyword-fn :as keyword-fn]
+            [cortex.buffer-initialization :as buf-init]
+            [clojure.core.matrix :as m]
+            [cortex.argument :as arg]))
 
 
 (defmulti get-node-metadata
@@ -112,7 +115,7 @@ If any of the predecessors does not exist an error will be thrown."
 
 (defn- set->ordered-vec
   [item-set item-seq]
-  (->> (filter item-set ordered-item-seq)
+  (->> (filter item-set item-seq)
        distinct
        vec))
 
@@ -144,7 +147,7 @@ If any of the predecessors does not exist an error will be thrown."
 
 (defn dfs-seq
   "Get a sequence of ids in dfs order."
-  [graph ]
+  [graph]
   (let [p->c-map (-> (parent->child-map graph)
                      (assoc :roots (roots graph)))]
     (->>
@@ -154,26 +157,156 @@ If any of the predecessors does not exist an error will be thrown."
      (drop 1))))
 
 
-(defn- generate-parameter-argument-buffer
-  [node-id graph argument]
+(defmulti initialize-graph-parameter-buffer
+  "Initialize a graph parameter buffer"
+  (fn
+    [graph node argument shape initialization]
+    (get initialization :type)))
 
-  )
+
+(defmethod initialize-graph-parameter-buffer :default
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer (assoc initialization :shape shape)))
+
+
+(defn- generate-parameter-argument-buffer
+  "Given a parameter argument generate it's buffer."
+  [node-id graph argument]
+  (let [node (get-node graph node-id)
+        expected-shape (try
+                         (keyword-fn/call-keyword-fn (get argument :shape-fn)
+                                                     graph node argument)
+                         (catch Throwable e
+                           (throw (ex-info "Failed to resolve and call shape function"
+                                           {:node-id node-id
+                                            :argument argument
+                                            :error e}))))]
+    (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
+      (do
+        (when-not (= expected-shape (m/shape existing-buffer))
+          (throw (ex-info "Existing buffer does not match expected shape"
+                          {:node-id node-id
+                           :existing-shape (m/shape existing-buffer)
+                           :expected-shape expected-shape})))
+        graph)
+      (let [param-buffer-id (util/generate-id (str (name (get node :type))
+                                                   (name (get argument :key)))
+                                              (set (keys (get graph :buffers))))
+            param-buffer
+            (if-let [user-supplied-buffer (get argument :buffer)]
+              (let [user-shape (m/shape user-supplied-buffer)]
+                (when-not (= user-shape expected-shape)
+                  (throw (ex-info "User supplied buffer is incorrect shape"
+                                  {:user-buffer-shape user-shape
+                                   :expected-shape expected-shape})))
+                user-supplied-buffer)
+              (initialize-graph-parameter-buffer graph node argument
+                                                 expected-shape
+                                                 (get argument :initialization)))]
+        (-> graph
+            (assoc-in [:buffers param-buffer-id :buffer param-buffer])
+            (update-in [:id->node-map node-id (get argument :key)] dissoc :buffer)
+            (update-in [:id->node-map node-id (get argument :key)]
+                       assoc :buffer-id param-buffer-id))))))
 
 
 (defn- generate-parameter-buffers
   [graph id]
-  (let [node (get-node graph id)
-        arguments ]
-    (->> (get-node-arguments node)
-         (filter (= :parameter (get % :type)))
-         (reduce (partial generate-parameter-argument-buffer id)
-                 graph))))
+  (->> (get-node graph id)
+       get-node-arguments
+       (filter #(= :parameter (get % :type)))
+       (reduce (partial generate-parameter-argument-buffer id)
+               graph)))
 
 
 (defn generate-parameters
   "Go through all the nodes in the graph and generate any parameter buffers
 that do not already exist.  Returns a new graph."
   [graph]
+  (reduce generate-parameter-buffers
+          graph
+          (dfs-seq graph)))
+
+
+(defn augment-streams
+  "Augment the streams in the map and return a new map of data."
+  [graph stream-map]
   (->> (dfs-seq graph)
-       (reduce generate-parameter-buffers
-               graph)))
+       (map #(get-node graph %))
+       (mapcat get-node-arguments)
+       (filter #(= :stream-augmentation (get % :type)))
+       (map arg/augmented-stream-arg->id)
+       (map (fn [{:keys [stream augmentation] :as arg}]
+              (when-not (contains? stream-map stream)
+                (throw (ex-info "Failed to find stream for augmentation"
+                                {:argument arg
+                                 :streams (vec (keys stream-map))})))
+              (try
+                [arg (keyword-fn/call-keyword-fn augmentation
+                                                 (get stream-map stream))]
+                (catch Throwable e
+                  (throw (ex-info "Failed to augment stream"
+                                  {:argument arg
+                                   :error e}))))))
+       (into {})
+       (merge stream-map)))
+
+(defmulti resolve-argument
+  "Resolve a particular argument returning a map containing
+at least :buffer if not both :buffer and :gradient."
+  (fn [graph node argument stream-map node-id->output-map]
+    (get argument :type)))
+
+
+(defmethod resolve-argument :stream
+  [graph node argument stream-map node-id->output-map]
+  (if-let [data (get stream-map (get argument :stream))]
+    {:buffer data}
+    (throw (ex-info "Failed to resolve argument"
+                    {:streams (keys stream-map)
+                     :argument argument}))))
+
+(defmethod resolve-argument :parameter
+  [graph node argument stream-map node-id->output-map]
+  (if-let [data (get-in graph [:buffers (get argument :buffer-id)])]
+    data
+    (throw (ex-info "Failed to resolve argument"
+                    {:argument argument
+                     :buffers (keys (get graph :buffers))}))))
+
+(defmethod resolve-argument :node-output
+  [graph node argument stream-map node-id->output-map]
+  (if-let [buffer (get node-id->output-map (get argument :node-id))]
+    buffer
+    (throw (ex-info "Failed to resolve argument"
+                    {:argument argument
+                     :node-outputs (keys node-id->output-map)}))))
+
+(defmethod resolve-argument :node-parameter
+  [graph node {:keys [node-id parameter] :as argument} stream-map node-id->output-map]
+  (let [node-buffer-id (get-in graph [:id->node-map node-id parameter :buffer-id])]
+    (if-let [buffer (get-in graph [:buffers node-buffer-id])]
+      buffer
+      (throw (ex-info "Failed to find node parameter"
+                      {:argument argument
+                       :node-ids (keys (get graph :id->node-map))
+                       :buffers (keys (get graph :buffers))})))))
+
+(defmethod resolve-argument :stream-augmentation
+  [graph node argument stream-map node-id->output-map]
+  (if-let [buffer (get stream-map (arg/augmented-stream-arg->id argument))]
+    {:buffer buffer}
+    (throw (ex-info "Failed to find argument"
+                    {:argument argument
+                     :streams (keys stream-map)}))))
+
+
+(defn resolve-arguments
+  "Resolve the arguments to a particular node.
+It is expected the stream map contains the augmented data if necessary."
+  [graph node stream-map node-id->output-map]
+  (->> (get-node-arguments node)
+       (map (fn [{:keys [key type] :as argument}]
+              [key (resolve-argument graph node argument
+                                     stream-map node-id->output-map)]))
+       (into {})))

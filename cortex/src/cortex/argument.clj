@@ -60,7 +60,7 @@ Defaults to assuming the function produces gradients for this argument."
    args))
 
 
-(defmethod get-argument-metasdata :node-parameter
+(defmethod get-argument-metadata :node-parameter
   [argument]
   {:gradients? true})
 
@@ -81,7 +81,12 @@ Defaults to assuming the function produces gradients for this argument."
 
 (defn ->parameter-arg
   "Bind to a parameter buffer.  Note that if a buffer is specified
-then the initializer for this argument is ignored and the buffer is used."
+then the initializer for this argument is ignored and the buffer is used.
+the shape function is a keyword function where the namespace, fn-name and
+possible arguments are encoded in map
+{:fn function
+:args args}.
+see cortex.keyword-fn namespace."
   [shape-fn-id initializer & args]
   (merge-args
    {:type :parameter
@@ -96,12 +101,18 @@ then the initializer for this argument is ignored and the buffer is used."
 
 
 (defn ->argumented-stream-arg
+  "Augmentation is a keyword function.  See cortex.keyword-fn."
   [stream-name augmentation & args]
   (merge-args
    {:type :stream-augmentation
     :stream stream-name
     :augmentation augmentation}
    args))
+
+
+(defn augmented-stream-arg->id
+  [argument]
+  (select-keys argument [:stream :augmentation]))
 
 
 (defmethod get-argument-metadata :stream-agumentation

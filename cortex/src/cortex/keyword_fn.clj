@@ -35,5 +35,5 @@ function returned will look like:
 
 
 (defn call-keyword-fn
-  [kwd-or-map args]
-  (apply (get-keywrod-fn kwd-or-map) args))
+  [kwd-or-map & args]
+  (apply (get-keyword-fn kwd-or-map) args))
