@@ -30,26 +30,38 @@ taking a map of arguments.  Layers are functions which also have implicit input 
     (last maps)))
 
 
-(defn get-node-arguments
-  "Get the node arguments 'before' being merged with the node
-buffers."
-  [node]
-  (->> (-> (get-node-metadata node)
-           (get :arguments {}))
-       (map (fn [[arg-key arg-data]]
-              (deep-merge (assoc arg-data :key arg-key)
-                          (get node arg-key {}))))))
-
 (defn get-node-argument
   [node arg-key]
-  (let [retval (->> (get-node-arguments node)
-                    (filter #(= arg-key (get % :key)))
-                    first)]
+  (let [retval (->> (get-node-metadata node)
+                    (#(get % arg-key)))]
     (when-not retval
       (throw (ex-info "Failed to find node argument"
                       {:node node
                        :argument-name arg-key})))
-    retval))
+    (let [retval (->> (assoc retval :key arg-key)
+                      (deep-merge retval (get node arg-key)))]
+      ;;Resolve the stream for the stream-augmentation argument dynamically
+      ;;as late as possible.
+      (if (= :stream-augmentation (get retval :type))
+        (let [stream-arg (get-node-argument node (get retval :argument))]
+          (when-not (= :stream (get stream-arg :type))
+            (throw (ex-info "Stream augmentation arguments most point to stream arguments"
+                            {:augmentation-arg retval
+                             :target-arg stream-arg})))
+          (assoc retval
+                 :stream
+                 (get stream-arg :stream)))
+        retval))))
+
+
+(defn get-node-arguments
+  "Get the node arguments 'before' being merged with the node
+buffers."
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       keys
+       (map #(get-node-argument node %))))
 
 
 (defmulti build-node
