@@ -46,6 +46,16 @@
   [desc args]
   (merge desc (arg-list->arg-map args)))
 
+
+(defn generate-id
+  [id-stem id-set]
+  (loop [idx 1]
+    (let [new-id (-> (format "%s-%s" id-stem idx)
+                     keyword)]
+      (if (contains? id-set new-id)
+        (recur (inc idx))
+        [new-id (conj id-set new-id)]))))
+
 ;;;; Timing
 
 (defmacro ctime*

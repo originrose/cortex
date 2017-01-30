@@ -17,7 +17,7 @@ The loss term can state which of it's arguments it produces gradients for when a
 gradients. This makes it a little easier for implementations to manage gradients when
 evaluating loss terms."
   (:require [clojure.core.matrix :as m]
-            [cortex.util :refer [arg-list->arg-map merge-args]]))
+            [cortex.util :refer [arg-list->arg-map merge-args generate-id]]))
 
 
 (defn stream->data->stream->size
@@ -337,16 +337,6 @@ containing the buffer coming from the network.
                       {:argument argument
                        :loss-term loss-term
                        :streams (vec (keys stream->buffer-map))})))))
-
-
-(defn- generate-id
-  [id-stem id-set]
-  (loop [idx 1]
-    (let [new-id (-> (format "%s-%s" id-stem idx)
-                     keyword)]
-      (if (contains? id-set new-id)
-        (recur (inc idx))
-        [new-id (conj id-set new-id)]))))
 
 
 (defn generate-augmented-argument-ids

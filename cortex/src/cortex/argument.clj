@@ -82,10 +82,10 @@ Defaults to assuming the function produces gradients for this argument."
 (defn ->parameter-arg
   "Bind to a parameter buffer.  Note that if a buffer is specified
 then the initializer for this argument is ignored and the buffer is used."
-  [shape-fn initializer & args]
+  [shape-fn-id initializer & args]
   (merge-args
    {:type :parameter
-    :shape-fn shape-fn
+    :shape-fn shape-fn-id
     :initialization initializer}
    args))
 
