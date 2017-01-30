@@ -22,6 +22,14 @@ taking a map of arguments.  Layers are functions which also have implicit input 
 (defmethod get-node-metadata :default [node] {})
 
 
+(defn deep-merge
+  "Like merge, but merges maps recursively."
+  [& maps]
+  (if (every? map? maps)
+    (apply merge-with deep-merge maps)
+    (last maps)))
+
+
 (defn get-node-arguments
   "Get the node arguments 'before' being merged with the node
 buffers."
@@ -29,8 +37,19 @@ buffers."
   (->> (-> (get-node-metadata node)
            (get :arguments {}))
        (map (fn [[arg-key arg-data]]
-              (merge (assoc arg-data :key arg-key)
-                     (get node arg-key {}))))))
+              (deep-merge (assoc arg-data :key arg-key)
+                          (get node arg-key {}))))))
+
+(defn get-node-argument
+  [node arg-key]
+  (let [retval (->> (get-node-arguments node)
+                    (filter #(= arg-key (get % :key)))
+                    first)]
+    (when-not retval
+      (throw (ex-info "Failed to find node argument"
+                      {:node node
+                       :argument-name arg-key})))
+    retval))
 
 
 (defmulti build-node
@@ -156,6 +175,51 @@ If any of the predecessors does not exist an error will be thrown."
                :roots)
      (drop 1))))
 
+(defmulti get-argument-shape
+  "Get the expected shape of an argument"
+  (fn [graph node argument stream->size]
+    (get argument :type)))
+
+
+(defmethod get-argument-shape :stream
+  [graph node argument stream->size]
+  (if-let [retval (get stream->size (get argument :stream))]
+    [(long retval)]
+    (throw (ex-info "Failed to find stream size for argument"
+                    {:stream (get argument :stream)
+                     :streams (keys stream->size)}))))
+
+(defmethod get-argument-shape :node-output
+  [graph node argument stream->size]
+  (let [target-node (get-node graph (get argument :node-id))]
+    (if-let [retval (get target-node :output-size)]
+      [(long retval)]
+      (throw (ex-info "Failed to find node output size"
+                      {:argument argument
+                       :nodes (keys (get graph :id->node-map))})))))
+
+(defmethod get-argument-shape :node-argument
+  [graph node argument stream->size]
+  (let [target-node (get-node graph (get argument :node-id))
+        target-arg (get-node-argument graph node (get argument :argument))]
+    (get-argument-shape graph target-node target-arg stream->size)))
+
+(defmethod get-argument-shape :stream-augmentation
+  [graph node argument stream->size]
+  (throw (ex-info "Cannot get shape of stream augments without actually augmenting stream"
+                  {:argument argument})))
+
+(defmethod get-argument-shape :parameter
+  [graph node argument stream->size]
+  (try
+    (keyword-fn/call-keyword-fn (get argument :shape-fn)
+                                graph node argument stream->size)
+    (catch Throwable e
+      (throw (ex-info "Failed to resolve and call shape function"
+                      {:node-id (get node :id)
+                       :argument argument
+                       :error e})))))
+
 
 (defmulti initialize-graph-parameter-buffer
   "Initialize a graph parameter buffer"
@@ -171,16 +235,9 @@ If any of the predecessors does not exist an error will be thrown."
 
 (defn- generate-parameter-argument-buffer
   "Given a parameter argument generate it's buffer."
-  [node-id graph argument]
+  [node-id stream->size graph argument]
   (let [node (get-node graph node-id)
-        expected-shape (try
-                         (keyword-fn/call-keyword-fn (get argument :shape-fn)
-                                                     graph node argument)
-                         (catch Throwable e
-                           (throw (ex-info "Failed to resolve and call shape function"
-                                           {:node-id node-id
-                                            :argument argument
-                                            :error e}))))]
+        expected-shape (get-argument-shape graph node argument stream->size)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
       (do
         (when-not (= expected-shape (m/shape existing-buffer))
@@ -211,19 +268,19 @@ If any of the predecessors does not exist an error will be thrown."
 
 
 (defn- generate-parameter-buffers
-  [graph id]
+  [stream->size graph id]
   (->> (get-node graph id)
        get-node-arguments
        (filter #(= :parameter (get % :type)))
-       (reduce (partial generate-parameter-argument-buffer id)
+       (reduce (partial generate-parameter-argument-buffer id stream->size)
                graph)))
 
 
 (defn generate-parameters
   "Go through all the nodes in the graph and generate any parameter buffers
 that do not already exist.  Returns a new graph."
-  [graph]
-  (reduce generate-parameter-buffers
+  [graph stream->size]
+  (reduce (partial generate-parameter-buffers stream->size)
           graph
           (dfs-seq graph)))
 
@@ -260,16 +317,15 @@ at least :buffer if not both :buffer and :gradient."
 
 (defmethod resolve-argument :stream
   [graph node argument stream-map node-id->output-map]
-  (if-let [data (get stream-map (get argument :stream))]
-    {:buffer data}
+  (if-let [buffer (get stream-map (get argument :stream))]
     (throw (ex-info "Failed to resolve argument"
                     {:streams (keys stream-map)
                      :argument argument}))))
 
 (defmethod resolve-argument :parameter
   [graph node argument stream-map node-id->output-map]
-  (if-let [data (get-in graph [:buffers (get argument :buffer-id)])]
-    data
+  (if-let [buffer (get-in graph [:buffers (get argument :buffer-id)])]
+    buffer
     (throw (ex-info "Failed to resolve argument"
                     {:argument argument
                      :buffers (keys (get graph :buffers))}))))
@@ -282,20 +338,16 @@ at least :buffer if not both :buffer and :gradient."
                     {:argument argument
                      :node-outputs (keys node-id->output-map)}))))
 
-(defmethod resolve-argument :node-parameter
-  [graph node {:keys [node-id parameter] :as argument} stream-map node-id->output-map]
-  (let [node-buffer-id (get-in graph [:id->node-map node-id parameter :buffer-id])]
-    (if-let [buffer (get-in graph [:buffers node-buffer-id])]
-      buffer
-      (throw (ex-info "Failed to find node parameter"
-                      {:argument argument
-                       :node-ids (keys (get graph :id->node-map))
-                       :buffers (keys (get graph :buffers))})))))
+(defmethod resolve-argument :node-argument
+  [graph node {:keys [node-id] :as argument} stream-map node-id->output-map]
+  (let [target-node (get-node graph node-id)
+        target-arg (get-node-argument target-node (get argument :argument))]
+    (resolve-argument graph target-node target-arg stream-map node-id->output-map)))
 
 (defmethod resolve-argument :stream-augmentation
   [graph node argument stream-map node-id->output-map]
   (if-let [buffer (get stream-map (arg/augmented-stream-arg->id argument))]
-    {:buffer buffer}
+    buffer
     (throw (ex-info "Failed to find argument"
                     {:argument argument
                      :streams (keys stream-map)}))))
@@ -303,7 +355,12 @@ at least :buffer if not both :buffer and :gradient."
 
 (defn resolve-arguments
   "Resolve the arguments to a particular node.
-It is expected the stream map contains the augmented data if necessary."
+It is expected the stream map contains the augmented data if necessary.
+Note that for uniformity the values are returned without modification.  This
+means the the format of the stream map and the node->output-map must be
+entries of the form of at least {:buffer data} instead of linking key directly
+to data.  This allows a uniform system both when doing auto-differentiation and
+when simply doing execution."
   [graph node stream-map node-id->output-map]
   (->> (get-node-arguments node)
        (map (fn [{:keys [key type] :as argument}]

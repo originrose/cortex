@@ -56,6 +56,17 @@
         (recur (inc idx))
         [new-id (conj id-set new-id)]))))
 
+
+(defn max-index
+  [coll]
+  (second (reduce (fn [[max-val max-idx] idx]
+                    (if (or (nil? max-val)
+                            (> (long (coll idx)) (long max-val)))
+                      [(coll idx) idx]
+                      [max-val max-idx]))
+                  [nil nil]
+                  (range (count coll)))))
+
 ;;;; Timing
 
 (defmacro ctime*

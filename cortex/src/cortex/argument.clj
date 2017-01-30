@@ -50,19 +50,19 @@ Defaults to assuming the function produces gradients for this argument."
   {:gradients? true})
 
 
-(defn ->node-param-arg
-  "Bind to a graph node's parameter buffer."
-  [node-id param-key & args]
+(defn ->node-argument-arg
+  "Bind to a graph node's argument"
+  [node-id arg-key & args]
   (merge-args
-   {:type :node-parameter
+   {:type :node-argument
     :node-id node-id
-    :parameter param-key}
+    :argument arg-key}
    args))
 
 
-(defmethod get-argument-metadata :node-parameter
+(defmethod get-argument-metadata :node-argument
   [argument]
-  {:gradients? true})
+  {})
 
 
 (defn ->stream-arg
