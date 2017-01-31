@@ -185,7 +185,7 @@ observations in each cell instead of just a count."
   (reset! last-network-eval network-eval)
   (let [class-names (get dataset :class-names)
         vec->label #(class-names (loss/max-index (vec %)))
-        _ (when-not (and (contains? inferences :output)
+        _ (when-not (and (map? inferences)
                          (contains? labels :labels)
                          (contains? data :data))
             (throw (ex-info "Classification datasets should have :output :labels and :data."
@@ -195,7 +195,7 @@ observations in each cell instead of just a count."
         ;;There are a lot of firsts here because generically out network could take
         ;;many inputs and produce many outputs.  When we are training classification
         ;;tasks however we know this isn't the case; we have one input and one output
-        inferences (get inferences :output)
+        inferences (first (vals inferences))
         data (get data :data)
         labels (get labels :labels)
         inference-answer-patch-pairs (->> (interleave inferences
