@@ -163,9 +163,7 @@ containing the buffer coming from the network.
    {:type :mse-loss}
    args))
 
-(defmethod graph/build-node :mse-loss
-  [graph node ids]
-  node)
+
 (defmethod graph/get-node-metadata :mse-loss
   [loss-term]
   {:arguments {:output {:gradients? true}
@@ -193,9 +191,7 @@ containing the buffer coming from the network.
    {:type :softmax-loss}
    args))
 
-(defmethod graph/build-node :softmax-loss
-  [graph node ids]
-  node)
+
 (defmethod graph/get-node-metadata :softmax-loss
   [loss-term]
   {:arguments {:output {:gradients? true}
@@ -298,9 +294,7 @@ entry in addition to a node-id."
    :lambda 0.001})
 
 
-(defmethod graph/build-node :l1-regularization
-  [graph node ids]
-  node)
+
 (defmethod graph/get-node-metadata :l1-regularization
   [loss-term]
   (reg-loss-metadata loss-term))
@@ -320,9 +314,8 @@ node in which case it will be applied to the node's output buffer."
   (merge-args
    {:type :l2-regularization}
    args))
-(defmethod graph/build-node :l2-regularization
-  [graph node ids]
-  node)
+
+
 (defmethod graph/get-node-metadata :l2-regularization
   [loss-term]
   (reg-loss-metadata loss-term))
@@ -386,9 +379,7 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
     ;;We keep track of stream-size centers each of node output size.
     [labels-size output-size]))
 
-(defmethod graph/build-node :center-loss
-  [graph node ids]
-  node)
+
 (defmethod graph/get-node-metadata :center-loss
   [loss-term]
   {:arguments {:output {:gradients? true}

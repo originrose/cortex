@@ -6,12 +6,14 @@ Note that input-bindings are maps from node-id to stream
 while output bindings are maps from node-id to {:stream :loss}."
   (:require [cortex.nn.network :as network]
             [cortex.nn.layers :as layers]
+            [cortex.graph :as graph]
             [clojure.set :as c-set]
             [cortex.optimise :as optimise]
             [cortex.loss :as loss]
             [cortex.core-matrix-backends :as b]
             [clojure.core.matrix :as m]
-            [cortex.buffer-initialization :as buf-init]))
+            [cortex.buffer-initialization :as buf-init]
+            [cortex.argument :as arg]))
 
 
 (defn- check-node-id
@@ -26,7 +28,7 @@ while output bindings are maps from node-id to {:stream :loss}."
   "Create an input binding.  Inputs are always bound to incoming streams."
   [network node-id stream-name]
   (check-node-id network node-id)
-  (assoc-in network [:traversal :input-bindings node-id] {:input-stream stream-name}))
+  (assoc-in network [:traversal :input-bindings node-id] {:stream stream-name}))
 
 
 (defn ->input-binding
@@ -57,10 +59,10 @@ while training no stream or loss is necessary"
   [network node-id stream & [loss]]
   (check-node-id network node-id)
   (assoc-in network [:traversal :output-bindings node-id]
-            {:output-stream stream
+            {:stream stream
              :loss (or loss
                        (layers/get-layer-default-loss
-                        (network/network->node network node-id)))}))
+                        (graph/get-node network node-id)))}))
 
 
 (defn ->output-binding
@@ -82,18 +84,18 @@ while training no stream or loss is necessary"
 (defn get-input-bindings
   [network]
   (->> (get-in network [:traversal :input-bindings])
-       (map (fn [[node-id {:keys [input-stream]}]]
+       (map (fn [[node-id {:keys [stream]}]]
               {:node-id node-id
-               :stream input-stream
+               :stream stream
                :direction :input}))))
 
 
 (defn get-output-bindings
   [network]
   (->> (get-in network [:traversal :output-bindings])
-       (map (fn [[node-id {:keys [output-stream loss]}]]
+       (map (fn [[node-id {:keys [stream loss]}]]
               {:node-id node-id
-               :stream output-stream
+               :stream stream
                :direction :output
                :loss loss}))))
 
@@ -114,7 +116,9 @@ are exactly 1 root and leaf or to :data-x where x is a one-based index of the
 root and labels-x where labels are a 1-based index of the leaf."
   [network]
   (let [network (clear-io-bindings network)
-        [roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
+        graph (get network :layer-graph)
+        roots (graph/roots graph)
+        leaves (graph/leaves graph)
         input-name-fn (if (> (count roots) 1)
                         (fn [network]
                           (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
@@ -181,15 +185,11 @@ Each item in the sequence is a map of:
  :id
  :outgoing ()
 }"
-  [{:keys [layer-graph] :as built-network}]
-  (let [{:keys [id->node-map edges]} layer-graph
-        {:keys [input-bindings output-bindings]} (get built-network :traversal)
+  [{:keys [layer-graph] :as network}]
+  (let [{:keys [input-bindings output-bindings]} (get network :traversal)
         ;;Remove all edges that do not participate in the keep node set.
-        [roots leaves] (network/edges->roots-and-leaves edges)
-        parent->child-map (network/edges->parent->child-map edges)
-        child->parent-map (network/edges->child->parent-map edges)]
-    (->> (network/edges->dfs-seq edges :roots parent->child-map)
-         (drop 1)
+        child->parent-map (graph/child->parent-map layer-graph)]
+    (->> (graph/dfs-seq layer-graph)
          (reduce (fn [[retval id->buffer-map] id]
                    (let [node-buffer (if-let [output-binding (get output-bindings id)]
                                        (merge {:output-id id} output-binding)
@@ -212,9 +212,10 @@ Each item in the sequence is a map of:
   [{:keys [layer-graph]} pass-type traversal]
   (->> traversal
        (reduce (fn [[traversal input-alias-map] {:keys [incoming id] :as entry}]
-                 (let [graph-node (get-in layer-graph [:id->node-map id])
+                 (let [graph-node (graph/get-node layer-graph id)
                        pass-set (layers/get-pass-set graph-node)
-                       new-incoming (flatten (map #(get input-alias-map (get % :id) %) incoming))]
+                       new-incoming (flatten (map #(get input-alias-map (get % :id) %)
+                                                  incoming))]
                    (if (contains? pass-set pass-type)
                      [(conj traversal
                             (assoc entry
@@ -227,7 +228,8 @@ Each item in the sequence is a map of:
        (reduce (fn [[traversal output-alias-map] {:keys [id outgoing] :as entry}]
                  (let [graph-node (get-in layer-graph [:id->node-map id])
                        pass-set (layers/get-pass-set graph-node)
-                       new-outgoing (flatten (map #(get output-alias-map (get % :id) %) outgoing))]
+                       new-outgoing (flatten (map #(get output-alias-map
+                                                        (get % :id) %) outgoing))]
                    (if (contains? pass-set pass-type)
                      [(conj traversal
                             (assoc entry
@@ -277,10 +279,10 @@ the previous step."
 
 
 (defn- forward-traversal->buffer-map
-  [built-network forward-traversal]
-  (let [id->node-map (get-in built-network [:layer-graph :id->node-map])]
+  [network forward-traversal]
+  (let [layer-graph (get network :layer-graph)]
     (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
-              (let [node (get id->node-map id)
+              (let [node (graph/get-node layer-graph id)
                     output-size (get node :output-size)
                     input-size (get node :input-size)]
                 (merge buffer-map
@@ -308,7 +310,7 @@ which means removing extra information from them."
   [network traversal]
   (-> (reduce (fn [[keep-set traversal] {:keys [incoming id] :as item}]
                 (let [keep? (or (seq (filter #(contains? keep-set (get % :id)) incoming))
-                                (network/any-trainable-parameters? network id))]
+                                (graph/any-trainable-arguments? network id))]
                   (if keep?
                     [(conj keep-set id) (conj traversal item)]
                     [keep-set traversal])))
@@ -339,13 +341,13 @@ which means removing extra information from them."
 (defn- generate-node-loss-terms
   [network node]
   (let [node-losses (->> (map->loss-term-seq node)
-                         (map #(loss/set-loss-term-arg-node-output % :output (get node :id))))
-        trainable-parameters (->> (network/node->node-parameters network node)
-                                  (remove #(get % :non-trainable?)))
+                         (map #(arg/set-arg-node-output % :output (get node :id))))
+        trainable-parameters (->> (graph/get-node-arguments node)
+                                  (filter :gradients?))
         parameter-losses (->> trainable-parameters
                               (map map->loss-term-seq)
                               (mapcat (fn [parameter loss-term-seq]
-                                        (map #(loss/set-loss-term-arg-node-parameter
+                                        (map #(arg/set-arg-node-argument
                                                % :output (get node :id) (get parameter :key))
                                              loss-term-seq))
                                       trainable-parameters))]
@@ -361,54 +363,68 @@ which means removing extra information from them."
                                          (get % :stream)))
                            (map (fn [{:keys [node-id stream loss]}]
                                   (-> loss
-                                      (loss/set-loss-term-arg-node-output :output node-id)
-                                      (loss/set-loss-term-arg-stream :labels stream)))))]
+                                      (arg/set-arg-node-output :output node-id)
+                                      (arg/set-arg-stream :labels stream)))))]
     (concat loss output-losses node-losses)))
 
 
-(defn- generate-param-initial-buffer
-  [loss-term
-   {:keys [initialization shape-fn] :as loss-arg}
-   node-id->name->shape-map
-   stream->size-map]
-  (let [param-shape (shape-fn loss-term loss-arg node-id->name->shape-map stream->size-map)]
-    (buf-init/initialize-buffer (assoc initialization :shape param-shape))))
+(defn- merge-streams
+  [stream-map graph]
+  (reduce (fn [graph [stream size]]
+            (if-not (contains? (get graph :streams) stream)
+              (graph/add-stream graph stream (graph/create-stream-descriptor
+                                              (long size)))
+              graph))
+          graph
+          stream-map))
 
-
-(defn- generate-buffer-id [network loss-term-type]
-  (let [existing-keys (set (keys (get-in network [:layer-graph :buffers])))]
-    (loop [idx 1]
-      (let [new-key (keyword (str (name loss-term-type) "-" idx))]
-        (if (contains? existing-keys new-key)
-          (recur (inc idx))
-          new-key)))))
+(defn- set-loss-terms
+  [loss-term-vec graph]
+  ;;map each loss term to the node it is most associated with (its output)
+  ;;and attach it to that node in the graph.  Generate parameters and then
+  ;;create a new vector of loss terms with the added information.
+  (let [existing-terms (-> (graph/dfs-seq graph)
+                           (map (fn [node-id]
+                                  (let [pass-set (-> (graph/get-node graph node-id)
+                                                     graph/get-node-metadata
+                                                     :passes
+                                                     set)]
+                                    (when (contains? pass-set :loss)
+                                      node-id))))
+                           (remove nil?))
+        graph (reduce graph/remove-node
+                      graph
+                      existing-terms)]
+    (reduce (fn [[graph loss-term-vec] loss-term]
+              (when-not (contains? (-> (graph/get-node-metadata loss-term)
+                                       :passes
+                                       set)
+                                   :loss)
+                (throw (ex-info "Loss term does not contain the loss pass in it's metadata"
+                                {:loss-term loss-term
+                                 :metadata (graph/get-node-metadata loss-term)})))
+              (let [node-id (->> (graph/get-node-arguments loss-term)
+                                 :node-id
+                                 (remove nil?)
+                                 first)
+                    [graph term-id] (graph/add-node graph loss-term [node-id])]
+                [graph (conj loss-term-vec (assoc loss-term :id term-id))]))
+            [graph []]
+            loss-term-vec)))
 
 
 (defn- generate-loss-term-parameters
+  "Generating loss term parameters modifies the nodes associated with those
+parameters by adding buffer-ids in some cases."
   [network stream-map loss-term-vec]
-  (let [node-id->name->shape-map (network/network->node-id->name->shape-map network)
-        stream->size-map (loss/stream->data->stream->size stream-map)]
-    (reduce (fn [[network loss-term-vec] loss-term]
-              (let [[network arguments]
-                    (reduce (fn [[network arguments] arg]
-                              (let [buffer-id (generate-buffer-id network (get loss-term :type))]
-                                [(assoc-in network [:layer-graph :buffers buffer-id :buffer]
-                                           (or (get arg :buffer)
-                                               (generate-param-initial-buffer loss-term
-                                                                              arg
-                                                                              node-id->name->shape-map
-                                                                              stream->size-map)))
-                                 (conj arguments (assoc (dissoc arg :buffer)
-                                                        :buffer-id buffer-id))]))
-                            [network []]
-                            (loss/get-loss-term-parameters loss-term))
-                    loss-term (reduce (fn [loss-term {:keys [key buffer-id]}]
-                                        (assoc-in loss-term [key :buffer-id] buffer-id))
-                                      loss-term
-                                      arguments)]
-                [network (conj loss-term-vec loss-term)]))
-            [network []]
-            loss-term-vec)))
+  (let [[graph loss-term-vec] (->> (get network :layer-graph)
+                                   (merge-streams stream-map)
+                                   (set-loss-terms loss-term-vec))
+        graph (graph/generate-parameters graph)]
+    [(assoc network :layer-graph graph)
+     (->> loss-term-vec
+          (map :id)
+          (mapv #(graph/get-node graph %)))]))
 
 
 (defn network->training-traversal
@@ -451,8 +467,7 @@ datastructure describing the final loss function.
                                                        forward-traversal-nodes
                                                        (get-output-bindings network)
                                                        loss-fn)
-                               (generate-loss-term-parameters network stream-map))
-        loss-fn (loss/generate-augmented-argument-ids loss-fn)]
+                               (generate-loss-term-parameters network stream-map))]
     (update network
             :traversal
             #(merge %
@@ -465,7 +480,11 @@ datastructure describing the final loss function.
                                    clean-traversal-incoming-outgoing)
                      :buffers (forward-traversal->buffer-map network forward-with-buffers)
                      :type :training
-                     :stream-map stream-map
+                     :stream-map (->> (get-in network [:layer-graph :streams])
+                                      (map (fn [[k v]]
+                                             [k (graph/stream->size
+                                                 (get network :layer-graph) k)]))
+                                      (into {}))
                      :optimiser optimiser
                      :loss-function loss-fn}))))
 

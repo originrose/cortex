@@ -54,7 +54,7 @@
                      keyword)]
       (if (contains? id-set new-id)
         (recur (inc idx))
-        [new-id (conj id-set new-id)]))))
+        new-id))))
 
 
 (defn max-index

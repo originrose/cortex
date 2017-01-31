@@ -28,7 +28,7 @@
                        (/ 1.0 (double val))))))]
     (mapv inverse-counts class-indexes)))
 
-(defn labels->indexes-augmentation
+(defn labels->inverse-counts-augmentation
   "Create a stream augmentation that places 1/label-count in each batch index.
 Used for inverse scaling of things that are summed per-batch by class."
   [stream-arg-name]

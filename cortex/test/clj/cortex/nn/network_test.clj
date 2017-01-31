@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
+            [cortex.graph :as graph]
             [clojure.core.matrix :as m]))
 
 
@@ -10,10 +11,10 @@
   (let [weight-data [[1 2][3 4]]
         bias-data [0 10]
         built-network (network/build-network [(layers/input 2)
-                                            (layers/linear
-                                             2
-                                             :weights {:buffer weight-data}
-                                             :bias {:buffer bias-data})])]
+                                              (layers/linear
+                                               2
+                                               :weights {:buffer weight-data}
+                                               :bias {:buffer bias-data})])]
     (is (= (vec (m/eseq weight-data))
            (vec (m/eseq (get-in built-network [:layer-graph :buffers
                                                (get-in built-network
@@ -26,6 +27,27 @@
                                                        [:layer-graph :id->node-map
                                                         :linear-1 :bias :buffer-id])
                                                :buffer])))))))
+
+
+(deftest generate-weights-bias
+  (let [bias-data [0 0]
+        built-network (network/build-network [(layers/input 2)
+                                              (layers/linear
+                                               2)
+                                              (layers/relu)])]
+    (is (not (nil? (m/eseq (get-in built-network
+                                   [:layer-graph :buffers
+                                    (get-in built-network
+                                            [:layer-graph :id->node-map
+                                             :linear-1 :weights :buffer-id])
+                                    :buffer])))))
+    (is (m/equals (vec (m/eseq bias-data))
+                  (vec (m/eseq (get-in built-network
+                                       [:layer-graph :buffers
+                                        (get-in built-network
+                                                [:layer-graph :id->node-map
+                                                 :linear-1 :bias :buffer-id])
+                                        :buffer])))))))
 
 
 

@@ -7,7 +7,8 @@ constructors are all variable args with the extra arguments expected to be
   keyword-value pairs and are assoc'd into the description map."
   (:require [cortex.util :refer [merge-args arg-list->arg-map] :as util]
             [cortex.loss :as loss]
-            [cortex.graph :as graph]))
+            [cortex.graph :as graph]
+            [cortex.buffer-initialization :as buf-init]))
 
 
 (defn- carry-input-image-dims-forward
@@ -52,6 +53,16 @@ constructors are all variable args with the extra arguments expected to be
    :passes [:training :inference]
    :default-loss (loss/mse-loss)})
 
+(defn get-pass-set
+  [node]
+  (-> (graph/get-node-metadata node)
+      set))
+
+(defn get-layer-default-loss
+  [layer]
+  (get (graph/get-node-metadata layer)
+       :default-loss
+       (loss/mse-loss)))
 
 (defn input
   ([width height channels & args]
@@ -63,16 +74,6 @@ constructors are all variable args with the extra arguments expected to be
      args)])
   ([output-size]
    (input output-size 1 1)))
-
-
-(defmethod graph/get-node-metadata :input
-  [layer]
-  {:parameter-descriptions []
-   :pass-set #{}})
-
-(defmethod graph/build-node :input
-  [node graph predecessor-ids]
-  (default-build-fn graph node predecessor-ids))
 
 
 (defn linear
@@ -109,6 +110,22 @@ constructors are all variable args with the extra arguments expected to be
            :initialization {:type :constant :value 0}
            :gradients? true}}
    :passes [:inference :training]})
+
+
+;;This type of initialization finds the next activation in the graph and then
+;;decides what to do from there.
+(defmethod graph/initialize-graph-parameter-buffer :weight-initialization
+  [graph node argument shape initialization]
+  (let [activation-set #{:tanh :relu :logistic}
+        next-activation (->> (graph/relative-dfs-seq graph (get node :id))
+                             (map #(get (graph/get-node graph %) :type))
+                             (filter activation-set)
+                             first)]
+    (if (= next-activation :relu)
+      (buf-init/initialize-buffer {:type :relu
+                                   :shape shape})
+      (buf-init/initialize-buffer {:type :xavier
+                                   :shape shape}))))
 
 
 (defn softmax
@@ -406,12 +423,13 @@ This is for cudnn compatibility.")))
 
 (defn prelu
   "https://arxiv.org/pdf/1502.01852.pdf
-At this point we only support per-channel scale, not across channel scale."
+At this point we only support per-channel scale, not across channel scale.
+If the input contains no channels then you get a scale factor per input parameter."
   []
-  {:type :prelu})
+  [{:type :prelu}])
 
 (defn prelu-neg-scale-shape
-  [layer]
+  [graph layer argument]
   [(get layer :input-channels (get layer :input-size))])
 
 (defmethod graph/build-node :prelu
@@ -423,16 +441,9 @@ At this point we only support per-channel scale, not across channel scale."
    {:neg-scale {:shape-fn :cortex.nn.layers/prelu-neg-scale-shape
                 :initialization {:type :constant
                                  :value 0.25}
-                :gradients? true}}
+                :gradients? true
+                :type :parameter}}
    :passes #{:training :inference}})
-
-
-(defn prelu
-  "https://arxiv.org/pdf/1502.01852.pdf
-At this point we only support per-channel scale, not across channel scale.
-If the input contains no channels then you get a scale factor per input parameter."
-  []
-  [{:type :prelu}])
 
 
 (defn network-description

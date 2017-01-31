@@ -122,3 +122,27 @@ back into the stream augmentation argument."
 (defmethod get-argument-metadata :stream-agumentation
   [parameter]
   {})
+
+
+(defn set-arg-node-output
+  [node arg-name node-id]
+  (update node arg-name
+          #(merge %
+                  {:type :node-output
+                   :node-id node-id})))
+
+
+(defn set-arg-node-argument
+  [node arg-name node-id arg-name]
+  (update node arg-name
+          #(merge %
+                  {:type :node-output
+                   :node-id node-id
+                   :argument arg-name})))
+
+(defn set-arg-stream
+  [node arg-name stream-name]
+  (update node arg-name
+          #(merge %
+                  {:type :stream
+                   :stream stream-name})))

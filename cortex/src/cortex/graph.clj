@@ -33,14 +33,23 @@ patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
 
 (defn get-node-argument
   [node arg-key]
-  (let [retval (->> (get-node-metadata node)
+  (let [learn-atten (get node :learning-attenuation 1.0)
+        non-trainable? (get node :non-trainable? false)
+        retval (->> (get-node-metadata node)
+                    :arguments
                     (#(get % arg-key)))]
     (when-not retval
       (throw (ex-info "Failed to find node argument"
                       {:node node
-                       :argument-name arg-key})))
-    (->> (assoc retval :key arg-key)
-         (deep-merge retval (get node arg-key)))))
+                       :argument-name arg-key
+                       :arguments (get (get-node-metadata node) :arguments)})))
+    (let [retval (->> (assoc retval :key arg-key)
+                      (deep-merge retval (get node arg-key)))
+          param-learn-atten (get retval :learning-attenuation learn-atten)]
+      (if (or (zero? param-learn-atten)
+              non-trainable?)
+        (assoc retval :gradients? false)
+        (assoc retval :learning-attenuation param-learn-atten)))))
 
 
 (defn get-node-arguments
@@ -53,6 +62,13 @@ buffers."
        (map #(get-node-argument node %))))
 
 
+(defn any-trainable-arguments?
+  [node]
+  (->> (get-node-arguments node)
+       (filter :gradients?)
+       seq))
+
+
 (defmulti build-node
   "Callback called when the node is added to the graph.  Note that the node at this point
   is not located in the graph.  Also note that any parameter arguments are generated
@@ -61,8 +77,13 @@ buffers."
   (fn [graph node predecessor-ids]
     (get node :type)))
 
+;;lots of nodes do not need to build built.
+(defmethod build-node :default
+  [graph node p-id-seq]
+  node)
 
-(defn create-shape-descriptor
+
+(defn create-stream-descriptor
   "Shape descriptors are used to describe streams.  Currently there are two types
 of streams, a multi-channeled input like an image and a single channel input like
 a vector of floats."
@@ -71,10 +92,10 @@ a vector of floats."
     :height height
     :width width})
   ([width]
-   (create-shape-descriptor 1 1 width)))
+   (create-stream-descriptor 1 1 width)))
 
 
-(defn shape-descriptor->size
+(defn stream-descriptor->size
   ^long [shape-desc]
   (long (apply * (vals shape-desc))))
 
@@ -97,7 +118,7 @@ a vector of floats."
 (defn stream->size
   [graph stream-name]
   (if-let [stream-shape (get-in graph [:streams stream-name])]
-    (shape-descriptor->size stream-shape)
+    (stream-descriptor->size stream-shape)
     (throw (ex-info "Failed to find stream in graph"
                     {:stream stream-name
                      :available-streams (keys (get graph :streams))}))))
@@ -113,12 +134,27 @@ a vector of floats."
   (when-not (= 0 (count predecessor-seq))
     (throw (ex-info "Input nodes cannot have predecessor nodes"
                     {:node node
-                     :predecessors predecessor-seq}))))
+                     :predecessors predecessor-seq})))
+  (let [input-data (get-node-argument node :input)]
+    (when-not (= :stream (get input-data :type))
+      (throw (ex-info "Input nodes can only link to streams"
+                      {:node node})))
+    (if-let [stream-desc (get-in graph [:streams (get input-data :stream)])]
+      (assoc node
+             :input-channels (get stream-desc :channels)
+             :output-channels (get stream-desc :channels)
+             :input-height (get stream-desc :height)
+             :output-height (get stream-desc :height)
+             :input-width (get stream-desc :width)
+             :output-width (get stream-desc :width))
+      (throw (ex-info "Failed to find stream to bind to input"
+                      {:node node
+                       :stream (get input-data :stream)})))))
 
 
 (defmethod get-node-metadata :input
   [node]
-  {:arguments {:type :stream}})
+  {:arguments {:input {:type :stream}}})
 
 
 (defn get-node
@@ -142,22 +178,23 @@ a vector of floats."
 
 (defn add-node
   "Add a node to the graph with a list of predecessors.  If the node has no id one will
-be generated; if it does and it is not unique and exception will be thrown.
-If any of the predecessors does not exist an error will be thrown."
+  be generated; if it does and it is not unique and exception will be thrown.
+  If any of the predecessors does not exist an error will be thrown.  Returns a pair
+  of [graph node-id]"
   [graph node predecessor-id-seq]
   (when-not (every? (get graph :id->node-map) predecessor-id-seq)
     (throw (ex-info "Failed to find all predecessor id's in graph"
                     {:id-seq predecessor-id-seq
                      :missing-ids (remove (get graph :id->node-map) predecessor-id-seq)
                      :existing-ids (vec (keys (get graph :id->node-map)))})))
-  (let [node (-> (get-or-create-node-id graph node)
-                 (#(build-node graph % predecessor-id-seq)))]
-    (assoc graph
-           :id->node-map node
-           :edges (concat (get graph :edges)
-                          (map vec
-                               predecessor-id-seq
-                               (repeat (get node :id)))))))
+  (let [node (get-or-create-node-id graph node)]
+    [(-> graph
+         (assoc-in [:id->node-map (get node :id)] node)
+         (update :edges #(concat %
+                                 (map vector
+                                      predecessor-id-seq
+                                      (repeat (get node :id))))))
+     (get node :id)]))
 
 (defn- edges
   [graph]
@@ -205,11 +242,11 @@ If any of the predecessors does not exist an error will be thrown."
               [k (map val-fn v)]))
        (into {})))
 
-(defn- parent->child-map
+(defn parent->child-map
   [graph]
   (edges->map graph first second))
 
-(defn- child->parent-map
+(defn child->parent-map
   [graph]
   (edges->map graph second first))
 
@@ -220,9 +257,40 @@ If any of the predecessors does not exist an error will be thrown."
                      (assoc :roots (roots graph)))]
     (->>
      (tree-seq #(contains? p->c-map %)
-               #(get parent->child-map %)
+               #(get p->c-map %)
                :roots)
      (drop 1))))
+
+(defn relative-dfs-seq
+  [graph node-id]
+  (let [p->c-map (parent->child-map graph)]
+    (tree-seq #(contains? p->c-map %)
+              #(get p->c-map %)
+              node-id)))
+
+
+(defn- do-build-graph
+  [c->p-map graph node-id]
+  (let [node (build-node graph (get-node graph node-id) (get c->p-map node-id))]
+    (update graph :id->node-map assoc node-id node)))
+
+
+(defn build-graph
+  "Propagate size information (input/output sizes) through the graph in dfs order."
+  [graph]
+  (let [c->p-map (child->parent-map graph)]
+    (reduce (partial do-build-graph c->p-map)
+            graph
+            (dfs-seq graph))))
+
+
+(defn update-node
+  [graph node-id update-fn]
+  (when-not (contains? (get graph :id->node-map) node-id)
+    (throw (ex-info "Update failed to find node"
+                    {:node-id node-id})))
+  (update-in graph [:id->node-map node-id] update-fn))
+
 
 (defmulti get-argument-shape
   "Get the expected shape of an argument"
@@ -295,7 +363,8 @@ If any of the predecessors does not exist an error will be thrown."
                            :existing-shape (m/shape existing-buffer)
                            :expected-shape expected-shape})))
         graph)
-      (let [param-buffer-id (util/generate-id (str (name (get node :type))
+      (let [param-buffer-id (util/generate-id (str (name (get node :id))
+                                                   "-"
                                                    (name (get argument :key)))
                                               (set (keys (get graph :buffers))))
             param-buffer
@@ -310,19 +379,26 @@ If any of the predecessors does not exist an error will be thrown."
                                                  expected-shape
                                                  (get argument :initialization)))]
         (-> graph
-            (assoc-in [:buffers param-buffer-id :buffer param-buffer])
-            (update-in [:id->node-map node-id (get argument :key)] dissoc :buffer)
+            (assoc-in [:buffers param-buffer-id :buffer]
+                      param-buffer)
+            (update-in [:id->node-map node-id (get argument :key)]
+                       dissoc :buffer)
             (update-in [:id->node-map node-id (get argument :key)]
                        assoc :buffer-id param-buffer-id))))))
 
 
-(defn- generate-parameter-buffers
-  [graph id]
-  (->> (get-node graph id)
+(defn generate-node-parameter-buffers
+  [graph node]
+  (->> node
        get-node-arguments
        (filter #(= :parameter (get % :type)))
-       (reduce (partial generate-parameter-argument-buffer id)
+       (reduce (partial generate-parameter-argument-buffer (get node :id))
                graph)))
+
+
+(defn- generate-parameter-buffers
+  [graph id]
+  (generate-node-parameter-buffers graph (get-node graph id)))
 
 
 (defn generate-parameters
@@ -373,7 +449,11 @@ at least :buffer if not both :buffer and :gradient."
 
 (defmethod resolve-argument :parameter
   [graph node argument stream-map node-id->output-map]
-  (if-let [buffer (get-in graph [:buffers (get argument :buffer-id)])]
+  ;;Rather than get-in here we use a function style lookup because
+  ;;the buffers in the graph 'may' actually be a function instead
+  ;;of a map to enable runtime systems to provide a minimal set of
+  ;;parameters.
+  (if-let [buffer ((get graph [:buffers]) (get argument :buffer-id))]
     buffer
     (throw (ex-info "Failed to resolve argument"
                     {:argument argument
@@ -416,3 +496,40 @@ when simply doing execution."
               [key (resolve-argument graph node argument
                                      stream-map node-id->output-map)]))
        (into {})))
+
+(defn- recur-remove-node
+  [p->c-map graph node-id]
+  (let [graph (reduce (partial recur-remove-node p->c-map)
+                      graph
+                      (get p->c-map node-id))
+        buffer-ids (->> (get-node-arguments (get-node graph node-id))
+                        (filter #(= :parameter (get % :type)))
+                        :buffer-id)]
+    (-> graph
+        (update :edges #(remove (fn [[p c]]
+                                  (or (= p node-id)
+                                      (= c node-id)))
+                                %))
+        (update :buffers #(apply dissoc % buffer-ids))
+        (update :id->node-map dissoc node-id))))
+
+
+(defn remove-children
+  "Remove all child nodes, edges and any associated buffers from the graph."
+  [graph parent-node-id]
+  (let [p->c-map (parent->child-map graph)]
+    (reduce (partial recur-remove-node p->c-map)
+            graph
+            (get p->c-map parent-node-id))))
+
+(defn remove-node
+  [graph node-id]
+  (recur-remove-node (parent->child-map graph) graph node-id))
+
+
+(defn parameter-count
+  [graph]
+  (->> (get graph :buffers)
+       vals
+       (map (comp #(apply * %) m/shape :buffer))
+       (reduce +)))
