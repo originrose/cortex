@@ -17,7 +17,9 @@
             [cortex.suite.train :as suite-train]
             [cortex.loss :as loss]
             [think.gate.core :as gate]
-            [think.parallel.core :as parallel])
+            [think.parallel.core :as parallel]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.network :as network])
   (:import [java.io File]))
 
 
@@ -262,7 +264,7 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
 
 
 (defn display-dataset-and-model
-  ([dataset]
+  ([dataset argmap]
    (let [initial-description initial-network
          data-display-atom (atom {})
          confusion-matrix-atom (atom {})]
@@ -271,10 +273,12 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
                                                       initial-description)]
        (classification/reset-confusion-matrix confusion-matrix-atom mnist-observation->image
                                               dataset
-                                              (suite-train/evaluate-network
+                                              (apply suite-train/evaluate-network
                                                dataset
                                                loaded-data
-                                               :batch-type :cross-validation)))
+                                               (-> (merge argmap 
+                                                       {:batch-type :cross-validation})
+                                                   seq flatten))))
 
      (let [open-message
            (gate/open (atom
@@ -292,21 +296,21 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
 
 
 (defn train-forever
-  []
+  [argmap]
   (let [dataset (if *run-from-nippy*
                   (create-nippy-dataset)
                   (create-dataset))
-        confusion-matrix-atom (display-dataset-and-model dataset)]
-    (classification/train-forever dataset mnist-observation->image
+        confusion-matrix-atom (display-dataset-and-model dataset argmap)]
+    (apply classification/train-forever dataset mnist-observation->image
                                   initial-network
-                                  :confusion-matrix-atom confusion-matrix-atom)))
-
+                                  (-> (merge argmap 
+                                         {:confusion-matrix-atom confusion-matrix-atom})
+                                         seq flatten))))
 
 (defn train-forever-uberjar
-  []
-  (with-bindings {#'*running-from-repl* false}
-    (train-forever)))
-
+  [argmap]
+  (with-bindings {#'*running-from-repl* (not (:live-updates? argmap))}
+    (train-forever argmap)))
 
 (defn label-one
   "Take an arbitrary image and label it."
@@ -322,3 +326,27 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
                                                                        image-size
                                                                        image-size)
                                     (classification/get-class-names-from-directory "mnist/testing"))))
+
+(defn fine-tuning-example
+  "This is an example of how to use cortex to fine tune an existing network."
+  []
+  (let [mnist-dataset (create-dataset)
+        mnist-network (load-trained-network)
+        initial-description (:initial-description mnist-network)
+        ;; To figure out at which point you'd like to split the network,
+        ;; you can use (get-in mnist-net [:layer-graph :edges]) or (get-in mnist-net [:layer-graph :id->node-map])
+        ;; to guide your decision.
+        ;;
+        ;; Removing the fully connected layers and beyond.
+        network-bottleneck (network/dissoc-layers-from-network mnist-network :linear-1)
+        layers-to-add [(layers/linear->relu 500)
+                       (layers/dropout 0.5)
+                       (layers/linear->relu 500)
+                       (layers/dropout 0.5)
+                       (layers/linear->softmax num-classes)]
+        modified-description (vec (concat (drop-last 3 initial-description) layers-to-add))
+        modified-network (network/assoc-layers-to-network network-bottleneck layers-to-add)
+        modified-network (dissoc modified-network :traversal)
+        modified-network (-> (network/build-network modified-network)
+                           (traverse/auto-bind-io))]
+    (suite-train/train-n mnist-dataset modified-description modified-network :batch-size 128 :epoch-count 1)))

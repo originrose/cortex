@@ -69,21 +69,18 @@ in initial description.  Else returns the initial description"
 
 (defn create-context
   "Attempt to create a gpu context.  If that fails create a cpu context."
-  [& {:keys [datatype force-cpu? force-gpu?]
-      :or {datatype :float}}]
+  [& {:keys [datatype force-gpu?]
+      :or {datatype :float force-gpu? false}}]
   (ce/create-context (fn []
-                       (or (when-not force-cpu?
-                             (try
+                       (if force-gpu?
+                         (try
                                (require 'think.compute.nn.cuda-backend)
                                ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
                                (catch Exception e
-                                 (println (format "Failed to create cuda backend (%s); will use cpu backend"
-                                                  e))
-                                 (when force-gpu?
-                                   (throw e))
-                                 nil)))
-                           (cpu-backend/create-cpu-backend datatype)))))
-
+                                 (println (format "Failed to create cuda backend (%s); will use cpu backend" e))
+                                   (throw e) 
+                                 nil))
+                       (cpu-backend/create-cpu-backend datatype)))))
 
 (defn backup-trained-network
   [network-filestem]
@@ -131,17 +128,21 @@ we continue to train forever.
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
              optimiser
+             reset-score
              force-gpu?]
       :or {batch-size 128
            network-filestem default-network-filestem
            optimiser (cortex-opt/adam)
+           reset-score false
            force-gpu? true}}]
   (resource/with-resource-context
     (let [network-filename (str network-filestem ".nippy")
           ;;Backup the trained network if we haven't already
           network (if-let [loaded-network (load-network network-filename
                                                         initial-description)]
-                    loaded-network
+                    (if reset-score
+                      (assoc loaded-network :cv-loss {})
+                      loaded-network)
                     (do
                       (backup-trained-network network-filestem)
                       (merge network

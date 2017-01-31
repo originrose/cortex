@@ -427,6 +427,14 @@ At this point we only support per-channel scale, not across channel scale."
    :passes #{:training :inference}})
 
 
+(defn prelu
+  "https://arxiv.org/pdf/1502.01852.pdf
+At this point we only support per-channel scale, not across channel scale.
+If the input contains no channels then you get a scale factor per input parameter."
+  []
+  [{:type :prelu}])
+
+
 (defn network-description
   "A network description must have 1 key and that is the actual
 network graph description."

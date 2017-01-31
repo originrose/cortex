@@ -216,8 +216,8 @@ and then forward many times for every parameter of the network."
 
 (defmethod create :prelu
   [backend layer batch-size]
-  (let [n-channels (long (get layer :input-channels 1))
-        input-size (long (get layer :input-size))
+  (let [input-size (long (get layer :input-size))
+        n-channels (long (get layer :input-channels input-size))
         n-pixels (quot input-size n-channels)
         driver (drv/get-driver backend)
         stream (drv/get-stream backend)]

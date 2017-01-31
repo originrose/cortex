@@ -23,8 +23,9 @@ The build step is responsible for
 
 
 (defn- generate-layer-ids
-  [layer-list]
-  (let [id->layer-map (group-by :id layer-list)]
+  [layer-list & {:keys [id->node-map]
+                 :or [id->node-map {}]}]
+  (let [existing-node-ids (set (map (comp :id val) id->node-map))]
     (first (reduce (fn [[layer-list existing-ids] {:keys [id] :as layer}]
                      (if (or (nil? id)
                              (contains? existing-ids id))
@@ -40,18 +41,22 @@ The build step is responsible for
                           (conj existing-ids new-layer-id)])
                        [(conj layer-list layer)
                         (conj existing-ids id)]))
-                   [[] #{}]
+                   [[] existing-node-ids]
                    layer-list))))
 
 
 (defn- assign-layer-parents
-  [layer-list]
-  (concat [(first layer-list)]
-          (map (fn [parent-item current-item]
-                 (if (get :parents current-item)
-                   current-item
-                   (assoc current-item :parents [(get parent-item :id)])))
-               layer-list (drop 1 layer-list))))
+  [layer-list & {:keys [parent-nodes]
+                 :or [parent-nodes nil]}]
+  (let [first-layer (if parent-nodes
+                      (assoc (first layer-list) :parents parent-nodes)
+                      (first layer-list))]
+   (concat [first-layer]
+           (map (fn [parent-item current-item]
+                  (if (get :parents current-item)
+                    current-item
+                    (assoc current-item :parents [(get parent-item :id)])))
+                layer-list (drop 1 layer-list)))))
 
 
 (defn- layer-list->edge-list
@@ -206,6 +211,18 @@ The build step is responsible for
     [(buf-init/initialize-buffer init) init]))
 
 
+(defn- append-layer-list-to-graph
+  [layer-graph layer-list parent-nodes]
+  (let [{:keys [id->node-map edges]} layer-graph
+        layer-list-with-id (-> (flatten layer-list)
+                     (generate-layer-ids :id->node-map id->node-map)
+                     (assign-layer-parents :parent-nodes parent-nodes))
+        new-nodes (mapv #(dissoc % :parents) layer-list-with-id)
+        new-edges (layer-list->edge-list layer-list-with-id)]
+    (-> (assoc layer-graph :id->node-map (merge id->node-map (nodes->id->node-map new-nodes)))
+      (assoc :edges (concat edges (vec new-edges))))))
+
+
 (defn- build-desc-seq-or-graph
   [desc-seq-or-graph]
   (let [desc-graph (if (sequential? desc-seq-or-graph)
@@ -213,20 +230,19 @@ The build step is responsible for
                           flatten
                           layer-list->graph)
                      desc-seq-or-graph)
-        {:keys [nodes edges buffers]
+        {:keys [nodes edges buffers id->node-map]
          :or {buffers {}}} desc-graph
         parents (set (map first edges))
         children (set (map second edges))
         [roots leaves] (edges->roots-and-leaves edges)
-        id->node-map (nodes->id->node-map nodes)
+        id->node-map (if nodes (nodes->id->node-map nodes) id->node-map)
+
         ;;Setup forward traversal so we let parameters flow
         ;;from top to bottom.
         child->parent-map (edges->child->parent-map edges)
         parent->child-map (edges->parent->child-map edges :add-roots? true)
-
         dfs-seq (->> (edges->dfs-seq edges)
                      (drop 1))
-
         builder (partial build-graph-node child->parent-map)
         id->node-map (reduce (fn [id->node-map id]
                                (update id->node-map id #(builder
@@ -244,8 +260,9 @@ The build step is responsible for
                         (let [param-entry (get node key)
                               buffer (if (map? param-entry)
                                        (or (get param-entry :buffer)
-                                           (get buffers (get param-entry
-                                                             :buffer-id)))
+                                           (get-in buffers [(get param-entry
+                                                                 :buffer-id)
+                                                            :buffer]))
                                        ;;If the parameter-entry is not associative
                                        ;;and is non-nil then we assume it is the desired
                                        ;;buffer.
@@ -315,26 +332,28 @@ The build step is responsible for
 
 
 (defn- verify-graph-node
-  [node]
+  [network node]
   (let [parameter-descriptions (layers/get-parameter-descriptions node)]
     (->>
      (map (fn [{:keys [key shape-fn]}]
             (let [node-shape (shape-fn node)
-                  parameter-data (get node key)]
-              (when-let [buffer-data (get parameter-data :buffer)]
-                (when-not (= node-shape
-                             (m/shape buffer-data))
-                  {:node node
-                   :parameter key
-                   :desired-shape node-shape
-                   :actual-shape (m/shape buffer-data)}))))
+                  buffer-data (get-in network [:layer-graph
+                                               :buffers
+                                               (get-in node [key :buffer-id])
+                                               :buffer])]
+              (when-not (= node-shape
+                           (m/shape buffer-data))
+                {:node node
+                 :parameter key
+                 :desired-shape node-shape
+                 :actual-shape (m/shape buffer-data)})))
           parameter-descriptions)
      (remove nil?))))
 
 
-(defn- verify-layer-graph
-  [{:keys [nodes]}]
-  (mapcat verify-graph-node nodes))
+(defn verify-layer-graph
+  [network]
+  (mapcat (partial verify-graph-node network) (vals (get-in network [:layer-graph :id->node-map]))))
 
 
 (defn build-network
@@ -344,7 +363,7 @@ along with failure reasons."
   [network-desc]
   (let [{:keys [layer-graph] :as built-network} (build-layer-graph network-desc)]
     (assoc built-network
-           :verification-failures (seq (verify-layer-graph layer-graph))
+           :verification-failures (seq (verify-layer-graph built-network))
            :parameter-count (get-layer-graph-parameter-count layer-graph))))
 
 
@@ -483,4 +502,42 @@ opposed to networks), but consider:
                                    [k (layer->buffer-shape network layer k)])))))
          (clojure.pprint/print-table (concat ["type" "input" "output"] parameter-keys))))
   (println "\nParameter count:" (:parameter-count network)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Network API Functions
+(defn add-property-to-layer
+  "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id
+  To get a list of node-id -> (keys (get-in network [:layer-graph :id->node-map)))
+  ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0 :regularization )"
+  [network node-id key value]
+  (update-in network [:layer-graph :id->node-map node-id] assoc key value))
+
+;; When using these functions, make sure to call traverse/auto-bind-io and travrse/network->training-traversal on the resulting network
+(defn assoc-layers-to-network
+  "Appends a list of layers to the end of the layer-graph"
+  [network layer-list]
+  (let [layer-graph (:layer-graph network)
+        {:keys [edges]} layer-graph
+        last-child-node (second (last edges))]
+    (->> (append-layer-list-to-graph layer-graph layer-list (vector last-child-node))
+      (assoc network :layer-graph))))
+
+(defn dissoc-layers-from-network
+  "Removes layers (nodes, edges, buffers) from the given parent node till the last leaf node"
+  [network parent-node]
+  (let [{:keys [id->node-map edges buffers]} (:layer-graph network)
+        edges-to-chop (first (reduce (fn [[path node] [parent child]]
+                                       (if (= node parent)
+                                         [(conj path [parent child]) child]
+                                         [path node])) [[] parent-node] edges))
+        nodes-to-chop (distinct (flatten edges-to-chop))
+        buffers-to-remove (->> (map (fn [node-id]
+                                      (map #(get-in id->node-map [node-id % :buffer-id]) (keys (get id->node-map node-id)))) nodes-to-chop)
+                            flatten
+                            (filter identity))
+        id->node-map (reduce dissoc id->node-map nodes-to-chop)
+        edges (drop-last (+ (count edges-to-chop) 1) edges)   ;; + 1 because the parent node is the child in the previous edge pair
+        buffers (reduce dissoc buffers buffers-to-remove)]
+    (-> (assoc-in network [:layer-graph :id->node-map] id->node-map)
+      (assoc-in [:layer-graph :edges] edges)
+      (assoc-in [:layer-graph :buffers] buffers))))
