@@ -39,20 +39,8 @@ patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
       (throw (ex-info "Failed to find node argument"
                       {:node node
                        :argument-name arg-key})))
-    (let [retval (->> (assoc retval :key arg-key)
-                      (deep-merge retval (get node arg-key)))]
-      ;;Resolve the stream for the stream-augmentation argument dynamically
-      ;;as late as possible.
-      (if (= :stream-augmentation (get retval :type))
-        (let [stream-arg (get-node-argument node (get retval :argument))]
-          (when-not (= :stream (get stream-arg :type))
-            (throw (ex-info "Stream augmentation arguments most point to stream arguments"
-                            {:augmentation-arg retval
-                             :target-arg stream-arg})))
-          (assoc retval
-                 :stream
-                 (get stream-arg :stream)))
-        retval))))
+    (->> (assoc retval :key arg-key)
+         (deep-merge retval (get node arg-key)))))
 
 
 (defn get-node-arguments
@@ -70,17 +58,67 @@ buffers."
   is not located in the graph.  Also note that any parameter arguments are generated
   in a separate step.  This is simply a translation from node->node called during
   the add-node step."
-  (fn [node graph predecessor-ids]
+  (fn [graph node predecessor-ids]
     (get node :type)))
+
+
+(defn create-shape-descriptor
+  "Shape descriptors are used to describe streams.  Currently there are two types
+of streams, a multi-channeled input like an image and a single channel input like
+a vector of floats."
+  ([channels height width]
+   {:channels channels
+    :height height
+    :width width})
+  ([width]
+   (create-shape-descriptor 1 1 width)))
+
+
+(defn shape-descriptor->size
+  ^long [shape-desc]
+  (long (apply * (vals shape-desc))))
 
 
 (defn create-graph
   "Create an empty graph."
   []
   {:edges [] ;;Adjacency list of [id id]
-   :id->node-map ;;each node has an id and a type
-   :buffers ;;parameter buffers, map of id->{:buffer data :gradient gradient}
+   :id->node-map {} ;;each node has an id and a type
+   :buffers {} ;;parameter buffers, map of id->{:buffer data :gradient gradient}
+   :streams {} ;;map of stream name -> shape descriptor.  Streams act as roots of the graph.
    })
+
+
+(defn add-stream
+  [graph stream-name shape-descriptor]
+  (assoc-in graph [:streams stream-name] shape-descriptor))
+
+
+(defn stream->size
+  [graph stream-name]
+  (if-let [stream-shape (get-in graph [:streams stream-name])]
+    (shape-descriptor->size stream-shape)
+    (throw (ex-info "Failed to find stream in graph"
+                    {:stream stream-name
+                     :available-streams (keys (get graph :streams))}))))
+
+(defn input-node
+  [stream-name]
+  {:type :input
+   :input {:stream stream-name}})
+
+
+(defmethod build-node :input
+  [graph node predecessor-seq]
+  (when-not (= 0 (count predecessor-seq))
+    (throw (ex-info "Input nodes cannot have predecessor nodes"
+                    {:node node
+                     :predecessors predecessor-seq}))))
+
+
+(defmethod get-node-metadata :input
+  [node]
+  {:arguments {:type :stream}})
 
 
 (defn get-node
@@ -113,7 +151,7 @@ If any of the predecessors does not exist an error will be thrown."
                      :missing-ids (remove (get graph :id->node-map) predecessor-id-seq)
                      :existing-ids (vec (keys (get graph :id->node-map)))})))
   (let [node (-> (get-or-create-node-id graph node)
-                 (build-node graph predecessor-id-seq))]
+                 (#(build-node graph % predecessor-id-seq)))]
     (assoc graph
            :id->node-map node
            :edges (concat (get graph :edges)
@@ -188,20 +226,20 @@ If any of the predecessors does not exist an error will be thrown."
 
 (defmulti get-argument-shape
   "Get the expected shape of an argument"
-  (fn [graph node argument stream->size]
+  (fn [graph node argument]
     (get argument :type)))
 
 
 (defmethod get-argument-shape :stream
-  [graph node argument stream->size]
-  (if-let [retval (get stream->size (get argument :stream))]
+  [graph node argument]
+  (if-let [retval (stream->size graph (get argument :stream))]
     [(long retval)]
     (throw (ex-info "Failed to find stream size for argument"
                     {:stream (get argument :stream)
                      :streams (keys stream->size)}))))
 
 (defmethod get-argument-shape :node-output
-  [graph node argument stream->size]
+  [graph node argument]
   (let [target-node (get-node graph (get argument :node-id))]
     (if-let [retval (get target-node :output-size)]
       [(long retval)]
@@ -210,21 +248,21 @@ If any of the predecessors does not exist an error will be thrown."
                        :nodes (keys (get graph :id->node-map))})))))
 
 (defmethod get-argument-shape :node-argument
-  [graph node argument stream->size]
+  [graph node argument]
   (let [target-node (get-node graph (get argument :node-id))
         target-arg (get-node-argument graph node (get argument :argument))]
-    (get-argument-shape graph target-node target-arg stream->size)))
+    (get-argument-shape graph target-node target-arg)))
 
 (defmethod get-argument-shape :stream-augmentation
-  [graph node argument stream->size]
+  [graph node argument]
   (throw (ex-info "Cannot get shape of stream augments without actually augmenting stream"
                   {:argument argument})))
 
 (defmethod get-argument-shape :parameter
-  [graph node argument stream->size]
+  [graph node argument]
   (try
     (keyword-fn/call-keyword-fn (get argument :shape-fn)
-                                graph node argument stream->size)
+                                graph node argument)
     (catch Throwable e
       (throw (ex-info "Failed to resolve and call shape function"
                       {:node-id (get node :id)
@@ -246,9 +284,9 @@ If any of the predecessors does not exist an error will be thrown."
 
 (defn- generate-parameter-argument-buffer
   "Given a parameter argument generate it's buffer."
-  [node-id stream->size graph argument]
+  [node-id graph argument]
   (let [node (get-node graph node-id)
-        expected-shape (get-argument-shape graph node argument stream->size)]
+        expected-shape (get-argument-shape graph node argument)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
       (do
         (when-not (= expected-shape (m/shape existing-buffer))
@@ -279,19 +317,19 @@ If any of the predecessors does not exist an error will be thrown."
 
 
 (defn- generate-parameter-buffers
-  [stream->size graph id]
+  [graph id]
   (->> (get-node graph id)
        get-node-arguments
        (filter #(= :parameter (get % :type)))
-       (reduce (partial generate-parameter-argument-buffer id stream->size)
+       (reduce (partial generate-parameter-argument-buffer id)
                graph)))
 
 
 (defn generate-parameters
   "Go through all the nodes in the graph and generate any parameter buffers
 that do not already exist.  Returns a new graph."
-  [graph stream->size]
-  (reduce (partial generate-parameter-buffers stream->size)
+  [graph]
+  (reduce generate-parameter-buffers
           graph
           (dfs-seq graph)))
 

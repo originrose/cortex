@@ -81,12 +81,12 @@ constructors are all variable args with the extra arguments expected to be
 
 
 (defn linear-weight-parameter-shape
-  [graph {:keys [input-size output-size] :as node} argument stream->size]
+  [graph {:keys [input-size output-size] :as node} argument]
   [output-size input-size])
 
 
 (defn linear-bias-parameter-shape
-  [graph {:keys [output-size] :as node} argument stream->size]
+  [graph {:keys [output-size] :as node} argument]
   [output-size])
 
 (defmethod graph/build-node :linear
@@ -252,12 +252,12 @@ calculations must be "
 
 
 (defn- convolutional-weight-parameter-shape
-  [graph {:keys [kernel-width kernel-height num-kernels input-channels]} argument stream->size]
+  [graph {:keys [kernel-width kernel-height num-kernels input-channels]} argument]
   [num-kernels (* kernel-width kernel-height input-channels)])
 
 
 (defn- convolutional-bias-parameter-shape
-  [graph {:keys [num-kernels]} argument stream->size]
+  [graph {:keys [num-kernels]} argument]
   [num-kernels])
 
 
