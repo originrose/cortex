@@ -103,10 +103,10 @@ see cortex.keyword-fn namespace."
 (defn ->argumented-stream-arg
   "Augmentation is a keyword function.  See cortex.keyword-fn.
 The augmentation points to another argument which must of type stream."
-  [arg-name augmentation & args]
+  [stream-name augmentation & args]
   (merge-args
    {:type :stream-augmentation
-    :argument arg-name
+    :stream stream-name
     :augmentation augmentation}
    args))
 

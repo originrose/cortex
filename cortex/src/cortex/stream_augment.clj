@@ -10,7 +10,7 @@
   "Create a stream augmentation that converts from class labels to class indexes"
   [stream-arg-name]
   {:type :stream-augmentation
-   :argument stream-arg-name
+   :stream stream-arg-name
    :augmentation :cortex.stream-augment/labels->indexes
    :datatype :int})
 
@@ -33,5 +33,5 @@
 Used for inverse scaling of things that are summed per-batch by class."
   [stream-arg-name]
   {:type :stream-augmentation
-   :argument stream-arg-name
+   :stream stream-arg-name
    :augmentation :cortex.stream-augment/labels->inverse-counts})

@@ -1,4 +1,3 @@
-
 (ns cortex.nn.layers
   "Descriptions are the canonical representation of layers in cortex.  Implementations
 are expected to work with descriptions that are annotated with special information
@@ -6,22 +5,9 @@ on them that pertails exactly to that implementation.  They are expected to be t
 of extra keys/information on the descriptions.  Because of this the description
 constructors are all variable args with the extra arguments expected to be
   keyword-value pairs and are assoc'd into the description map."
-  (:require [cortex.loss :refer [merge-args arg-list->arg-map] :as loss]))
-
-
-(defmulti get-layer-metadata
-  "Get the metadata for the layer.  This encompasses
-at least:
-:parameter-descriptions - A list of parameter descriptions.  see get-parameter-descriptons.
-:pass-set - a set of pass types the layer is used in.  The set of possible types could be empty
-   or any of #{:training :inference}.
-:build-fn - A function that takes a list of previous built layers along with this layer and sets
-  information on this layer about its output size and such.  There is a default build function
-  provided if this layer has no build function specified for it that simple assumes the layer
-  does not change the dimensions of the input.
-:default-loss The default loss descriptor for this layer type if one isn't provided in the
-  output binding."
-  :type)
+  (:require [cortex.util :refer [merge-args arg-list->arg-map] :as util]
+            [cortex.loss :as loss]
+            [cortex.graph :as graph]))
 
 
 (defn- carry-input-image-dims-forward
@@ -44,17 +30,17 @@ at least:
 
 
 (defn- ensure-single-parent
-  [previous-nodes node]
-  (when-not (= 1 (count previous-nodes))
+  [graph node previous-id-seq]
+  (when-not (= 1 (count previous-id-seq))
     (throw (ex-info "Node only takes a single node of input."
                     {:node node
-                     :previous previous-nodes})))
-  (first previous-nodes))
+                     :previous previous-id-seq})))
+  (graph/get-node graph (first previous-id-seq)))
 
 
 (defn- default-build-fn
-  [previous-nodes node]
-  (let [previous (ensure-single-parent previous-nodes node)
+  [graph node predecessor-ids]
+  (let [previous (ensure-single-parent graph node predecessor-ids)
         io-size (get previous :output-size)]
     (-> (carry-image-dims-forward previous node)
         (assoc :input-size io-size
@@ -62,64 +48,9 @@ at least:
 
 (defn- default-layer-metadata
   []
-  {:parameter-descriptions []
-   :pass-set #{:training :inference}
-   :build-fn default-build-fn
+  {:arguments {}
+   :passes [:training :inference]
    :default-loss (loss/mse-loss)})
-
-
-(defmethod get-layer-metadata :default
-  [layer]
-  (default-layer-metadata))
-
-
-(defn get-layer-build-fn
-  [layer]
-  (get (get-layer-metadata layer) :build-fn default-build-fn))
-
-
-(defn get-layer-default-loss
-  [layer]
-  (get (get-layer-metadata layer) :default-loss (loss/mse-loss)))
-
-
-(def parameter-buffer-types
-  [:weight
-   :bias
-   :scale
-   :mean
-   :variance])
-
-
-(defn get-parameter-descriptions
-  "Get a list of parameter descriptions.  Parameter descriptions are maps:
-:key        description key which holds the parameter.
-:type       one of the parameter buffer types.  Possibly unknown type.
-:shape-fn   function which given the built description will return the
-            core matrix parameter shape for this particular buffer."
-  [layer]
-  (get (get-layer-metadata layer) :parameter-descriptions))
-
-
-(defn get-parameter-shape
-  "Get the shape of a given parameter."
-  [layer param-key]
-  (if-let [layer-param (->> (get-parameter-descriptions layer)
-                            (filter #(= param-key (get % :key)))
-                            first)]
-    ((get layer-param :shape-fn) layer)
-    (throw (ex-info "Parameter was not found on layer."
-                    {:layer layer
-                     :parameter param-key}))))
-
-
-(defn get-pass-set
-  "Get the pass types the layer is used in.  The set can be empty
-if the layer is a placeholder to help building graphs (input,output)
-or it can be #{:training} if the layer is used only during training (dropout)
-  or finally the default is #{:training :inference}"
-  [layer]
-  (get (get-layer-metadata layer) :pass-set))
 
 
 (defn input
@@ -134,16 +65,14 @@ or it can be #{:training} if the layer is used only during training (dropout)
    (input output-size 1 1)))
 
 
-(defmethod get-layer-metadata :input
+(defmethod graph/get-node-metadata :input
   [layer]
   {:parameter-descriptions []
-   :pass-set #{}
-   :build-fn (fn [_ layer]
-               (assoc layer
-                      :input-size (get layer :output-size)
-                      :input-width (get layer :output-width)
-                      :input-height (get layer :output-height)
-                      :input-channels (get layer :output-channels)))})
+   :pass-set #{}})
+
+(defmethod graph/build-node :input
+  [node graph predecessor-ids]
+  (default-build-fn graph node predecessor-ids))
 
 
 (defn linear
@@ -151,36 +80,35 @@ or it can be #{:training} if the layer is used only during training (dropout)
   [(merge-args {:type :linear :output-size num-output} args)])
 
 
-(defn- linear-weight-parameter-shape
-  [{:keys [input-size output-size]}]
+(defn linear-weight-parameter-shape
+  [graph {:keys [input-size output-size] :as node} argument stream->size]
   [output-size input-size])
 
 
-(defn- linear-bias-parameter-shape
-  [{:keys [output-size]}]
+(defn linear-bias-parameter-shape
+  [graph {:keys [output-size] :as node} argument stream->size]
   [output-size])
 
-
-(defn- build-linear
-  [previous-seq item]
-  (let [previous (ensure-single-parent previous-seq item)
+(defmethod graph/build-node :linear
+  [graph node predecessor-id-seq]
+  (let [previous (ensure-single-parent graph node predecessor-id-seq)
         input-size (:output-size previous)
-        result (assoc (carry-input-image-dims-forward previous item)
+        result (assoc (carry-input-image-dims-forward previous node)
                       :input-size input-size)]
     result))
 
-
-(defmethod get-layer-metadata :linear
-  [desc]
-  {:parameter-descriptions
-   [{:key :weights
-     :type :weight
-     :shape-fn linear-weight-parameter-shape}
-    {:key :bias
-     :type :bias
-     :shape-fn linear-bias-parameter-shape}]
-   :pass-set #{:inference :training}
-   :build-fn build-linear})
+(defmethod graph/get-node-metadata :linear
+  [node]
+  {:arguments
+   {:weights {:type :parameter
+              :shape-fn :cortex.nn.layers/linear-weight-parameter-shape
+              :initialization {:type :weight-initialization}
+              :gradients? true}
+    :bias {:type :parameter
+           :shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+           :initialization {:type :constant :value 0}
+           :gradients? true}}
+   :passes [:inference :training]})
 
 
 (defn softmax
@@ -194,20 +122,19 @@ channel 2 with n-outputs"
           arg-map)])
 
 
-(defn- build-softmax
-  [previous-seq item]
-  (let [previous (ensure-single-parent previous-seq item)
+(defmethod graph/build-node :softmax
+  [graph node predecessor-seq]
+  (let [previous (ensure-single-parent graph node predecessor-seq)
         io-size (:output-size previous)]
-    (assoc item
+    (assoc node
            :input-size io-size
            :output-size io-size
-           :output-channels (get item :output-channels 1))))
+           :output-channels (get node :output-channels 1))))
 
 
-(defmethod get-layer-metadata :softmax
+(defmethod graph/get-node-metadata :softmax
   [layer]
   (assoc (default-layer-metadata)
-         :build-fn build-softmax
          :default-loss (loss/softmax-loss)))
 
 
@@ -224,6 +151,12 @@ channel 2 with n-outputs"
   [num-output & args]
   (concat (apply linear num-output args)
           (apply relu args)))
+(defmethod graph/build-node :relu
+  [& args]
+  (apply default-build-fn args))
+(defmethod graph/get-node-metadata :relu
+  [& args]
+  (default-layer-metadata))
 
 
 (defn logistic
@@ -233,6 +166,12 @@ channel 2 with n-outputs"
   [num-output & args]
   (concat (apply linear num-output args)
           (apply logistic args)))
+(defmethod graph/build-node :logistic
+  [& args]
+  (apply default-build-fn args))
+(defmethod graph/get-node-metadata :logistic
+  [& args]
+  (default-layer-metadata))
 
 
 (defn tanh
@@ -242,6 +181,12 @@ channel 2 with n-outputs"
   [num-output & args]
   (concat (apply linear num-output args)
           (apply tanh args)))
+(defmethod graph/build-node :tanh
+  [& args]
+  (apply default-build-fn args))
+(defmethod graph/get-node-metadata :tanh
+  [& args]
+  (default-layer-metadata))
 
 
 (defn dropout
@@ -265,11 +210,12 @@ no change to the input."
     {:type :dropout :distribution :gaussian :variance variance}
     args)])
 
-
-(defmethod get-layer-metadata :dropout
+(defmethod graph/build-node :dropout
+  [& args]
+  (apply default-build-fn args))
+(defmethod graph/get-node-metadata :dropout
   [layer]
-  {:parameter-descriptions []
-   :pass-set #{:training}})
+  {:passes #{:training}})
 
 
 (def default-layer-type-dimension-op
@@ -306,12 +252,12 @@ calculations must be "
 
 
 (defn- convolutional-weight-parameter-shape
-  [{:keys [kernel-width kernel-height num-kernels input-channels]}]
+  [graph {:keys [kernel-width kernel-height num-kernels input-channels]} argument stream->size]
   [num-kernels (* kernel-width kernel-height input-channels)])
 
 
 (defn- convolutional-bias-parameter-shape
-  [{:keys [num-kernels]}]
+  [graph {:keys [num-kernels]} argument stream->size]
   [num-kernels])
 
 
@@ -368,25 +314,27 @@ a few compatibility issues."
            :output-size output-size
            :input-data-format input-data-format :output-data-format output-data-format)))
 
-
-(defmethod get-layer-metadata :convolutional
+(defmethod graph/build-node :convolutional
+  [graph node predecessor-id-seq]
+  ;;Convolutional layers can only have a floor dimension operation for cudnn compatibility.
+  (when-not (= :floor (get node :dimension-op :floor))
+    (throw (ex-info "Convolutional layers can only have floor dimension operation"
+                    {:dimension-op (get node :dimension-op)
+                     :node node})))
+  (build-convolutional-type-node (ensure-single-parent graph node predecessor-id-seq)
+                                 node (get node :num-kernels)))
+(defmethod graph/get-node-metadata :convolutional
   [desc]
-  {:parameter-descriptions
-   [{:type :weight
-     :key :weights
-     :shape-fn convolutional-weight-parameter-shape}
-    {:type :bias
-     :key :bias
-     :shape-fn convolutional-bias-parameter-shape}]
-   :pass-set #{:training :inference}
-   :build-fn (fn [previous-seq node]
-               ;;Convolutional layers can only have a floor dimension operation for cudnn compatibility.
-               (when-not (= :floor (get node :dimension-op :floor))
-                 (throw (ex-info "Convolutional layers can only have floor dimension operation"
-                                 {:dimension-op (get node :dimension-op)
-                                  :node node})))
-               (build-convolutional-type-node (ensure-single-parent previous-seq node)
-                                              node (get node :num-kernels)))})
+  {:arguments
+   {:weights {:type :parameter
+              :shape-fn :cortex.nn.layers/convolutional-weight-parameter-shape
+              :initialization {:type :weight-initialization}
+              :gradients? true}
+    :bias {:type :parameter
+           :shape-fn :cortex.nn.layers/convolutional-bias-parameter-shape
+           :initialization {:type :constant :value 0}
+           :gradients? true}}
+   :passes #{:training :inference}})
 
 
 (defn max-pooling
@@ -394,15 +342,12 @@ a few compatibility issues."
    [(apply convolutional-type-layer :max-pooling kernel-dim kernel-dim pad pad
            stride stride 0 :ceil args)]))
 
-
-(defmethod get-layer-metadata :max-pooling
+(defmethod graph/build-node :max-pooling
+  [graph node predecessor-ids]
+  (default-build-fn graph node predecessor-ids))
+(defmethod graph/get-node-metadata :max-pooling
   [layer]
-  (assoc (default-layer-metadata)
-         :build-fn (fn [previous-seq node]
-                     (let [previous (ensure-single-parent previous-seq node)]
-                      (build-convolutional-type-node previous
-                                                     node
-                                                     (get previous :output-channels))))))
+  (default-layer-metadata))
 
 
 (defn batch-normalization
@@ -423,25 +368,23 @@ This is for cudnn compatibility.")))
      :epsilon epsilon}
     (dissoc arg-map :epsilon))])
 
-
-(defmethod get-layer-metadata :batch-normalization
+(defmethod graph/build-node :batch-normalization
+  [graph node p-id-seq]
+  (default-build-fn graph node p-id-seq))
+(defmethod graph/get-node-metadata :batch-normalization
   [desc]
-  {:parameter-descriptions
-   [{:key :scale
-     :type :scale
-     :shape-fn linear-bias-parameter-shape}
-    {:key :bias
-     :type :bias
-     :shape-fn linear-bias-parameter-shape}
-    {:key :means
-     :type :mean
-     :non-trainable? true
-     :shape-fn linear-bias-parameter-shape}
-    {:key :variances
-     :type :variance
-     :non-trainable? true
-     :shape-fn linear-bias-parameter-shape}]
-   :pass-set #{:training :inference}})
+  {:arguments
+   {:scale {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+            :initialization {:type :constant :value 1}
+            :gradients? true}
+    :bias {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+           :initialization {:type :constant :value 0}
+           :gradients? true}
+    :means {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+            :initialization {:type :constant :value 0}}
+    :variances {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+                :initialization {:type :constant :value 0}}}
+   :passes #{:training :inference}})
 
 
 (defn local-response-normalization
@@ -453,18 +396,12 @@ This is for cudnn compatibility.")))
     {:type :local-response-normalization
      :k k :n n :alpha alpha :beta beta}
     (dissoc arg-map :k :n :alpha :beta))])
-
-
-(defmethod get-layer-metadata :prelu
-  [desc]
-  {:parameter-descriptions
-   [{:key :neg-scale
-     :type :scale
-     :shape-fn (fn [desc]
-                 [(get desc :input-channels 1)])
-     :initialization {:type :constant
-                      :value 0.25}}]
-   :pass-set #{:training :inference}})
+(defmethod graph/build-node :local-response-normalization
+  [graph node p-id-seq]
+  (default-build-fn graph node p-id-seq))
+(defmethod graph/get-node-metadata :local-response-normalization
+  [& args]
+  (default-layer-metadata))
 
 
 (defn prelu
@@ -472,6 +409,22 @@ This is for cudnn compatibility.")))
 At this point we only support per-channel scale, not across channel scale."
   []
   {:type :prelu})
+
+(defn prelu-neg-scale-shape
+  [layer]
+  [(get layer :input-channels (get layer :input-size))])
+
+(defmethod graph/build-node :prelu
+  [graph node p-id-seq]
+  (default-build-fn graph node p-id-seq))
+(defmethod graph/get-node-metadata :prelu
+  [desc]
+  {:arguments
+   {:neg-scale {:shape-fn :cortex.nn.layers/prelu-neg-scale-shape
+                :initialization {:type :constant
+                                 :value 0.25}
+                :gradients? true}}
+   :passes #{:training :inference}})
 
 
 (defn network-description

@@ -23,7 +23,8 @@ taking a map of arguments.  Layers are functions which also have implicit input 
 
 
 (defn deep-merge
-  "Like merge, but merges maps recursively."
+  "Like merge, but merges maps recursively.  Note that this is pulled from a rejected
+patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
   [& maps]
   (if (every? map? maps)
     (apply merge-with deep-merge maps)
@@ -73,15 +74,13 @@ buffers."
     (get node :type)))
 
 
-(defrecord Graph [edges ;;Adjacency list of [id id]
-                  id->node-map ;;each node has a :type
-                  buffers ;;map of buffer-id->{:buffer data :gradient gradient}
-                  ])
-
-
 (defn create-graph
+  "Create an empty graph."
   []
-  (->Graph [] {} {}))
+  {:edges [] ;;Adjacency list of [id id]
+   :id->node-map ;;each node has an id and a type
+   :buffers ;;parameter buffers, map of id->{:buffer data :gradient gradient}
+   })
 
 
 (defn get-node
@@ -360,7 +359,7 @@ at least :buffer if not both :buffer and :gradient."
   [graph node argument stream-map node-id->output-map]
   (if-let [buffer (get stream-map (arg/augmented-stream-arg->id argument))]
     buffer
-    (throw (ex-info "Failed to find argument"
+    (throw (ex-info "Failed to resolve argument"
                     {:argument argument
                      :streams (keys stream-map)}))))
 
