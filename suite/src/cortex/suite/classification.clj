@@ -181,21 +181,22 @@ as it is training)."
 (defn network-eval->rich-confusion-matrix
   "A rich confusion matrix is a confusion matrix with the list of inferences and
 observations in each cell instead of just a count."
-  [dataset {:keys [labels inferences data] :as network-eval}]
+  [dataset {:keys [labels inferences data leaf-node] :as network-eval}]
   (reset! last-network-eval network-eval)
   (let [class-names (get dataset :class-names)
         vec->label #(class-names (loss/max-index (vec %)))
-        _ (when-not (and (map? inferences)
+        _ (when-not (and (= (count leaf-node) 1)
                          (contains? labels :labels)
                          (contains? data :data))
-            (throw (ex-info "Classification datasets should have :output :labels and :data."
+            (throw (ex-info "Classification datasets should have :labels and :data and one leaf node with corresponding inferences."
                             {:input (keys data)
                              :labels (keys labels)
-                             :inferences (keys inferences)})))
+                             :inferences (keys inferences)
+                             :leaf-nodes leaf-node})))
         ;;There are a lot of firsts here because generically out network could take
         ;;many inputs and produce many outputs.  When we are training classification
         ;;tasks however we know this isn't the case; we have one input and one output
-        inferences (first (vals inferences))
+        inferences (get inferences (first leaf-node))
         data (get data :data)
         labels (get labels :labels)
         inference-answer-patch-pairs (->> (interleave inferences
