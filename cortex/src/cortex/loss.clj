@@ -390,7 +390,8 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
                          :shape-fn :cortex.loss/get-center-loss-center-buffer-shape
                          :initialization {:type :constant
                                           :value 0}}}
-   :lambda 0.1})
+   :lambda 0.1
+   :passes [:loss]})
 
 
 (defmethod generate-loss-term :center-loss

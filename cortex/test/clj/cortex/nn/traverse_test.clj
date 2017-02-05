@@ -2,6 +2,7 @@
   (:require [cortex.nn.traverse :as traverse]
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
+            [cortex.graph :as graph]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
             [cortex.loss :as loss]
@@ -60,10 +61,13 @@
 (defn build-big-description
   []
   (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1 :stream :labels :loss (loss/softmax-loss))]]
+        output-bindings [(traverse/->output-binding :softmax-1 :stream
+                                                    :labels :loss (loss/softmax-loss))]]
     (-> (network/build-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
+
+
 
 (def stream->size-map {:data 768
                        :labels 10})
@@ -71,20 +75,27 @@
 
 (deftest big-description
   (let [network (build-big-description)
-        gradient-descent (->> (traverse/network->training-traversal network stream->size-map)
+        training-net (traverse/network->training-traversal network stream->size-map)
+        gradient-descent (->> training-net
                               :traversal
                               realize-traversals)
         inference-mem (->> (traverse/network->inference-traversal network stream->size-map)
                            :traversal
                            realize-traversals)]
-    (is (= 434280 (get network :parameter-count)))
+    (is (= 434280 (graph/parameter-count (get network :layer-graph))))
     (is (= 434280 (->> (get-in network [:layer-graph :buffers])
                        (map (comp m/ecount :buffer second))
                        (reduce +))))
+    ;;Adding in the parameters required for the network
+    (is (= 439280 (graph/parameter-count (get training-net :layer-graph))))
+    (clojure.pprint/pprint (get gradient-descent :forward))
+
     (is (= [nil nil]
            (minimal-diff
-            [{:id :dropout-1, :incoming [{:input-stream :data}], :outgoing [{:id :dropout-1}]}
-             {:id :convolutional-1, :incoming [{:id :dropout-1}], :outgoing [{:id :convolutional-1}]}
+            [{:id :dropout-1, :incoming [{:stream :data}], :outgoing [{:id :dropout-1}]}
+             {:id :convolutional-1,
+              :incoming [{:id :dropout-1}],
+              :outgoing [{:id :convolutional-1}]}
              {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]}
              {:id :relu-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :relu-1}]}
              {:id :dropout-2, :incoming [{:id :relu-1}], :outgoing [{:id :dropout-2}]}

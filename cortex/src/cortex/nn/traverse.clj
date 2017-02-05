@@ -188,7 +188,11 @@ Each item in the sequence is a map of:
   [{:keys [layer-graph] :as network}]
   (let [{:keys [input-bindings output-bindings]} (get network :traversal)
         ;;Remove all edges that do not participate in the keep node set.
-        child->parent-map (graph/child->parent-map layer-graph)]
+        child->parent-map (graph/child->parent-map layer-graph)
+        output-bindings (->> output-bindings
+                             (map (fn [[k v]]
+                                    [k (dissoc v :stream)]))
+                             (into {}))]
     (->> (graph/dfs-seq layer-graph)
          (reduce (fn [[retval id->buffer-map] id]
                    (let [node-buffer (if-let [output-binding (get output-bindings id)]
@@ -275,7 +279,7 @@ the previous step."
 
 (defn- buffer-desc->map-key
   [buffer-desc]
-  (select-keys buffer-desc [:id :input-stream :output-id]))
+  (select-keys buffer-desc [:id :stream :output-id]))
 
 
 (defn- forward-traversal->buffer-map
@@ -310,7 +314,9 @@ which means removing extra information from them."
   [network traversal]
   (-> (reduce (fn [[keep-set traversal] {:keys [incoming id] :as item}]
                 (let [keep? (or (seq (filter #(contains? keep-set (get % :id)) incoming))
-                                (graph/any-trainable-arguments? network id))]
+                                (graph/any-trainable-arguments? (graph/get-node
+                                                                 (get  network :layer-graph)
+                                                                  id)))]
                   (if keep?
                     [(conj keep-set id) (conj traversal item)]
                     [keep-set traversal])))
@@ -383,15 +389,15 @@ which means removing extra information from them."
   ;;map each loss term to the node it is most associated with (its output)
   ;;and attach it to that node in the graph.  Generate parameters and then
   ;;create a new vector of loss terms with the added information.
-  (let [existing-terms (-> (graph/dfs-seq graph)
-                           (map (fn [node-id]
-                                  (let [pass-set (-> (graph/get-node graph node-id)
-                                                     graph/get-node-metadata
-                                                     :passes
-                                                     set)]
-                                    (when (contains? pass-set :loss)
-                                      node-id))))
-                           (remove nil?))
+  (let [existing-terms (->> (graph/dfs-seq graph)
+                            (map (fn [node-id]
+                                   (let [pass-set (-> (graph/get-node graph node-id)
+                                                      graph/get-node-metadata
+                                                      :passes
+                                                      set)]
+                                     (when (contains? pass-set :loss)
+                                       node-id))))
+                            (remove nil?))
         graph (reduce graph/remove-node
                       graph
                       existing-terms)]
@@ -404,9 +410,14 @@ which means removing extra information from them."
                                 {:loss-term loss-term
                                  :metadata (graph/get-node-metadata loss-term)})))
               (let [node-id (->> (graph/get-node-arguments loss-term)
-                                 :node-id
+                                 (map :node-id)
                                  (remove nil?)
                                  first)
+                    _ (when-not node-id
+                        (throw (ex-info "failed to find node for loss term"
+                                        {:term loss-term
+                                         :arguments (vec (graph/get-node-arguments
+                                                          loss-term))})))
                     [graph term-id] (graph/add-node graph loss-term [node-id])]
                 [graph (conj loss-term-vec (assoc loss-term :id term-id))]))
             [graph []]

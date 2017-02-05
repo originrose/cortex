@@ -56,6 +56,7 @@ constructors are all variable args with the extra arguments expected to be
 (defn get-pass-set
   [node]
   (-> (graph/get-node-metadata node)
+      (get :passes)
       set))
 
 (defn get-layer-default-loss
@@ -361,7 +362,9 @@ a few compatibility issues."
 
 (defmethod graph/build-node :max-pooling
   [graph node predecessor-ids]
-  (default-build-fn graph node predecessor-ids))
+  (let [previous (ensure-single-parent graph node predecessor-ids)]
+   (build-convolutional-type-node previous
+                                  node (get previous :output-channels))))
 (defmethod graph/get-node-metadata :max-pooling
   [layer]
   (default-layer-metadata))
@@ -388,19 +391,24 @@ This is for cudnn compatibility.")))
 (defmethod graph/build-node :batch-normalization
   [graph node p-id-seq]
   (default-build-fn graph node p-id-seq))
+
 (defmethod graph/get-node-metadata :batch-normalization
   [desc]
   {:arguments
    {:scale {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
             :initialization {:type :constant :value 1}
-            :gradients? true}
+            :gradients? true
+            :type :parameter}
     :bias {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
            :initialization {:type :constant :value 0}
-           :gradients? true}
+           :gradients? true
+           :type :parameter}
     :means {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
-            :initialization {:type :constant :value 0}}
+            :initialization {:type :constant :value 0}
+            :type :parameter}
     :variances {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
-                :initialization {:type :constant :value 0}}}
+                :initialization {:type :constant :value 0}
+                :type :parameter}}
    :passes #{:training :inference}})
 
 
