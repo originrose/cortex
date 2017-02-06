@@ -58,22 +58,18 @@
 (defn assoc-layers-to-network
   "Appends a list of layers to the end of the layer-graph"
   [network layer-list]
-  (update network :layer-graph
-          (fn [graph]
-            (let [leaves (graph/leaves network)]
-              (when-not (= 1 (count leaves))
-                (throw (ex-info "cannot auto-append to graphs with multiple leaves"
-                                {:leaves leaves})))
-              (let [layer-list (vec (flatten layer-list))]
-                (build-network network (update layer-list 0 #(assoc % :parents leaves))))))))
+  (let [leaves (graph/leaves (get network :layer-graph))
+        layer-list (vec (flatten layer-list))]
+    (when-not (= 1 (count leaves))
+      (throw (ex-info "cannot auto-append to graphs with either zero or multiple leaves"
+                      {:leaves leaves})))
+    (build-network network (update layer-list 0 #(assoc % :parents leaves)))))
 
 
 (defn dissoc-layers-from-network
   "Removes layers (nodes, edges, buffers) from the given parent node till the last leaf node"
-  [network parent-node]
-  (update network :layer-graph
-          (fn [graph]
-            (graph/remove-children (get parent-node :id)))))
+  [network parent-node-id]
+  (update network :layer-graph graph/remove-node parent-node-id))
 
 (defn network->graph
   [network]

@@ -327,6 +327,7 @@ a few compatibility issues."
         input-data-format (get previous :output-data-format :planar)
         output-data-format (get item :output-data-format :planar)]
     (assoc item
+           :input-size (get previous :output-size)
            :output-width output-width :output-height output-height
            :output-channels output-channels
            :output-size output-size

@@ -62,7 +62,7 @@ while training no stream or loss is necessary"
             {:stream stream
              :loss (or loss
                        (layers/get-layer-default-loss
-                        (graph/get-node network node-id)))}))
+                        (graph/get-node (get network :layer-graph) node-id)))}))
 
 
 (defn ->output-binding
@@ -289,6 +289,9 @@ the previous step."
               (let [node (graph/get-node layer-graph id)
                     output-size (get node :output-size)
                     input-size (get node :input-size)]
+                (when-not (and output-size input-size)
+                  (throw (ex-info "Node does not have input or output size"
+                                  {:node node})))
                 (merge buffer-map
                        (->> (concat (map #(assoc % :size output-size) outgoing)
                                     (map #(assoc % :size input-size) incoming))

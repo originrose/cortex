@@ -140,13 +140,18 @@ a vector of floats."
       (throw (ex-info "Input nodes can only link to streams"
                       {:node node})))
     (if-let [stream-desc (get-in graph [:streams (get input-data :stream)])]
-      (assoc node
-             :input-channels (get stream-desc :channels)
-             :output-channels (get stream-desc :channels)
-             :input-height (get stream-desc :height)
-             :output-height (get stream-desc :height)
-             :input-width (get stream-desc :width)
-             :output-width (get stream-desc :width))
+      (let [channels (long (get stream-desc :channels))
+            width (long (get stream-desc :width))
+            height (long (get stream-desc :height))]
+       (assoc node
+              :input-channels channels
+              :output-channels channels
+              :input-height height
+              :output-height height
+              :input-width width
+              :output-width width
+              :input-size (* channels width height)
+              :output-size (* channels width height)))
       (throw (ex-info "Failed to find stream to bind to input"
                       {:node node
                        :stream (get input-data :stream)})))))
@@ -159,7 +164,11 @@ a vector of floats."
 
 (defn get-node
   [graph node-id]
-  (get-in graph [:id->node-map node-id]))
+  (let [retval (get-in graph [:id->node-map node-id])]
+    (when-not retval
+      (throw (ex-info "Failed to find node:"
+                      {:node-id node-id})))
+    retval))
 
 
 (defn- get-or-create-node-id
@@ -167,7 +176,7 @@ a vector of floats."
   [graph node]
   (if-let [existing-id (get node :id)]
     (do
-      (when-let [existing-node (get-node graph existing-id)]
+      (when-let [existing-node (get-in graph [:id->node-map existing-id])]
         (throw (ex-info "Duplicate id detected in graph:"
                         {:new-node node
                          :existing-node existing-node})))
@@ -504,7 +513,7 @@ when simply doing execution."
                       (get p->c-map node-id))
         buffer-ids (->> (get-node-arguments (get-node graph node-id))
                         (filter #(= :parameter (get % :type)))
-                        :buffer-id)]
+                        (map :buffer-id))]
     (-> graph
         (update :edges #(remove (fn [[p c]]
                                   (or (= p node-id)

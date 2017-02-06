@@ -23,6 +23,8 @@
    (layers/batch-normalization 0.9)
    (layers/linear 500) ;;If you use this description put that at 1000
    (layers/relu :id :feature :center-loss {:labels {:stream :labels}
+                                           :label-indexes {:stream :labels}
+                                           :label-inverse-counts {:stream :labels}
                                            :lambda 0.05
                                            :alpha 0.9})
    (layers/dropout 0.5)
@@ -86,9 +88,9 @@
     (is (= 434280 (->> (get-in network [:layer-graph :buffers])
                        (map (comp m/ecount :buffer second))
                        (reduce +))))
-    ;;Adding in the parameters required for the network
+    ;;Adding in the parameters required for the center loss centers.  10 * 500 = 5000
+    ;;extra parameters
     (is (= 439280 (graph/parameter-count (get training-net :layer-graph))))
-    (clojure.pprint/pprint (get gradient-descent :forward))
 
     (is (= [nil nil]
            (minimal-diff
@@ -125,39 +127,40 @@
              {:id :max-pooling-2} {:id :max-pooling-2, :size 800},
              {:id :relu-1} {:id :relu-1, :size 2880},
              {:id :relu-2} {:id :relu-2, :size 800},
-             {:input-stream :data} {:input-stream :data, :size 784},
+             {:stream :data} {:stream :data, :size 784},
              {:id :feature} {:id :feature :size 500},
              {:output-id :softmax-1} {:loss {:type :softmax-loss},
                                       :output-id :softmax-1,
-                                      :output-stream :labels,
                                       :size 10}}
             (get gradient-descent :buffers))))
     (is (= [nil nil]
            (minimal-diff
             [{:type :softmax-loss,
               :output {:type :node-output, :node-id :softmax-1},
-              :labels {:type :stream, :stream :labels}}
+              :labels {:type :stream, :stream :labels},
+              :id :softmax-loss-1}
              {:type :center-loss,
               :alpha 0.9,
+              :labels {:stream :labels},
+              :label-indexes {:stream :labels},
+              :label-inverse-counts {:stream :labels},
               :lambda 0.05,
               :output {:type :node-output, :node-id :feature},
-              :labels {:stream :labels}
-              :centers {:buffer-id :center-loss-1}
-              :label-indexes {:id :center-loss-1-label-indexes-1}
-              :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}
+              :id :center-loss-1,
+              :centers {:buffer-id :center-loss-1-centers-1}}
              {:type :l2-regularization,
               :lambda 0.01,
-              :output {:type :node-output, :node-id :convolutional-2}}
+              :output {:type :node-output, :node-id :convolutional-2},
+              :id :l2-regularization-1}
              {:type :l1-regularization,
               :lambda 0.001,
               :output
-              {:type :node-parameter,
-               :node-id :convolutional-1,
-               :parameter :weights}}]
+              {:type :node-output, :node-id :convolutional-1, :argument :weights},
+              :id :l1-regularization-1}]
             (get gradient-descent :loss-function))))
     (is (= [nil nil]
            (minimal-diff
-            [{:id :convolutional-1, :incoming [{:input-stream :data}], :outgoing [{:id :convolutional-1}]}
+            [{:id :convolutional-1, :incoming [{:stream :data}], :outgoing [{:id :convolutional-1}]}
              {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]}
              {:id :relu-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :relu-1}]}
              {:id :convolutional-2, :incoming [{:id :relu-1}], :outgoing [{:id :convolutional-2}]}
@@ -180,11 +183,10 @@
              {:id :max-pooling-2} {:id :max-pooling-2, :size 800},
              {:id :relu-1} {:id :relu-1, :size 2880},
              {:id :relu-2} {:id :relu-2, :size 800},
-             {:input-stream :data} {:input-stream :data, :size 784},
+             {:stream :data} {:stream :data, :size 784},
              {:id :feature} {:id :feature :size 500},
              {:output-id :softmax-1} {:loss {:type :softmax-loss},
                                       :output-id :softmax-1,
-                                      :output-stream :labels,
                                       :size 10}}
             (get inference-mem :buffers))))))
 
@@ -220,17 +222,19 @@
     ;;for previous layers.
     (is (= [nil nil]
            (minimal-diff
-            [{:labels {:stream :labels, :type :stream},
-              :output {:node-id :softmax-1, :type :node-output},
-              :type :softmax-loss}
+            [{:type :softmax-loss,
+              :output {:type :node-output, :node-id :softmax-1},
+              :labels {:type :stream, :stream :labels},
+              :id :softmax-loss-1}
              {:type :center-loss,
               :alpha 0.9,
               :labels {:stream :labels},
+              :label-indexes {:stream :labels},
+              :label-inverse-counts {:stream :labels},
               :lambda 0.05,
               :output {:type :node-output, :node-id :feature},
-              :centers {:buffer-id :center-loss-1}
-              :label-indexes {:id :center-loss-1-label-indexes-1}
-              :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}]
+              :id :center-loss-1,
+              :centers {:buffer-id :center-loss-1-centers-1}}]
             (get traversal :loss-function))))))
 
 
@@ -259,17 +263,19 @@
              (get traversal :backward))))
     (is (= [nil nil]
            (minimal-diff
-             [{:labels {:stream :labels, :type :stream},
-               :output{ :node-id :softmax-1, :type :node-output},
-              :type :softmax-loss}
-              {:type :center-loss,
-               :alpha 0.9,
-               :labels {:stream :labels},
-               :lambda 0.05,
-               :output {:type :node-output, :node-id :feature},
-               :centers {:buffer-id :center-loss-1}
-               :label-indexes {:id :center-loss-1-label-indexes-1}
-               :label-inverse-counts {:id :center-loss-1-label-inverse-counts-1}}]
+            [{:type :softmax-loss,
+              :output {:type :node-output, :node-id :softmax-1},
+              :labels {:type :stream, :stream :labels},
+              :id :softmax-loss-1}
+             {:type :center-loss,
+              :alpha 0.9,
+              :labels {:stream :labels},
+              :label-indexes {:stream :labels},
+              :label-inverse-counts {:stream :labels},
+              :lambda 0.05,
+              :id :center-loss-1,
+              :output {:type :node-output, :node-id :feature},
+              :centers {:buffer-id :center-loss-1-centers-1}}]
              (get traversal :loss-function))))))
 
 (deftest appending-layers-to-network
@@ -284,34 +290,35 @@
         ;; the network is modified and rebuilt, these 2 steps are also rebuilt correctly
 
         top-layers (drop layer-split src-desc)
-        top-network-desc (network/assoc-layers-to-network bottom-network top-layers)
-        top-network (-> (network/build-network top-network-desc)
-                      traverse/auto-bind-io)
+        top-network (-> (network/assoc-layers-to-network bottom-network top-layers)
+                        traverse/auto-bind-io
+                        (traverse/network->training-traversal stream->size-map))
 
         traversal-after-stacking (-> (get top-network :traversal)
-                    realize-traversals)
+                                     realize-traversals)
 
         original-network (-> (network/build-network mnist-description-with-toys)
-                           traverse/auto-bind-io)
+                             traverse/auto-bind-io
+                             (traverse/network->training-traversal stream->size-map))
 
         original-traversal (-> (get original-network :traversal)
-                             realize-traversals)
+                               realize-traversals)
 
         inference-mem-top (->> (traverse/network->inference-traversal top-network stream->size-map)
-                            :traversal
-                            realize-traversals)
-
-        inference-mem-original (->> (traverse/network->inference-traversal original-network stream->size-map)
-                                 :traversal
-                                 realize-traversals)
-
-        gradient-descent-top (->> (traverse/network->training-traversal top-network stream->size-map)
                                :traversal
                                realize-traversals)
 
-        gradient-descent-original (->> (traverse/network->training-traversal original-network stream->size-map)
+        inference-mem-original (->> (traverse/network->inference-traversal original-network stream->size-map)
                                     :traversal
                                     realize-traversals)
+
+        gradient-descent-top (->> (traverse/network->training-traversal top-network stream->size-map)
+                                  :traversal
+                                  realize-traversals)
+
+        gradient-descent-original (->> (traverse/network->training-traversal original-network stream->size-map)
+                                       :traversal
+                                       realize-traversals)
         layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
     (is (= [nil nil]
            (minimal-diff
@@ -337,8 +344,7 @@
 
 (deftest remove-layers-from-network
   (let [mnist-net (-> (network/build-network mnist-description-with-toys)
-                    traverse/auto-bind-io
-                    (traverse/network->training-traversal stream->size-map))
+                    traverse/auto-bind-io)
         chopped-net (network/dissoc-layers-from-network mnist-net :dropout-4)]
     (is (= #{:softmax-1 :linear-2 :dropout-4}
            (clojure.set/difference
@@ -348,7 +354,7 @@
            (clojure.set/difference
              (set (get-in mnist-net [:layer-graph :edges]))
              (set (get-in chopped-net [:layer-graph :edges])))))
-    (is (= #{:linear-2-bias :linear-2-weights}
+    (is (= #{:linear-2-bias-1 :linear-2-weights-1}
            (clojure.set/difference
              (set (keys (get-in mnist-net [:layer-graph :buffers])))
              (set (keys (get-in chopped-net [:layer-graph :buffers]))))))))
