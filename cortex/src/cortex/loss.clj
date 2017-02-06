@@ -385,7 +385,7 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
   {:arguments {:output {:gradients? true}
                :labels {:type :stream}
                :label-indexes (stream-aug/labels->indexes-augmentation :labels)
-               :label-inverse-counts (stream-aug/labels->indexes-augmentation :labels)
+               :label-inverse-counts (stream-aug/labels->inverse-counts-augmentation :labels)
                :centers {:type :parameter
                          :shape-fn :cortex.loss/get-center-loss-center-buffer-shape
                          :initialization {:type :constant

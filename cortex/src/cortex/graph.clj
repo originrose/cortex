@@ -426,15 +426,19 @@ that do not already exist.  Returns a new graph."
        (map #(get-node graph %))
        (mapcat get-node-arguments)
        (filter #(= :stream-augmentation (get % :type)))
-       (map arg/augmented-stream-arg->id)
        (map (fn [{:keys [stream augmentation] :as arg}]
               (when-not (contains? stream-map stream)
                 (throw (ex-info "Failed to find stream for augmentation"
                                 {:argument arg
                                  :streams (vec (keys stream-map))})))
               (try
-                [arg (keyword-fn/call-keyword-fn augmentation
-                                                 (get stream-map stream))]
+                (let [augment-result (keyword-fn/call-keyword-fn augmentation
+                                                                 (get stream-map stream))
+                      augment-data (if (get arg :datatype)
+                                     {:datatype (get arg :datatype)
+                                      :data augment-result}
+                                     augment-result)]
+                 [(arg/augmented-stream-arg->id arg) augment-data])
                 (catch Throwable e
                   (throw (ex-info "Failed to augment stream"
                                   {:argument arg
@@ -452,6 +456,7 @@ at least :buffer if not both :buffer and :gradient."
 (defmethod resolve-argument :stream
   [graph node argument stream-map node-id->output-map]
   (if-let [buffer (get stream-map (get argument :stream))]
+    buffer
     (throw (ex-info "Failed to resolve argument"
                     {:streams (keys stream-map)
                      :argument argument}))))
@@ -462,7 +467,7 @@ at least :buffer if not both :buffer and :gradient."
   ;;the buffers in the graph 'may' actually be a function instead
   ;;of a map to enable runtime systems to provide a minimal set of
   ;;parameters.
-  (if-let [buffer ((get graph [:buffers]) (get argument :buffer-id))]
+  (if-let [buffer ((get graph :buffers) (get argument :buffer-id))]
     buffer
     (throw (ex-info "Failed to resolve argument"
                     {:argument argument
@@ -542,3 +547,18 @@ when simply doing execution."
        vals
        (map (comp #(apply * %) m/shape :buffer))
        (reduce +)))
+
+
+(defn graph->nodes
+  [graph]
+  (->> (dfs-seq graph)
+       (map #(get-node graph %))))
+
+
+(defn get-parameter-buffer
+  [graph buffer-id]
+  (if-let [retval (get-in graph [:buffers buffer-id])]
+    retval
+    (throw (ex-info "Failed to find buffer for buffer id"
+                    {:buffer-id buffer-id
+                     :buffers (keys (get graph :buffers))}))))

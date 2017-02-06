@@ -5,7 +5,10 @@
             [think.compute.nn.backend :as backend]
             [clojure.core.matrix :as m]
             [think.compute.driver :as drv]
-            [think.compute.math :as math]))
+            [think.compute.math :as math]
+            [cortex.graph :as graph]
+            [cortex.nn.layers :as layers]
+            [cortex.nn.network :as network]))
 
 
 
@@ -26,36 +29,44 @@
         centers (vec (repeat n-classes (vec (repeat n-features center-val))))
         features (vec (repeatedly batch-size #(vec (repeat n-features feature-val))))
         gradients (mapv #(m/sub % 1) features)
-        loss-fn (->> [(cortex-loss/center-loss :labels {:stream :labels}
-                                               :output {:node-id :feature
-                                                        :type :node-output}
-                                               :alpha alpha)]
-                     cortex-loss/generate-augmented-argument-ids)
+        network (network/build-network [(layers/input n-features 1 1)
+                                        (layers/linear n-features :id :feature)])
+
+        graph (-> (graph/add-node (network/network->graph network)
+                                  (cortex-loss/center-loss :labels {:stream :labels}
+                                                           :output {:node-id :feature
+                                                                    :type :node-output}
+                                                           :label-indexes {:stream :labels}
+                                                           :label-inverse-counts {:stream :labels}
+                                                           :alpha alpha
+                                                           :centers {:buffer centers}
+                                                           :id :center-loss-1)
+                                  [:feature])
+                  first
+                  (graph/add-stream :labels (graph/create-stream-descriptor 5))
+                  graph/build-graph
+                  graph/generate-parameters)
         driver (drv/get-driver backend)
         stream (drv/get-stream backend)
-        stream-buffer-map (->> (cortex-loss/augment-streams loss-fn input-buffer-map)
-                               (map (fn [[k v]]
-                                      (if (map? v)
-                                        [k (math/array driver stream (get v :datatype) (get v :data))]
-                                        [k (backend/array backend v)])))
-                               (into {}))
-        node-id->name->shape-map {:feature {:output [n-features]}}
-        loss-term (first loss-fn)
-        argument-map (->> (concat (cortex-loss/get-loss-term-augmented-streams loss-term)
-                                  (cortex-loss/get-loss-term-streams loss-term))
-                          (map (fn [{:keys [key type id]}]
-                                 (condp = type
-                                   :stream
-                                   [key {:buffer (get stream-buffer-map key)}]
-                                   :stream-augmentation
-                                   [key {:buffer (get stream-buffer-map id)}])))
-                          (into {})
-                          (merge {:output {:buffer (backend/array backend features batch-size)
-                                           :gradient (backend/new-array backend [n-features] batch-size)}
-                                  :centers {:buffer (backend/array backend centers)}}))
-        loss-term (compute-loss/create-compute-loss-term (first loss-fn) backend node-id->name->shape-map
-                                                         {:labels n-classes}
-                                                         batch-size)
+        stream->buffer-map (->> (graph/augment-streams graph input-buffer-map)
+                                (map (fn [[k v]]
+                                       (if (map? v)
+                                         [k {:buffer (math/array driver stream (get v :datatype) (get v :data))}]
+                                         [k {:buffer (backend/array backend v)}])))
+                                (into {}))
+        ;;Upload buffers to device.
+        graph (update graph :buffers (fn [buffer-map]
+                                       (->> buffer-map
+                                            (map (fn [[k v]]
+                                                   [k (update v :buffer #(backend/array backend %))]))
+                                            (into {}))))
+        loss-term (graph/get-node graph :center-loss-1)
+        argument-map (graph/resolve-arguments graph (graph/get-node graph :center-loss-1)
+                                              stream->buffer-map
+                                              {:feature {:buffer (backend/array backend features batch-size)
+                                                         :gradient (backend/new-array backend [n-features]
+                                                                                      batch-size)}})
+        loss-term (compute-loss/create-compute-loss-term backend {:layer-graph graph} loss-term batch-size)
         nonzero-classes [1 0 1 1 0]
         adjusted-centers (mapv #(if (zero? %)
                                   (vec (repeat n-features 1.0))

@@ -80,6 +80,20 @@
   (-> (network->graph network)
       (graph/get-node node-id)))
 
+(defn network->node-parameters
+  ([network node-id]
+   (->> (graph/get-node (network->graph network) node-id)
+        graph/get-node-arguments
+        (filter #(= :parameter (get % :type)))
+        (mapv (fn [arg]
+                (merge arg
+                       (graph/get-parameter-buffer (network->graph network)
+                                                   (get arg :buffer-id)))))))
+  ([network]
+   (->> (network->graph network)
+        graph/dfs-seq
+        (mapcat (partial network->node-parameters network)))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Print Layer Summary
 (defn- network->parameter-keys
