@@ -71,9 +71,13 @@
   [network parent-node-id]
   (update network :layer-graph graph/remove-node parent-node-id))
 
+
 (defn network->graph
   [network]
-  (get network :layer-graph))
+  (if-let [retval (get network :layer-graph)]
+    retval
+    (throw (ex-info "Network does not appear to contain a graph; keys should contain :layer-graph"
+                    {:network-keys (keys network)}))))
 
 (defn network->node
   [network node-id]
@@ -103,6 +107,7 @@
        :id->node-map
        vals
        (mapcat graph/get-node-arguments)
+       (filter #(= :parameter (get % :type)))
        (map :key)
        (distinct)
        (sort)))
@@ -148,11 +153,11 @@ opposed to networks), but consider:
     (->> network
          :traversal :forward
          (mapv (fn [{:keys [id]}]
-                 (let [layer (graph/get-node network id)]
+                 (let [layer (graph/get-node (network->graph network) id)]
                    (into {"type" (:type layer)
                           "input" (layer->input-str layer)
                           "output" (layer->output-str layer)}
                          (for [k parameter-keys]
                                    [k (layer->buffer-shape network layer k)])))))
          (pprint/print-table (concat ["type" "input" "output"] parameter-keys))))
-  (println "\nParameter count:" (graph/parameter-count network)))
+  (println "\nParameter count:" (graph/parameter-count (network->graph network))))

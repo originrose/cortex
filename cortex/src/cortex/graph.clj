@@ -167,7 +167,8 @@ a vector of floats."
   (let [retval (get-in graph [:id->node-map node-id])]
     (when-not retval
       (throw (ex-info "Failed to find node:"
-                      {:node-id node-id})))
+                      {:node-id node-id
+                       :nodes (keys (get graph :id->node-map))})))
     retval))
 
 

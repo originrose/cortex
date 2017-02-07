@@ -81,33 +81,65 @@ Returns map of:
                                                                            input-streams)
                                                            {})))))))
 
-(defn execute-live-loss-term
+(defn- map-val->map-buffers
+  [map-data]
+  (->> map-data
+       (map (fn [[k v]]
+              [k {:buffer v}]))
+       (into {})))
+
+
+(defn- normalize-argument-buffer
+  [arg-buf]
+  (let [buf-value (get arg-buf :buffer)]
+    (if (map? buf-value)
+      (assoc arg-buf :buffer (get buf-value :data))
+      arg-buf)))
+
+
+(defn- execute-live-loss-term
   "Execute a loss term.  This uses the context to find node and loss parameters."
   [context network loss-term inference-columns dataset-columns]
   (let [graph (-> (network/network->graph network)
-                  (assoc :buffers #(vector
-                                    (-> (cp/get-parameter context network %)
-                                        (get :buffer)))))
-        arguments (graph/resolve-arguments graph loss-term dataset-columns inference-columns)
+                  (assoc :buffers #(hash-map :buffer
+                                             [(cp/get-parameter context network %)])))
+        arguments (->> (graph/resolve-arguments graph loss-term
+                                                (map-val->map-buffers dataset-columns)
+                                                (map-val->map-buffers inference-columns))
+                       (map (fn [[k v]]
+                              (let [v (normalize-argument-buffer v)]
+                               (try
+                                 [k (assoc v
+                                           :count
+                                           (count (get v :buffer)))]
+                                 (catch Throwable e
+                                   (throw (ex-info "Argument resolved to odd value"
+                                                   {:arg-key k
+                                                    :error e})))))))
+                       (into {}))
         distinct-count (->> arguments
-                            (map :count)
+                            (map (comp :count second))
                             distinct)
         _ (when-not (< (count distinct-count)
                        3)
             (throw (ex-info "There should be at most 2 distinct argument buffer counts"
-                            {:buffer-counts (vec distinct-count)})))
-        max-argument-num-items (apply max (->> arguments
-                                               (map :count)))
+                            {:buffer-counts (map (fn [[k v]]
+                                                   [k
+                                                    (dissoc v :buffer)])
+                                                 arguments)})))
+        max-argument-num-items (apply max distinct-count)
         even-arguments (->> arguments
-                            (map (fn [argument]
-                                   (update argument :buffer
-                                           (fn [buffer]
-                                             (->> (repeat buffer)
-                                                  (apply concat)
-                                                  (take max-argument-num-items)
-                                                  vec))))))
-        argument-keys (map :key arguments)
-        partitioned-buffers (->> even-arguments
+                            (map (fn [[k argument]]
+                                   [k
+                                    (update argument :buffer
+                                            (fn [buffer]
+                                              (->> (repeat buffer)
+                                                   (apply concat)
+                                                   (take max-argument-num-items)
+                                                   vec)))])))
+        argument-keys (map first arguments)
+        argument-vals (map second arguments)
+        partitioned-buffers (->> argument-vals
                                  (map :buffer)
                                  (apply interleave)
                                  (partition (count even-arguments)))
@@ -146,8 +178,11 @@ Returns map of:
   "Execute a loss function against a running network returning the loss value as a double.  Inferences
 and dataset outputs are expected to be maps of columns of data."
   [context network inferences dataset-outputs]
-  (apply + (->> (get-in network [:traversal :loss-function])
-                (map #(execute-live-loss-term context network % inferences dataset-outputs)))))
+  (let [dataset-outputs (->> (ds/columns->batches dataset-outputs)
+                             (map #(graph/augment-streams (network/network->graph network) %))
+                             (ds/batches->columns))]
+   (apply + (->> (get-in network [:traversal :loss-function])
+                 (map #(execute-live-loss-term context network % inferences dataset-outputs))))))
 
 
 (defn network->applied-loss-fn
@@ -157,7 +192,11 @@ return the loss function from the traverse where each term has a :value member w
 post-lambda-multiplied value."
   [context network inferences dataset-outputs]
   (let [inference-columns (ds/batches->columns inferences)
-        label-columns (ds/batches->columns dataset-outputs)
+        label-columns (->> dataset-outputs
+                           (map #(graph/augment-streams (network/network->graph network)
+                                                        %))
+                           ds/batches->columns)
+        _ (println label-columns)
         output-bindings (traverse/get-output-training-bindings network)
         node-id->output-streams (->> output-bindings
                                      (map (fn [{:keys [node-id stream]}]

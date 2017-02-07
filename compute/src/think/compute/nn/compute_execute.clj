@@ -154,7 +154,7 @@
              (mapv (fn [loss-term]
                      (let [term-gradients (generate-loss-term-gradients network backend loss-term)]
                        {:compute-term (compute-loss/create-compute-loss-term backend
-                                                                             (network/network->graph network)
+                                                                             network
                                                                              loss-term
                                                                              batch-size)
                         :gradients term-gradients
@@ -285,7 +285,7 @@
 (defn- get-parameter
   [network buffer-id]
   (if-let [param-data (get-in network [:compute-binding :parameter-buffers buffer-id])]
-    (backend/to-core-matrix (get-in network [:compute-binding :backend]) param-data)
+    (backend/to-core-matrix (get-in network [:compute-binding :backend]) (get param-data :buffer))
     (throw (ex-info "Failed to find parameter"
                     {:buffer-id buffer-id
                      :available-buffers (keys (get-in network [:compute-binding :parameter-buffers]))}))))
@@ -367,7 +367,8 @@
 (defn- generate-node-id->output-map
   [network]
   (->> (map-pass-to-buffers network {} :forward)
-       (map (fn [{:keys [incoming id outgoing]}]
+       second
+       (map (fn [{:keys [incoming id outgoing] :as arg}]
               [id (first outgoing)]))
        (into {})))
 
@@ -383,8 +384,8 @@
          retval (graph/resolve-arguments special-graph (graph/get-node special-graph id)
                                          stream-map id->output-map)]
      retval))
-  ([network node]
-   (resolve-node-arguments network node (generate-node-id->output-map network))))
+  ([network id]
+   (resolve-node-arguments network id (generate-node-id->output-map network))))
 
 
 (defmethod perform-pass :default
@@ -405,7 +406,7 @@
 (defn- execute-loss-term
   [network {:keys [compute-term loss-term gradients]}]
   (let [backend (get-in network [:compute-binding :backend])
-        buffer-map (-> (resolve-node-arguments network loss-term)
+        buffer-map (-> (resolve-node-arguments network (get loss-term :id))
                        (graph/deep-merge gradients))]
     (compute-loss/compute-loss-gradient compute-term buffer-map)
     ;;Useful debugging tool.
@@ -435,11 +436,14 @@
         ;;coalesce all the loss term arguments that apply to this node.  Note we do not know
         ;;if they apply to the output buffer or a parameter of this node.
         node-term-arguments (->> loss-terms
-                                 (mapcat (fn [{:keys [compute-term arguments loss-term]}]
-                                           (->> arguments
+                                 (mapcat (fn [{:keys [compute-term gradients loss-term]}]
+                                           (->> (graph/get-node-arguments loss-term)
                                                 (filter #(and (= id (get % :node-id))
                                                               (get % :gradients?)))
-                                                (map #(assoc % :lambda (cortex-loss/get-loss-lambda loss-term)))))))
+                                                (map #(assoc %
+                                                             :lambda (cortex-loss/get-loss-lambda loss-term)
+                                                             :gradient (get-in gradients
+                                                                               [(get % :key) :gradient])))))))
         output-arguments (filter #(= :node-output (get % :type))
                                  node-term-arguments)
         parameter-arguments  (filter #(= :node-parameter (get % :type))
@@ -569,7 +573,7 @@ and anything that has a loss term attached to it's output becomes an output bind
                      :buffers
                      (get-in network [:compute-binding
                                       :traversal-buffers
-                                      {:input-stream stream}])
+                                      {:stream stream}])
                      :size (get-in network [:layer-graph
                                             :id->node-map
                                             node-id
@@ -808,7 +812,7 @@ any loss-specific parameter buffers."
                                      (map (fn [{:keys [stream] :as entry}]
                                             (merge (dissoc entry :buffers)
                                                    (get entry :buffers)))))
-                                (remove #(get % :non-trainable?) parameters))
+                                (filter #(get % :gradients?) parameters))
         epsilon (double epsilon)
         support-data (create-infer-seq-support-data network)
         node-id->output-binding (->> output-bindings
