@@ -1,5 +1,5 @@
 (ns cortex.optimise
-  (:require [cortex.loss :refer [merge-args]]))
+  (:require [cortex.util :refer [merge-args]]))
 
 ;;Optimization strategies
 (defn adam

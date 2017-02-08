@@ -3,6 +3,7 @@
             [cortex.nn.traverse :as traverse]
             [cortex.nn.execute :as execute]
             [cortex.nn.protocols :as cp]
+            [cortex.graph :as graph]
             [think.resource.core :as resource]
             [clojure.pprint :as pprint]
             [clojure.core.matrix :as m]))
@@ -19,7 +20,8 @@
      (throw (Exception. (format "Description verification failed:\n %s"
                                 (with-out-str (clojure.pprint/pprint failures))))))
    (resource/with-resource-context
-     (let [[roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
+     (let [roots (graph/roots (network/network->graph network))
+           leaves (graph/leaves (network/network->graph network))
            input-bindings {(first roots) :data}
            input (get layer-id->output (first roots))
            output-bindings (->> leaves
@@ -35,7 +37,6 @@
              (cp/save-to-network context network {:save-gradients? true}))
            traversal (get-in network [:traversal :forward])
            io-buffers (get-in network [:traversal :buffers])]
-       (pprint/pprint traversal)
        (->> traversal
             (map (fn [{:keys [incoming id outgoing]}]
                    (when-let [import-output (get layer-id->output id)]

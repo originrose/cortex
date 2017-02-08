@@ -220,7 +220,8 @@ whitespace = #'\\s*'")
      ;;In addition, we have to worry about 'group' which is a specific thing to
      ;;caffe networks:
      ;;http://caffe.berkeleyvision.org/tutorial/layers.html
-     ;;My solution is to expand the weights such that they have zeros over the input they should not
+     ;;My solution is to expand the weights such that they have zeros over the
+     ;;input they should not
      ;;care about.
      (case (count ideal-shape)
        1 data
@@ -229,7 +230,8 @@ whitespace = #'\\s*'")
                ^"[[D" retval (make-array Double/TYPE n-rows (* n-cols group))]
            (c-for [row 0 (< row n-rows) (inc row)]
                   (let [group-copy-offset (* n-cols (quot row group-rows))]
-                    (dtype/copy! data (* row n-cols) (aget retval row) group-copy-offset n-cols)))
+                    (dtype/copy! data (* row n-cols) (aget retval row)
+                                 group-copy-offset n-cols)))
            retval))))
   ([data ideal-shape]
    (to-core-matrix data ideal-shape 1)))
@@ -347,14 +349,16 @@ whitespace = #'\\s*'")
 (defn test-caffe-file
   [fname & args]
   (let [import-result (apply caffe-h5->model fname args)]
-    (println (format "Verifying %d layers" (count (get-in import-result [:model :layer-graph :id->node-map]))))
+    (println (format "Verifying %d layers" (count (get-in import-result [:model :layer-graph
+                                                                         :id->node-map]))))
     (verify-import/verify-model (compute-execute/create-context) import-result)))
 
 
 (defn import-and-write
   [^String fname & args]
   (let [import-result (apply caffe-h5->model fname args)]
-    (if-let [failures (seq (verify-import/verify-model (compute-execute/create-context) import-result))]
+    (if-let [failures (seq (verify-import/verify-model (compute-execute/create-context)
+                                                       import-result))]
       (throw (ex-info "import verification failures: " (vec failures)))
       (let [f-stem (.substring fname 0 (.lastIndexOf fname "."))
             output-file (str f-stem ".nippy")

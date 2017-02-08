@@ -5,7 +5,9 @@
             [cortex.nn.traverse :as traverse]
             [cortex.nn.network :as network]
             [cortex.loss :as loss]
-            [cortex.suite.train :as suite-train]))
+            [cortex.suite.train :as suite-train]
+            [cortex.graph :as graph]
+            [cortex.util :as util]))
 
 
 (defn infer-n-observations
@@ -19,7 +21,9 @@
         dataset (ds/->InMemoryDataset {:data {:data observations
                                               :shape observation-dataset-shape}}
                                       (vec (range (count observations))))
-        [roots leaves] (network/edges->roots-and-leaves (network/network->edges network))]
+        graph (network/network->graph network)
+        roots  (graph/roots graph)
+        leaves (graph/leaves graph)]
     (when-not (= 1 (count roots))
       (throw (ex-info "Network must have exactly 1 root for infer-n-observations"
                       {:roots roots})))
@@ -44,4 +48,4 @@
                                       :force-cpu? true)
         result (vec (first results))]
     {:probability-map (into {} (map vec (partition 2 (interleave class-names result))))
-     :classification (get class-names (loss/max-index result))}))
+     :classification (get class-names (util/max-index result))}))

@@ -1,20 +1,23 @@
 (ns cortex.nn.execute
-  "Executing the graph means training or inference.  The goal is to allow both imperative/effectful implementations
-and pure functional implementations but to abstract common details of training or execution into
-one place written in such a way that someone can affect the behavior of various implementations and design
-new execution strategies (like parameter sharing) at least partially without needing to work withing a specific
-implementation.  It is important to realize that training the network means essentially a transformation from
-layer-graph -> layer-graph via some training process.
+  "Executing the graph means training or inference.  The goal is to allow both
+imperative/effectful implementations and pure functional implementations but to abstract
+common details of training or execution into one place written in such a way that someone
+can affect the behavior of various implementations and design new execution strategies
+(like parameter sharing) at least partially without needing to work withing a specific
+implementation.  It is important to realize that training the network means essentially
+a transformation from layer-graph -> layer-graph via some training process.
 Both train and infer should be wrapped in resource contexts; this is not done at this level.
 Furthermore infer should be both wrapped in a resource context and completely realized."
   (:require [cortex.nn.traverse :as traverse]
+            [cortex.nn.network :as network]
             [cortex.nn.layers :as layers]
             [cortex.dataset :as ds]
             [think.resource.core :as resource]
             [cortex.loss :as loss]
             [cortex.nn.protocols :as cp]
             [cortex.optimise :as optimise]
-            [clojure.pprint :as pprint]))
+            [clojure.pprint :as pprint]
+            [cortex.graph :as graph]))
 
 
 (defn- safe-inc
@@ -78,80 +81,65 @@ Returns map of:
                                                                            input-streams)
                                                            {})))))))
 
-(defmulti bind-loss-term-argument
-  "Bind the argument into actual data for executing the loss term."
-  (fn
-    [context network loss-term argument inference-columns dataset-columns]
-    (loss/get-loss-term-argument-type argument)))
+(defn- map-val->map-buffers
+  [map-data]
+  (->> map-data
+       (map (fn [[k v]]
+              [k {:buffer v}]))
+       (into {})))
 
 
-(defmethod bind-loss-term-argument :node-output
-  [context network loss-term {:keys [node-id] :as argument}
-   inference-columns dataset-columns]
-  (if-let [retval (get inference-columns node-id)]
-    retval
-    (throw (ex-info "Failed to bind to node output:"
-                    {:argument argument
-                     :available-outputs (keys inference-columns)}))))
+(defn- normalize-argument-buffer
+  [arg-buf]
+  (let [buf-value (get arg-buf :buffer)]
+    (if (map? buf-value)
+      (assoc arg-buf :buffer (get buf-value :data))
+      arg-buf)))
 
 
-(defmethod bind-loss-term-argument :node-parameter
-  [context network loss-term {:keys [node-id parameter] :as argument}
-   inference-columns dataset-columns]
-  (if-let [retval (cp/get-node-parameter context network node-id parameter)]
-    [retval]
-    (throw (ex-info "Failed to bind to node parameter:"
-                    {:argument argument}))))
-
-
-(defmethod bind-loss-term-argument :stream
-  [context network loss-term {:keys [stream] :as argument} inference-columns dataset-columns]
-  (if-let [retval (get dataset-columns stream)]
-    retval
-    (throw (ex-info "Failed to bind to dataset stream"
-                    {:argument argument
-                     :available-streams (vec (keys dataset-columns))}))))
-
-
-(defmethod bind-loss-term-argument :loss-term-parameter
-  [context network loss-term argument inference-columns dataset-columns]
-  [(cp/get-loss-term-parameter context network argument)])
-
-
-(defmethod bind-loss-term-argument :stream-augmentation
-  [context network loss-term argument inference-columns dataset-columns]
-  (loss/get-loss-term-stream-augment loss-term argument dataset-columns))
-
-
-(defn execute-live-loss-term
+(defn- execute-live-loss-term
   "Execute a loss term.  This uses the context to find node and loss parameters."
   [context network loss-term inference-columns dataset-columns]
-  (let [arguments (->> (loss/get-loss-term-arguments loss-term)
-                     (map (fn [{:keys [key] :as argument}]
-                            (let [buffer (bind-loss-term-argument context network loss-term argument
-                                                                  inference-columns dataset-columns)]
-                              (assoc argument
-                                     :buffer buffer
-                                     :count (count buffer))))))
+  (let [graph (-> (network/network->graph network)
+                  (assoc :buffers #(hash-map :buffer
+                                             [(cp/get-parameter context network %)])))
+        arguments (->> (graph/resolve-arguments graph loss-term
+                                                (map-val->map-buffers dataset-columns)
+                                                (map-val->map-buffers inference-columns))
+                       (map (fn [[k v]]
+                              (let [v (normalize-argument-buffer v)]
+                               (try
+                                 [k (assoc v
+                                           :count
+                                           (count (get v :buffer)))]
+                                 (catch Throwable e
+                                   (throw (ex-info "Argument resolved to odd value"
+                                                   {:arg-key k
+                                                    :error e})))))))
+                       (into {}))
         distinct-count (->> arguments
-                            (map :count)
+                            (map (comp :count second))
                             distinct)
         _ (when-not (< (count distinct-count)
                        3)
             (throw (ex-info "There should be at most 2 distinct argument buffer counts"
-                            {:buffer-counts (vec distinct-count)})))
-        max-argument-num-items (apply max (->> arguments
-                                               (map :count)))
+                            {:buffer-counts (map (fn [[k v]]
+                                                   [k
+                                                    (dissoc v :buffer)])
+                                                 arguments)})))
+        max-argument-num-items (apply max distinct-count)
         even-arguments (->> arguments
-                            (map (fn [argument]
-                                   (update argument :buffer
-                                           (fn [buffer]
-                                             (->> (repeat buffer)
-                                                  (apply concat)
-                                                  (take max-argument-num-items)
-                                                  vec))))))
-        argument-keys (map :key arguments)
-        partitioned-buffers (->> even-arguments
+                            (map (fn [[k argument]]
+                                   [k
+                                    (update argument :buffer
+                                            (fn [buffer]
+                                              (->> (repeat buffer)
+                                                   (apply concat)
+                                                   (take max-argument-num-items)
+                                                   vec)))])))
+        argument-keys (map first arguments)
+        argument-vals (map second arguments)
+        partitioned-buffers (->> argument-vals
                                  (map :buffer)
                                  (apply interleave)
                                  (partition (count even-arguments)))
@@ -169,7 +157,7 @@ Returns map of:
 (defn loss-fn->table-str
   [loss-fn]
   (with-out-str
-    (pprint/print-table [:type :value :lambda :node-id :parameter]
+    (pprint/print-table [:type :value :lambda :node-id :argument]
                         (mapv (fn [loss-term]
                                 (assoc loss-term
                                        :lambda
@@ -179,10 +167,10 @@ Returns map of:
                                        (get-in loss-term
                                                [:output
                                                 :node-id])
-                                       :parameter
+                                       :argument
                                        (get-in loss-term
                                                [:output
-                                                :parameter])))
+                                                :argument])))
                               loss-fn))))
 
 
@@ -194,6 +182,16 @@ and dataset outputs are expected to be maps of columns of data."
                 (map #(execute-live-loss-term context network % inferences dataset-outputs)))))
 
 
+(defn- augment-and-normalize-streams
+  [graph batch-data]
+  (->> (graph/augment-streams graph batch-data)
+       (map (fn [[k v]]
+              [k (if (map? v)
+                   (get v :data)
+                   v)]))
+       (into {})))
+
+
 (defn network->applied-loss-fn
   "Given the set of inferences from an inference run of the network
 and the set of labels along with the bindings (traverse/get-io-bindings built-network)
@@ -201,7 +199,11 @@ return the loss function from the traverse where each term has a :value member w
 post-lambda-multiplied value."
   [context network inferences dataset-outputs]
   (let [inference-columns (ds/batches->columns inferences)
-        label-columns (ds/batches->columns dataset-outputs)
+        label-columns (->> dataset-outputs
+                           (map #(augment-and-normalize-streams
+                                  (network/network->graph network)
+                                  %))
+                           ds/batches->columns)
         output-bindings (traverse/get-output-training-bindings network)
         node-id->output-streams (->> output-bindings
                                      (map (fn [{:keys [node-id stream]}]
@@ -212,13 +214,16 @@ post-lambda-multiplied value."
         inference-label-pairs (->> (keys inference-columns)
                                    (map (fn [node-id]
                                           [node-id [(get inference-columns node-id)
-                                                    (get label-columns (get node-id->output-streams node-id))]]))
+                                                    (get label-columns
+                                                         (get node-id->output-streams
+                                                              node-id))]]))
                                    (into {}))]
     (->> (get-in network [:traversal :loss-function])
          (mapv (fn [loss-term]
                  (assoc loss-term
                         :value
-                        (execute-live-loss-term context network loss-term inference-columns label-columns)))))))
+                        (execute-live-loss-term context network loss-term
+                                                inference-columns label-columns)))))))
 
 
 (defn- setup-network
@@ -245,9 +250,10 @@ in a single map you still need to call cortex-dataset/batches->columns."
                    #(train-seq context % dataset)
                    #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
     (-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/network->training-traversal %
-                                                              (ds/dataset->stream->size-map dataset)
-                                                              :optimiser optimiser))
+                       #(traverse/network->training-traversal
+                         %
+                         (ds/dataset->stream->size-map dataset)
+                         :optimiser optimiser))
       train-fn)))
 
 
