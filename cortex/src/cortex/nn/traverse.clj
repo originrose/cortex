@@ -338,6 +338,20 @@ which means removing extra information from them."
                      :output-bindings (get-output-bindings network)}))))
 
 
+(defn- remove-existing-loss-terms
+  [graph]
+  (->> (graph/dfs-seq graph)
+       (map (fn [node-id]
+              (let [pass-set (-> (graph/get-node graph node-id)
+                                 graph/get-node-metadata
+                                 :passes
+                                 set)]
+                (when (contains? pass-set :loss)
+                  node-id))))
+       (remove nil?)
+       (reduce graph/remove-node
+               graph)))
+
 
 (defn- map->loss-term-seq
   [item-map]
@@ -365,7 +379,8 @@ which means removing extra information from them."
 
 (defn- generate-loss-function
   [network nodes output-bindings loss]
-  (let [node-losses (->> nodes
+  (let [network (update network :layer-graph remove-existing-loss-terms)
+        node-losses (->> nodes
                          (mapcat (partial generate-node-loss-terms network)))
         output-losses (->> output-bindings
                            (filter #(and (get % :loss)
@@ -387,44 +402,33 @@ which means removing extra information from them."
           graph
           stream-map))
 
+
 (defn- set-loss-terms
   [loss-term-vec graph]
   ;;map each loss term to the node it is most associated with (its output)
   ;;and attach it to that node in the graph.  Generate parameters and then
   ;;create a new vector of loss terms with the added information.
-  (let [existing-terms (->> (graph/dfs-seq graph)
-                            (map (fn [node-id]
-                                   (let [pass-set (-> (graph/get-node graph node-id)
-                                                      graph/get-node-metadata
-                                                      :passes
-                                                      set)]
-                                     (when (contains? pass-set :loss)
-                                       node-id))))
-                            (remove nil?))
-        graph (reduce graph/remove-node
-                      graph
-                      existing-terms)]
-    (reduce (fn [[graph loss-term-vec] loss-term]
-              (when-not (contains? (-> (graph/get-node-metadata loss-term)
-                                       :passes
-                                       set)
-                                   :loss)
-                (throw (ex-info "Loss term does not contain the loss pass in it's metadata"
-                                {:loss-term loss-term
-                                 :metadata (graph/get-node-metadata loss-term)})))
-              (let [node-id (->> (graph/get-node-arguments loss-term)
-                                 (map :node-id)
-                                 (remove nil?)
-                                 first)
-                    _ (when-not node-id
-                        (throw (ex-info "failed to find node for loss term"
-                                        {:term loss-term
-                                         :arguments (vec (graph/get-node-arguments
-                                                          loss-term))})))
-                    [graph term-id] (graph/add-node graph loss-term [node-id])]
-                [graph (conj loss-term-vec (assoc loss-term :id term-id))]))
-            [graph []]
-            loss-term-vec)))
+  (reduce (fn [[graph loss-term-vec] loss-term]
+            (when-not (contains? (-> (graph/get-node-metadata loss-term)
+                                     :passes
+                                     set)
+                                 :loss)
+              (throw (ex-info "Loss term does not contain the loss pass in it's metadata"
+                              {:loss-term loss-term
+                               :metadata (graph/get-node-metadata loss-term)})))
+            (let [node-id (->> (graph/get-node-arguments loss-term)
+                               (map :node-id)
+                               (remove nil?)
+                               first)
+                  _ (when-not node-id
+                      (throw (ex-info "failed to find node for loss term"
+                                      {:term loss-term
+                                       :arguments (vec (graph/get-node-arguments
+                                                        loss-term))})))
+                  [graph term-id] (graph/add-node graph loss-term [node-id])]
+              [graph (conj loss-term-vec (assoc loss-term :id term-id))]))
+          [graph []]
+          loss-term-vec))
 
 
 (defn- generate-loss-term-parameters
@@ -477,11 +481,15 @@ datastructure describing the final loss function.
                                      reverse
                                      (map :id)
                                      (map #(network/network->node network %)))
-        [network loss-fn] (->> (generate-loss-function network
-                                                       forward-traversal-nodes
-                                                       (get-output-bindings network)
-                                                       loss-fn)
-                               (generate-loss-term-parameters network stream-map))]
+        ;;If the loss function is regenerated then any loss term parameters are lost.
+        [network loss-fn]
+        (if-not (get-in network [:traversal :loss-function])
+          (->> (generate-loss-function network
+                                       forward-traversal-nodes
+                                       (get-output-bindings network)
+                                       loss-fn)
+               (generate-loss-term-parameters network stream-map))
+          [network (get-in network [:traversal :loss-function])])]
     (update network
             :traversal
             #(merge %

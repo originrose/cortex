@@ -4,7 +4,8 @@
             [clojure.core.matrix :as m]
             [cortex.core-matrix-backends :as b]
             [cortex.graph :as graph]
-            [clojure.pprint :as pprint])
+            [clojure.pprint :as pprint]
+            [clojure.set :as c-set])
   (:import [java.util UUID]))
 
 
@@ -178,3 +179,30 @@ opposed to networks), but consider:
                                    [k (layer->buffer-shape network layer k)])))))
          (pprint/print-table (concat ["type" "input" "output"] parameter-keys))))
   (println "\nParameter count:" (graph/parameter-count (network->graph network))))
+
+
+(defn- node-id-is-in-pass?
+  [graph pass node-id]
+  (contains? (layers/get-pass-set
+              (graph/get-node graph node-id))
+             pass))
+
+
+(defn leaf-inference-layers
+  [network]
+  (let [graph (network->graph network)
+        is-inference? (partial node-id-is-in-pass? graph :inference)
+        is-training? (partial node-id-is-in-pass? graph :training)
+        keep-inference-nodes (fn [map-data]
+                               (->> map-data
+                                    (map (fn [[k v]]
+                                           (when (is-inference? k)
+                                             (when-let [v (-> (filter #(or (is-inference? %)
+                                                                           (is-training? %)) v)
+                                                             seq)]
+                                              k))))
+                                    (remove nil?)
+                                    set))
+        parent-set (keep-inference-nodes (graph/parent->child-map graph))
+        child-set (keep-inference-nodes (graph/child->parent-map graph))]
+    (c-set/difference child-set parent-set)))

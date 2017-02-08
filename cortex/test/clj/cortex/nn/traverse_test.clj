@@ -77,7 +77,8 @@
 
 (deftest big-description
   (let [network (build-big-description)
-        training-net (traverse/network->training-traversal network stream->size-map)
+        training-net (-> (traverse/network->training-traversal network stream->size-map)
+                         (traverse/network->training-traversal stream->size-map))
         gradient-descent (->> training-net
                               :traversal
                               realize-traversals)
