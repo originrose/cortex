@@ -11,7 +11,8 @@
             [think.datatype.core :as dtype]
             [cortex.verify.nn.import :as compute-verify]
             [clojure.string :as string]
-            [think.compute.nn.compute-execute :as compute-execute]))
+            [think.compute.nn.compute-execute :as compute-execute]
+            [cortex.graph :as graph]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* true)
@@ -320,26 +321,53 @@
 
 (defn- reshape-weights
   "check and possibly reshape weights for a given node."
-  [network node-id]
-  (let [node (get-in network [:layer-graph :id->node-map node-id])]
-    (reduce (fn [network {:keys [key shape-fn] :as weight-desc}]
-              (let [keras-dims (node->keras-dims node)
-                    parameter (get node key)
-                    weights (get-in network [:layer-graph :buffers
-                                             (get parameter :buffer-id)
-                                             :buffer])
-                    weights (-> (if (= 4 (count keras-dims))
-                                  (reshape-data weights keras-dims [3 2 0 1])
-                                  (reshape-data weights keras-dims [1 0]))
-                                (to-core-matrix (shape-fn node)))]
-                (assoc-in network [:layer-graph :buffers
-                                   (get parameter :buffer-id)
-                                   :buffer]
-                          weights)))
-            network
-            (->> (layers/get-parameter-descriptions node)
-                 (filter #(= :weight (get % :type)))
-                 seq))))
+  [id->weight-map network node-id]
+  (let [node (-> network
+                 network/network->graph
+                 (graph/get-node node-id))
+        weight-node (get id->weight-map (:id node))]
+    (if (and weight-node (seq (hdf5/get-children weight-node)))
+      (let [weight-map (hdf5-child-map weight-node)
+            ;;Is this any more robust than just assuming first child is weights
+            ;;and second child is bias?
+            weight-id (keyword (str (name (:id node)) "_W"))
+            bias-id (keyword (str (name (:id node)) "_b"))
+            weight-ds (get weight-map weight-id)
+            bias-ds (get weight-map bias-id)
+            [weight-ds bias-ds] (if (and weight-ds bias-ds)
+                                  [weight-ds bias-ds]
+                                  (let [children (hdf5/get-children weight-node)]
+                                    [(first children) (second children)]))]
+        (when-not (and weight-ds bias-ds)
+          (throw (Exception.
+                  (format "Failed to find weights and bias: wanted %s, found %s"
+                          [weight-id bias-id] (keys weight-map)))))
+        (println "loading weights/bias for" (:id node))
+        (let [weight-clj (hdf5/->clj weight-ds)
+              weight-raw-data (:data weight-clj)
+              weight-double-data (ensure-doubles weight-raw-data)
+              keras-dims (node->keras-dims node)
+              graph (network/network->graph network)
+              weights-arg (graph/get-node-argument graph
+                                                   node
+                                                   :weights)
+              bias-arg (graph/get-node-argument graph
+                                                node
+                                                :bias)
+              weights (-> (if (= 4 (count keras-dims))
+                            (reshape-data weight-double-data keras-dims [3 2 0 1])
+                            (reshape-data weight-double-data keras-dims [1 0]))
+                          (to-core-matrix (graph/get-argument-shape graph node weights-arg)))]
+          (-> network
+              (assoc-in [:layer-graph :buffers
+                         (get weights-arg :buffer-id)
+                         :buffer]
+                        weights)
+              (assoc-in [:layer-graph :buffers
+                         (get bias-arg :buffer-id)
+                         :buffer]
+                        (ensure-doubles (:data (hdf5/->clj bias-ds)))))))
+      network)))
 
 (defn- description->network
   "Given a simple list of descriptors load the weights and return a network."
@@ -348,47 +376,15 @@
                                       (= (hdf5/get-name node)
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
-        node-map (if weight-entry
+        id->weight-map (if weight-entry
                    (hdf5-child-map weight-entry)
                    (hdf5-child-map weight-file))
-        network
-        (->> desc-seq
-             (mapv (fn [desc]
-                     (let [weight-node (get node-map (:id desc))]
-                       (if (and weight-node (seq (hdf5/get-children weight-node)))
-                         (let [weight-map (hdf5-child-map weight-node)
-                               ;;Is this any more robust than just assuming first child is weights
-                               ;;and second child is bias?
-                               weight-id (keyword (str (name (:id desc)) "_W"))
-                               bias-id (keyword (str (name (:id desc)) "_b"))
-                               weight-ds (get weight-map weight-id)
-                               bias-ds (get weight-map bias-id)
-                               [weight-ds bias-ds] (if (and weight-ds bias-ds)
-                                                     [weight-ds bias-ds]
-                                                     (let [children (hdf5/get-children weight-node)]
-                                                       [(first children) (second children)]))]
-                           (when-not (and weight-ds bias-ds)
-                             (throw (Exception.
-                                     (format "Failed to find weights and bias: wanted %s, found %s"
-                                             [weight-id bias-id] (keys weight-map)))))
-                           (println "loading weights/bias for" (:id desc))
-                           (let [weight-clj (hdf5/->clj weight-ds)
-                                 weight-raw-data (:data weight-clj)
-                                 weight-double-data (ensure-doubles weight-raw-data)]
-                             (assoc desc
-                                    :weights weight-double-data
-                                    :bias (ensure-doubles (:data (hdf5/->clj bias-ds))))))
-                         desc))))
-             network/build-network)
-        network (reduce reshape-weights network
-                        (keys (get-in network [:layer-graph :id->node-map])))
-        ;;Replace the verification failures from before with valid ones after the reshape operation.
-        verification-failures (network/verify-layer-graph network)
-        network (assoc network :verification-failures verification-failures)]
-    (when-let [failures (seq (get network :verification-failures))]
-      (throw (ex-info "Model failed verifcation"
-                      {:verification-failures verification-failures})))
-    network))
+        network (network/build-network desc-seq)
+        network (reduce (partial reshape-weights id->weight-map)
+                        network
+                        (graph/dfs-seq (network/network->graph network)))]
+    ;;Generate parameters and check that all our shapes are correct.
+    (update network :layer-graph graph/generate-parameters)))
 
 
 (defn description-weight-file->network
