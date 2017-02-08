@@ -38,7 +38,7 @@ in initial description.  Else returns the initial description"
 
 (defn per-epoch-eval-training-network
   [context best-network-atom network-filename initial-description
-   best-network-function cv-columnar-input cv-output
+   best-network-function cv-columnar-input cv-output simple-loss-print?
    {:keys [network inferences]}]
   (let [loss-fn (execute/network->applied-loss-fn
                  context network inferences
@@ -47,10 +47,9 @@ in initial description.  Else returns the initial description"
         current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
                             (when (sequential? best-loss)
                               (apply + (map :value best-loss))))]
-    (println (format "Loss for epoch %s: %s%s\n\n"
-                     (get network :epoch-count)
-                     loss-val
-                     (execute/pprint-executed-loss-fn loss-fn)))
+    (println (format "Loss for epoch %s: %s" (get network :epoch-count) loss-val))
+    (when-not simple-loss-print?
+      (println (execute/loss-fn->table-str loss-fn)))
     (when (or (nil? current-best-loss)
               (< (double loss-val) (double current-best-loss)))
       (println "Saving network")
@@ -134,7 +133,8 @@ we continue to train forever.
              network-filestem best-network-fn
              optimiser
              reset-score
-             force-gpu?]
+             force-gpu?
+             simple-loss-print?]
       :or {batch-size 128
            network-filestem default-network-filestem
            optimiser (cortex-opt/adam)
@@ -167,7 +167,7 @@ we continue to train forever.
                                         :infer-batch-type :cross-validation)
           epoch-processor (partial per-epoch-eval-training-network context
                                    best-network-atom network-filename initial-description
-                                   best-network-fn cv-columnar-input cv-labels)]
+                                   best-network-fn cv-columnar-input cv-labels simple-loss-print?)]
       (println "Training network:")
       (network/print-layer-summary (-> network
                                        traverse/auto-bind-io

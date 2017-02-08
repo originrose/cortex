@@ -175,7 +175,7 @@
                                           (println (format "Loss for epoch %s: %s%s\n\n"
                                                            (get network :epoch-count)
                                                            (apply + (map :value loss-fn))
-                                                           (execute/pprint-executed-loss-fn loss-fn))))
+                                                           (execute/loss-fn->table-str loss-fn))))
                                          entry))
         score (loss/evaluate-softmax results answers)]
     (is (> score 0.6))))
