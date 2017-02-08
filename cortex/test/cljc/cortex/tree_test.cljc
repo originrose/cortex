@@ -12,13 +12,17 @@
 (def X (mat/matrix (map drop-last IRISES)))
 (def Y (mat/matrix (map last IRISES)))
 
-(defn iris-tree-test
+(deftest tree-classify-test
   []
-  (let [tree (tree/decision-tree X Y {:split-fn tree/rand-splitter})]
-    tree))
+  (let [tree (tree/decision-tree X Y {:split-fn tree/best-splitter})
+        sample (first IRISES)
+        classification (tree/tree-classify tree (butlast sample))]
+    (is (= classification (last sample)))))
 
-(defn iris-forest-test
+(deftest forest-classify-test
   []
   (let [forest (tree/random-forest X Y {:n-trees 100
-                                        :split-fn tree/best-splitter})]
-    forest))
+                                        :split-fn tree/best-splitter})
+        sample (first IRISES)
+        classification (tree/forest-classify forest (butlast sample))]
+    (is (= classification (last sample)))))
