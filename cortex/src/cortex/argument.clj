@@ -136,7 +136,7 @@ back into the stream augmentation argument."
   [node arg-name node-id node-arg-name]
   (update node arg-name
           #(merge %
-                  {:type :node-output
+                  {:type :node-argument
                    :node-id node-id
                    :argument node-arg-name})))
 

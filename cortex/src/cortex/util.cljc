@@ -61,7 +61,7 @@
   [coll]
   (second (reduce (fn [[max-val max-idx] idx]
                     (if (or (nil? max-val)
-                            (> (long (coll idx)) (long max-val)))
+                            (> (double (coll idx)) (double max-val)))
                       [(coll idx) idx]
                       [max-val max-idx]))
                   [nil nil]

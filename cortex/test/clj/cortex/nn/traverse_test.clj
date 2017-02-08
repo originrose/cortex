@@ -91,6 +91,10 @@
     ;;Adding in the parameters required for the center loss centers.  10 * 500 = 5000
     ;;extra parameters
     (is (= 439280 (graph/parameter-count (get training-net :layer-graph))))
+    (is (= :node-argument (-> (network/network->graph training-net)
+                              (graph/get-node :l1-regularization-1)
+                              (graph/get-node-argument :output)
+                              (get :type))))
 
     (is (= [nil nil]
            (minimal-diff
@@ -155,7 +159,7 @@
              {:type :l1-regularization,
               :lambda 0.001,
               :output
-              {:type :node-output, :node-id :convolutional-1, :argument :weights},
+              {:type :node-argument, :node-id :convolutional-1, :argument :weights},
               :id :l1-regularization-1}]
             (get gradient-descent :loss-function))))
     (is (= [nil nil]

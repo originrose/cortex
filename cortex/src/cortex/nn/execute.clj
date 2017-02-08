@@ -157,7 +157,7 @@ Returns map of:
 (defn pprint-executed-loss-fn
   [loss-fn]
   (with-out-str
-    (pprint/print-table [:type :value :lambda :node-id :parameter]
+    (pprint/print-table [:type :value :lambda :node-id :argument]
                         (mapv (fn [loss-term]
                                 (assoc loss-term
                                        :lambda
@@ -167,10 +167,10 @@ Returns map of:
                                        (get-in loss-term
                                                [:output
                                                 :node-id])
-                                       :parameter
+                                       :argument
                                        (get-in loss-term
                                                [:output
-                                                :parameter])))
+                                                :argument])))
                               loss-fn))))
 
 
@@ -178,11 +178,18 @@ Returns map of:
   "Execute a loss function against a running network returning the loss value as a double.  Inferences
 and dataset outputs are expected to be maps of columns of data."
   [context network inferences dataset-outputs]
-  (let [dataset-outputs (->> (ds/columns->batches dataset-outputs)
-                             (map #(graph/augment-streams (network/network->graph network) %))
-                             (ds/batches->columns))]
-   (apply + (->> (get-in network [:traversal :loss-function])
-                 (map #(execute-live-loss-term context network % inferences dataset-outputs))))))
+  (apply + (->> (get-in network [:traversal :loss-function])
+                (map #(execute-live-loss-term context network % inferences dataset-outputs)))))
+
+
+(defn- augment-and-normalize-streams
+  [graph batch-data]
+  (->> (graph/augment-streams graph batch-data)
+       (map (fn [[k v]]
+              [k (if (map? v)
+                   (get v :data)
+                   v)]))
+       (into {})))
 
 
 (defn network->applied-loss-fn
@@ -193,10 +200,10 @@ post-lambda-multiplied value."
   [context network inferences dataset-outputs]
   (let [inference-columns (ds/batches->columns inferences)
         label-columns (->> dataset-outputs
-                           (map #(graph/augment-streams (network/network->graph network)
-                                                        %))
+                           (map #(augment-and-normalize-streams
+                                  (network/network->graph network)
+                                  %))
                            ds/batches->columns)
-        _ (println label-columns)
         output-bindings (traverse/get-output-training-bindings network)
         node-id->output-streams (->> output-bindings
                                      (map (fn [{:keys [node-id stream]}]

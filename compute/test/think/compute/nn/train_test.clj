@@ -21,5 +21,5 @@
   (verify-train/test-corn (create-context)))
 
 
-(deftest mnist
+(def-double-float-test mnist
   (verify-train/train-mnist (create-context)))
