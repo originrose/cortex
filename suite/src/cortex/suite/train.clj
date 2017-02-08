@@ -63,7 +63,10 @@ in initial description.  Else returns the initial description"
         (best-network-function {:inferences (ds/batches->columnsv inferences)
                                 :labels (ds/batches->columnsv cv-output)
                                 :data cv-columnar-input
-                                :loss-fn loss-fn}))))
+                                :loss-fn loss-fn
+                                :leaf-node (->> (get-in network [:layer-graph :edges])
+                                             network/edges->roots-and-leaves
+                                             last)}))))
   true)
 
 
@@ -78,7 +81,7 @@ in initial description.  Else returns the initial description"
                                ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
                                (catch Exception e
                                  (println (format "Failed to create cuda backend (%s); will use cpu backend" e))
-                                   (throw e) 
+                                   (throw e)
                                  nil))
                        (cpu-backend/create-cpu-backend datatype)))))
 
