@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex-optimise "0.5.0-SNAPSHOT"
+(defproject thinktopic/cortex-optimise "0.5.0"
   :description "General purpose optimization framework"
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
@@ -8,7 +8,7 @@
                       :machine-learning :exploratory :mathematica
                       :repl]}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/cortex "0.5.0-SNAPSHOT"]
+                 [thinktopic/cortex "0.5.0"]
                  [net.mikera/vectorz-clj "0.45.0"]
                  [net.mikera/core.matrix "0.57.0"]
                  [thinktopic/lazy-map "0.1.0"]]
