@@ -30,7 +30,7 @@
 
 (def description
   [(layers/input 2)
-   (layers/batch-normalization 0.9)
+   (layers/batch-normalization)
    (layers/linear->logistic 1)])
 
 (deftest logistic-test

@@ -99,7 +99,7 @@
         output input]
     (-> (get-gradients context
                        [(layers/input input-size)
-                        (layers/batch-normalization 1.0)]
+                        (layers/batch-normalization :ave-factor 1.0)]
                        input output (loss/mse-loss)
                        1e-4 batch-size)
         check-gradients)))

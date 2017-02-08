@@ -46,7 +46,7 @@
    (layers/local-response-normalization)
    (layers/convolutional 5 0 1 50)
    (layers/max-pooling 2 0 2)
-   (layers/batch-normalization 0.9 :l1-regularization 1e-4)
+   (layers/batch-normalization :l1-regularization 1e-4)
    (layers/linear 500 :l2-max-constraint 4.0)
    (layers/relu :center-loss {:labels {:stream :labels}
                               :alpha 0.9

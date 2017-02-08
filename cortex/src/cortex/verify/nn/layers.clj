@@ -472,7 +472,7 @@ for that network."
                                                  double-array
                                                  (cu/ensure-gaussian! 5 20)))))
         network (bind-test-network context [(layers/input input-size)
-                                            (layers/batch-normalization 0.8)]
+                                            (layers/batch-normalization :ave-factor 0.8)]
                                    batch-size
                                    {:data input-size
                                     :labels input-size}
