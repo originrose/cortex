@@ -363,3 +363,13 @@
            (clojure.set/difference
              (set (keys (get-in mnist-net [:layer-graph :buffers])))
              (set (keys (get-in chopped-net [:layer-graph :buffers]))))))))
+
+
+
+(deftest inference-after-train
+  (let [network (build-big-description)
+        training-net (traverse/network->training-traversal network stream->size-map)
+        inference-net (traverse/network->inference-traversal (traverse/auto-bind-io training-net) stream->size-map)
+        output-bindings (vec (traverse/get-output-bindings inference-net))]
+    (is (= 1 (count output-bindings)))
+    (is (= :softmax-1 (get-in output-bindings [0 :node-id])))))

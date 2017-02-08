@@ -115,27 +115,30 @@ while training no stream or loss is necessary"
 are exactly 1 root and leaf or to :data-x where x is a one-based index of the
 root and labels-x where labels are a 1-based index of the leaf."
   [network]
-  (let [network (clear-io-bindings network)
-        graph (get network :layer-graph)
-        roots (graph/roots graph)
-        leaves (graph/leaves graph)
-        input-name-fn (if (> (count roots) 1)
-                        (fn [network]
-                          (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
-                        (constantly :data))
-        output-name-fn (if (> (count leaves) 1)
-                         (fn [network]
-                           (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
-                         (constantly :labels))]
-    (as-> network network
-      (reduce (fn [network root]
-                (bind-input network root (input-name-fn network)))
-              network
-              roots)
-      (reduce (fn [network leaf]
-                (bind-output-train network leaf (output-name-fn network)))
-              network
-              leaves))))
+  (if-not (and (contains? (get network :traversal) :input-bindings)
+               (contains? (get network :traversal) :output-bindings))
+    (let [network (clear-io-bindings network)
+          graph (get network :layer-graph)
+          roots (graph/roots graph)
+          leaves (graph/leaves graph)
+          input-name-fn (if (> (count roots) 1)
+                          (fn [network]
+                            (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
+                          (constantly :data))
+          output-name-fn (if (> (count leaves) 1)
+                           (fn [network]
+                             (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
+                           (constantly :labels))]
+      (as-> network network
+        (reduce (fn [network root]
+                  (bind-input network root (input-name-fn network)))
+                network
+                roots)
+        (reduce (fn [network leaf]
+                  (bind-output-train network leaf (output-name-fn network)))
+                network
+                leaves)))
+    network))
 
 
 (defn get-io-bindings
@@ -338,19 +341,21 @@ which means removing extra information from them."
                      :output-bindings (get-output-bindings network)}))))
 
 
-(defn- remove-existing-loss-terms
-  [graph]
-  (->> (graph/dfs-seq graph)
-       (map (fn [node-id]
-              (let [pass-set (-> (graph/get-node graph node-id)
-                                 graph/get-node-metadata
-                                 :passes
-                                 set)]
-                (when (contains? pass-set :loss)
-                  node-id))))
-       (remove nil?)
-       (reduce graph/remove-node
-               graph)))
+(defn remove-existing-loss-terms
+  [network]
+  (-> network
+      (update :traversal dissoc :loss-function)
+      (update :layer-graph
+              #(->> (graph/dfs-seq %)
+                    (map (fn [node-id]
+                           (let [pass-set (-> (graph/get-node % node-id)
+                                              graph/get-node-metadata
+                                              :passes
+                                              set)]
+                             (when (contains? pass-set :loss)
+                               node-id))))
+                    (remove nil?)
+                    (reduce graph/remove-node %)))))
 
 
 (defn- map->loss-term-seq
@@ -379,7 +384,7 @@ which means removing extra information from them."
 
 (defn- generate-loss-function
   [network nodes output-bindings loss]
-  (let [network (update network :layer-graph remove-existing-loss-terms)
+  (let [network (remove-existing-loss-terms network)
         node-losses (->> nodes
                          (mapcat (partial generate-node-loss-terms network)))
         output-losses (->> output-bindings
@@ -523,13 +528,16 @@ datastructure describing the final loss function.
                                (filter-traversal network :inference)
                                (#(traversal->buffers % {}))
                                first)]
-    (update network
-            :traversal
-            #(merge %
-                    {:forward (clean-traversal-incoming-outgoing forward-traversal)
-                     :buffers (forward-traversal->buffer-map network forward-traversal)
-                     :type :inference
-                     :stream-map stream-map}))))
+    (-> network
+        remove-existing-loss-terms
+        (update network
+                :traversal
+                #(-> (dissoc % :loss-function)
+                     (merge
+                      {:forward (clean-traversal-incoming-outgoing forward-traversal)
+                       :buffers (forward-traversal->buffer-map network forward-traversal)
+                       :type :inference
+                       :stream-map stream-map}))))))
 
 
 (defn- traversal->buffer-set

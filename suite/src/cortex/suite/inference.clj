@@ -21,6 +21,8 @@
         dataset (ds/->InMemoryDataset {:data {:data observations
                                               :shape observation-dataset-shape}}
                                       (vec (range (count observations))))
+        ;;The loss terms appear like leaves to the graph confusion a few algorithms.
+        network (traverse/remove-existing-loss-terms network)
         graph (network/network->graph network)
         roots  (graph/roots graph)
         leaves (graph/leaves graph)]

@@ -281,4 +281,4 @@ This does not need to be wrapped in a resource context; that is done for you."
   [context network dataset input-bindings output-bindings & args]
   (resource/with-resource-context
     (->> (apply infer context network dataset input-bindings output-bindings args)
-        ds/batches->columnsv)))
+         ds/batches->columnsv)))

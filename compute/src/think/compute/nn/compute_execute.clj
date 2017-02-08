@@ -544,6 +544,7 @@ and anything that has a loss term attached to it's output becomes an output bind
                                                 :passes v})))
                              [k (first v)]))
                       (into {}))]
+
    (->> (concat (traverse/get-output-bindings network)
                 (get-loss-function-output-bindings network))
         (map :node-id)
