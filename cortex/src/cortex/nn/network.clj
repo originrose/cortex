@@ -8,6 +8,19 @@
   (:import [java.util UUID]))
 
 
+(defn embed-param-args
+  [desc]
+  (->> (graph/get-node-arguments desc)
+       (filter #(= :parameter (get % :type)))
+       (reduce (fn [desc argument]
+                 (let [param-name (get argument :key)
+                       node-param (get desc param-name)]
+                   (if-not (map? node-param)
+                     (assoc desc param-name {:buffer node-param})
+                     desc)))
+               desc)))
+
+
 (defn build-network
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
@@ -15,11 +28,15 @@
    (update network :layer-graph
            (fn [graph]
              (-> (reduce (fn [[graph last-id] next-desc]
+
                            (let [predecessor-id-seq (if (get next-desc :parents)
                                                       (get next-desc :parents)
                                                       (if last-id
                                                         [last-id]
                                                         []))
+                                 ;;For backward compatibility we need to embed any parameter argument
+                                 ;;buffers into maps
+                                 next-desc (embed-param-args next-desc)
                                  [graph id] (graph/add-node graph next-desc
                                                             predecessor-id-seq)]
                              [(if (= :input (get next-desc :type))
