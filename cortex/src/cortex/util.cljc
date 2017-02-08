@@ -30,6 +30,43 @@
   [name & decls]
   (list* `def (with-meta name (assoc (meta name) :private true)) decls))
 
+
+;;Utilities for dealing with map constructors
+(defn arg-list->arg-map
+  [args]
+  (when-not (= 0 (rem (count args) 2))
+    (throw (ex-info "Argument count must be evenly divisble by 2"
+                    {:arguments args})))
+  (->> (partition 2 args)
+       (map vec)
+       (into {})))
+
+
+(defn merge-args
+  [desc args]
+  (merge desc (arg-list->arg-map args)))
+
+
+(defn generate-id
+  [id-stem id-set]
+  (loop [idx 1]
+    (let [new-id (-> (format "%s-%s" id-stem idx)
+                     keyword)]
+      (if (contains? id-set new-id)
+        (recur (inc idx))
+        new-id))))
+
+
+(defn max-index
+  [coll]
+  (second (reduce (fn [[max-val max-idx] idx]
+                    (if (or (nil? max-val)
+                            (> (double (coll idx)) (double max-val)))
+                      [(coll idx) idx]
+                      [max-val max-idx]))
+                  [nil nil]
+                  (range (count coll)))))
+
 ;;;; Timing
 
 (defmacro ctime*

@@ -9,7 +9,8 @@
             [cortex.verify.utils :as utils]
             [cortex.gaussian :as cu]
             [think.resource.core :as resource]
-            [cortex.nn.protocols :as cp]))
+            [cortex.nn.protocols :as cp]
+            [cortex.graph :as graph]))
 
 (defn bind-test-network
   [context network batch-size stream->size-map test-layer-id]
@@ -34,7 +35,8 @@
   (let [network (cp/save-to-network context network {:save-gradients? true})
         traversal (get network :traversal)
         test-node (get-in network [:layer-graph :id->node-map test-layer-id])
-        parameter-descriptions (layers/get-parameter-descriptions test-node)
+        parameter-descriptions (->> (graph/get-node-arguments test-node)
+                                    (filter #(= :parameter (get % :type))))
         parameters (->> (map (fn [{:keys [key] :as description}]
                                (let [parameter (get test-node key)
                                      buffer (get-in network

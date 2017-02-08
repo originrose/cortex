@@ -169,6 +169,19 @@ one column for each item requested from the batch."
               [k (vec v)]))
        (into {})))
 
+(defn columns->batches
+  [column-map]
+  (let [column-seq (seq column-map)
+        column-names (map first column-map)
+        column-vals (map second column-map)
+        num-cols (count column-names)
+        interleaved-columns (->> column-vals
+                                 (apply interleave)
+                                 (partition num-cols))]
+    (map (fn [column-names column-vals]
+           (apply hash-map (interleave column-names column-vals)))
+         (repeat column-names) interleaved-columns)))
+
 
 (defn get-data-sequence-from-dataset
   "Get a sequence of data from the dataset.  Takes a batch size because

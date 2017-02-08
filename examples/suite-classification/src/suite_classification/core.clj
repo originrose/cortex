@@ -19,7 +19,8 @@
             [think.gate.core :as gate]
             [think.parallel.core :as parallel]
             [cortex.nn.traverse :as traverse]
-            [cortex.nn.network :as network])
+            [cortex.nn.network :as network]
+            [cortex.util :as util])
   (:import [java.io File]))
 
 
@@ -52,7 +53,7 @@
 (defn vec-label->label
   [ds-label]
   (get (vec (map str (range 10)))
-       (loss/max-index ds-label)))
+       (util/max-index ds-label)))
 
 
 (defn write-data
@@ -276,7 +277,7 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
                                               (apply suite-train/evaluate-network
                                                dataset
                                                loaded-data
-                                               (-> (merge argmap 
+                                               (-> (merge argmap
                                                        {:batch-type :cross-validation})
                                                    seq flatten))))
 
@@ -303,7 +304,7 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
         confusion-matrix-atom (display-dataset-and-model dataset argmap)]
     (apply classification/train-forever dataset mnist-observation->image
                                   initial-network
-                                  (-> (merge argmap 
+                                  (-> (merge argmap
                                          {:confusion-matrix-atom confusion-matrix-atom})
                                          seq flatten))))
 

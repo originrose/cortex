@@ -3,16 +3,18 @@
   (:require [think.compute.math :as math]
             [clojure.core.matrix :as m]
             [think.compute.driver :as drv]
+            [cortex.graph :as graph]
             [cortex.nn.layers :as layers]
             [cortex.loss :as loss]
             [think.datatype.core :as dtype]
+            [cortex.nn.network :as network]
             [think.compute.nn.backend :as backend]))
 
 
 (defmulti create-compute-loss-term
   "Multi method to allow pluggable loss terms.  Note that formally defined parameters are
 taken care of for you."
-  (fn [loss-term backend id->node-map stream->size-map batch-size]
+  (fn [backend network loss-term batch-size]
     (:type loss-term)))
 
 
@@ -38,7 +40,7 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :mse-loss
-  [loss-term backend id->name->shape-map stream->size-map batch-size]
+  [backend network loss-term batch-size]
   (->MSELoss loss-term backend))
 
 
@@ -63,7 +65,7 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :softmax-loss
-  [loss-term backend id->name->shape-map stream->size-map batch-size]
+  [backend network loss-term batch-size]
   (->SoftmaxLoss loss-term backend))
 
 
@@ -80,16 +82,14 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :l1-regularization
-  [loss-term backend id->name->shape-map stream->size-map batch-size]
+  [backend network loss-term batch-size]
   (let [driver (drv/get-driver backend)
         datatype (dtype/get-datatype backend)
-        node (->> (get loss-term :node-id)
-                  (get id->name->shape-map))
-        argument (loss/get-loss-term-argument loss-term :output)
-        term-size (->> (loss/get-loss-term-argument-shape loss-term
-                                                         (loss/get-loss-term-argument loss-term :output)
-                                                         id->name->shape-map
-                                                         stream->size-map)
+        graph (network/network->graph network)
+        argument (graph/get-node-argument loss-term :output)
+        term-size (->> (graph/get-argument-shape graph
+                                                 loss-term
+                                                 argument)
                        (apply *))
         term-size (if (= (get argument :type)
                          :node-output)
@@ -111,7 +111,7 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :l2-regularization
-  [loss-term backend id->name->shape-map stream->size-map batch-size]
+  [backend network loss-term batch-size]
   (->L2RegularizationLoss loss-term backend))
 
 
@@ -136,7 +136,6 @@ buffer is expected to be entirely overwritten by operation."
       ;;gradient = feature - center
       (math/subtract stream 1.0 output-buffer 1.0 batch-centers output-gradient)
       ;;copy features to batch-centers to start to calculate new centers
-
 
       ;;c' = a*c + b*sum(x)/n
       ;;c' = sum(a*c + b*x)/n
@@ -163,15 +162,12 @@ buffer is expected to be entirely overwritten by operation."
 
 
 (defmethod create-compute-loss-term :center-loss
-  [loss-term backend id->name->shape-map stream->size-map batch-size]
-  (let [output-shape (loss/get-loss-term-argument-shape loss-term
-                                                        (loss/get-loss-term-argument loss-term :output)
-                                                        id->name->shape-map
-                                                        stream->size-map)
-        labels-shape (loss/get-loss-term-argument-shape loss-term
-                                                        (loss/get-loss-term-argument loss-term :labels)
-                                                        id->name->shape-map
-                                                        stream->size-map)
+  [backend network loss-term batch-size]
+  (let [graph (network/network->graph network)
+        output-shape (graph/get-argument-shape graph loss-term
+                                               (graph/get-node-argument loss-term :output))
+        labels-shape (graph/get-argument-shape graph loss-term
+                                               (graph/get-node-argument loss-term :labels))
         batch-centers (backend/new-array backend output-shape batch-size)
         monotonic-indexes (math/array (drv/get-driver backend)
                                       (drv/get-stream backend)

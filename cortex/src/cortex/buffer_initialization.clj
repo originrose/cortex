@@ -55,6 +55,12 @@ the initialization."
   :type)
 
 
+(defn ->constant-initializer
+  [init-value]
+  {:type :constnat
+   :value (double init-value)})
+
+
 (defmethod initialize-buffer :constant
   [{:keys [shape value]}]
   (let [retval (b/new-array shape)
@@ -75,7 +81,13 @@ the initialization."
   [{:keys [type shape]}]
   (check-2-dimensional shape)
   (let [[n-rows n-cols] shape]
-   (weight-matrix n-rows n-cols type)))
+    (weight-matrix n-rows n-cols type)))
+
+
+(defn ->weight-initalization
+  [type shape]
+  {:type type
+   :shape shape})
 
 
 (defmethod initialize-buffer :relu

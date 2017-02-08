@@ -10,7 +10,8 @@
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
             [cortex.optimise :as cortex-opt]
-            [cortex.nn.network :as network]))
+            [cortex.nn.network :as network]
+            [cortex.graph :as graph]))
 
 (def default-network-filestem "trained-network")
 (def trained-networks-folder "trained-networks/")
@@ -64,9 +65,7 @@ in initial description.  Else returns the initial description"
                                 :labels (ds/batches->columnsv cv-output)
                                 :data cv-columnar-input
                                 :loss-fn loss-fn
-                                :leaf-node (->> (get-in network [:layer-graph :edges])
-                                             network/edges->roots-and-leaves
-                                             last)}))))
+                                :leaves (network/leaf-inference-layers network)}))))
   true)
 
 
@@ -75,15 +74,18 @@ in initial description.  Else returns the initial description"
   [& {:keys [datatype force-gpu?]
       :or {datatype :float force-gpu? false}}]
   (ce/create-context (fn []
-                       (if force-gpu?
-                         (try
-                               (require 'think.compute.nn.cuda-backend)
-                               ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
-                               (catch Exception e
-                                 (println (format "Failed to create cuda backend (%s); will use cpu backend" e))
-                                   (throw e)
-                                 nil))
-                       (cpu-backend/create-cpu-backend datatype)))))
+                       (try
+                         (require 'think.compute.nn.cuda-backend)
+                         ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
+                         (catch Exception e
+                           (if force-gpu?
+                             (throw (ex-info "Failed to create cuda context:"
+                                             {:error e}))
+                             (do
+                               (println
+                                (format "Failed to create cuda backend (%s); will use cpu backend" e))
+                               (cpu-backend/create-cpu-backend datatype)))
+                           nil)))))
 
 (defn backup-trained-network
   [network-filestem]
@@ -205,7 +207,8 @@ existing traversal bindings."
                                                         [input-streams output-streams])]
     {:labels labels
      :inferences inferences
-     :data data}))
+     :data data
+     :leaves (network/leaf-inference-layers network)}))
 
 (defn print-trained-networks-summary
   "Prints a summary of the different networks trained so far.

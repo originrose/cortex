@@ -1,61 +1,41 @@
 (ns cortex.loss
-  "Definitions and implementations of cortex loss function terms.  A loss term is a function that takes
-a map of arguments and returns a single double number.  The loss function for a network is a weighted summation
-across a vector of terms.  The weight on any term is :lambda and is defined with a per-term-default in the loss
-metadata for that function type.  The default is 1.
+  "Definitions and implementations of cortex loss function terms.  A loss term is a function
+that takes a map of arguments and returns a single double number.  The loss function for a
+network is a weighted summation across a vector of terms.  The weight on any term is :lambda
+and is defined with a per-term-default in the loss metadata for that function type.  The
+default is 1.
 
-The loss terms can have any number of uniquely named arguments and each argument can bind to one of four
-different things.
+The loss terms can have any number of uniquely named arguments and each argument can bind to
+one of four different things.
 1.  A node output
 2.  A node parameter
 3.  A stream
 4.  Data tracked by the implementation with an initializer.
+5. An augmented stream.  A pure transformation from a source stream to another stream.
 
-The loss term can state which of it's arguments it produces gradients for when asked to produce gradients.
-This makes it a little easier for implementations to manage gradients when evaluating loss terms."
-  (:require [clojure.core.matrix :as m]))
-
-
-;;Utilities for dealing with map constructors
-(defn arg-list->arg-map
-  [args]
-  (when-not (= 0 (rem (count args) 2))
-    (throw (ex-info "Argument count must be evenly divisble by 2"
-                    {:arguments args})))
-  (->> (partition 2 args)
-       (map vec)
-       (into {})))
+The loss term can state which of it's arguments it produces gradients for when asked to produce
+gradients. This makes it a little easier for implementations to manage gradients when
+evaluating loss terms."
+  (:require [clojure.core.matrix :as m]
+            [cortex.util :refer [arg-list->arg-map merge-args
+                                 generate-id max-index]]
+            [cortex.graph :as graph]
+            [cortex.argument :as arg]
+            [cortex.stream-augment :as stream-aug]))
 
 
-(defn merge-args
-  [desc args]
-  (merge desc (arg-list->arg-map args)))
-
-
-(defn stream->data->stream->size
-  "Utility to convert a map that points to either a number or a map containing a size member
-to a stream->size member."
-  [stream->data]
-  (->> stream->data
-       (map (fn [[k v]]
-              [k
-               (if (number? v)
-                 (long v)
-                 (get v :size))]))
-       (into {})))
-
-
-(defmulti loss-metadata
+(defn loss-metadata
   "Get the metadata for a particular loss function.
 
 There are some standard argument definitions:
 :output - loss-term contains? :node-id output of the node.
 :stream - loss-term contains? :stream the data coming from the data stream.
-:parameter - loss-term contains? :node-id :parameter and this is the value of the parameter of the node.
+:parameter - loss-term contains? :node-id :parameter and this is the value of the parameter of
+the node.
 
 In addition loss functions themselves can have parameters in that the network stores in its
-definition in parameter buffers.  This is useful in the case where the loss itself has some running
-means associated with it like in the form of center loss.
+definition in parameter buffers.  This is useful in the case where the loss itself has some
+running means associated with it like in the form of center loss.
 
 All losses have a default lambda which weights them against any other elements in the loss.
 
@@ -64,21 +44,9 @@ In general, the loss function for a given network
 The map must contain:
 {:arguments - The keys and potentially some extra information about the data in the keys passed
 to the loss function.
-}"
-  :type)
-
-
-
-;;Arguments can have a an indicator if the loss term produces gradients.
-(def default-loss-term-arguments
-  {:output {:gradients? true}
-   :labels {}})
-
-
-(defmethod loss-metadata :default
+  }"
   [loss-term]
-  {:arguments default-loss-term-arguments
-   :lambda 1.0})
+  (graph/get-node-metadata loss-term))
 
 
 (defn get-loss-lambda
@@ -87,111 +55,12 @@ to the loss function.
       (get (loss-metadata loss-term) :lambda 1.0)))
 
 
-(defn set-loss-term-argument-data
-  [loss-term arg-key data-source]
-  (assoc loss-term arg-key data-source))
-
-
-(defn get-loss-term-argument-type
-  [argument]
-  (get argument :type))
-
-
-(defn set-loss-term-arg-node-output
-  [loss-term arg-key node-id]
-  (set-loss-term-argument-data loss-term arg-key {:type :node-output
-                                                  :node-id node-id}))
-
-(defn set-loss-term-arg-node-parameter
-  [loss-term arg-key node-id param-key]
-  (set-loss-term-argument-data loss-term arg-key {:type :node-parameter
-                                                  :node-id node-id
-                                                  :parameter param-key}))
-
-(defn set-loss-term-arg-stream
-  [loss-term arg-key stream]
-  (set-loss-term-argument-data loss-term arg-key {:type :stream
-                                                  :stream stream}))
-
-
-(defn set-loss-term-arg-param
-  "Bind a loss term to generated data.  The shape function takes:
-(shape-fn loss-term node-id->name->shape-map stream->size).
-For the other three loss argument types the designed shape can be inferred from
-either the above arguments without a custom function."
-  [loss-term arg-key initialization shape-fn]
-  (set-loss-term-argument-data loss-term arg-key {:type :loss-term-parameter
-                                                  :shape-fn shape-fn
-                                                  :initialization initialization}))
-
-
-(defmulti get-loss-term-argument-shape
-  "Given a loss term argument infer it's desired shape from it's binding."
-  (fn [loss-term argument node-id->name->shape-map stream->size]
-    (get argument :type)))
-
-
-(defmethod get-loss-term-argument-shape :default
-  [loss-term argument node-id->name->shape-map stream->size]
-  (throw (ex-info "Invalid loss term argument"
-                  {:loss-term loss-term
-                   :argument argument})))
-
-
-(defmethod get-loss-term-argument-shape :node-output
-  [loss-term {:keys [node-id]} node-id->name->shape-map stream->size]
-  (if-let [retval (get-in node-id->name->shape-map [node-id :output])]
-    retval
-    (throw (ex-info "Failed to find node output shape"
-                    {:node-id node-id
-                     :shape-map node-id->name->shape-map}))))
-
-
-(defmethod get-loss-term-argument-shape :node-parameter
-  [loss-term {:keys [node-id parameter] :as argument} node-id->name->shape-map stream->size]
-  (if-let [retval (get-in node-id->name->shape-map [node-id parameter])]
-    retval
-    (throw (ex-info "Failed to find node parameter shape"
-                    {:node-id node-id
-                     :parameter parameter
-                     :node-id->name->shape-mape node-id->name->shape-map
-                     :loss-term loss-term
-                     :argument argument}))))
-
-
-(defmethod get-loss-term-argument-shape :stream
-  [loss-term {:keys [stream] :as argument} node-id->name->shape-map stream->size]
-  (when-not (contains? stream->size stream)
-    (throw (ex-info "Failed to find stream size"
-                    {:stream stream
-                     :stream->size stream->size})))
-  [(get stream->size stream)])
-
-
-(defmethod get-loss-term-argument-shape :loss-term-parameter
-  [loss-term {:keys [shape-fn] :as arg} node-id->name->shape-map stream->size]
-  (shape-fn loss-term arg node-id->name->shape-map stream->size))
-
 
 (defn get-loss-term-arguments
   "Flatten the metadata of the loss term with any specific argument information included
 with the loss term itself."
   [loss-term]
-  (->> (get (loss-metadata loss-term) :arguments default-loss-term-arguments)
-       (map (fn [[k v]]
-              (merge
-               (assoc v :key k)
-               (get loss-term k))))))
-
-
-(defn get-loss-term-argument
-  [loss-term arg-key]
-  (if-let [meta-arg (get-in (loss-metadata loss-term) [:arguments arg-key])]
-    (merge (assoc meta-arg :key arg-key)
-           (get loss-term arg-key))
-    (throw (ex-info "Failed to find loss term argument"
-                    {:loss-term loss-term
-                     :arg-key arg-key}))))
+  (graph/get-node-arguments loss-term))
 
 
 (defn get-loss-term-args-of-type
@@ -202,15 +71,13 @@ with the loss term itself."
 
 
 (defn get-loss-term-parameters
-  "A parameter for a loss term is an argument that has an initialization key.  This means it is data
-specific to that loss term that will be updated during the term's execution but it also needs to be
-saved if the network is saved.  Data specific to the loss term that does not need to be saved is
-expected to be created by the implementation of the term itself.  Note that there are at this time
-three sources of data for a loss term argument; it could be a parameter, it could be a network-path
-or it could be a stream.  These are mutually exlusive so we should never see a loss term with
-two or more of them."
+  "A parameter for a loss term is an argument that has an initialization key.  This means it is
+data specific to that loss term that will be updated during the term's execution but it also
+needs to be saved if the network is saved.  Data specific to the loss term that does not need to
+be saved is expected to be created by the implementation of the term itself.  These are mutually
+exlusive so we should never see a loss term with two or more of them."
   [loss-term]
-  (get-loss-term-args-of-type loss-term :loss-term-parameter))
+  (get-loss-term-args-of-type loss-term :parameter))
 
 (defn get-loss-term-node-outputs
   "Get loss term arguments that connect to node outputs."
@@ -289,132 +156,19 @@ containing the buffer coming from the network.
            (count output-seq))))))
 
 
-(defn max-index
-  [coll]
-  (second (reduce (fn [[max-val max-idx] idx]
-                    (if (or (nil? max-val)
-                            (> (coll idx) max-val))
-                      [(coll idx) idx]
-                      [max-val max-idx]))
-                  [nil nil]
-                  (range (count coll)))))
-
-
-
-(defmulti get-stream-augmentation-metadata
-  "loss arguments that are functions of other arguments (but should be uploaded to the gpu)."
-  (fn [argument]
-    (get argument :augmentation)))
-
-
-(defmethod get-stream-augmentation-metadata :labels->indexes
-  [argument]
-  {:fn (partial mapv max-index)})
-
-
-(defmethod get-stream-augmentation-metadata :labels->inverse-counts
-  [argument]
-  {:fn (fn [batch-label-vec]
-         (let [n-classes (m/ecount (first batch-label-vec))
-               class-indexes (mapv max-index batch-label-vec)
-               inverse-counts
-               (->> class-indexes
-                    (reduce #(update %1 %2 inc)
-                            (vec (repeat n-classes 0)))
-                    (mapv (fn [val]
-                            (if (zero? val)
-                              0.0
-                              (/ 1.0 (double val))))))]
-           (mapv inverse-counts class-indexes)))})
-
-
-(defn get-stream-augmentation-fn
-  [augmentation-type]
-  (if-let [retval (-> (get-stream-augmentation-metadata
-                        {:augmentation augmentation-type})
-                      (get :fn))]
-    retval
-    (throw (ex-info "Failed to find augmentation fn for augmentation type:"
-                    {:augmentation-type augmentation-type}))))
-
-
-(defn get-loss-term-stream-augment
-  [loss-term argument stream->buffer-map]
-  (let [src-arg (get-loss-term-argument loss-term (get argument :argument))
-        data-stream (get src-arg :stream)
-        arg-augmentation (get-stream-augmentation-metadata argument)
-        augment-fn (get arg-augmentation :fn)]
-    (if-let [data (stream->buffer-map data-stream)]
-      (augment-fn (get stream->buffer-map data-stream))
-      (throw (ex-info "Failed to find stream to for augmented argument"
-                      {:argument argument
-                       :loss-term loss-term
-                       :streams (vec (keys stream->buffer-map))})))))
-
-
-(defn- generate-id
-  [id-stem id-set]
-  (loop [idx 1]
-    (let [new-id (-> (format "%s-%s" id-stem idx)
-                     keyword)]
-      (if (contains? id-set new-id)
-        (recur (inc idx))
-        [new-id (conj id-set new-id)]))))
-
-
-(defn generate-augmented-argument-ids
-  "Given a sequence of loss terms, some with stream augmentation parameters, generate
-id's for each stream augmentation parameter (:id) that are unique across the
-space of parameters."
-  [loss-term-seq]
-  (->> loss-term-seq
-       (reduce (fn [[loss-term-seq id-set] loss-term]
-                 (let [[loss-term-id id-set] (generate-id (name (get loss-term :type)) id-set)
-                       [loss-term id-set]
-                       (reduce (fn [[loss-term id-set] {:keys [key] :as arg}]
-                                 (let [[arg-id id-set]
-                                       (generate-id (format "%s-%s"
-                                                            (name loss-term-id)
-                                                            (name key))
-                                                    id-set)]
-                                   [(assoc-in loss-term [key :id] arg-id)
-                                    id-set]))
-                               [loss-term id-set]
-                               (get-loss-term-augmented-streams loss-term))]
-                   [(conj loss-term-seq loss-term) id-set]))
-               [[] #{}])
-       first))
-
-
-(defn augment-streams
-  "Perform data augmentation on the streams and return a new buffer map."
-  [loss-term-seq stream->buffer-map]
-  (->> loss-term-seq
-       (reduce (fn [stream->buffer-map loss-term]
-                 (->> (get-loss-term-augmented-streams loss-term)
-                      (reduce (fn [stream->buffer-map arg]
-                                (when-not (get arg :id)
-                                  (throw (ex-info "Augmented stream arguments must have unique ids"
-                                                  {:argument arg
-                                                   :loss-term loss-term})))
-                                (let [augmented-data (get-loss-term-stream-augment loss-term arg
-                                                                                   stream->buffer-map)]
-                                 (assoc stream->buffer-map
-                                        (get arg :id)
-                                        (if (contains? arg :datatype)
-                                          {:datatype (get arg :datatype)
-                                           :data augmented-data}
-                                          augmented-data))))
-                              stream->buffer-map)))
-               stream->buffer-map)))
-
-
 (defn mse-loss
   "Mean squared error loss.  Applied to a node and a matching-size output stream."
   [& args]
   (merge-args
    {:type :mse-loss}
    args))
+
+
+(defmethod graph/get-node-metadata :mse-loss
+  [loss-term]
+  {:arguments {:output {:gradients? true}
+               :labels {}}
+   :passes [:loss]})
 
 
 (defmethod loss :mse-loss
@@ -436,6 +190,13 @@ space of parameters."
   (merge-args
    {:type :softmax-loss}
    args))
+
+
+(defmethod graph/get-node-metadata :softmax-loss
+  [loss-term]
+  {:arguments {:output {:gradients? true}
+               :labels {}}
+   :passes [:loss]})
 
 (defn log-likelihood-softmax-loss
   ^double [softmax-output answer]
@@ -498,9 +259,10 @@ the actual log-loss of the softmax unit."
 
 
 (defn l1-regularization
-  "Penalize the network for the sum of the absolute values of a given buffer.  This pushes all entries of the buffer
-at a constant rate towards zero and is purported to lead to more sparse representations.  This could be applied
-to either a trainable parameter or to a node in which case it will be applied to the node's output buffer."
+  "Penalize the network for the sum of the absolute values of a given buffer.
+This pushes all entries of the buffer at a constant rate towards zero and is purported
+to lead to more sparse representations.  This could be applied to either a trainable
+parameter or to a node in which case it will be applied to the node's output buffer."
   [& args]
   (merge-args
    {:type :l1-regularization}
@@ -528,10 +290,12 @@ or to a parameter buffer (like weights) in which case the function should have a
 entry in addition to a node-id."
   [loss-term]
   {:arguments {:output {:gradients? true}}
+   :passes [:loss]
    :lambda 0.001})
 
 
-(defmethod loss-metadata :l1-regularization
+
+(defmethod graph/get-node-metadata :l1-regularization
   [loss-term]
   (reg-loss-metadata loss-term))
 
@@ -542,19 +306,19 @@ entry in addition to a node-id."
 
 
 (defn l2-regularization
-  "Penalize the network for the magnitude of a given buffer.  This will penalize large entries in the buffer
-  exponentially more than smaller entries leading to a buffer that tends to produce an even distribution of small
-  entries.  Can be applied to either a trainable parameter or a node in which case it will be applied to
-  the node's output buffer."
+  "Penalize the network for the magnitude of a given buffer.  This will penalize large entries
+in the buffer exponentially more than smaller entries leading to a buffer that tends to produce
+an even distribution of small  entries.  Can be applied to either a trainable parameter or a
+node in which case it will be applied to the node's output buffer."
   [& args]
   (merge-args
    {:type :l2-regularization}
    args))
 
-(defmethod loss-metadata :l2-regularization
+
+(defmethod graph/get-node-metadata :l2-regularization
   [loss-term]
   (reg-loss-metadata loss-term))
-
 
 (defmethod generate-loss-term :l2-regularization
   [item-key]
@@ -603,38 +367,31 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
        2.0)))
 
 
-(defn- get-center-loss-center-buffer-shape
-  "Get the shape of the centers of the network.  The network must be built and enough
-information must be known about the dataset to make a stream->size map."
-  [loss-term argument node-id->name->shape-map stream-map]
-  (let [output-shape (get-loss-term-argument-shape loss-term
-                                                   (get-loss-term-argument loss-term :output)
-                                                   node-id->name->shape-map stream-map)
-        labels-shape (get-loss-term-argument-shape loss-term
-                                                   (get-loss-term-argument loss-term :labels)
-                                                   node-id->name->shape-map stream-map)
+(defn get-center-loss-center-buffer-shape
+  "Get the shape of the per-class centroids of the network."
+  [graph loss-term argument]
+  (let [output-shape (graph/get-argument-shape graph loss-term
+                                               (graph/get-node-argument loss-term :output))
+        labels-shape (graph/get-argument-shape graph loss-term
+                                               (graph/get-node-argument loss-term :labels))
         output-size (long (apply * output-shape))
         labels-size (long (apply * labels-shape))]
     ;;We keep track of stream-size centers each of node output size.
     [labels-size output-size]))
 
 
-(defmethod loss-metadata :center-loss
+(defmethod graph/get-node-metadata :center-loss
   [loss-term]
   {:arguments {:output {:gradients? true}
                :labels {:type :stream}
-               :label-indexes {:type :stream-augmentation
-                               :argument :labels
-                               :augmentation :labels->indexes
-                               :datatype :int}
-               :label-inverse-counts {:type :stream-augmentation
-                                      :argument :labels
-                                      :augmentation :labels->inverse-counts}
-               :centers {:type :loss-term-parameter
-                         :shape-fn get-center-loss-center-buffer-shape
+               :label-indexes (stream-aug/labels->indexes-augmentation :labels)
+               :label-inverse-counts (stream-aug/labels->inverse-counts-augmentation :labels)
+               :centers {:type :parameter
+                         :shape-fn :cortex.loss/get-center-loss-center-buffer-shape
                          :initialization {:type :constant
                                           :value 0}}}
-   :lambda 0.1})
+   :lambda 0.1
+   :passes [:loss]})
 
 
 (defmethod generate-loss-term :center-loss
