@@ -166,7 +166,7 @@ Returns map of:
           (count buffer-map-seq)))))
 
 
-(defn pprint-executed-loss-fn
+(defn loss-fn->table-str
   [loss-fn]
   (with-out-str
     (pprint/print-table [:type :value :lambda :node-id :parameter]
