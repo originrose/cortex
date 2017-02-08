@@ -7,6 +7,7 @@
                  [thinktopic/think.image "0.4.6"]
                  [thinktopic/gpu-compute "0.5.0-SNAPSHOT"]
                  [com.taoensso/nippy "2.12.2"]
-                 [garden "1.3.2"]]
+                 [garden "1.3.2"]
+                 [org.bytedeco.javacpp-presets/cuda "7.5-1.2"]]
   :resource-paths ["cljs" "resources"]
   :plugins [[lein-codox "0.10.2"]])

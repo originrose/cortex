@@ -79,12 +79,12 @@ in initial description.  Else returns the initial description"
                          (catch Exception e
                            (if force-gpu?
                              (throw (ex-info "Failed to create cuda context:"
-                                             {:error e}))
+                                             {:error e
+                                              :force-gpu? force-gpu?}))
                              (do
                                (println
                                 (format "Failed to create cuda backend (%s); will use cpu backend" e))
-                               (cpu-backend/create-cpu-backend datatype)))
-                           nil)))))
+                               (cpu-backend/create-cpu-backend datatype))))))))
 
 (defn backup-trained-network
   [network-filestem]
@@ -139,7 +139,7 @@ we continue to train forever.
            network-filestem default-network-filestem
            optimiser (cortex-opt/adam)
            reset-score false
-           force-gpu? true}}]
+           force-gpu? false}}]
   (resource/with-resource-context
     (let [network-filename (str network-filestem ".nippy")
           ;;Backup the trained network if we haven't already
