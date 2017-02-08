@@ -163,6 +163,7 @@
               {:type :node-argument, :node-id :convolutional-1, :argument :weights},
               :id :l1-regularization-1}]
             (get gradient-descent :loss-function))))
+
     (is (= [nil nil]
            (minimal-diff
             [{:id :convolutional-1, :incoming [{:stream :data}], :outgoing [{:id :convolutional-1}]}
@@ -325,6 +326,10 @@
                                        :traversal
                                        realize-traversals)
         layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
+    (clojure.pprint/pprint              (get traversal-after-stacking :backward))
+
+    (println "!!!original")
+    (clojure.pprint/pprint              (get original-traversal :backward))
     (is (= [nil nil]
            (minimal-diff
              (get original-traversal :backward)
@@ -342,7 +347,8 @@
              (get gradient-descent-top :buffers)
              (get gradient-descent-original :buffers))))
     (is (nil? (:verification-failures top-network)))
-    (is (= (:parameter-count top-network) (:parameter-count original-network)))
+    (is (= (graph/parameter-count (network/network->graph top-network))
+           (graph/parameter-count (network/network->graph original-network))))
     (is (= (layer-graph->buffer-id-size-fn (get-in top-network [:layer-graph :buffers]))
            (layer-graph->buffer-id-size-fn (get-in original-network [:layer-graph :buffers]))))))
 

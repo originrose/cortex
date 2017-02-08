@@ -108,6 +108,7 @@ while training no stream or loss is necessary"
             (-> traversal
                 (dissoc :input-bindings)
                 (dissoc :output-bindings)))))
+(declare remove-existing-loss-terms)
 
 
 (defn auto-bind-io
@@ -115,30 +116,28 @@ while training no stream or loss is necessary"
 are exactly 1 root and leaf or to :data-x where x is a one-based index of the
 root and labels-x where labels are a 1-based index of the leaf."
   [network]
-  (if-not (and (contains? (get network :traversal) :input-bindings)
-               (contains? (get network :traversal) :output-bindings))
-    (let [network (clear-io-bindings network)
-          graph (get network :layer-graph)
-          roots (graph/roots graph)
-          leaves (graph/leaves graph)
-          input-name-fn (if (> (count roots) 1)
-                          (fn [network]
-                            (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
-                          (constantly :data))
-          output-name-fn (if (> (count leaves) 1)
-                           (fn [network]
-                             (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
-                           (constantly :labels))]
-      (as-> network network
-        (reduce (fn [network root]
-                  (bind-input network root (input-name-fn network)))
-                network
-                roots)
-        (reduce (fn [network leaf]
-                  (bind-output-train network leaf (output-name-fn network)))
-                network
-                leaves)))
-    network))
+  (let [network (clear-io-bindings network)
+        ;;Get the graph without any loss terms else we will bind things to the loss nodes.
+        graph (get (remove-existing-loss-terms network) :layer-graph)
+        roots (graph/roots graph)
+        leaves (graph/leaves graph)
+        input-name-fn (if (> (count roots) 1)
+                        (fn [network]
+                          (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
+                        (constantly :data))
+        output-name-fn (if (> (count leaves) 1)
+                         (fn [network]
+                           (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
+                         (constantly :labels))]
+    (as-> network network
+      (reduce (fn [network root]
+                (bind-input network root (input-name-fn network)))
+              network
+              roots)
+      (reduce (fn [network leaf]
+                (bind-output-train network leaf (output-name-fn network)))
+              network
+              leaves))))
 
 
 (defn get-io-bindings
@@ -524,20 +523,19 @@ datastructure describing the final loss function.
   default to optimising for memory because this avoids OOM situations with large networks."
   [{:keys [layer-graph] :as network} stream-map]
   (check-for-io-bindings network)
-  (let [forward-traversal (->> (create-forward-traversal network)
+  (let [network (remove-existing-loss-terms network)
+        forward-traversal (->> (create-forward-traversal network)
                                (filter-traversal network :inference)
                                (#(traversal->buffers % {}))
                                first)]
-    (-> network
-        remove-existing-loss-terms
-        (update network
-                :traversal
-                #(-> (dissoc % :loss-function)
-                     (merge
-                      {:forward (clean-traversal-incoming-outgoing forward-traversal)
-                       :buffers (forward-traversal->buffer-map network forward-traversal)
-                       :type :inference
-                       :stream-map stream-map}))))))
+    (update network
+            :traversal
+            #(merge
+              %
+              {:forward (clean-traversal-incoming-outgoing forward-traversal)
+               :buffers (forward-traversal->buffer-map network forward-traversal)
+               :type :inference
+               :stream-map stream-map}))))
 
 
 (defn- traversal->buffer-set
