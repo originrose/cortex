@@ -20,7 +20,7 @@
    (layers/max-pooling 2 0 2)
    (layers/relu)
    (layers/dropout 0.75)
-   (layers/batch-normalization 0.9)
+   (layers/batch-normalization)
    (layers/linear 500) ;;If you use this description put that at 1000
    (layers/relu :id :feature :center-loss {:labels {:stream :labels}
                                            :label-indexes {:stream :labels}

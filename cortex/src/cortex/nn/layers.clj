@@ -377,9 +377,10 @@ https://arxiv.org/pdf/1502.03167v3.pdf.
 ave-factor is the exponential falloff for the running averages of mean and variance
 while epsilon is the stabilization factor for the variance (because we need inverse variance
 and we don't want to divide by zero."
-  [ave-factor & {:keys [epsilon]
-                 :or {epsilon 1e-4}
-                 :as arg-map}]
+  [& {:keys [ave-factor epsilon]
+      :or {ave-factor 0.9
+           epsilon 1e-4}
+      :as arg-map}]
   (when (< (double epsilon) 1e-5)
     (throw (Exception. "batch-normalization minimum epsilon is 1e-5.
 This is for cudnn compatibility.")))
