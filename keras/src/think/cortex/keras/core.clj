@@ -348,12 +348,8 @@
               weight-double-data (ensure-doubles weight-raw-data)
               keras-dims (node->keras-dims node)
               graph (network/network->graph network)
-              weights-arg (graph/get-node-argument graph
-                                                   node
-                                                   :weights)
-              bias-arg (graph/get-node-argument graph
-                                                node
-                                                :bias)
+              weights-arg (graph/get-node-argument node :weights)
+              bias-arg (graph/get-node-argument node :bias)
               weights (-> (if (= 4 (count keras-dims))
                             (reshape-data weight-double-data keras-dims [3 2 0 1])
                             (reshape-data weight-double-data keras-dims [1 0]))
@@ -532,7 +528,7 @@
         reshaped    (->> (mapv reshape-layer-output assoc-out)
                          (remove nil?)
                          (into {}))
-        [roots leaves] (network/edges->roots-and-leaves (get-in network [:layer-graph :edges]))
+        roots  (graph/roots (network/network->graph network))
         for-verify  {:model network
                      :layer-id->output (assoc reshaped
                                               (first roots)

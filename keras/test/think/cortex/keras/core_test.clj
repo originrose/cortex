@@ -4,7 +4,8 @@
             [cortex.nn.network :as network]
             [clojure.core.matrix :as m]
             [cortex.verify.nn.import :as import]
-            [think.compute.nn.compute-execute :as ce]))
+            [think.compute.nn.compute-execute :as ce]
+            [cortex.graph :as graph]))
 
 
 (def simple_archf "models/simple_mnist.json")
@@ -42,8 +43,7 @@
   that built result is correct."
   (let [model-desc (keras/keras-json->cortex-desc simple_archf)
         built-net   (network/build-network model-desc)]
-    (is (= 422154 (:parameter-count built-net)))
-    (is (nil? (:verification-failures built-net)))))
+    (is (= 422154 (graph/parameter-count (network/network->graph built-net))))))
 
 
 (deftest read-outputs-correctly
@@ -59,8 +59,5 @@
 (deftest verify-simple-mnist
   "This is a basic model which has no ambiguity introduced by uneven strides,
   where frameworks start to differ. A failure here indicates a very basic
-  problem in the Keras importer.
-
-  Model does, however, inclue Dropout, so requires handling in inference or 
-  training step so layer is not skipped."
+  problem in the Keras importer."
   (is (keras/import-model simple_archf simple_weightf simple_outf)))
