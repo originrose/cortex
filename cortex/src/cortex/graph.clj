@@ -504,7 +504,8 @@ Note that for uniformity the values are returned without modification.  This
 means the the format of the stream map and the node->output-map must be
 entries of the form of at least {:buffer data} instead of linking key directly
 to data.  This allows a uniform system both when doing auto-differentiation and
-when simply doing execution."
+when simply doing execution because when doing back propagation the entries must
+link to both {:buffer :gradient}."
   [graph node stream-map node-id->output-map]
   (->> (get-node-arguments node)
        (map (fn [{:keys [key type] :as argument}]
@@ -538,11 +539,13 @@ when simply doing execution."
             (get p->c-map parent-node-id))))
 
 (defn remove-node
+  "Remove a node, its buffers and all children from the graph."
   [graph node-id]
   (recur-remove-node (parent->child-map graph) graph node-id))
 
 
 (defn parameter-count
+  "Return the number of trainable and non-trainable parameters."
   [graph]
   (->> (get graph :buffers)
        vals
@@ -551,6 +554,7 @@ when simply doing execution."
 
 
 (defn graph->nodes
+  "Return a list of all nodes in the graph in dfs order."
   [graph]
   (->> (dfs-seq graph)
        (map #(get-node graph %))))
