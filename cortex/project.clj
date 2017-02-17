@@ -17,10 +17,10 @@
 
                  ;;The dataset abstraction uses parallel and optionally resource management.
                  [thinktopic/think.parallel "0.3.4"]
-                 [thinktopic/think.datatype "0.3.9" :exclusions [net.mikera/vectorz-clj]]
 
                  ;; FIXME: update datatype to use latest vectorz
-                 [thinktopic/cortex-datasets "0.5.0-SNAPSHOT"]
+                 [thinktopic/think.datatype "0.3.9" :exclusions [net.mikera/vectorz-clj]]
+
                  [thinktopic/resource "1.1.0"]
                  ]
 
