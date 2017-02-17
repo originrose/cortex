@@ -1,7 +1,8 @@
 (ns cortex.dataset
-  "Datasets are essentially infinite sequences of batches of data.  They have multiple data streams and
-generally have multiple batch types.  A batch type indicates the usage of the data; for instance
-the training batch type is expecting very random data that may be extended with augmentation."
+  "Datasets are essentially infinite sequences of batches of data.  They have
+  multiple data streams and generally have multiple batch types.  A batch type
+  indicates the usage of the data; for instance the training batch type is
+  expecting very random data that may be extended with augmentation."
   (:require [clojure.core.matrix :as m]
             [think.parallel.core :as parallel]
             [think.resource.core :as resource]))
@@ -38,8 +39,7 @@ the training batch type is expecting very random data that may be extended with 
 
 
 (defn create-split-ranges
-  "Given a training split and a cv-split create
-the training,cv,and holdout splits."
+  "Given a training split and a cv-split create the training,cv,and holdout splits."
   [training-split cv-split]
   (let [training-split (double (max 0.0 (min 1.0 (or training-split 1.0))))
         cv-split-max (- 1.0 training-split)
@@ -77,15 +77,14 @@ the training,cv,and holdout splits."
 
 
 (defn create-index-sets
-  "Create a training/testing split of indexes.  Returns a map
-with three keys, :training, :cross-validation, :holdout where the testing
-indexes are withheld from the training set.  The running indexes
-are the same as the testing indexes at this time.
-If cv-split is provided then the amount used for holdout is:
-(max 0.0 (- 1.0 training-split cv-split))
-else cv and holdout are the same index set and the amount used for
-holdout and cv is (max 0.0 (- 1.0 training-split)).
-If training split is 1.0 then all indexes are used for everything."
+  "Create a training/testing split of indexes.  Returns a map with three keys,
+  :training, :cross-validation, :holdout where the testing indexes are withheld
+  from the training set.  The running indexes are the same as the testing
+  indexes at this time.  If cv-split is provided then the amount used for
+  holdout is: (max 0.0 (- 1.0 training-split cv-split)) else cv and holdout are
+  the same index set and the amount used for holdout and cv is (max 0.0 (- 1.0
+  training-split)).  If training split is 1.0 then all indexes are used for
+  everything."
   [item-count & {:keys [training-split cv-split max-items randomize?]
                  :or {training-split 0.6 cv-split 0.2 randomize? true}}]
   ;;The code below uses both item count and max items so that we can a random subset
@@ -107,20 +106,21 @@ If training split is 1.0 then all indexes are used for everything."
 
 (defprotocol PDataset
   "The dataset protocol provides uniform access to named sequences of data.
-The system will expect to be able to access each sequence of data within a batch
-with a separate thread but it will not assume that access within the sequence is
-threadsafe meaning it will completely process the current item before moving to the
-next item."
+  The system will expect to be able to access each sequence of data within a
+  batch with a separate thread but it will not assume that access within the
+  sequence is threadsafe meaning it will completely process the current item
+  before moving to the next item."
 
   (shapes [ds]
-    "Return a map of name to shape where shape is either an integer
-or a more complex shape definition a layout, num-channels, width and height")
+    "Return a map of name to shape where shape is either an integer or a more
+    complex shape definition a layout, num-channels, width and height")
 
 
   (get-batches [ds batch-size batch-type shape-name-seq]
-    "Return a possibly lazy sequence of maps data, one for each shape name in the label sequence.
-  So to clarify if I have a dataset with six items for training
-  where each item is composed of an image, a histogram and a label, I may call:
+    "Return a possibly lazy sequence of maps data, one for each shape name in
+    the label sequence.  So to clarify if I have a dataset with six items for
+    training where each item is composed of an image, a histogram and a label,
+    I may call:
 
   (get-batches ds 3 :training [:image :label :histogram])
   and I should get back a potentially lazy sequence of batches, each batch has a
@@ -147,9 +147,8 @@ or a more complex shape definition a layout, num-channels, width and height")
 
 
 (defn batches->columns
-  "Given a batch sequence from get-batches
-transform it so that it is a vector of columnar data,
-one column for each item requested from the batch."
+  "Given a batch sequence from get-batches transform it so that it is a vector
+  of columnar data, one column for each item requested from the batch."
   [batch-sequence]
   (when (and (not (empty? batch-sequence))
              (not (empty? (first batch-sequence))))
@@ -185,10 +184,10 @@ one column for each item requested from the batch."
 
 (defn get-data-sequence-from-dataset
   "Get a sequence of data from the dataset.  Takes a batch size because
-datasets always give data in batches.  Note that if you are taking the
-evaluation results from a network with a given batch size you should call
-this function with the same batch type (probably holdout) and batch-size
-as what you used in the run call."
+  datasets always give data in batches.  Note that if you are taking the
+  evaluation results from a network with a given batch size you should call
+  this function with the same batch type (probably holdout) and batch-size as
+  what you used in the run call."
   [dataset name batch-type batch-size]
   (-> (->> (get-batches dataset batch-size batch-type [name])
            batches->columns)
@@ -205,8 +204,8 @@ as what you used in the run call."
 
 
 (defn batch-sequence->column-groups
-  "Given a sequence of sequences of names to pull from the dataset,
-return a sequence of columnar maps of information."
+  "Given a sequence of sequences of names to pull from the dataset, return a
+  sequence of columnar maps of information."
   [dataset batch-size batch-type name-seq-seq]
   (->> (flatten name-seq-seq)
        (get-batches dataset batch-size batch-type)
@@ -312,8 +311,8 @@ return a sequence of columnar maps of information."
 
 
 (defn create-infinite-dataset
-  "Create an infinite dataset.  Note that the shape-pair-seq is expected
-to be pairs that are in the same order as elements in the dataset.
+  "Create an infinite dataset.  Note that the shape-pair-seq is expected to be
+  pairs that are in the same order as elements in the dataset.
 
 (def test-ds (create-infinite-dataset [[:index 1] [:label 1]]
                                       (partition 2 (interleave (range)
