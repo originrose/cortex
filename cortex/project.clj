@@ -10,6 +10,7 @@
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
                  [com.indeed/util-mmap "1.0.20"]
                  [com.github.ben-manes.caffeine/caffeine "2.3.1"]
+                 [com.taoensso/nippy "2.12.2"]
 
                  ;; Change the following dep to depend on different versions of CUDA
 ;                 [org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
@@ -22,6 +23,11 @@
                  [thinktopic/think.datatype "0.3.9" :exclusions [net.mikera/vectorz-clj]]
 
                  [thinktopic/resource "1.1.0"]
+
+                 [thinktopic/think.image "0.4.6"]
+
+
+
                  ]
 
   :java-source-paths ["java"]
