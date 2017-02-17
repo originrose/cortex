@@ -17,7 +17,7 @@
   (let [tree (tree/decision-tree X Y {:split-fn tree/best-splitter})
         sample (first IRISES)
         classification (tree/tree-classify tree (butlast sample))]
-    (is (= classification (last sample)))))
+    (is (= (double classification) (double (last sample))))))
 
 (deftest forest-classify-test
   []
@@ -25,4 +25,4 @@
                                         :split-fn tree/best-splitter})
         sample (first IRISES)
         classification (tree/forest-classify forest (butlast sample))]
-    (is (= classification (last sample)))))
+    (is (= (double classification) (double (last sample))))))

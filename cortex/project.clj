@@ -4,14 +4,24 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [net.mikera/vectorz-clj "0.45.0"]
+
                  [net.mikera/core.matrix "0.57.0"]
+                 [net.mikera/vectorz-clj "0.45.0"]
+                 [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
+                 [com.indeed/util-mmap "1.0.20"]
+                 [com.github.ben-manes.caffeine/caffeine "2.3.1"]
+
+                 ;; Change the following dep to depend on different versions of CUDA
+;                 [org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
+                 [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
+
                  ;;The dataset abstraction uses parallel and optionally resource management.
                  [thinktopic/think.parallel "0.3.4"]
-                 [thinktopic/think.datatype "0.3.7"]
+                 [thinktopic/think.datatype "0.3.9" :exclusions [net.mikera/vectorz-clj]]
+
+                 ;; FIXME: update datatype to use latest vectorz
                  [thinktopic/cortex-datasets "0.5.0-SNAPSHOT"]
                  [thinktopic/resource "1.1.0"]
-                 [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
                  ]
 
   :java-source-paths ["java"]

@@ -40,7 +40,8 @@
 
 (defn indexed-array
   [X indices]
-  (map #(mat/get-row X %) indices))
+  (let [vX (vec X)]
+    (map #(get vX %) indices)))
 
 (defn mode
   "Returns the most comment value in a seq of items."
