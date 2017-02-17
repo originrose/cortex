@@ -1,6 +1,6 @@
-(ns cortex.compute.nn.optimise-test
+(ns cortex.compute.nn.optimize-test
   (:require [clojure.test :refer :all]
-            [cortex.compute.verify.optimise :as verify-optimise]
+            [cortex.compute.verify.optimize :as verify-optimize]
             [cortex.compute.verify.utils :refer :all]
             [cortex.compute.nn.cpu-backend :as cpu-net]))
 
@@ -12,4 +12,4 @@
 
 
 (def-double-float-test adam
-  (verify-optimise/test-adam (create-backend)))
+  (verify-optimize/test-adam (create-backend)))

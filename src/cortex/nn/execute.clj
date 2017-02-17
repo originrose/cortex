@@ -15,7 +15,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
             [think.resource.core :as resource]
             [cortex.loss :as loss]
             [cortex.nn.protocols :as cp]
-            [cortex.optimise :as optimise]
+            [cortex.optimize :as optimize]
             [clojure.pprint :as pprint]
             [cortex.graph :as graph]))
 
@@ -243,9 +243,9 @@ just the network for each epoch or the network along with inferences for each
 epoch. The inferences are a sequence of maps so if you want just all the inferences
 in a single map you still need to call cortex-dataset/batches->columns."
   [context network dataset input-bindings output-bindings
-   & {:keys [batch-size infer-batch-type optimiser disable-infer?]
+   & {:keys [batch-size infer-batch-type optimizer disable-infer?]
       :or {batch-size 128 infer-batch-type :cross-validation
-           optimiser (optimise/adam)}}]
+           optimizer (optimize/adam)}}]
   (let [train-fn (if disable-infer?
                    #(train-seq context % dataset)
                    #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
@@ -253,7 +253,7 @@ in a single map you still need to call cortex-dataset/batches->columns."
                        #(traverse/network->training-traversal
                          %
                          (ds/dataset->stream->size-map dataset)
-                         :optimiser optimiser))
+                         :optimizer optimizer))
       train-fn)))
 
 

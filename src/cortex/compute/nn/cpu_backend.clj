@@ -4,7 +4,7 @@
             [cortex.compute.math :as math]
             [cortex.compute.cpu-driver :as cpu-drv]
             [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
-            [cortex.compute.optimise :as opt]
+            [cortex.compute.optimize :as opt]
             [cortex.compute.nn.layers :as compute-layers]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.nn.layers :as layers]
@@ -15,7 +15,7 @@
   (:import [cortex.compute.cpu_driver CPUDriver CPUStream]
            [java.nio DoubleBuffer FloatBuffer]
            [cortex.compute.math DeviceArray Tensor]
-           [cortex.compute.optimise AdadeltaOptimiser AdamOptimiser]
+           [cortex.compute.optimize AdadeltaOptimizer AdamOptimizer]
            [java.util Arrays]
            [java.util.concurrent ForkJoinPool Callable Future]
            [think.datatype ArrayView DoubleArrayView FloatArrayView]))
@@ -750,13 +750,13 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (cpu-adadelta-step! [gradient ^DoubleArrayView parameters gradient-alpha
                        param-offset decay epsilon ^DoubleArrayView grad-accum
                        ^DoubleArrayView dx-accum]
-    (AdadeltaOptimiser/step_d (double gradient-alpha) (.data gradient) (.data parameters)
+    (AdadeltaOptimizer/step_d (double gradient-alpha) (.data gradient) (.data parameters)
                               (int param-offset) (double decay) (double epsilon)
                               (.data grad-accum) (.data dx-accum)))
   (cpu-adam-step! [gradient ^DoubleArrayView parameters gradient-alpha param-offset
                    alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
                    ^DoubleArrayView m ^DoubleArrayView v]
-    (AdamOptimiser/step_d (double gradient-alpha) (.data gradient) (.data parameters)
+    (AdamOptimizer/step_d (double gradient-alpha) (.data gradient) (.data parameters)
                           param-offset (double alpha) (double beta1) (double beta2)
                           (double epsilon) (double pow-beta1-t) (double pow-beta2-t)
                           (.data m) (.data v)))
@@ -821,13 +821,13 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha
                        param-offset decay epsilon
                        ^FloatArrayView grad-accum ^FloatArrayView dx-accum]
-    (AdadeltaOptimiser/step_f (float gradient-alpha) (.data gradient) (.data parameters)
+    (AdadeltaOptimizer/step_f (float gradient-alpha) (.data gradient) (.data parameters)
                               (int param-offset) (float decay) (float epsilon)
                               (.data grad-accum) (.data dx-accum)))
   (cpu-adam-step! [gradient ^FloatArrayView parameters gradient-alpha param-offset
                    alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
                    ^FloatArrayView m ^FloatArrayView v]
-    (AdamOptimiser/step_f (float gradient-alpha) (.data gradient) (.data parameters)
+    (AdamOptimizer/step_f (float gradient-alpha) (.data gradient) (.data parameters)
                           param-offset (float alpha) (float beta1) (float beta2) (float epsilon)
                           (float pow-beta1-t) (float pow-beta2-t) (.data m) (.data v)))
   (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved conv-config]
@@ -1179,7 +1179,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
     (create-cpu-layer backend layer batch-size))
-  opt/POptimiseBackend
+  opt/POptimizeBackend
   (adadelta-step! [backend ^DeviceArray gradient ^DeviceArray parameters
                    gradient-alpha param-offset decay epsilon
                    ^DeviceArray grad-sq-accum ^DeviceArray dx-sq-accum]

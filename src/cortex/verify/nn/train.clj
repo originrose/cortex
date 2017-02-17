@@ -6,7 +6,7 @@
             [cortex.dataset :as ds]
             [cortex.loss :as loss]
             [cortex.datasets.mnist :as mnist]
-            [cortex.optimise :as opt]
+            [cortex.optimize :as opt]
             [clojure.test :refer :all]
             [think.resource.core :as resource]
             [clojure.core.matrix :as m]
@@ -93,7 +93,7 @@
 
 (defn- train-and-get-results
   [context network input-bindings output-bindings
-   batch-size dataset optimiser disable-infer? infer-batch-type
+   batch-size dataset optimizer disable-infer? infer-batch-type
    n-epochs map-fn]
   (let [output-id (ffirst output-bindings)]
     (resource/with-resource-context
@@ -105,7 +105,7 @@
       (as-> (network/build-network network) net-or-seq
         (execute/train context net-or-seq dataset input-bindings output-bindings
                        :batch-size batch-size
-                       :optimiser optimiser
+                       :optimizer optimizer
                        :disable-infer? disable-infer?
                        :infer-batch-type infer-batch-type)
         (take n-epochs net-or-seq)

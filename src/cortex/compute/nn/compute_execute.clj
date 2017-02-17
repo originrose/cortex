@@ -3,7 +3,7 @@
             [cortex.nn.layers :as layers]
             [cortex.nn.traverse :as traverse]
             [cortex.compute.nn.layers :as compute-layers]
-            [cortex.compute.optimise :as compute-optimise]
+            [cortex.compute.optimize :as compute-optimize]
             [cortex.compute.nn.backend :as backend]
             [cortex.nn.protocols :as cp]
             [cortex.compute.nn.protocols :as compute-protocols]
@@ -234,10 +234,10 @@
                                    (apply +))
         [network loss-function] (load-loss-function network backend (get traversal :loss-function))]
     (-> network
-        (assoc-in [:compute-binding :optimiser]
-                  (when-let [optimiser (get traversal :optimiser)]
-                    (compute-optimise/create-compute-optimiser backend
-                                                               optimiser
+        (assoc-in [:compute-binding :optimizer]
+                  (when-let [optimizer (get traversal :optimizer)]
+                    (compute-optimize/create-compute-optimizer backend
+                                                               optimizer
                                                                trainable-param-count)))
         (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
         (assoc-in [:compute-binding :loss-function] loss-function))))
@@ -603,14 +603,14 @@ and anything that has a loss term attached to it's output becomes an output bind
                      (math/device-buffer weight-magnitude-temp) 1
                      (math/device-buffer buffer) num-w-cols))))
 
-(defn- optimise-network
-  [network parameters optimise?]
-  (if optimise?
+(defn- optimize-network
+  [network parameters optimize?]
+  (if optimize?
     (let [backend (get-in network [:compute-binding :backend])
           stream (drv/get-stream backend)
           driver (drv/get-driver backend)
-          optimiser (compute-optimise/batch-update (get-in network [:compute-binding
-                                                                    :optimiser]))
+          optimizer (compute-optimize/batch-update (get-in network [:compute-binding
+                                                                    :optimizer]))
           buffer-alpha (/ 1.0 (double (get network :batch-size)))]
       (reduce (fn [offset {:keys [buffer gradient
                                   learning-attenuation non-trainable?] :as parameter}]
@@ -622,7 +622,7 @@ and anything that has a loss term attached to it's output becomes an output bind
                       gradient-buf (math/device-buffer gradient)
                       param-buf (math/device-buffer buffer)]
                   (when-not non-trainable?
-                    (compute-optimise/compute-parameters! optimiser
+                    (compute-optimize/compute-parameters! optimizer
                                                           (* buffer-alpha learning-attenuation)
                                                           offset gradient buffer)
                     (when (is-l2-max-constraint-valid? parameter)
@@ -633,8 +633,8 @@ and anything that has a loss term attached to it's output becomes an output bind
               0
               parameters)
       (assoc-in network
-                [:compute-binding :optimiser]
-                optimiser))
+                [:compute-binding :optimizer]
+                optimizer))
     network))
 
 
@@ -673,7 +673,7 @@ any loss-specific parameter buffers."
 
 (defn- recur-train-sequence
   "Training is a lazy sequence of these operations."
-  [network parameters optimise? batch-seq]
+  [network parameters optimize? batch-seq]
   (when-let [stream->buffer-map (first batch-seq)]
     ;;Sometimes you have to print the entire batch out to see what is going on.
     (let [backend (get-in network [:compute-binding :backend])
@@ -690,9 +690,9 @@ any loss-specific parameter buffers."
                 (zero-traverse-gradients)
                 (compute-loss-term-gradients)
                 (do-traverse {} :backward)
-                (optimise-network parameters optimise?))]
+                (optimize-network parameters optimize?))]
         (cons network
-              (lazy-seq (recur-train-sequence network parameters optimise?
+              (lazy-seq (recur-train-sequence network parameters optimize?
                                               (rest batch-seq))))))))
 
 

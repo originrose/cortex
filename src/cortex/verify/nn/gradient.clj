@@ -8,7 +8,7 @@
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.verify.nn.train :as verify-train]
             [clojure.test :refer :all]
-            [cortex.optimise :as opt]
+            [cortex.optimize :as opt]
             [cortex.loss :as loss]
             [clojure.core.matrix :as m]
             [cortex.gaussian :as gaussian]))

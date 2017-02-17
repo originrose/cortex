@@ -5,7 +5,7 @@
             [cortex.compute.nn.layers :as layers]
             [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.driver :as drv]
-            [cortex.compute.optimise :as opt]
+            [cortex.compute.optimize :as opt]
             [cortex.compute.verify.nn.train :as train-test]
             [cortex.compute.math :as math]
             [cortex.nn.protocols :as cp]

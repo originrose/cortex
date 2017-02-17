@@ -5,7 +5,7 @@
             [think.parallel.core :as parallel]
             [taoensso.nippy :as nippy]
             [cortex.compute.nn.cpu-backend :as cpu-backend]
-            [cortex.optimise :as opt]
+            [cortex.optimize :as opt]
             [think.resource.core :as resource]
             [cortex.util :as util]
             [clojure.core.matrix :as m]

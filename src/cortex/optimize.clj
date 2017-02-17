@@ -1,4 +1,4 @@
-(ns cortex.optimise
+(ns cortex.optimize
   (:require [cortex.util :refer [merge-args]]))
 
 ;;Optimization strategies

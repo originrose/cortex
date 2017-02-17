@@ -9,7 +9,7 @@
             [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
-            [cortex.optimise :as cortex-opt]
+            [cortex.optimize :as cortex-opt]
             [cortex.nn.network :as network]
             [cortex.graph :as graph]))
 
@@ -131,13 +131,13 @@ we continue to train forever.
   [dataset initial-description network
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
-             optimiser
+             optimizer
              reset-score
              force-gpu?
              simple-loss-print?]
       :or {batch-size 128
            network-filestem default-network-filestem
-           optimiser (cortex-opt/adam)
+           optimizer (cortex-opt/adam)
            reset-score false
            force-gpu? false}}]
   (resource/with-resource-context
@@ -163,7 +163,7 @@ we continue to train forever.
           context (create-context :force-gpu? force-gpu?)
           train-sequence (execute/train context network dataset [] []
                                         :batch-size batch-size
-                                        :optimiser optimiser
+                                        :optimizer optimizer
                                         :infer-batch-type :cross-validation)
           epoch-processor (partial per-epoch-eval-training-network context
                                    best-network-atom network-filename initial-description

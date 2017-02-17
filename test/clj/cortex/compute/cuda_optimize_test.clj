@@ -1,6 +1,6 @@
-(ns cortex.compute.cuda-optimise-test
+(ns cortex.compute.cuda-optimize-test
   (:require [cortex.compute.nn.cuda-backend :as cuda-backend]
-            [cortex.compute.verify.optimise :as verify-optimise]
+            [cortex.compute.verify.optimize :as verify-optimize]
             [clojure.test :refer :all]
             [cortex.compute.verify.utils :as verify-utils]))
 
@@ -13,4 +13,4 @@
 
 
 (verify-utils/def-double-float-test adam
-  (verify-optimise/test-adam (create-backend)))
+  (verify-optimize/test-adam (create-backend)))

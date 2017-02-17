@@ -1,7 +1,7 @@
-package cortex.compute.optimise;
+package cortex.compute.optimize;
 
 
-public final class AdamOptimiser {
+public final class AdamOptimizer {
 
     static private class microStepResult
     {

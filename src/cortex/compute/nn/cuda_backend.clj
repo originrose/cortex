@@ -3,7 +3,7 @@
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
             [think.datatype.core :as dtype]
             [cortex.compute.driver :as drv]
-            [cortex.compute.optimise :as opt]
+            [cortex.compute.optimize :as opt]
             [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.compute.nn.layers :as compute-layers]
@@ -207,7 +207,7 @@
        ~@body)))
 
 
-(defprotocol PCUDAOptimiseMethod
+(defprotocol PCUDAOptimizeMethod
   (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count stream])
   (cuda-adam-step! [gradient parameters gradient-alpha alpha beta1 beta2 epsilon
                     pow-beta1-t pow-beta2-t m v item-count stream])
@@ -220,7 +220,7 @@
 
 
 (extend-type DoublePointer
-  PCUDAOptimiseMethod
+  PCUDAOptimizeMethod
   (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count backend]
     (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adadelta-step :double) item-count 0
                                    (double decay) (double epsilon)
@@ -243,7 +243,7 @@
 
 
 (extend-type FloatPointer
-  PCUDAOptimiseMethod
+  PCUDAOptimizeMethod
   (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count backend]
     (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adadelta-step :float) item-count 0
                                    (float decay) (float epsilon)
@@ -898,7 +898,7 @@ Backward Data: %s %d"
   (get-stream [impl] (.stream impl))
   dtype/PDatatype
   (get-datatype [impl] (.datatype impl))
-  opt/POptimiseBackend
+  opt/POptimizeBackend
   (adadelta-step! [backend gradient parameters gradient-alpha param-offset decay
                    epsilon grad-sq-accum dx-sq-accum]
     (cuda-adadelta-step! (->ptr gradient) (->ptr parameters) gradient-alpha

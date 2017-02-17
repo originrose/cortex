@@ -1,7 +1,7 @@
-package cortex.compute.optimise;
+package cortex.compute.optimize;
 
 
-public final class AdadeltaOptimiser
+public final class AdadeltaOptimizer
 {
     public static double computeSquaredRunningAverage( double acc, double data, double decay )
     {
