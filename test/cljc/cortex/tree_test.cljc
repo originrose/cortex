@@ -8,7 +8,7 @@
     [clojure.zip :as zip]
     [cortex.tree :as tree]))
 
-(def IRISES (read-string (slurp "test_data/iris.edn")))
+(def IRISES (read-string (slurp "test/data/iris.edn")))
 (def X (mat/matrix (map drop-last IRISES)))
 (def Y (mat/matrix (map last IRISES)))
 
