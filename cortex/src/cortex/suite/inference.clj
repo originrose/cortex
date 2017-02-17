@@ -1,6 +1,6 @@
 (ns cortex.suite.inference
   (:require [cortex.dataset :as ds]
-            [think.compute.nn.compute-execute :as ce]
+            [cortex.compute.nn.compute-execute :as ce]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.network :as network]

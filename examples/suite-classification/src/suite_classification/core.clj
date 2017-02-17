@@ -1,11 +1,11 @@
 (ns suite-classification.core
   (:require [clojure.java.io :as io]
-            [cortex-datasets.mnist :as mnist]
+            [cortex.datasets.mnist :as mnist]
             [mikera.image.core :as imagez]
             [think.image.image :as image]
             [think.image.patch :as patch]
             [think.image.data-augmentation :as image-aug]
-            [think.compute.optimise :as opt]
+            [cortex.compute.optimise :as opt]
             [cortex.nn.layers :as layers]
             [think.image.image-util :as image-util]
             [clojure.core.matrix.macros :refer [c-for]]

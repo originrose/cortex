@@ -5,7 +5,7 @@
             [cortex.nn.network :as network]
             [cortex.dataset :as ds]
             [cortex.loss :as loss]
-            [cortex-datasets.mnist :as mnist]
+            [cortex.datasets.mnist :as mnist]
             [cortex.optimise :as opt]
             [clojure.test :refer :all]
             [think.resource.core :as resource]

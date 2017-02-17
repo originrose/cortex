@@ -10,7 +10,7 @@
             [cortex.verify.nn.import :as verify-import]
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
-            [think.compute.nn.compute-execute :as compute-execute]
+            [cortex.compute.nn.compute-execute :as compute-execute]
             [taoensso.nippy :as nippy]
             [cortex.nn.traverse :as traverse])
   (:import [java.io StringReader FileOutputStream]))

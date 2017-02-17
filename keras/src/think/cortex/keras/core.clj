@@ -11,7 +11,7 @@
             [think.datatype.core :as dtype]
             [cortex.verify.nn.import :as compute-verify]
             [clojure.string :as string]
-            [think.compute.nn.compute-execute :as compute-execute]
+            [cortex.compute.nn.compute-execute :as compute-execute]
             [cortex.graph :as graph]))
 
 (set! *warn-on-reflection* true)

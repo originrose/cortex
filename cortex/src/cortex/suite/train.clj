@@ -4,9 +4,9 @@
             [think.resource.core :as resource]
             [clojure.java.io :as io]
             [cortex.dataset :as ds]
-            [think.compute.batching-system :as bs]
-            [think.compute.nn.compute-execute :as ce]
-            [think.compute.nn.cpu-backend :as cpu-backend]
+            [cortex.compute.batching-system :as bs]
+            [cortex.compute.nn.compute-execute :as ce]
+            [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
             [cortex.optimise :as cortex-opt]
@@ -74,8 +74,8 @@ in initial description.  Else returns the initial description"
       :or {datatype :float force-gpu? false}}]
   (ce/create-context (fn []
                        (try
-                         (require 'think.compute.nn.cuda-backend)
-                         ((resolve 'think.compute.nn.cuda-backend/create-backend) datatype)
+                         (require 'cortex.compute.nn.cuda-backend)
+                         ((resolve 'cortex.compute.nn.cuda-backend/create-backend) datatype)
                          (catch Exception e
                            (if force-gpu?
                              (throw (ex-info "Failed to create cuda context:"

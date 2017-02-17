@@ -4,7 +4,7 @@
             [clojure.java.io :as io]
             [think.parallel.core :as parallel]
             [taoensso.nippy :as nippy]
-            [think.compute.nn.cpu-backend :as cpu-backend]
+            [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.optimise :as opt]
             [think.resource.core :as resource]
             [cortex.util :as util]
