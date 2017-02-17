@@ -18,8 +18,7 @@
 
 (defn default-dataset
   []
-  (->> "default.csv"
-      (io/resource)
+  (->> "test/data/default.csv"
       (slurp)
       (s/split-lines)
       (rest)                                     ;; ignore the header row
