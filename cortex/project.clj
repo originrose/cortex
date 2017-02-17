@@ -8,7 +8,13 @@
                  [net.mikera/core.matrix "0.57.0"]
                  ;;The dataset abstraction uses parallel and optionally resource management.
                  [thinktopic/think.parallel "0.3.4"]
-                 [thinktopic/resource "1.1.0"]]
+                 [thinktopic/think.datatype "0.3.7"]
+                 [thinktopic/cortex-datasets "0.5.0-SNAPSHOT"]
+                 [thinktopic/resource "1.1.0"]
+                 [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
+                 ]
+
+  :java-source-paths ["java"]
 
   :profiles {:dev {:source-paths ["src" "test/cljc" "test/clj"]}
              :test {:source-paths ["src" "test/cljc" "test/clj"]}}
