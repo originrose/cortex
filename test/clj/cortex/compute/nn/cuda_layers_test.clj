@@ -1,4 +1,4 @@
-(ns cortex.compute.nn.cuda-layers-test
+(ns ^:gpu cortex.compute.nn.cuda-layers-test
   (:require [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
             [clojure.test :refer :all]
             [cortex.verify.nn.layers :as verify-layers]

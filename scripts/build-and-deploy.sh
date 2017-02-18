@@ -2,4 +2,4 @@
 
 set -e
 
-lein test && lein install
+lein with-profile cpu-only test && lein install

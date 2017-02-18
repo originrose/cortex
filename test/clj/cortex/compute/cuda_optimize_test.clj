@@ -1,4 +1,4 @@
-(ns cortex.compute.cuda-optimize-test
+(ns ^:gpu cortex.compute.cuda-optimize-test
   (:require [cortex.compute.nn.cuda-backend :as cuda-backend]
             [cortex.compute.verify.optimize :as verify-optimize]
             [clojure.test :refer :all]
