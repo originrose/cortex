@@ -4,4 +4,4 @@ services:
   - docker
 
 script:
- ./build-docker-and-test.sh
+ ./scripts/build-docker-and-test.sh

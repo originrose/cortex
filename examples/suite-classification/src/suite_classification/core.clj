@@ -1,11 +1,10 @@
 (ns suite-classification.core
   (:require [clojure.java.io :as io]
-            [cortex-datasets.mnist :as mnist]
+            [cortex.datasets.mnist :as mnist]
             [mikera.image.core :as imagez]
             [think.image.image :as image]
             [think.image.patch :as patch]
             [think.image.data-augmentation :as image-aug]
-            [think.compute.optimise :as opt]
             [cortex.nn.layers :as layers]
             [think.image.image-util :as image-util]
             [clojure.core.matrix.macros :refer [c-for]]
@@ -85,8 +84,8 @@
                                         (training-data)
                                         (training-labels))
         testing-observation-label-seq (produce-indexed-data-label-seq
-                                        (test-data)
-                                        (test-labels))
+                                       (test-data)
+                                       (test-labels))
         train-fn (partial write-data "mnist/training")
         test-fn (partial write-data "mnist/testing")]
     (dorun (pmap train-fn training-observation-label-seq))
@@ -148,8 +147,8 @@
 
 (defn observation-label-pairs
   "Create a possibly infinite sequence of [observation label].
-Asking for an infinite sequence implies some level of data augmentation
-to avoid overfitting the network to the training data."
+  Asking for an infinite sequence implies some level of data augmentation
+  to avoid overfitting the network to the training data."
   [augment? datatype [file label]]
   (let [img (imagez/load-image file)
         png->obs #(mnist-png->observation datatype augment? img)
@@ -216,43 +215,54 @@ to avoid overfitting the network to the training data."
 (defn- create-map-load-fn
   [image->obs label->vec]
   (let [image->obs (fn [img-path]
-                       (-> (imagez/load-image img-path)
-                           image->obs))]
+                     (-> (imagez/load-image img-path)
+                         image->obs))]
     (fn [{:keys [data labels]}]
       {:data (image->obs data)
        :labels (label->vec labels)})))
 
 
 (defn- create-nippy-dataset
-  "For a lot of use cases, defining a dataset with clojure datastructures and saving that either to an edn file
-or to a nippy file makes the most sense.  Here is an example of building the dataset manually (not using much
-pre-built framework) and ensuring that:
-1.  The testing data is shuffled.  This means that when you look at it you see a representative sample.
-2.  The training data is both randomized and balanced.  Balancing your classification data tends to help
-things out a lot.
+  "For a  lot of use cases,  defining a dataset with  clojure datastructures and
+  saving that  either to an edn  file or to a  nippy file makes the  most sense.
+  Here is an example of building  the dataset manually (not using much pre-built
+  framework) and  ensuring that: 1.  The  testing data is shuffled.   This means
+  that when you  look at it you  see a representative sample.   2.  The training
+  data  is both  randomized and  balanced.  Balancing  your classification  data
+  tends to help things out a lot.
 
-This uses the think.parallel library so that we have infinite (augmented) data for training and that data loaded
-up to 2000 images ahead of where we are right now thus we get some ability to train and use the cpu to prepare
-data in parallel efficiently without putting much thought into it.  Using the infinite training data does imply
-a shutdown function to stop those threads at some point; but this is only really necessary if you are going to
-create a bunch of datasets.
+  This uses the think.parallel library so that we have infinite (augmented) data
+  for training  and that data  loaded up  to 2000 images  ahead of where  we are
+  right now thus we get some ability to train and use the cpu to prepare data in
+  parallel efficiently without putting much thought into it.  Using the infinite
+  training data  does imply a  shutdown function to  stop those threads  at some
+  point; but this is only really necessary if you are going to create a bunch of
+  datasets.
 
-It may not be clear but there is a dataset function that takes an infinite sequence of maps and produces a
-dataset.  This is most likely the easiest and fastest way to build a dataset assuming you can produce an
-infinite sequence of maps, each map is one entry and all maps have the same keys."
+  It may  not be clear but  there is a  dataset function that takes  an infinite
+  sequence of maps and produces a dataset.   This is most likely the easiest and
+  fastest way to  build a dataset assuming you can  produce an infinite sequence
+  of maps, each map is one entry and all maps have the same keys."
   []
   (ensure-dataset-is-created)
   (when-not (.exists (io/file "mnist-dataset.nippy"))
     (suite-io/write-nippy-file "mnist-dataset.nippy"
-                               {:testing (vec (shuffle (walk-directory-and-create-path-label-pairs "mnist/testing")))
-                                :training (vec (walk-directory-and-create-path-label-pairs "mnist/training"))}))
+                               {:testing (vec (shuffle
+                                               (walk-directory-and-create-path-label-pairs
+                                                "mnist/testing")))
+                                :training (vec
+                                           (walk-directory-and-create-path-label-pairs
+                                            "mnist/training"))}))
   (let [{:keys [testing training]} (suite-io/read-nippy-file "mnist-dataset.nippy")
         classes (classification/get-class-names-from-directory "mnist/training")
         label->vec (classification/create-label->vec-fn classes)
-        train-load-fn (create-map-load-fn (partial mnist-png->observation datatype true) label->vec)
-        test-load-fn (create-map-load-fn (partial mnist-png->observation datatype false) label->vec)
+        train-load-fn (create-map-load-fn
+                       (partial mnist-png->observation datatype true) label->vec)
+        test-load-fn (create-map-load-fn
+                      (partial mnist-png->observation datatype false) label->vec)
         cv-seq (parallel/queued-pmap 1000 test-load-fn testing)
-        train-seq-data (parallel/queued-sequence train-load-fn [(balance-classes training)] :queue-depth 2000)
+        train-seq-data (parallel/queued-sequence train-load-fn
+                                                 [(balance-classes training)] :queue-depth 2000)
         train-seq (get train-seq-data :sequence)
         shutdown-fn (get train-seq-data :shutdown-fn)]
     (-> (ds/map-sequence->dataset train-seq 60000 :cv-map-seq cv-seq :shutdown-fn shutdown-fn)
@@ -275,11 +285,11 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
        (classification/reset-confusion-matrix confusion-matrix-atom mnist-observation->image
                                               dataset
                                               (apply suite-train/evaluate-network
-                                               dataset
-                                               loaded-data
-                                               (-> (merge argmap
-                                                       {:batch-type :cross-validation})
-                                                   seq flatten))))
+                                                     dataset
+                                                     loaded-data
+                                                     (-> (merge argmap
+                                                                {:batch-type :cross-validation})
+                                                         seq flatten))))
 
      (let [open-message
            (gate/open (atom
@@ -288,7 +298,7 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
                       :clj-css-path "src/css"
                       :live-updates? *running-from-repl*
                       :port 8091)]
-              (println open-message))
+       (println open-message))
      confusion-matrix-atom))
   ([]
    (display-dataset-and-model (create-dataset))))
@@ -297,16 +307,17 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
 
 
 (defn train-forever
-  [argmap]
-  (let [dataset (if *run-from-nippy*
-                  (create-nippy-dataset)
-                  (create-dataset))
-        confusion-matrix-atom (display-dataset-and-model dataset argmap)]
-    (apply classification/train-forever dataset mnist-observation->image
-                                  initial-network
-                                  (-> (merge argmap
-                                         {:confusion-matrix-atom confusion-matrix-atom})
-                                         seq flatten))))
+  ([argmap]
+   (let [dataset (if *run-from-nippy*
+                   (create-nippy-dataset)
+                   (create-dataset))
+         confusion-matrix-atom (display-dataset-and-model dataset argmap)]
+     (apply classification/train-forever dataset mnist-observation->image
+            initial-network
+            (-> (merge argmap
+                       {:confusion-matrix-atom confusion-matrix-atom})
+                seq flatten))))
+  ([] (train-forever [{}])))
 
 (defn train-forever-uberjar
   [argmap]
@@ -326,7 +337,8 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
                                     observation (ds/create-image-shape num-channels
                                                                        image-size
                                                                        image-size)
-                                    (classification/get-class-names-from-directory "mnist/testing"))))
+                                    (classification/get-class-names-from-directory
+                                     "mnist/testing"))))
 
 (defn fine-tuning-example
   "This is an example of how to use cortex to fine tune an existing network."
@@ -335,7 +347,8 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
         mnist-network (load-trained-network)
         initial-description (:initial-description mnist-network)
         ;; To figure out at which point you'd like to split the network,
-        ;; you can use (get-in mnist-net [:layer-graph :edges]) or (get-in mnist-net [:layer-graph :id->node-map])
+        ;; you can use (get-in mnist-net [:layer-graph :edges]) or
+        ;; (get-in mnist-net [:layer-graph :id->node-map])
         ;; to guide your decision.
         ;;
         ;; Removing the fully connected layers and beyond.
@@ -349,5 +362,6 @@ infinite sequence of maps, each map is one entry and all maps have the same keys
         modified-network (network/assoc-layers-to-network network-bottleneck layers-to-add)
         modified-network (dissoc modified-network :traversal)
         modified-network (-> (network/build-network modified-network)
-                           (traverse/auto-bind-io))]
-    (suite-train/train-n mnist-dataset modified-description modified-network :batch-size 128 :epoch-count 1)))
+                             (traverse/auto-bind-io))]
+    (suite-train/train-n mnist-dataset modified-description modified-network
+                         :batch-size 128 :epoch-count 1)))
