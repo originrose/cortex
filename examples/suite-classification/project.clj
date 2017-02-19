@@ -4,7 +4,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/cortex.suite "0.5.0-SNAPSHOT"]
+                 [thinktopic/cortex.suite "0.9.0-SNAPSHOT"]
                  [org.clojure/tools.cli "0.3.5"]
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)

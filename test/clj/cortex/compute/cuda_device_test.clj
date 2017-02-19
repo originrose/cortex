@@ -1,4 +1,4 @@
-(ns cortex.compute.cuda-device-test
+(ns ^:gpu cortex.compute.cuda-device-test
   (:require [clojure.test :refer :all]
             [cortex.compute.verify.driver :as verify-driver]
             [cortex.compute.verify.utils :refer [def-double-float-test]
