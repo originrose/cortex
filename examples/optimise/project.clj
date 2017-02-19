@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex-optimise "0.5.0-SNAPSHOT"
+(defproject thinktopic/cortex-optimise "0.5.1-SNAPSHOT"
   :description "General purpose optimization framework"
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"

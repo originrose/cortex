@@ -1,4 +1,4 @@
-(defproject suite-classification "0.5.0-SNAPSHOT"
+(defproject suite-classification "0.5.1-SNAPSHOT"
   :description "Example of using the turn key classification system"
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"

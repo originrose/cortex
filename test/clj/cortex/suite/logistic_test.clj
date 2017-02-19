@@ -43,4 +43,4 @@
         [[should-def] [shouldnt-def]] (inference/infer-n-observations trained-network [[5000.0 10.0] [5.0 100000.0]]
                                                                       2 :batch-size 2)]
     (is (> should-def 0.97))
-    (is (< shouldnt-def 0.01))))
+    (is (< shouldnt-def 0.02))))

@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex-keras "0.5.0-SNAPSHOT"
+(defproject thinktopic/cortex-keras "0.5.1-SNAPSHOT"
   :description "Import of keras models into cortex descriptions"
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
