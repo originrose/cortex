@@ -10,24 +10,25 @@ constructors are all variable args with the extra arguments expected to be
             [cortex.graph :as graph]
             [cortex.buffer-initialization :as buf-init]))
 
+(defn- ensure-single-output-dimensions
+  [previous]
+  (when-not (= 1 (count (graph/node->output-dimensions previous)))
+    (throw (ex-info "Previous node has multiple output dimensions"
+                    {:previous previous
+                     :output-dimensions (graph/node->output-dimensions previous)})))
+  (first (graph/node->output-dimensions previous)))
+
 
 (defn- carry-input-image-dims-forward
   [previous item]
-  (if-let [channels (:output-channels previous)]
-    (assoc item :input-channels channels
-           :input-width (:output-width previous)
-           :input-height (:output-height previous))
-    item))
+  (assoc item :input-dimensions [(ensure-single-output-dimensions previous)]))
 
 
 (defn- carry-image-dims-forward
   [previous item]
-  (if-let [channels (:output-channels previous)]
-    (assoc (carry-input-image-dims-forward previous item)
-           :output-channels channels
-           :output-width (:output-width previous)
-           :output-height (:output-height previous))
-    item))
+  (let [input-dims (ensure-single-output-dimensions previous)]
+   (assoc item :input-dimensions [input-dims]
+          :output-dimensions [input-dims])))
 
 
 (defn- ensure-single-parent
@@ -41,11 +42,8 @@ constructors are all variable args with the extra arguments expected to be
 
 (defn- default-build-fn
   [graph node predecessor-ids]
-  (let [previous (ensure-single-parent graph node predecessor-ids)
-        io-size (get previous :output-size)]
-    (-> (carry-image-dims-forward previous node)
-        (assoc :input-size io-size
-               :output-size io-size))))
+  (let [previous (ensure-single-parent graph node predecessor-ids)]
+    (carry-image-dims-forward previous node)))
 
 (defn- default-layer-metadata
   []
@@ -83,21 +81,19 @@ constructors are all variable args with the extra arguments expected to be
 
 
 (defn linear-weight-parameter-shape
-  [graph {:keys [input-size output-size] :as node} argument]
-  [output-size input-size])
+  [graph node argument]
+  [(graph/node->output-size node)
+   (graph/node->input-size node)])
 
 
 (defn linear-bias-parameter-shape
-  [graph {:keys [output-size] :as node} argument]
-  [output-size])
+  [graph node argument]
+  [(graph/node->output-size node)])
 
 (defmethod graph/build-node :linear
   [graph node predecessor-id-seq]
-  (let [previous (ensure-single-parent graph node predecessor-id-seq)
-        input-size (:output-size previous)
-        result (assoc (carry-input-image-dims-forward previous node)
-                      :input-size input-size)]
-    result))
+  (-> (ensure-single-parent graph node predecessor-id-seq)
+      (carry-input-image-dims-forward node)))
 
 (defmethod graph/get-node-metadata :linear
   [node]
@@ -142,12 +138,10 @@ channel 2 with n-outputs"
 
 (defmethod graph/build-node :softmax
   [graph node predecessor-seq]
-  (let [previous (ensure-single-parent graph node predecessor-seq)
-        io-size (:output-size previous)]
-    (assoc node
-           :input-size io-size
-           :output-size io-size
-           :output-channels (get node :output-channels 1))))
+  (let [previous (ensure-single-parent graph node predecessor-seq)]
+   (-> (carry-input-image-dims-forward previous node)
+       (assoc :output-size (graph/node->output-size previous)
+              :output-channels (get node :output-channels 1)))))
 
 
 (defmethod graph/get-node-metadata :softmax
@@ -270,8 +264,9 @@ calculations must be "
 
 
 (defn- convolutional-weight-parameter-shape
-  [graph {:keys [kernel-width kernel-height num-kernels input-channels]} argument]
-  [num-kernels (* kernel-width kernel-height input-channels)])
+  [graph {:keys [kernel-width kernel-height num-kernels] :as node} argument]
+  [num-kernels (* kernel-width kernel-height
+                  (get (first (graph/node->input-dimensions node)) :channels))])
 
 
 (defn- convolutional-bias-parameter-shape
@@ -297,41 +292,33 @@ a few compatibility issues."
 
 
 (defn- convolutional-output-width
-  ^long [{:keys [input-width kernel-width pad-x stride-x dimension-op]}]
-  (long (get-padded-strided-dimension input-width pad-x kernel-width
+  ^long [{:keys [input-dimensions kernel-width pad-x stride-x dimension-op]}]
+  (long (get-padded-strided-dimension (get-in input-dimensions [0 :width]) pad-x kernel-width
                                       stride-x dimension-op)))
 
 
 (defn- convolutional-output-height
-  ^long [{:keys [input-height kernel-height pad-y stride-y dimension-op]}]
-  (long (get-padded-strided-dimension input-height pad-y kernel-height
+  ^long [{:keys [input-dimensions kernel-height pad-y stride-y dimension-op]}]
+  (long (get-padded-strided-dimension (get-in input-dimensions [0 :height]) pad-y kernel-height
                                       stride-y dimension-op)))
 
 
 (defn- build-convolutional-type-node
   [previous item ^long output-channels]
-  (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
-                num-kernels dimension-op]
+  (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y dimension-op]
          :or {dimension-op :floor}} item
-        input-width (:output-width previous)
-        input-height (:output-height previous)
-        input-channels (:output-channels previous)
+        output-dims (ensure-single-output-dimensions previous)
+        input-width (long (:width output-dims))
+        input-height (long (:height output-dims))
+        input-channels (long (:channels output-dims))
         ;;Convolutional layers have to be calculated with floor for cudnn compatibility
-        item (assoc item
-                    :input-width input-width
-                    :input-height input-height
-                    :input-channels input-channels)
+        item (assoc item :input-dimensions [output-dims])
         output-width (convolutional-output-width item)
-        output-height (convolutional-output-height item)
-        output-size (* output-width output-height output-channels)
-        input-data-format (get previous :output-data-format :planar)
-        output-data-format (get item :output-data-format :planar)]
-    (assoc item
-           :input-size (get previous :output-size)
-           :output-width output-width :output-height output-height
-           :output-channels output-channels
-           :output-size output-size
-           :input-data-format input-data-format :output-data-format output-data-format)))
+        output-height (convolutional-output-height item)]
+    (assoc item :input-dimensions [output-dims]
+           :output-dimensions [(graph/create-node-dimensions output-channels
+                                                             output-height
+                                                             output-width)])))
 
 (defmethod graph/build-node :convolutional
   [graph node predecessor-id-seq]
@@ -358,14 +345,15 @@ a few compatibility issues."
 
 (defn max-pooling
   ([kernel-dim pad stride & args]
-   [(apply convolutional-type-layer :max-pooling kernel-dim kernel-dim pad pad
+   [(apply convolutional-type-layer :max-pooling
+           kernel-dim kernel-dim pad pad
            stride stride 0 :ceil args)]))
 
 (defmethod graph/build-node :max-pooling
   [graph node predecessor-ids]
   (let [previous (ensure-single-parent graph node predecessor-ids)]
-   (build-convolutional-type-node previous
-                                  node (get previous :output-channels))))
+    (build-convolutional-type-node previous node (get (ensure-single-output-dimensions previous)
+                                                      :channels))))
 (defmethod graph/get-node-metadata :max-pooling
   [layer]
   (default-layer-metadata))
@@ -440,7 +428,10 @@ If the input contains no channels then you get a scale factor per input paramete
 
 (defn prelu-neg-scale-shape
   [graph layer argument]
-  [(get layer :input-channels (get layer :input-size))])
+  (let [{:keys [channels] :as dims} (first (graph/node->input-dimensions layer))]
+    [(if (= 1 channels)
+       (graph/dimensions->size dims)
+       channels)]))
 
 (defmethod graph/build-node :prelu
   [graph node p-id-seq]
@@ -454,23 +445,6 @@ If the input contains no channels then you get a scale factor per input paramete
                 :gradients? true
                 :type :parameter}}
    :passes #{:training :inference}})
-
-
-(defn network-description
-  "A network description must have 1 key and that is the actual
-network graph description."
-  [layer-graph & args]
-  (merge-args
-   {:layer-graph layer-graph}
-   args))
-
-
-(defn network-description-or-vec->network-description
-  "Make anything into a network description."
-  [network-desc-or-vec]
-  (if-not (map? network-desc-or-vec)
-    {:layer-graph network-desc-or-vec}
-    network-desc-or-vec))
 
 
 (def example-mnist-description

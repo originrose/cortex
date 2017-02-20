@@ -289,8 +289,8 @@ the previous step."
   (let [layer-graph (get network :layer-graph)]
     (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
               (let [node (graph/get-node layer-graph id)
-                    output-size (get node :output-size)
-                    input-size (get node :input-size)]
+                    output-size (graph/node->output-size node)
+                    input-size (graph/node->input-size node)]
                 (when-not (and output-size input-size)
                   (throw (ex-info "Node does not have input or output size"
                                   {:node node})))

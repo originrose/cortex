@@ -204,7 +204,8 @@
         src-desc (flatten mnist-description-with-toys)
         non-trainable-layers (take num-non-trainable src-desc)
         trainable-layers (drop num-non-trainable src-desc)
-        new-desc (concat (map (fn [layer] (assoc layer :learning-attenuation 0)) non-trainable-layers)
+        new-desc (concat (map (fn [layer] (assoc layer :learning-attenuation 0))
+                              non-trainable-layers)
                          trainable-layers)
         network (-> (network/build-network new-desc)
                     traverse/auto-bind-io
