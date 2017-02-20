@@ -1,6 +1,9 @@
-# cortex-resources
+# Cortex Datasets
 
-Library to provide datasets and to encapsulate persistent storage for cortex
+* when processing images cortex expects planar data, where the RGB channels are
+  each a separate plane in a width x height x planes matrix.
+
+* 
 
 ## License
 

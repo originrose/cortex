@@ -9,7 +9,8 @@
             [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
-            [cortex.optimize :as cortex-opt]
+            [cortex.optimize :as opt]
+            [cortex.optimize.adam :as adam]
             [cortex.nn.network :as network]
             [cortex.graph :as graph]))
 
@@ -84,7 +85,7 @@ in initial description.  Else returns the initial description"
                              (do
                                (println
                                 (format "Failed to create cuda backend (%s); will use cpu backend" e))
-                               (cpu-backend/create-cpu-backend datatype))))))))
+                               (cpu-backend/create-backend datatype))))))))
 
 (defn backup-trained-network
   [network-filestem]
@@ -137,7 +138,7 @@ we continue to train forever.
              simple-loss-print?]
       :or {batch-size 128
            network-filestem default-network-filestem
-           optimizer (cortex-opt/adam)
+           optimizer (adam/adam)
            reset-score false
            force-gpu? false}}]
   (resource/with-resource-context

@@ -8,7 +8,7 @@
 
 (defn create-backend
   []
-  (cpu-net/create-cpu-backend *datatype*))
+  (cpu-net/create-backend *datatype*))
 
 
 (def-double-float-test adam

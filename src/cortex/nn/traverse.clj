@@ -9,12 +9,12 @@ while output bindings are maps from node-id to {:stream :loss}."
             [cortex.graph :as graph]
             [clojure.set :as c-set]
             [cortex.optimize :as optimize]
+            [cortex.optimize.adam :as adam]
             [cortex.loss :as loss]
             [cortex.core-matrix-backends :as b]
             [clojure.core.matrix :as m]
             [cortex.buffer-initialization :as buf-init]
             [cortex.argument :as arg]))
-
 
 (defn- check-node-id
   [network node-id]
@@ -472,7 +472,7 @@ datastructure describing the final loss function.
  :backward where incoming/outgoing maps to buffer id}"
   [network stream-map
    & {:keys [optimizer keep-non-trainable? loss-fn]
-      :or {optimizer (optimize/adam) loss-function []}}]
+      :or {optimizer (adam/adam) loss-function []}}]
 
   (check-for-io-bindings network)
   (let [forward-traversal (->> (create-forward-traversal network)

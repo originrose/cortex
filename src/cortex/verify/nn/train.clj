@@ -7,12 +7,12 @@
             [cortex.loss :as loss]
             [cortex.datasets.mnist :as mnist]
             [cortex.optimize :as opt]
+            [cortex.optimize.adam :as adam]
+            [cortex.optimize.adadelta :as adadelta]
             [clojure.test :refer :all]
             [think.resource.core :as resource]
             [clojure.core.matrix :as m]
             [clojure.pprint :as pprint]))
-
-
 
 ;; Data from: Dominick Salvator and Derrick Reagle
 ;; Shaum's Outline of Theory and Problems of Statistics and Economics
@@ -139,7 +139,7 @@
                                                 (layers/linear 1 :id :output)]
                                        input-bindings output-bindings batch-size
                                        dataset
-                                       (opt/adadelta) true nil 5000 identity)
+                                       (adadelta/adadelta) true nil 5000 identity)
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))
 
@@ -164,7 +164,7 @@
         answers (->> (ds/batches->columnsv label-seq)
                      :labels)
         results (train-and-get-results context mnist-network input-bindings output-bindings batch-size
-                                       dataset (opt/adam) false inference-batch-type 4
+                                       dataset (adam/adam) false inference-batch-type 4
                                        (fn [{:keys [network inferences] :as entry}]
                                          (let [loss-fn (execute/network->applied-loss-fn
                                                         context network inferences
