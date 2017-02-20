@@ -426,12 +426,17 @@ If the input contains no channels then you get a scale factor per input paramete
   []
   [{:type :prelu}])
 
+(defn prelu-layer->prelu-size
+  [layer]
+  (let [{:keys [channels] :as dims} (first (graph/node->input-dimensions layer))]
+    (if (= 1 channels)
+      (graph/dimensions->size dims)
+      channels)))
+
 (defn prelu-neg-scale-shape
   [graph layer argument]
-  (let [{:keys [channels] :as dims} (first (graph/node->input-dimensions layer))]
-    [(if (= 1 channels)
-       (graph/dimensions->size dims)
-       channels)]))
+  [(prelu-layer->prelu-size layer)]
+)
 
 (defmethod graph/build-node :prelu
   [graph node p-id-seq]

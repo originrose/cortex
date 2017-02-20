@@ -543,7 +543,8 @@ and anything that has a loss term attached to it's output becomes an output bind
                                                {:node-id k
                                                 :passes v})))
                              [k (first v)]))
-                      (into {}))]
+                      (into {}))
+        graph (network/network->graph network)]
 
    (->> (concat (traverse/get-output-bindings network)
                 (get-loss-function-output-bindings network))
@@ -559,10 +560,8 @@ and anything that has a loss term attached to it's output becomes an output bind
                   :buffers (get-in network [:compute-binding
                                             :traversal-buffers
                                             output-id])
-                  :output-size (get-in network [:layer-graph
-                                                :id->node-map
-                                                node-id
-                                                :output-size])}))))))
+                  :output-size (graph/node->output-size
+                                (graph/get-node graph node-id))}))))))
 
 
 (defn- get-input-bindings

@@ -10,7 +10,9 @@ implementation as possible."
             [cortex.util :as util]
             [cortex.compute.nn.protocols :as compute-protocols]
             [think.resource.core :as resource]
-            [think.datatype.core :as dtype]))
+            [think.datatype.core :as dtype]
+            [cortex.graph :as graph]
+            [cortex.nn.layers :as cortex-layers]))
 
 
 (set! *warn-on-reflection* true)
@@ -75,7 +77,7 @@ and then forward many times for every parameter of the network."
   (let [dis-type (if (= (:distribution layer) :bernoulli)
                    (math/flat-desc)
                    (math/gaussian-desc 1 (:variance layer)))
-        elem-count (* (long batch-size) (long (:input-size layer)))]
+        elem-count (* (long batch-size) (long (graph/node->input-size layer)))]
     (math/generate-rands (drv/get-stream backend)
                          (math/device-buffer rand-buffer)
                          dis-type)
@@ -110,7 +112,7 @@ and then forward many times for every parameter of the network."
 
 (defmethod create :dropout
   [backend node batch-size]
-  (let [n-items (long (:input-size node))
+  (let [n-items (long (graph/node->input-size node))
         mult-buffer (nn-backend/new-array backend [n-items]
                                           batch-size)
         rand-buffer (math/->DeviceArray (drv/allocate-rand-buffer
@@ -168,8 +170,8 @@ and then forward many times for every parameter of the network."
 (defmethod create :batch-normalization
   [backend layer batch-size]
   (->BatchNormalization backend layer
-                        (nn-backend/new-array backend [(get layer :input-size)])
-                        (nn-backend/new-array backend [(get layer :input-size)])
+                        (nn-backend/new-array backend [(graph/node->input-size layer)])
+                        (nn-backend/new-array backend [(graph/node->input-size layer)])
                         (atom 1.0)
                         (nn-backend/create backend layer batch-size)))
 
@@ -216,8 +218,8 @@ and then forward many times for every parameter of the network."
 
 (defmethod create :prelu
   [backend layer batch-size]
-  (let [input-size (long (get layer :input-size))
-        n-channels (long (get layer :input-channels input-size))
+  (let [input-size (long (graph/node->input-size layer))
+        n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
         n-pixels (quot input-size n-channels)
         driver (drv/get-driver backend)
         stream (drv/get-stream backend)]
