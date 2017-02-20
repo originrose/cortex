@@ -279,6 +279,81 @@ a vector of floats."
               node-id)))
 
 
+(defn create-node-dimensions
+  "Create a node dimension map.  Dimensions are a map of
+:channels :height :width with the last item (width) being the most
+rapidly changing index and channels being the least rapidly changing index."
+  ([channels height width]
+   {:channels channels
+    :height height
+    :width width})
+  ([width] (create-node-dimensions 1 1 width)))
+
+
+(defn- node-inline-data->dims
+  [node key-stem]
+  (let [retval
+        (if-let [width (get node (keyword (str key-stem "-width")))]
+          [{:channels (get node (keyword (str key-stem "-channels")))
+            :height (get node (keyword (str key-stem "-height")))
+            :width width}]
+          [{:channels 1
+            :height 1
+            :width (get node (keyword (str key-stem "-size")))}])]
+    (when-not (every? number? (vals (first retval)))
+      (throw (ex-info "Failed to convert node's built information into dimensions"
+                      {:node node
+                       :result retval
+                       })))
+    retval))
+
+(defn node->input-dimensions
+  "Return a list of dimensions in order, one for every input of the node."
+  [node]
+  (or (get node :input-dimensions)
+      (node-inline-data->dims node "input")))
+
+
+(defn node->output-dimensions
+  "Return a list of dimensions in order, one for every input of the node."
+  [node]
+  (or (get node :output-dimensions)
+      (node-inline-data->dims node "output")))
+
+
+(defn dimensions->size
+  ^long [dims]
+  (apply * (vals dims)))
+
+
+(defn dimensions->shape
+  "Return a vector of integers with the highest indexes changing more rapidly than the
+lower indexes...In other words the dimenion tuple is in big-endian order."
+  [dims]
+  (mapv dims [:channels :height :width]))
+
+
+(defn- dims-vec->size
+  ^long [node dims-vec direction]
+  (when-not (= 1 (count dims-vec))
+    (throw (ex-info "Cannot convert to size, node has multiple or zero dimensions"
+                    {:node node
+                     :direction direction})))
+  (dimensions->size (first dims-vec)))
+
+
+(defn node->input-size
+  "Given a node, ensure it has 1 input dimension and call dimension->size for that dim."
+  ^long [node]
+  (dims-vec->size node (node->input-dimensions node) :input))
+
+
+(defn node->output-size
+  "Given a node, ensure it has 1 input dimension and call dimension->size for that dim."
+  ^long [node]
+  (dims-vec->size node (node->output-dimensions node) :output))
+
+
 (defn- do-build-graph
   [c->p-map graph node-id]
   (let [node (build-node graph (get-node graph node-id) (get c->p-map node-id))]
@@ -316,10 +391,11 @@ a vector of floats."
                     {:stream (get argument :stream)
                      :streams (keys stream->size)}))))
 
+
 (defmethod get-argument-shape :node-output
   [graph node argument]
   (let [target-node (get-node graph (get argument :node-id))]
-    (if-let [retval (get target-node :output-size)]
+    (if-let [retval (node->output-size target-node)]
       [(long retval)]
       (throw (ex-info "Failed to find node output size"
                       {:argument argument
@@ -347,13 +423,11 @@ a vector of floats."
                        :argument argument
                        :error e})))))
 
-
 (defmulti initialize-graph-parameter-buffer
   "Initialize a graph parameter buffer"
   (fn
     [graph node argument shape initialization]
     (get initialization :type)))
-
 
 (defmethod initialize-graph-parameter-buffer :default
   [graph node argument shape initialization]
