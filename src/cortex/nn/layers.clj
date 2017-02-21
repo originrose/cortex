@@ -11,22 +11,27 @@ constructors are all variable args with the extra arguments expected to be
             [cortex.buffer-initialization :as buf-init]))
 
 (defn- ensure-single-output-dimensions
-  [previous]
-  (when-not (= 1 (count (graph/node->output-dimensions previous)))
-    (throw (ex-info "Previous node has multiple output dimensions"
-                    {:previous previous
-                     :output-dimensions (graph/node->output-dimensions previous)})))
+  [previous node]
+  (let [output-dims (graph/node->output-dimensions previous)]
+   (when-not (or (= 1 (count output-dims))
+                 (= 1 (count (filter #(= (get node :id)
+                                         (get % :id))
+                                     output-dims))))
+     (throw (ex-info "Previous node has multiple output dimensions pertaining to this node."
+                     {:previous previous
+                      :node node
+                      :output-dimensions (graph/node->output-dimensions previous)}))))
   (first (graph/node->output-dimensions previous)))
 
 
 (defn- carry-input-image-dims-forward
   [previous item]
-  (assoc item :input-dimensions [(ensure-single-output-dimensions previous)]))
+  (assoc item :input-dimensions [(ensure-single-output-dimensions previous item)]))
 
 
 (defn- carry-image-dims-forward
   [previous item]
-  (let [input-dims (ensure-single-output-dimensions previous)]
+  (let [input-dims (ensure-single-output-dimensions previous item)]
    (assoc item :input-dimensions [input-dims]
           :output-dimensions [input-dims])))
 
@@ -41,7 +46,7 @@ constructors are all variable args with the extra arguments expected to be
 
 
 (defn- default-build-fn
-  [graph node predecessor-ids]
+  [graph node predecessor-ids successor-ids]
   (let [previous (ensure-single-parent graph node predecessor-ids)]
     (carry-image-dims-forward previous node)))
 
@@ -91,7 +96,7 @@ constructors are all variable args with the extra arguments expected to be
   [(graph/node->output-size node)])
 
 (defmethod graph/build-node :linear
-  [graph node predecessor-id-seq]
+  [graph node predecessor-id-seq successor-id-seq]
   (-> (ensure-single-parent graph node predecessor-id-seq)
       (carry-input-image-dims-forward node)))
 
@@ -137,7 +142,7 @@ channel 2 with n-outputs"
 
 
 (defmethod graph/build-node :softmax
-  [graph node predecessor-seq]
+  [graph node predecessor-seq successor-ids]
   (let [previous (ensure-single-parent graph node predecessor-seq)]
    (-> (carry-input-image-dims-forward previous node)
        (assoc :output-size (graph/node->output-size previous)
@@ -307,7 +312,7 @@ a few compatibility issues."
   [previous item ^long output-channels]
   (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y dimension-op]
          :or {dimension-op :floor}} item
-        output-dims (ensure-single-output-dimensions previous)
+        output-dims (ensure-single-output-dimensions previous item)
         input-width (long (:width output-dims))
         input-height (long (:height output-dims))
         input-channels (long (:channels output-dims))
@@ -321,7 +326,7 @@ a few compatibility issues."
                                                              output-width)])))
 
 (defmethod graph/build-node :convolutional
-  [graph node predecessor-id-seq]
+  [graph node predecessor-id-seq successor-ids]
   ;;Convolutional layers can only have a floor dimension operation for cudnn compatibility.
   (when-not (= :floor (get node :dimension-op :floor))
     (throw (ex-info "Convolutional layers can only have floor dimension operation"
@@ -350,10 +355,11 @@ a few compatibility issues."
            stride stride 0 :ceil args)]))
 
 (defmethod graph/build-node :max-pooling
-  [graph node predecessor-ids]
+  [graph node predecessor-ids successor-ids]
   (let [previous (ensure-single-parent graph node predecessor-ids)]
-    (build-convolutional-type-node previous node (get (ensure-single-output-dimensions previous)
-                                                      :channels))))
+    (build-convolutional-type-node previous node
+                                   (get (ensure-single-output-dimensions previous node)
+                                        :channels))))
 (defmethod graph/get-node-metadata :max-pooling
   [layer]
   (default-layer-metadata))
@@ -379,8 +385,8 @@ This is for cudnn compatibility.")))
     (dissoc arg-map :epsilon))])
 
 (defmethod graph/build-node :batch-normalization
-  [graph node p-id-seq]
-  (default-build-fn graph node p-id-seq))
+  [& args]
+  (apply default-build-fn args))
 
 (defmethod graph/get-node-metadata :batch-normalization
   [desc]
@@ -412,8 +418,8 @@ This is for cudnn compatibility.")))
      :k k :n n :alpha alpha :beta beta}
     (dissoc arg-map :k :n :alpha :beta))])
 (defmethod graph/build-node :local-response-normalization
-  [graph node p-id-seq]
-  (default-build-fn graph node p-id-seq))
+  [& args]
+  (apply default-build-fn args))
 (defmethod graph/get-node-metadata :local-response-normalization
   [& args]
   (default-layer-metadata))
@@ -439,8 +445,8 @@ If the input contains no channels then you get a scale factor per input paramete
 )
 
 (defmethod graph/build-node :prelu
-  [graph node p-id-seq]
-  (default-build-fn graph node p-id-seq))
+  [& args]
+  (apply default-build-fn args))
 (defmethod graph/get-node-metadata :prelu
   [desc]
   {:arguments
@@ -450,6 +456,33 @@ If the input contains no channels then you get a scale factor per input paramete
                 :gradients? true
                 :type :parameter}}
    :passes #{:training :inference}})
+
+
+(defn concatenate
+  [& args]
+  [(merge-args
+    {:type :concatenate}
+    args)])
+
+(defmethod graph/build-node :concatenate
+  [graph node p-id-seq s-id-seq]
+  (when-not (= 1 (count s-id-seq))
+    (throw (ex-info "Concatenate produces 1 output"
+                    {:node node
+                     :successors s-id-seq})))
+  (let [input-dims (mapv #(-> (graph/get-node graph %)
+                              (ensure-single-output-dimensions node)
+                              (assoc :id %))
+                         p-id-seq)]
+   (assoc node
+          :input-dimensions input-dims
+          :output-dimensions [(graph/create-node-dimensions
+                               (apply + (map graph/dimensions->size input-dims)))])))
+
+(defmethod graph/get-node-metadata :concatenate
+  [desc]
+  {:passes #{:training :inference}})
+
 
 
 (def example-mnist-description

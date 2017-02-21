@@ -73,13 +73,13 @@ buffers."
   "Callback called when the node is added to the graph.  Note that the node at this point
   is not located in the graph.  Also note that any parameter arguments are generated
   in a separate step.  This is simply a translation from node->node called during
-  the add-node step."
-  (fn [graph node predecessor-ids]
+  the add-node step.  Precessors have been built, successors have not been built."
+  (fn [graph node predecessor-ids successor-ids]
     (get node :type)))
 
 ;;lots of nodes do not need to build built.
 (defmethod build-node :default
-  [graph node p-id-seq]
+  [graph node p-id-seq s-id-seq]
   node)
 
 
@@ -130,7 +130,7 @@ a vector of floats."
 
 
 (defmethod build-node :input
-  [graph node predecessor-seq]
+  [graph node predecessor-seq successor-id-seq]
   (when-not (= 0 (count predecessor-seq))
     (throw (ex-info "Input nodes cannot have predecessor nodes"
                     {:node node
@@ -323,7 +323,7 @@ rapidly changing index and channels being the least rapidly changing index."
 
 (defn dimensions->size
   ^long [dims]
-  (apply * (vals dims)))
+  (apply * (vals (dissoc dims :id))))
 
 
 (defn dimensions->shape
@@ -355,16 +355,18 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
 
 
 (defn- do-build-graph
-  [c->p-map graph node-id]
-  (let [node (build-node graph (get-node graph node-id) (get c->p-map node-id))]
+  [c->p-map p->c-map graph node-id]
+  (let [node (build-node graph (get-node graph node-id)
+                         (get c->p-map node-id) (get p->c-map node-id))]
     (update graph :id->node-map assoc node-id node)))
 
 
 (defn build-graph
   "Propagate size information (input/output sizes) through the graph in dfs order."
   [graph]
-  (let [c->p-map (child->parent-map graph)]
-    (reduce (partial do-build-graph c->p-map)
+  (let [c->p-map (child->parent-map graph)
+        p->c-map (parent->child-map graph)]
+    (reduce (partial do-build-graph c->p-map p->c-map)
             graph
             (dfs-seq graph))))
 
