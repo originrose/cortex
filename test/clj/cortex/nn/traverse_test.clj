@@ -327,10 +327,6 @@
                                        :traversal
                                        realize-traversals)
         layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
-    (clojure.pprint/pprint              (get traversal-after-stacking :backward))
-
-    (println "!!!original")
-    (clojure.pprint/pprint              (get original-traversal :backward))
     (is (= [nil nil]
            (minimal-diff
              (get original-traversal :backward)
@@ -376,7 +372,23 @@
 (deftest inference-after-train
   (let [network (build-big-description)
         training-net (traverse/network->training-traversal network stream->size-map)
-        inference-net (traverse/network->inference-traversal (traverse/auto-bind-io training-net) stream->size-map)
+        inference-net (traverse/network->inference-traversal
+                       (traverse/auto-bind-io training-net) stream->size-map)
         output-bindings (vec (traverse/get-output-bindings inference-net))]
     (is (= 1 (count output-bindings)))
     (is (= :softmax-1 (get-in output-bindings [0 :node-id])))))
+
+
+(deftest concatenate-traversal
+  (let [network (-> (network/build-network [(layers/input 10 10 10)
+                                            (layers/linear 500 :id :right)
+                                            (layers/input 500 1 1 :parents [] :id :left)
+                                            (layers/concatenate :parents [:left :right]
+                                                                :id :concat)
+                                            (layers/linear 10)])
+                    (traverse/auto-bind-io))
+        stream->size-map {:data-1 (* 25 25 10)
+                          :data-2 500
+                          :labels 10}
+        train-network (traverse/network->training-traversal network stream->size-map)
+        inference-network (traverse/network->inference-traversal network stream->size-map)]))

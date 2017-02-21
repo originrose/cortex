@@ -260,16 +260,25 @@ a vector of floats."
   [graph]
   (edges->map graph second first))
 
+
 (defn dfs-seq
   "Get a sequence of ids in dfs order."
   [graph]
   (let [p->c-map (-> (parent->child-map graph)
                      (assoc :roots (roots graph)))]
-    (->>
-     (tree-seq #(contains? p->c-map %)
-               #(get p->c-map %)
-               :roots)
-     (drop 1))))
+
+    (->> (tree-seq #(contains? p->c-map %)
+                   #(get p->c-map %)
+                   :roots)
+         (drop 1)
+         ;;Account for cases where the graph has multiple roots.
+         ;;by taking the last occurance of a multiply-occuring node.
+         ;;this ensures that a child will not get visited until after
+         ;;every parent has been visited.
+         reverse
+         distinct
+         reverse)))
+
 
 (defn relative-dfs-seq
   [graph node-id]
@@ -319,6 +328,60 @@ rapidly changing index and channels being the least rapidly changing index."
   [node]
   (or (get node :output-dimensions)
       (node-inline-data->dims node "output")))
+
+
+(defn dimensions->dims-with-ids
+  "When there are only 1 of dimensions and ids then the id of the first dimension
+is unambiguous and set into the dimension entry.  When there are more ensure
+that each id has an unambiguous mapping to a dimension."
+  [dims-seq id-seq]
+  (when-not (= (count dims-seq) (count id-seq))
+    (throw (ex-info "Dimensions vector and id sequence mismatch"
+                    {:dims-sequence dims-seq
+                     :id-sequence id-seq})))
+  (if (= 1 (count dims-seq))
+    (update (vec dims-seq) 0
+            assoc :id (first id-seq))
+    ;;Error check the dimensions that each id in the id seq appears in them
+    ;;and that id's are not repeated.
+    (do
+      (when-not (every? #(contains? % :id)
+                        dims-seq)
+        (throw (ex-info "Every dimension entry must contain a mapping id"
+                        {:dimensions dims-seq})))
+      (let [dims-ids (set (map :id dims-seq))
+            id-set (set id-seq)]
+        (when-not (= (count id-seq)
+                     (count id-set))
+          (throw (ex-info "Duplicate ids detected"
+                          {:id-set id-set
+                           :id-seq id-seq
+                           :dims-seq dims-seq})))
+        (when-not (= id-set dims-ids)
+          (throw (ex-info "id set differs from dimension id set"
+                          {:id-seq id-seq
+                           :dimension-seq dims-seq})))
+        (vec dims-seq)))))
+
+
+(defn node->output-dimension
+  [node]
+  (let [output-dims (node->output-dimensions node)]
+    (when-not (= 1 (count output-dims))
+      (throw (ex-info "Node has multiple outputs thus canonical dimension is ambiguous."
+                      {:node node
+                       :output-dims output-dims})))
+    (first output-dims)))
+
+
+(defn node->input-dimension
+  [node]
+  (let [input-dims (node->input-dimensions node)]
+    (when-not (= 1 (count input-dims))
+      (throw (ex-info "Node has multiple inputs thus canonical dimension is ambiguous"
+                      {:node node
+                       :input-dims input-dims})))
+    (first input-dims)))
 
 
 (defn dimensions->size

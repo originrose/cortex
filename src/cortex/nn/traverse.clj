@@ -197,16 +197,36 @@ Each item in the sequence is a map of:
                              (into {}))]
     (->> (graph/dfs-seq layer-graph)
          (reduce (fn [[retval id->buffer-map] id]
-                   (let [node-buffer (if-let [output-binding (get output-bindings id)]
-                                       (merge {:output-id id} output-binding)
-                                       {:id id})]
-                     [(conj retval {:incoming (concat
-                                               (->> [id]
-                                                    (map input-bindings)
-                                                    (remove nil?))
-                                               (->> (get child->parent-map id)
-                                                    (map (fn [id]
-                                                           (get id->buffer-map id)))))
+                   (let [node (graph/get-node layer-graph id)
+                         node-buffer (assoc
+                                      (if-let [output-binding (get output-bindings id)]
+                                        (merge {:output-id id}
+                                               output-binding)
+                                        {:id id})
+                                      :dimension (graph/node->output-dimension node))
+                         incoming (concat
+                                   (->> [id]
+                                        (map input-bindings)
+                                        (remove nil?))
+                                   (->> (get child->parent-map id)
+                                        (map (fn [id]
+                                               (get id->buffer-map id)))))
+                         incoming (if (= 1 (count incoming))
+                                    (update (vec incoming) 0
+                                            assoc :dimension (graph/node->input-dimension
+                                                              node))
+                                    (let [dim-map (group-by :id (graph/node->input-dimensions
+                                                                 node))]
+                                      (->> incoming
+                                           (mapv (fn [{:keys [id] :as entry}]
+                                                   (when-not (contains? dim-map id)
+                                                     (throw (ex-info
+                                                             "Failed to find incoming id"
+                                                             {:id id
+                                                              :possible-ids (keys dim-map)})))
+                                                   (assoc entry :dimension
+                                                          (first (dim-map id))))))))]
+                     [(conj retval {:incoming incoming
                                     :id id
                                     :outgoing [node-buffer]})
                       (assoc id->buffer-map id node-buffer)]))
@@ -288,15 +308,14 @@ the previous step."
   [network forward-traversal]
   (let [layer-graph (get network :layer-graph)]
     (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
-              (let [node (graph/get-node layer-graph id)
-                    output-size (graph/node->output-size node)
-                    input-size (graph/node->input-size node)]
-                (when-not (and output-size input-size)
-                  (throw (ex-info "Node does not have input or output size"
-                                  {:node node})))
+              (let [node (graph/get-node layer-graph id)]
                 (merge buffer-map
-                       (->> (concat (map #(assoc % :size output-size) outgoing)
-                                    (map #(assoc % :size input-size) incoming))
+                       (->> (concat (map #(assoc %1 :size (graph/dimensions->size %2))
+                                         outgoing
+                                         (graph/node->output-dimensions node))
+                                    (map #(assoc %1 :size (graph/dimensions->size %2))
+                                         incoming
+                                         (graph/node->input-dimensions node)))
                             (map (fn [buffer-desc]
                                    [(buffer-desc->map-key buffer-desc) buffer-desc]))
                             (into {})))))
