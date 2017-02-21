@@ -1,12 +1,14 @@
 (ns cortex.compute.driver
-  "Base set of protocols required to move information from the host to the device as well as enable
-  some form of computation on a given device.  There is a cpu implementation provided for reference.
+  "Base set of protocols required to move information from the host to
+  the device  as well as  enable some form  of computation on  a given
+  device.  There is a cpu implementation provided for reference.
 
-  This file describes three basic datatypes:
-  Driver - Enables enumeration of devices as well as creation of streams and host or device buffers.
-  Stream - Stream of execution occuring on the device.
-  Event - Synchronization primitive.  Events are created un-triggered and get triggered their associated
-  stream gets to the point where the event was created."
+  This  file  describes  three   basic  datatypes:  Driver  -  Enables
+  enumeration of  devices as well as  creation of streams and  host or
+  device  buffers.   Stream -  Stream  of  execution occuring  on  the
+  device.   Event -  Synchronization  primitive.   Events are  created
+  un-triggered and get  triggered their associated stream  gets to the
+  point where the event was created."
   (:require [think.datatype.core :as dtype]
             [clojure.core.matrix :as m]
             [think.resource.core :as resource]))

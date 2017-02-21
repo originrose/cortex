@@ -1,5 +1,5 @@
-(ns cortex.compute.cuda-optimize-test
-  (:require [cortex.compute.nn.cuda-backend :as cuda-backend]
+(ns cortex.compute.cpu-optimize-test
+  (:require [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.compute.verify.optimize :as verify-optimize]
             [clojure.test :refer :all]
             [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]))
@@ -9,7 +9,7 @@
 
 (defn create-backend
   []
-  (cuda-backend/create-backend verify-utils/*datatype*))
+  (cpu-backend/create-backend verify-utils/*datatype*))
 
 
 (def-double-float-test adam
