@@ -18,7 +18,7 @@
   "A driver is a generic compute abstraction.  Could be a group of threads,
   could be a machine on a network or it could be a CUDA or OpenCL driver.
   A stream is a stream of execution (analogous to a thread) where
-  subsequent calls are serialized.  All buffers are implement a few of the datatype
+  subsequent calls are serialized.  All buffers implement a few of the datatype
   interfaces, at least get-datatype and ecount.  Host buffers are expected to implement
   enough of the datatype interfaces to allow a copy operation from generic datatypes
   into them.  This means at least PAccess."

@@ -15,7 +15,6 @@
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]))
 
-
 (defn array
   ([backend data items-per-batch]
    (math/array (drv/get-driver backend) (drv/get-stream backend) (dtype/get-datatype backend)
