@@ -99,35 +99,28 @@ in initial description.  Else returns the initial description"
         (io/make-parents backup-filename)
         (io/copy (io/file network-filename) (io/file backup-filename))))))
 
-
 (defn train-n
-  "Generate an ininite sequence of networks where we save the best networks to file:
-cv-loss is cross-validation loss.
-{:cv-loss best-loss-so-far
- :network-description best-network
-:initial-description initial-description}
+  "Generate an ininite sequence of networks where and the best networks to file:
+  {:cv-loss best-loss-so-far
+   :network-description best-network
+   :initial-description initial-description}
 
-This system expects a dataset with online data augmentation so that it is effectively infinite
-although the cross-validation and holdout sets do not change.  The best network is saved to:
-trained-network.nippy.
-If an epoch count is provided then this function returns the best network after
-the given epoch count.  When a better network is detected best-network-fn is called
-with a single argument of the form:
+  This system expects a dataset with online data augmentation so that it is
+  effectively infinite although the cross-validation and holdout sets do not
+  change. By default, the best network is saved to: `trained-network.nippy`
 
+  Note, we have to have enough memory to store the cross-validation dataset
+  in memory while training.
 
-{:data all inputs from the cross-validation dataset in vectors by input-label order
-:labels all outputs from the cross-validation dataset in vectors by output-label order
-:inferences all inferences the network made in vectors by output-label order
-:dataset original dataset provided
-:loss current best loss}
+  When a better network is detected best-network-fn is called with a single
+  argument of the form:
+  {:labels     cross-validation dataset outputs in vectors by output-label order
+   :inferences network inferences in vectors by output-label order
+   :data       cross-validation dataset inputs in vectors by input-label order
+   :leaves     network leaf nodes}
 
-
-Note that this means that we have to have enough memory to store the
-cross-validation dataset in memory while training.
-
-If epoch-count is provided then we stop training after that many epochs else
-we continue to train forever.
-"
+  If epoch-count is provided then we stop training after that many epochs else
+  we continue to train forever."
   [dataset initial-description network
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
