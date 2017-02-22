@@ -310,12 +310,7 @@ the previous step."
     (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
               (let [node (graph/get-node layer-graph id)]
                 (merge buffer-map
-                       (->> (concat (map #(assoc %1 :size (graph/dimensions->size %2))
-                                         outgoing
-                                         (graph/node->output-dimensions node))
-                                    (map #(assoc %1 :size (graph/dimensions->size %2))
-                                         incoming
-                                         (graph/node->input-dimensions node)))
+                       (->> (concat outgoing incoming)
                             (map (fn [buffer-desc]
                                    [(buffer-desc->map-key buffer-desc) buffer-desc]))
                             (into {})))))
@@ -494,7 +489,8 @@ datastructure describing the final loss function.
       :or {optimizer (optimize/adam) loss-function []}}]
 
   (check-for-io-bindings network)
-  (let [forward-traversal (->> (create-forward-traversal network)
+  (let [network (remove-existing-loss-terms network)
+        forward-traversal (->> (create-forward-traversal network)
                                (filter-traversal network :training))
         [forward-with-buffers buffer-map] (traversal->buffers forward-traversal {})
         backward-pass (if keep-non-trainable?
