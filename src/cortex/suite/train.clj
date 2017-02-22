@@ -167,14 +167,6 @@ in initial description.  Else returns the initial description"
            (map epoch-processor)
            doall))))
 
-(defn- bindings->streams
-  [bindings]
-  (->> bindings
-       (map :stream)
-       (remove nil?)
-       set))
-
-
 (defn evaluate-network
   "Given a single-output network description and a dataset with the keys
 :data and :labels produced set of inferences, answers, and the observations
