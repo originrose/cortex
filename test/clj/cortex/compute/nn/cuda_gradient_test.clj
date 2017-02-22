@@ -5,7 +5,6 @@
             [cortex.verify.nn.gradient :as verify-gradient]
             [cortex.compute.nn.compute-execute :as ce]))
 
-
 (use-fixtures :each verify-utils/test-wrapper)
 
 (defn create-context

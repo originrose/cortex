@@ -3,7 +3,7 @@
             [clojure.test :refer :all]
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.compute.nn.cuda-backend :as cuda-backend]
-            [cortex.compute.nn.compute-execute :as compute-execute]))
+            [cortex.compute.nn.compute-execute :as compute-execute])
 
 
 (use-fixtures :each verify-utils/test-wrapper)

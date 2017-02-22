@@ -3,7 +3,7 @@
             [cortex.nn.layers :as layers]
             [cortex.nn.traverse :as traverse]
             [cortex.compute.nn.layers :as compute-layers]
-            [cortex.compute.optimize :as compute-optimize]
+            [cortex.optimize :as opt]
             [cortex.compute.nn.backend :as backend]
             [cortex.nn.protocols :as cp]
             [cortex.compute.nn.protocols :as compute-protocols]
@@ -236,9 +236,9 @@
     (-> network
         (assoc-in [:compute-binding :optimizer]
                   (when-let [optimizer (get traversal :optimizer)]
-                    (compute-optimize/create-compute-optimizer backend
-                                                               optimizer
-                                                               trainable-param-count)))
+                    (opt/create-optimizer backend
+                                          optimizer
+                                          trainable-param-count)))
         (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
         (assoc-in [:compute-binding :loss-function] loss-function))))
 
@@ -609,9 +609,12 @@ and anything that has a loss term attached to it's output becomes an output bind
     (let [backend (get-in network [:compute-binding :backend])
           stream (drv/get-stream backend)
           driver (drv/get-driver backend)
-          optimizer (compute-optimize/batch-update (get-in network [:compute-binding
-                                                                    :optimizer]))
+
+          ; Call batch-update so the optimizer can do batch level computations
+          optimizer (opt/batch-update (get-in network [:compute-binding :optimizer]))
           buffer-alpha (/ 1.0 (double (get network :batch-size)))]
+
+      ; Call compute-parameters! on all of the paramter buffers
       (reduce (fn [offset {:keys [buffer gradient
                                   learning-attenuation non-trainable?] :as parameter}]
                 (let [elem-count (long (m/ecount buffer))
@@ -622,9 +625,9 @@ and anything that has a loss term attached to it's output becomes an output bind
                       gradient-buf (math/device-buffer gradient)
                       param-buf (math/device-buffer buffer)]
                   (when-not non-trainable?
-                    (compute-optimize/compute-parameters! optimizer
-                                                          (* buffer-alpha learning-attenuation)
-                                                          offset gradient buffer)
+                    (opt/compute-parameters! optimizer
+                                             (* buffer-alpha learning-attenuation)
+                                             offset gradient buffer)
                     (when (is-l2-max-constraint-valid? parameter)
                       (apply-l2-max-constraint backend parameter)))
                   (when gradient
@@ -887,4 +890,6 @@ any loss-specific parameter buffers."
   ([backend-fn]
    (->ComputeExecutionContext backend-fn))
   ([]
-   (create-context #(cpu-backend/create-cpu-backend))))
+   (create-context #(cpu-backend/create-backend))))
+
+

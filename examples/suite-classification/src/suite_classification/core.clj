@@ -5,6 +5,7 @@
             [think.image.image :as image]
             [think.image.patch :as patch]
             [think.image.data-augmentation :as image-aug]
+            [cortex.optimize :as opt]
             [cortex.nn.layers :as layers]
             [think.image.image-util :as image-util]
             [clojure.core.matrix.macros :refer [c-for]]

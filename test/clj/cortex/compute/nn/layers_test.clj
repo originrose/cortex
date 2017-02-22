@@ -13,7 +13,7 @@
 (defn create-context
   []
   (compute-execute/create-context
-   #(cpu-backend/create-cpu-backend test-utils/*datatype*)))
+   #(cpu-backend/create-backend test-utils/*datatype*)))
 
 (def-double-float-test relu-activation
   (verify-layers/relu-activation (create-context)))

@@ -31,5 +31,4 @@
              :test {:source-paths ["src" "test/cljc" "test/clj"]}
              :cpu-only {:test-selectors {:default (complement :gpu)}
                         :source-paths ["src" "test/cljc" "test/clj"]}}
-
   :plugins [[lein-codox "0.10.2"]])

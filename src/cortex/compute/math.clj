@@ -170,7 +170,7 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
       data
       (dtype/make-array-of-type datatype (vec (m/eseq data))))))
 
-;;Give a generic object get the buffer that is on the device.
+
 (defprotocol PGetDeviceBuffer
   (device-buffer [item]
     "Given a generic object product the device buffer backing data store for the object."))
@@ -178,7 +178,6 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
 (extend-protocol PGetDeviceBuffer
   Object
   (device-buffer [item] item))
-
 
 ;;An array is a combination of a device buffer backing store
 ;;and a tensor describing how the data is stored in the array.

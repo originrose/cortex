@@ -243,7 +243,6 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
   ([fn-name dtype-seq]
    (load-multiple-datatype-function (str fn-name ".fatbin") fn-name dtype-seq)))
 
-
 (defn load-all-datatype-function
   ([module-name fn-name]
    (load-multiple-datatype-function module-name fn-name dtype/datatypes))

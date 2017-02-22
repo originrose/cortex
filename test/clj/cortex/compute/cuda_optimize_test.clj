@@ -6,11 +6,11 @@
 
 (use-fixtures :each verify-utils/test-wrapper)
 
-
 (defn create-backend
   []
   (cuda-backend/create-backend verify-utils/*datatype*))
 
-
 (verify-utils/def-double-float-test adam
+
+(def-double-float-test adam
   (verify-optimize/test-adam (create-backend)))
