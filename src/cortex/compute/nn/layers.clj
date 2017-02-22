@@ -204,8 +204,10 @@ and then forward many times for every parameter of the network."
           output-gradient (first-gradient output-buffers)
           stream (drv/get-stream backend)
           neg-scale-gradient (get-in parameter-buffers [:neg-scale :gradient])]
-      (drv/memset stream (math/device-buffer neg-scale-gradient) 0 0 (m/ecount neg-scale-gradient))
-      ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output anyway
+      (drv/memset stream (math/device-buffer neg-scale-gradient) 0 0
+                  (m/ecount neg-scale-gradient))
+      ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output
+      ;;anyway
       (math/elem-mul stream 1.0 output-gradient 1 input 1 select-buffer 1)
       ;;sum into center gradient
       (math/indirect-add stream
@@ -233,3 +235,56 @@ and then forward many times for every parameter of the network."
              (nn-backend/new-array backend [input-size] batch-size)
              (math/array driver stream :int (range (* input-size (long batch-size))) batch-size)
              (nn-backend/new-array backend [input-size] batch-size))))
+
+(defn- do-concat
+  [backend input-buffers output-buffers batch-indexes buffer-key]
+  (let [output (get-in output-buffers [0 buffer-key])
+        [num-batches num-output] (math/batch-shape output)
+        driver (drv/get-driver backend)
+        stream (drv/get-stream backend)
+        output-buf (math/device-buffer output)
+        final-offset
+        (reduce (fn [^long offset input-buffer]
+                  (let [target-buf (drv/sub-buffer driver output-buf offset
+                                                   (- (dtype/ecount output) offset))
+                        [num-batches input-stride] (math/batch-shape input-buffer)]
+                    (condp = buffer-key
+                      :buffer
+                      ;;Copy from input buffer to output.
+                      (drv/indexed-copy stream
+                                        (math/device-buffer input-buffer) batch-indexes
+                                        target-buf batch-indexes
+                                        input-stride :dest-stride num-output)
+                      :gradient
+                      ;;Copy from output to input buffer.
+                      (drv/indexed-copy stream
+                                        target-buf batch-indexes
+                                        (math/device-buffer input-buffer) batch-indexes
+                                        input-stride :src-stride num-output))
+                    (+ offset (long input-stride))))
+                0
+                (map buffer-key input-buffers))]
+    ;;Ensure the result adds up to the correct amount.
+    (when-not (- (long final-offset) (long num-output))
+      (throw (ex-info "Output size and input buffer count mismatch"
+                      {:input-sizes (map (comp dtype/ecount buffer-key) input-buffers)
+                       :final-offset final-offset
+                       :output-size num-output})))
+    final-offset))
+
+
+(defrecord Concatenate [backend layer batch-indexes]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (do-concat backend input-buffers output-buffers batch-indexes :buffer))
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (do-concat backend input-buffers output-buffers batch-indexes :gradient)))
+
+
+(defmethod create :concatenate
+  [backend layer batch-size]
+  (->Concatenate backend layer
+                 (-> (math/array (drv/get-driver backend)
+                                 (drv/get-stream backend)
+                                 :int (range batch-size))
+                     math/device-buffer)))

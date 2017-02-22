@@ -2,7 +2,8 @@
 
 template<typename dtype>
 __device__
-void indexed_copy(const dtype* src, const int* src_indexes, dtype* dst, const int* dst_indexes,
+void indexed_copy(const dtype* src, const int* src_indexes, int src_stride,
+		  dtype* dst, const int* dst_indexes, int dst_stride,
 		  int n_elems_per_index, int n_indexes)
 {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -10,8 +11,8 @@ void indexed_copy(const dtype* src, const int* src_indexes, dtype* dst, const in
   if ( i < n_copy_elems ) {
     int index_idx  = i / n_elems_per_index;
     int elem_offset = i % n_elems_per_index;
-    int src_offset = src_indexes[index_idx] * n_elems_per_index + elem_offset;
-    int dst_offset = dst_indexes[index_idx] * n_elems_per_index + elem_offset;
+    int src_offset = src_indexes[index_idx] * src_stride + elem_offset;
+    int dst_offset = dst_indexes[index_idx] * dst_stride + elem_offset;
     //There is no use in making this threadsafe because copy is designed to overwrite
     //and relying on order of overwrites to get the correct answer is extremely
     //bad programming
@@ -22,17 +23,23 @@ void indexed_copy(const dtype* src, const int* src_indexes, dtype* dst, const in
 
 extern "C"
 __global__
-void indexed_copy_d(const double* src, const int* src_indexes, double* dst, const int* dst_indexes,
+void indexed_copy_d(const double* src, const int* src_indexes, int src_stride,
+		    double* dst, const int* dst_indexes, int dst_stride,
 		    int n_elems_per_index, int n_indexes)
 {
-  indexed_copy(src, src_indexes, dst, dst_indexes, n_elems_per_index, n_indexes);
+  indexed_copy(src, src_indexes, src_stride,
+	       dst, dst_indexes, dst_stride,
+	       n_elems_per_index, n_indexes);
 }
 
 
 extern "C"
 __global__
-void indexed_copy_f(const float* src, const int* src_indexes, float* dst, const int* dst_indexes,
+void indexed_copy_f(const float* src, const int* src_indexes, int src_stride,
+		    float* dst, const int* dst_indexes, int dst_stride,
 		    int n_elems_per_index, int n_indexes)
 {
-  indexed_copy(src, src_indexes, dst, dst_indexes, n_elems_per_index, n_indexes);
+  indexed_copy(src, src_indexes, src_stride,
+	       dst, dst_indexes, dst_stride,
+	       n_elems_per_index, n_indexes);
 }

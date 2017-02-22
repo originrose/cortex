@@ -466,8 +466,8 @@ If the input contains no channels then you get a scale factor per input paramete
 
 (defmethod graph/build-node :concatenate
   [graph node p-id-seq s-id-seq]
-  (when-not (= 1 (count s-id-seq))
-    (throw (ex-info "Concatenate produces 1 output"
+  (when-not (<= (count s-id-seq) 1)
+    (throw (ex-info "Concatenate produces at most 1 output"
                     {:node node
                      :successors s-id-seq})))
   (let [input-dims (mapv #(-> (graph/get-node graph %)

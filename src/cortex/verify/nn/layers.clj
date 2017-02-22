@@ -632,3 +632,38 @@
            (vec (m/eseq output))))
     (is (= [-10.0 10.0 -10.0 10.0]
            (vec (m/eseq (get-in parameters [:neg-scale :buffer :gradient])))))))
+
+
+(defn concatenate
+  [context]
+  (let [batch-size 4
+        item-count 5
+        num-inputs 2
+        ;;sums to zero
+        inputs (->> (partition (* item-count batch-size)
+                               (range (* batch-size item-count
+                                         num-inputs)))
+                    (map #(partition item-count %))
+                    (mapv vec))
+        outputs (->> (partition (* item-count batch-size)
+                                (range (* batch-size item-count
+                                          num-inputs)))
+                     (map #(partition item-count %))
+                     (apply interleave)
+                     (partition num-inputs)
+                     (mapv #(vec (apply concat %))))
+        output-gradients outputs
+        input-gradients inputs
+        {:keys [incoming-buffers outgoing-buffers]}
+        (forward-backward-test-multiple context
+                               [(layers/input item-count 1 1 :id :right)
+                                (layers/input item-count 1 1 :parents [] :id :left)
+                                (layers/concatenate :parents [:left :right]
+                                                    :id :test)]
+                               batch-size
+                               inputs
+                               [output-gradients])]
+    (is (m/equals input-gradients
+                  (mapv :gradient incoming-buffers)))
+    (is (m/equals outputs
+                  (get-in outgoing-buffers [0 :buffer])))))
