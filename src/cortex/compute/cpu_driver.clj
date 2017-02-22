@@ -7,7 +7,8 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
             [cortex.compute.array-view-math :as avm]
-            [think.datatype.marshal :as marshal])
+            [think.datatype.marshal :as marshal]
+            [think.parallel.core :as parallel])
   (:import [java.nio ByteBuffer IntBuffer ShortBuffer LongBuffer
             FloatBuffer DoubleBuffer Buffer]
            [com.github.fommil.netlib BLAS]
@@ -123,11 +124,26 @@ Use with care; the synchonization primitives will just hang with this stream."
   (sync-event [stream event]
     (with-stream-dispatch stream
       (drv/wait-for-event event)))
-  (indexed-copy [stream dev-a dev-a-indexes dev-b dev-b-indexes n-elems-per-idx]
-    (with-stream-dispatch stream
-      (dtype/indexed-copy! (dtype/->view dev-a) 0 (to-int-array dev-a-indexes)
-                           (dtype/->view dev-b) 0 (to-int-array dev-b-indexes)
-                           (long n-elems-per-idx)))))
+  (indexed-copy-impl [stream dev-a dev-a-indexes dev-a-stride
+                      dev-b dev-b-indexes dev-b-stride n-elems-per-idx]
+    (let [dev-a-indexes (to-int-array dev-a-indexes)
+          dev-b-indexes (to-int-array dev-b-indexes)]
+     (with-stream-dispatch stream
+       ;;TODO - update dtype library to support this striding.
+       (if (and (= n-elems-per-idx dev-a-stride)
+                (= n-elems-per-idx dev-b-stride))
+         (dtype/indexed-copy! (dtype/->view dev-a) 0 dev-a-indexes
+                              (dtype/->view dev-b) 0 dev-b-indexes
+                              (long n-elems-per-idx))
+         (let [dev-a-stride (long dev-a-stride)
+               dev-b-stride (long dev-b-stride)
+               n-elems-per-idx (long n-elems-per-idx)
+               n-indexes (alength dev-a-indexes)]
+           (parallel/parallel-for
+            idx n-indexes
+            (dtype/copy! dev-a (* dev-a-stride (aget dev-a-indexes idx))
+                         dev-b (* dev-b-stride (aget dev-b-indexes idx))
+                         n-elems-per-idx))))))))
 
 (extend-type CPUEvent
   drv/PEvent

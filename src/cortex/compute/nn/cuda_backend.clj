@@ -7,6 +7,8 @@
             [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.compute.nn.layers :as compute-layers]
+            [cortex.graph :as graph]
+            [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.compute.math :as math]
             [think.resource.core :as resource])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
@@ -267,19 +269,20 @@
 
 (defn layer->flat-tensor
   [layer batch-size datatype]
-  (create-tensor datatype 1 1 1 (* (long batch-size) (long (get layer :output-size)))))
+  (create-tensor datatype 1 1 1 (* (long batch-size)
+                                   (long (graph/node->output-size layer)))))
 
 
 (defn layer-input->image-tensor
   [layer batch-size datatype]
-  (create-tensor datatype batch-size (get layer :input-channels)
-                 (get layer :input-height) (get layer :input-width)))
+  (let [{:keys [channels width height]} (first (graph/node->input-dimensions layer))]
+   (create-tensor datatype batch-size channels height width)))
 
 
 (defn layer-output->image-tensor
   [layer batch-size datatype]
-  (create-tensor datatype batch-size (get layer :output-channels)
-                 (get layer :output-height) (get layer :output-width)))
+  (let [{:keys [channels height width]} (first (graph/node->output-dimensions layer))]
+   (create-tensor datatype batch-size channels height width)))
 
 
 (defn first-buffer
@@ -399,7 +402,8 @@
 (defn get-cudnn-convolution-output-sizes
   "Sizes are returned in a tensor"
   [backend layer ^long batch-size]
-  (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
+  (let [layer (cpu-backend/conv-type-layer->conv-config layer)
+        ^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
         ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
         input-tensor (layer-input->image-tensor layer batch-size)
         ^cudnn$cudnnContext cudnn-context (get-cudnn backend)
@@ -529,7 +533,8 @@
 
 (defmethod create-cuda-layer :convolutional
   [backend layer ^long batch-size]
-  (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
+  (let [layer (cpu-backend/conv-type-layer->conv-config layer)
+        ^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
         ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
         output-width (get layer :output-width)
         output-height (get layer :output-height)
@@ -702,7 +707,8 @@ Backward Data: %s %d"
 
 (defmethod create-cuda-layer :max-pooling
   [backend layer ^long batch-size]
-  (let [pooling-desc (cudnn$cudnnPoolingStruct.)
+  (let [layer (cpu-backend/conv-type-layer->conv-config layer)
+        pooling-desc (cudnn$cudnnPoolingStruct.)
         output-width (get layer :output-width)
         output-height (get layer :output-height)
         datatype (dtype/get-datatype backend)
@@ -821,7 +827,7 @@ Backward Data: %s %d"
 
 (defmethod create-cuda-layer :batch-normalization
   [backend layer batch-size]
-  (let [n-input (long (get layer :input-size))
+  (let [n-input (long (graph/node->input-size layer))
         io-tensor (create-tensor (dtype/get-datatype backend) batch-size 1 1 n-input)
         var-tensor (create-tensor (dtype/get-datatype backend) 1 1 1 n-input)]
     (->BatchNormalization backend io-tensor var-tensor)))

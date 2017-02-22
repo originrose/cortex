@@ -66,5 +66,7 @@
   (verify-layers/lrn-forward (create-context)))
 
 (def-double-float-test prelu
-  (with-bindings {#'verify-utils/*datatype* :float}
-   (verify-layers/prelu (create-context))))
+  (verify-layers/prelu (create-context)))
+
+(def-double-float-test concatenate
+  (verify-layers/concatenate (create-context)))

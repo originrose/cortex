@@ -59,3 +59,19 @@
                                                        [:layer-graph :id->node-map
                                                         :prelu-1 :neg-scale :buffer-id])
                                                :buffer])))))))
+
+
+(deftest build-concatenate
+  (let [network (network/build-network [(layers/input 25 25 10 :id :right)
+                                        (layers/input 500 1 1 :parents [] :id :left)
+                                        (layers/concatenate :parents [:left :right] :id :concat)
+                                        (layers/linear 10)])
+        graph (network/network->graph network)
+        concat-node (graph/get-node graph :concat)]
+    (is (= (+ (* 25 25 10) 500)
+           (graph/node->output-size concat-node)))
+    (is (= (set [(assoc (first (graph/node->output-dimensions (graph/get-node graph :right)))
+                        :id :right)
+                 (assoc (first (graph/node->output-dimensions (graph/get-node graph :left)))
+                        :id :left)])
+           (set (graph/node->input-dimensions concat-node))))))

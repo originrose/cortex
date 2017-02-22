@@ -54,7 +54,9 @@ and can be synchonized with the host or with each other using events."
                       host-buffer host-offset elem-count])
   (copy-device->device [stream dev-a dev-a-off dev-b dev-b-off elem-count])
   (memset [stream device-buffer device-offset elem-val elem-count])
-  (indexed-copy [stream dev-src dev-src-indexes dev-dst dev-dst-indexes n-elems-per-idx]
+  (indexed-copy-impl [stream dev-src dev-src-indexes src-stride
+                      dev-dst dev-dst-indexes dst-stride
+                      n-elems-per-idx]
     "Perform an indexed copy operation where dev-a, dev-b are of same datatype (double,float)
 while dev-a-indexes, dev-b-indexes are integer buffers.  n-elems-per-idx allows you to copy
 vectors of data.")
@@ -82,6 +84,30 @@ executes to the event.")
     (when-not (<= length new-max-length)
       (throw (Exception. "Sub buffer out of range.")))
     (sub-buffer-impl impl device-buffer offset length)))
+
+
+(defn indexed-copy
+  [stream src src-indexes dest dest-indexes n-elems-per-idx
+   & {:keys [src-stride dest-stride]
+      :or {src-stride n-elems-per-idx
+           dest-stride n-elems-per-idx}}]
+  (when-not (= (dtype/ecount src-indexes)
+               (dtype/ecount dest-indexes))
+    (throw (ex-info "src/dest index mismatch"
+                    {:src-index-length (dtype/ecount src-indexes)
+                     :dest-index-length (dtype/ecount dest-indexes)})))
+  (when-not (and (= :int (dtype/get-datatype src-indexes))
+                 (= :int (dtype/get-datatype dest-indexes)))
+    (throw (ex-info "Indexes must of of integer type."
+                    {:src-idx-dtype (dtype/get-datatype src-indexes)
+                     :dest-index-dtype (dtype/get-datatype dest-indexes)})))
+  (when-not (= (dtype/get-datatype src)
+               (dtype/get-datatype dest))
+    (throw (ex-info "src/dest datatype mismatch"
+                    {:src-dtype (dtype/get-datatype src)
+                     :dest-dtype (dtype/get-datatype dest)})))
+  (indexed-copy-impl stream src src-indexes src-stride
+                     dest dest-indexes dest-stride n-elems-per-idx))
 
 
 (defn host-array->device-buffer

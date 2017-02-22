@@ -68,3 +68,6 @@
 
 (def-double-float-test prelu
   (verify-layers/prelu (create-context)))
+
+(def-double-float-test concatenate
+  (verify-layers/concatenate (create-context)))
