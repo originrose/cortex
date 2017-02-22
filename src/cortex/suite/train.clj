@@ -38,7 +38,7 @@ in initial description.  Else returns the initial description"
 
 (defn- per-epoch-eval-training-network
   [context best-network-atom network-filename initial-description
-   best-network-function dataset simple-loss-print?
+   best-network-fn dataset simple-loss-print?
    {:keys [network inferences]}]
   (let [batch-size (:batch-size network)
         cv-columnar-input (->> (traverse/get-input-streams network)
@@ -61,14 +61,14 @@ in initial description.  Else returns the initial description"
       (reset! best-network-atom
               (save-network context network loss-fn
                             initial-description network-filename))
-      (when best-network-function
+      (when best-network-fn
         ;;We use the same format here as the output of the evaluate network function below
         ;;so that clients can use the same network display system.  This is why we have data
         ;;in columnar formats.
-        (best-network-function {:labels (ds/batches->columnsv labels)
-                                :inferences (ds/batches->columnsv inferences)
-                                :data cv-columnar-input
-                                :leaves (network/leaf-inference-layers network)}))))
+        (best-network-fn {:labels (ds/batches->columnsv labels)
+                          :inferences (ds/batches->columnsv inferences)
+                          :data cv-columnar-input
+                          :leaves (network/leaf-inference-layers network)}))))
   true)
 
 
