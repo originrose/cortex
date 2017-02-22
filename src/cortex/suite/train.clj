@@ -17,13 +17,12 @@
 (def trained-networks-folder "trained-networks/")
 
 (defn load-network
-  "Loads a map of {:cv-loss :network-description :initial-description}
-iff the initial description saved with the network matches the passed
-in initial description.  Else returns the initial description"
+  "Loads a map of {:cv-loss :network-description :initial-description} if the
+initial description saved with the network matches the provided description."
   [network-filename initial-description]
   (when (.exists (io/file network-filename))
     (let [network-data (suite-io/read-nippy-file network-filename)]
-      (when (= initial-description (get network-data :initial-description))
+      (when (= initial-description (:initial-description network-data))
         network-data))))
 
 
@@ -94,12 +93,10 @@ in initial description.  Else returns the initial description"
   [network-filestem]
   (let [network-filename (str network-filestem ".nippy")]
     (when (.exists (io/file network-filename))
-      (let [backup-filename  (->> (map (fn [idx]
-                                         (str trained-networks-folder network-filestem
-                                              "-" idx ".nippy"))
-                                       (drop 1 (range)))
-                                  (remove #(.exists (io/file %)))
-                                  first)]
+      (let [backup-filename (->> (rest (range))
+                                 (map #(format "%s%s-%s.nippy" trained-networks-folder network-filestem %))
+                                 (remove #(.exists (io/file %)))
+                                 (first))]
         (io/make-parents backup-filename)
         (io/copy (io/file network-filename) (io/file backup-filename))))))
 
