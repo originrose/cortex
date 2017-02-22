@@ -204,7 +204,9 @@
            (update-in compute-binding [:traversal-buffers buffer-key]
                       (fn [buffer]
                         (or buffer
-                            (let [buffer-size (get-in traversal [:buffers buffer-key :size])
+                            (let [buffer-size (-> (get-in traversal
+                                                          [:buffers buffer-key :dimension])
+                                                  (graph/dimensions->size))
                                   gradients? (and gradients?
                                                   (contains? backward-buffers buffer-key))
                                   numeric-gradients? (and numeric-gradients?
