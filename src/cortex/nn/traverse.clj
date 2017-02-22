@@ -464,23 +464,21 @@ parameters by adding buffer-ids in some cases."
 
 
 (defn network->training-traversal
-  "Given network create master buffer list,
-two traversals (forward,backward)
-and input and output buffer lists.
+  "Given network create master buffer list, two traversals (forward,backward) and input and
+  output buffer lists.
 
-!!Note that input-bindings are maps from stream to node-id
-while output-bindings are maps from node-id to {:stream :loss}!!
+!!Note that input-bindings are maps from stream to node-id while output-bindings are maps from
+  node-id to {:stream :loss}!!
 
 
-Each traversal is sequence of maps like in create-forward-traversal
-exception the incoming and outgoing ids are buffer ids.
-Input bindings are pairs of node to stream name.  Output bindings
-for gradient descent are also pairs of node-id to stream name or they can be
-pairs of node-id to [stream-name loss-function].
+Each traversal is sequence of maps like in create-forward-traversal exception the incoming and
+  outgoing ids are buffer ids.  Input bindings are pairs of node to stream name.  Output
+  bindings for gradient descent are also pairs of node-id to stream name or they can be pairs of
+  node-id to [stream-name loss-function].
 
-You can specify a loss here directly or you can specify loss terms around the graph.
-Any terms in the graph are coalesced and appended to the passed-in loss to build a
-datastructure describing the final loss function.
+You can specify a loss here directly or you can specify loss terms around the graph.  Any terms
+  in the graph are coalesced and appended to the passed-in loss to build a datastructure
+  describing the final loss function.
 {:buffers map id->{:size}
  :forward where incoming/outgoing maps to buffer id
  :backward where incoming/outgoing maps to buffer id}"
@@ -531,11 +529,11 @@ datastructure describing the final loss function.
 
 
 (defn network->inference-traversal
-  "Similar to network->gradient-descent however in this case we have the option
-  of optimising for memory which means we can aggressively reuse buffers *or*
-  optimising for speed in which case the result is the forward pass of gradient descent
-  and we expect implementations to have multiple batches in flight simultaneously.  We
-  default to optimising for memory because this avoids OOM situations with large networks."
+  "Similar to network->gradient-descent however in this case we have the option of optimising
+  for memory which means we can aggressively reuse buffers *or* optimising for speed in which
+  case the result is the forward pass of gradient descent and we expect implementations to have
+  multiple batches in flight simultaneously.  We default to optimising for memory because this
+  avoids OOM situations with large networks."
   [{:keys [layer-graph] :as network} stream-map]
   (check-for-io-bindings network)
   (let [network (remove-existing-loss-terms network)
