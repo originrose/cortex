@@ -23,3 +23,6 @@
 
 (deftest prelu-gradient
   (gradient/prelu-gradient (create-context)))
+
+(deftest concat-gradient
+  (gradient/concat-gradient (create-context)))

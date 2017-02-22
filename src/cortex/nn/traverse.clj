@@ -115,12 +115,20 @@ while training no stream or loss is necessary"
   "Auto bind the network's roots and leaves to either :data :labels if there
 are exactly 1 root and leaf or to :data-x where x is a one-based index of the
 root and labels-x where labels are a 1-based index of the leaf."
-  [network]
+  [network & {:keys [input-bindings]}]
   (let [network (clear-io-bindings network)
         ;;Get the graph without any loss terms else we will bind things to the loss nodes.
         graph (get (remove-existing-loss-terms network) :layer-graph)
         roots (graph/roots graph)
         leaves (graph/leaves graph)
+        [roots network] (if input-bindings
+                          [(c-set/difference (set roots)
+                                             (set (keys input-bindings)))
+                           (reduce (fn [network [k v]]
+                                     (bind-input network k v))
+                                   network
+                                   input-bindings)]
+                          [roots network])
         input-name-fn (if (> (count roots) 1)
                         (fn [network]
                           (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
@@ -130,6 +138,7 @@ root and labels-x where labels are a 1-based index of the leaf."
                            (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
                          (constantly :labels))]
     (as-> network network
+
       (reduce (fn [network root]
                 (bind-input network root (input-name-fn network)))
               network

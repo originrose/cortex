@@ -13,11 +13,11 @@
             [cortex.graph :as graph]))
 
 (defn bind-test-network
-  [context network batch-size stream->size-map & {:keys [bind-opts]
+  [context network batch-size stream->size-map & {:keys [bind-opts input-bindings]
                                                   :or {bind-opts {}}}]
   (as-> network network
     (network/build-network network)
-    (traverse/auto-bind-io network)
+    (traverse/auto-bind-io network :input-bindings input-bindings)
     (traverse/network->training-traversal network stream->size-map
                                           :keep-non-trainable? true)
     (assoc network :batch-size batch-size)
@@ -108,11 +108,13 @@
 
 (defn forward-backward-test-multiple
   "General test for when there may be a network with multiple inputs or outputs."
-  [context network batch-size input-vec output-grad-vec]
+  [context network batch-size input-vec output-grad-vec
+   & {:keys [input-bindings]}]
   (as-> (bind-test-network context network batch-size
                            (io-vec->stream->size-map input-vec
                                                      output-grad-vec
-                                                     batch-size))
+                                                     batch-size)
+                           :input-bindings input-bindings)
       network
     (forward-backward-bound-network context network
                                     input-vec
@@ -657,14 +659,40 @@
         input-gradients inputs
         {:keys [incoming-buffers outgoing-buffers]}
         (forward-backward-test-multiple context
-                               [(layers/input item-count 1 1 :id :right)
-                                (layers/input item-count 1 1 :parents [] :id :left)
-                                (layers/concatenate :parents [:left :right]
-                                                    :id :test)]
+                                        [(layers/input item-count 1 1 :id :right)
+                                         (layers/input item-count 1 1 :parents [] :id :left)
+                                         (layers/concatenate :parents [:left :right]
+                                                             :id :test)]
                                batch-size
                                inputs
-                               [output-gradients])]
+                               [output-gradients]
+                               :input-bindings {:right :data-2
+                                                :left :data-1})]
     (is (m/equals input-gradients
                   (mapv :gradient incoming-buffers)))
     (is (m/equals outputs
-                  (get-in outgoing-buffers [0 :buffer])))))
+                  (get-in outgoing-buffers [0 :buffer])))
+    (let [{:keys [incoming-buffers outgoing-buffers]}
+          (forward-backward-test-multiple context
+                                          [(layers/input item-count 1 1 :id :right)
+                                           (layers/input item-count 1 1 :parents [] :id :left)
+                                           (layers/concatenate :parents [:right :left]
+                                                               :id :test)]
+                                          batch-size
+                                          inputs
+                                          [output-gradients]
+                                          :input-bindings {:right :data-2
+                                                           :left :data-1})
+          swapped-outputs (->> (partition (* item-count batch-size)
+                                          (range (* batch-size item-count
+                                                    num-inputs)))
+                               (map #(partition item-count %))
+                               (apply interleave)
+                               (partition num-inputs)
+                               (mapv #(vec (->> %
+                                                reverse
+                                                (apply concat)))))]
+      (is (m/equals input-gradients
+                    (mapv :gradient incoming-buffers)))
+      (is (m/equals swapped-outputs
+                    (get-in outgoing-buffers [0 :buffer]))))))

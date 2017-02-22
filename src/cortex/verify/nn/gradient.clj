@@ -136,3 +136,25 @@
                        [input] [output]
                        1e-4 batch-size)
         check-gradients)))
+
+
+(defn concat-gradient
+  [context]
+  (let [batch-size 4
+        item-count 5
+        num-inputs 2
+        ;;sums to zero
+        inputs (->> (partition (* item-count batch-size)
+                               (range (* batch-size item-count
+                                         num-inputs)))
+                    (map #(partition item-count %))
+                    (mapv vec))
+        outputs [(repeat (* item-count num-inputs batch-size) 1)]]
+    (-> (get-gradients context
+                       [(layers/input item-count 1 1 :id :right)
+                        (layers/input item-count 1 1 :parents [] :id :left)
+                        (layers/concatenate :parents [:left :right]
+                                            :id :test)]
+                       inputs outputs
+                       1e-4 batch-size)
+        check-gradients)))
