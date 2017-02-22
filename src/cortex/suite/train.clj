@@ -36,15 +36,20 @@ in initial description.  Else returns the initial description"
     write-data))
 
 
-(defn per-epoch-eval-training-network
+(defn- per-epoch-eval-training-network
   [context best-network-atom network-filename initial-description
-   best-network-function cv-columnar-input cv-output simple-loss-print?
+   best-network-function dataset simple-loss-print?
    {:keys [network inferences]}]
-  (let [loss-fn (execute/network->applied-loss-fn
-                 context network inferences
-                 cv-output)
+  (let [batch-size (:batch-size network)
+        cv-columnar-input (->> (traverse/get-input-streams network)
+                               (ds/get-batches dataset batch-size :cross-validation)
+                               (ds/batches->columns))
+        labels (->> (traverse/get-output-streams network)
+                     (ds/get-batches dataset batch-size :cross-validation))
+        loss-fn (execute/network->applied-loss-fn context network inferences labels)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
+                            ;; TODO: Is there a bug here? What if the best-loss isn't sequential?
                             (when (sequential? best-loss)
                               (apply + (map :value best-loss))))]
     (println (format "Loss for epoch %s: %s" (get network :epoch-count) loss-val))
@@ -60,10 +65,9 @@ in initial description.  Else returns the initial description"
         ;;We use the same format here as the output of the evaluate network function below
         ;;so that clients can use the same network display system.  This is why we have data
         ;;in columnar formats.
-        (best-network-function {:inferences (ds/batches->columnsv inferences)
-                                :labels (ds/batches->columnsv cv-output)
+        (best-network-function {:labels (ds/batches->columnsv labels)
+                                :inferences (ds/batches->columnsv inferences)
                                 :data cv-columnar-input
-                                :loss-fn loss-fn
                                 :leaves (network/leaf-inference-layers network)}))))
   true)
 
@@ -136,31 +140,22 @@ in initial description.  Else returns the initial description"
   (resource/with-resource-context
     (let [network-filename (str network-filestem ".nippy")
           ;;Backup the trained network if we haven't already
-          network (if-let [loaded-network (load-network network-filename
-                                                        initial-description)]
+          network (if-let [loaded-network (load-network network-filename initial-description)]
                     (if reset-score
                       (assoc loaded-network :cv-loss {})
                       loaded-network)
-                    (do
-                      (backup-trained-network network-filestem)
-                      (merge network
-                             {:initial-description initial-description
-                              :cv-loss {}})))
-
-          input-streams (traverse/get-input-streams network)
-          output-streams (traverse/get-output-streams network)
-          cv-columnar-input (->> (ds/get-batches dataset batch-size :cross-validation input-streams)
-                                 ds/batches->columns)
-          cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
-          best-network-atom (atom network)
+                    (do (backup-trained-network network-filestem)
+                        (merge network
+                               {:initial-description initial-description
+                                :cv-loss {}})))
           context (create-context :force-gpu? force-gpu?)
           train-sequence (execute/train context network dataset [] []
                                         :batch-size batch-size
                                         :optimizer optimizer
                                         :infer-batch-type :cross-validation)
           epoch-processor (partial per-epoch-eval-training-network context
-                                   best-network-atom network-filename initial-description
-                                   best-network-fn cv-columnar-input cv-labels simple-loss-print?)]
+                                   (atom network) network-filename initial-description
+                                   best-network-fn dataset simple-loss-print?)]
       (println "Training network:")
       (network/print-layer-summary (-> network
                                        traverse/auto-bind-io
