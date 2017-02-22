@@ -13,14 +13,15 @@
             [cortex.graph :as graph]))
 
 (defn bind-test-network
-  [context network batch-size stream->size-map]
+  [context network batch-size stream->size-map & {:keys [bind-opts]
+                                                  :or {bind-opts {}}}]
   (as-> network network
     (network/build-network network)
     (traverse/auto-bind-io network)
     (traverse/network->training-traversal network stream->size-map
                                           :keep-non-trainable? true)
     (assoc network :batch-size batch-size)
-    (cp/bind-to-network context network {})))
+    (cp/bind-to-network context network bind-opts)))
 
 
 (defn set-id-and-bind-test-network
@@ -76,7 +77,7 @@
                     data-item])
                  data-vec)))
 
-(defn- vec->stream-map
+(defn vec->stream-map
   [input-vec stem]
   (->> (vec->id-val-pairs input-vec stem)
        (into {})))

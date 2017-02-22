@@ -34,38 +34,31 @@
                            (m/eseq numeric-gradient)))))))))
 
 
+(defn add-id-to-desc-list
+  [network]
+  (let [network (-> network flatten vec)]
+   (-> network
+       (assoc-in [0 :id] :input)
+       (assoc-in [(- (count network) 1) :id] :test))))
+
+
 (defn generate-gradients
-  [context network input output loss-fn epsilon batch-size]
-  (let [test-id :test
-        network (-> network
-                    flatten
-                    vec)
-        num-items (count network)
-        input-bindings [(traverse/->input-binding :input :data)]
-        output-bindings [(traverse/->output-binding test-id :stream :labels :loss loss-fn)]]
-    (as-> (-> network
-              (assoc-in [0 :id] :input)
-              (assoc-in [(- num-items 1) :id] test-id)) network
-      (network/build-network network)
-      (traverse/bind-input-bindings network input-bindings)
-      (traverse/bind-output-bindings network output-bindings)
-      (assoc network :batch-size batch-size)
-      (traverse/network->training-traversal network {:data (/ (m/ecount input)
-                                                              batch-size)
-                                                     :labels (/ (m/ecount output)
-                                                                batch-size)}
-                                            :keep-non-trainable? true)
-      (cp/bind-to-network context network {:numeric-gradients? true})
-      (cp/generate-numeric-gradients context network
-                                     {:data input
-                                      :labels output}
-                                     epsilon)
-      (verify-layers/unpack-bound-network context network test-id))))
+  [context network input output epsilon batch-size]
+  (as-> (verify-layers/bind-test-network context network batch-size
+                                         (verify-layers/io-vec->stream->size-map
+                                          input output batch-size)
+                                         :bind-opts {:numeric-gradients? true}) network
+    (cp/generate-numeric-gradients context network
+                                   (merge (verify-layers/vec->stream-map input :data)
+                                          (verify-layers/vec->stream-map output :labels))
+                                   epsilon)
+    (verify-layers/unpack-bound-network context network :test)))
 
 
 (defn get-gradients
   [& args]
-  (let [{:keys [input-gradient numeric-input-gradient parameters] :as gen-result} (apply generate-gradients args)]
+  (let [{:keys [input-gradient numeric-input-gradient parameters] :as gen-result}
+        (apply generate-gradients args)]
     (concat [{:buffer-id :input
               :gradient input-gradient
               :numeric-gradient numeric-input-gradient}]
@@ -80,11 +73,12 @@
   [context]
   (let [batch-size 2]
     (-> (get-gradients context
-                       [(layers/input 2)
-                        (layers/linear 1)]
-                       (take batch-size verify-train/CORN-DATA)
-                       (take batch-size verify-train/CORN-LABELS)
-                       (loss/mse-loss) 1e-4 batch-size)
+                       (add-id-to-desc-list
+                        [(layers/input 2)
+                         (layers/linear 1)])
+                       [(take batch-size verify-train/CORN-DATA)]
+                       [(take batch-size verify-train/CORN-LABELS)]
+                       1e-4 batch-size)
         check-gradients)))
 
 
@@ -98,9 +92,10 @@
                                (gaussian/ensure-gaussian! 5 20)))
         output input]
     (-> (get-gradients context
-                       [(layers/input input-size)
-                        (layers/batch-normalization :ave-factor 1.0)]
-                       input output (loss/mse-loss)
+                       (add-id-to-desc-list
+                        [(layers/input input-size)
+                         (layers/batch-normalization :ave-factor 1.0)])
+                       [input] [output]
                        1e-4 batch-size)
         check-gradients)))
 
@@ -116,9 +111,11 @@
         input (flatten (repeat batch-size (range n-input)))
         output input]
     (-> (get-gradients context
-                       [(layers/input input-dim input-dim num-input-channels)
-                        (layers/local-response-normalization :k 1 :n lrn-n :alpha 1.0 :beta 0.75)]
-                       input output (loss/mse-loss)
+                       (add-id-to-desc-list
+                        [(layers/input input-dim input-dim num-input-channels)
+                         (layers/local-response-normalization :k 1 :n lrn-n
+                                                              :alpha 1.0 :beta 0.75)])
+                       [input] [output]
                        1e-4 batch-size)
         check-gradients)))
 
@@ -133,8 +130,9 @@
         input (flatten (repeat batch-size (repeat (quot n-input 2) [-1 1])))
         output input]
     (-> (get-gradients context
-                       [(layers/input input-dim input-dim n-channels)
-                        (layers/prelu)]
-                       input output (loss/mse-loss)
+                       (add-id-to-desc-list
+                        [(layers/input input-dim input-dim n-channels)
+                         (layers/prelu)])
+                       [input] [output]
                        1e-4 batch-size)
         check-gradients)))
