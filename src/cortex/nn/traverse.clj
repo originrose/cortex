@@ -198,7 +198,6 @@ Each item in the sequence is a map of:
 }"
   [{:keys [layer-graph] :as network}]
   (let [{:keys [input-bindings output-bindings]} (get network :traversal)
-        ;;Remove all edges that do not participate in the keep node set.
         child->parent-map (graph/child->parent-map layer-graph)
         output-bindings (->> output-bindings
                              (map (fn [[k v]]

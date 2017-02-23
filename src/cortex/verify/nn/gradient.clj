@@ -158,3 +158,19 @@
                        inputs outputs
                        1e-4 batch-size)
         check-gradients)))
+
+(defn split-gradient
+  [context]
+  (let [batch-size 4
+        input-size 5
+        num-outputs 2
+        inputs [(mapv vec (partition input-size (range (* batch-size input-size))))]
+        outputs (repeat num-outputs (repeat (* input-size batch-size) 1))]
+    (-> (get-gradients context
+                       [(layers/input input-size)
+                        (layers/split :id :test)
+                        (layers/split)
+                        (layers/split :parents [:test])]
+                       inputs outputs
+                       1e-4 batch-size)
+        check-gradients)))

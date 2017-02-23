@@ -70,3 +70,6 @@
 
 (def-double-float-test concatenate
   (verify-layers/concatenate (create-context)))
+
+(def-double-float-test split
+  (verify-layers/split (create-context)))
