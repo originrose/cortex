@@ -13,7 +13,7 @@
                  [com.taoensso/nippy "2.12.2"]
 
                  ;; Change the following dep to depend on different versions of CUDA
-;                 [org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
+                 ;[org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
 
                  ;;The dataset abstraction uses parallel and optionally resource management.

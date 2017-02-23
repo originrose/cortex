@@ -2,9 +2,6 @@
   (:require [clojure.test :refer :all]
             [cortex.compute.nn.backend :as nn-backend]
             [think.datatype.core :as dtype]
-
-            [cortex.compute.optimize :as opt]
-            [cortex.optimize :as cortex-opt]
             [cortex.optimize :refer [create-optimizer] :as opt]
             [cortex.optimize.adam :as adam]
 

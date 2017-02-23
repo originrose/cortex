@@ -10,7 +10,6 @@
   []
   (cuda-backend/create-backend verify-utils/*datatype*))
 
-(verify-utils/def-double-float-test adam
 
-(def-double-float-test adam
+(verify-utils/def-double-float-test adam
   (verify-optimize/test-adam (create-backend)))
