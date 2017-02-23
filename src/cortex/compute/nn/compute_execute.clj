@@ -681,12 +681,7 @@ any loss-specific parameter buffers."
     ;;Sometimes you have to print the entire batch out to see what is going on.
     (let [backend (get-in network [:compute-binding :backend])
           stream (drv/get-stream backend)
-          driver (drv/get-driver backend)
-          ten-doubles #(vec (take 10 (backend/to-double-array backend %)))]
-      (comment
-        (clojure.pprint/pprint (mapv (fn [[k v]]
-                                       [k (ten-doubles v)])
-                                     stream->buffer-map)))
+          driver (drv/get-driver backend)]
       (let [network
             (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
                 (do-traverse stream->buffer-map :forward)
