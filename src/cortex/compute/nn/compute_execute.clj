@@ -337,7 +337,9 @@
                                       (let [input-buffer (get id->input-buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
-                                          [map-key (assoc buffer-entry buffer-type input-buffer)]
+                                          (do
+                                            [map-key (assoc buffer-entry buffer-type
+                                                            input-buffer)])
                                           [map-key buffer-entry]))))
                                (into {}))
         buffer-resolve (partial find-buffers traversal-buffers)]
@@ -379,12 +381,14 @@
 (defn- resolve-node-arguments
   ([network id id->output-map]
    (let [special-graph (-> (network/network->graph network)
-                           (assoc :buffers (get-in network [:compute-binding :parameter-buffers])))
+                           (assoc :buffers (get-in network [:compute-binding
+                                                            :parameter-buffers])))
          stream-map (->> (get-in network [:compute-binding :stream->buffer-map])
                          (map (fn [[k v]]
                                 [k {:buffer v}]))
                          (into {}))
-         retval (graph/resolve-arguments special-graph (graph/get-node special-graph id)
+         retval (graph/resolve-arguments special-graph
+                                         (graph/get-node special-graph id)
                                          stream-map id->output-map)]
      retval))
   ([network id]

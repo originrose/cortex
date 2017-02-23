@@ -26,3 +26,6 @@
 
 (deftest concat-gradient
   (gradient/concat-gradient (create-context)))
+
+(deftest split-gradient
+  (gradient/split-gradient (create-context)))

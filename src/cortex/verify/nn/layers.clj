@@ -85,10 +85,14 @@
 
 (defn forward-backward-bound-network
   [context network input-vec output-gradient-vec test-layer-id]
-  (as-> (cp/forward-backward context network
-                             (vec->stream-map input-vec :data)
-                             (vec->stream-map output-gradient-vec test-layer-id))
-      network
+  ;;We drop nodes leading up to the test node in the backward pass so a test
+  ;;can just provide the necessary data for that node specifically and does not,
+  ;;for example, need to provide a bunch of output gradients for children of the
+  ;;test layer.
+  (as-> network network
+    (cp/forward-backward context network
+                         (vec->stream-map input-vec :data)
+                         (vec->stream-map output-gradient-vec test-layer-id))
     (unpack-bound-network context network test-layer-id)))
 
 
@@ -696,3 +700,24 @@
                     (mapv :gradient incoming-buffers)))
       (is (m/equals swapped-outputs
                     (get-in outgoing-buffers [0 :buffer]))))))
+
+
+(defn split
+  [context]
+  (let [input-size 5
+        batch-size 5
+        output-size 10
+        input [(mapv vec (partition input-size (range (* batch-size input-size))))]
+        output-gradients (repeat 2 (first input))
+        outputs (repeat 2 (first input))
+        ;;Split with <2 children acts as a pass-through node.
+        {:keys [outgoing-buffers input-gradient]}
+        (forward-backward-test-multiple context
+                                        [(layers/input input-size)
+                                         (layers/split :id :test)
+                                         (layers/split)
+                                         (layers/split :parents [:test])]
+                                        batch-size
+                                        input
+                                        output-gradients)]
+    (is (m/equals outputs (mapv :buffer outgoing-buffers)))))

@@ -30,3 +30,6 @@
 
 (deftest concat-gradient
   (verify-gradient/concat-gradient (create-context)))
+
+(deftest split-gradient
+  (verify-gradient/split-gradient (create-context)))

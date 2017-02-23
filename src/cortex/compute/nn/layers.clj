@@ -288,3 +288,30 @@ and then forward many times for every parameter of the network."
                                  (drv/get-stream backend)
                                  :int (range batch-size))
                      math/device-buffer)))
+
+(defrecord Split [backend layer]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (let [input-array (first-buffer input-buffers)
+          n-elems (dtype/ecount input-array)
+          input-buffer (math/device-buffer input-array)
+          stream (drv/get-stream backend)]
+      (->> output-buffers
+           (map (comp math/device-buffer :buffer))
+           (map #(drv/copy-device->device stream input-buffer 0 % 0 n-elems))
+           dorun)))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (let [input-array (first-gradient input-buffers)
+          n-elems (dtype/ecount input-array)
+          stream (drv/get-stream backend)]
+      (drv/memset stream (math/device-buffer input-array) 0 0 n-elems)
+      (->> output-buffers
+           (map (comp math/device-buffer :gradient))
+           (map #(math/sum stream 1.0 % 1.0 input-array))
+           dorun))))
+
+
+(defmethod create :split
+  [backend layer batch-size]
+  (->Split backend layer))
