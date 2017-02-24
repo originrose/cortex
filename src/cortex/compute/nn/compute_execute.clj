@@ -177,6 +177,8 @@
         backward-buffers (if gradients?
                            (traverse/network->backward-buffer-set built-network)
                            #{})
+
+        ; Setup the parameter buffers
         compute-binding
         (reduce
          (fn [compute-binding id]
@@ -198,6 +200,8 @@
          (->> (concat (get traversal :forward)
                       (get traversal :loss-function))
               (map :id)))
+
+        ; Setup the traversal buffers (for passing activations and gradients)
         compute-binding
         (reduce
          (fn [compute-binding buffer-key]

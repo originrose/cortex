@@ -66,7 +66,7 @@ while training no stream or loss is necessary"
 
 
 (defn ->output-binding
-  "Create a stand-along output-binding"
+  "Create a stand-alone output-binding"
   [node-id & {:keys [stream loss]}]
   [node-id {:stream stream
             :loss loss}])

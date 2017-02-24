@@ -4,7 +4,7 @@ are at this point two different general classes of nodes and these are different
 understanding which pass they take part in.  All node's have a type and this type links
 to a metadata multimethod which gives further information on the node.  All nodes are functions
 taking a map of arguments.  Layers are functions which also have implicit input and output
-  arguments which correspond to the edges of the graph the layers attach to."
+arguments which correspond to the edges of the graph the layers attach to."
   (:require [cortex.util :as util]
             [clojure.set :as c-set]
             [cortex.keyword-fn :as keyword-fn]
@@ -100,13 +100,18 @@ a vector of floats."
   (long (apply * (vals shape-desc))))
 
 
-(defn create-graph
-  "Create an empty graph."
+(defn empty-graph
+  "Create an empty graph, which is stored as a map of:
+  {:edges [] adjacency list of [id id]
+   :id->node-map {} each node has an id and a type
+   :buffers {} parameter buffers, map of id->{:buffer data :gradient gradient}
+   :streams {} stream-name -> shape-descriptor.  Streams act as roots of the graph.
+   }"
   []
-  {:edges [] ;;Adjacency list of [id id]
-   :id->node-map {} ;;each node has an id and a type
-   :buffers {} ;;parameter buffers, map of id->{:buffer data :gradient gradient}
-   :streams {} ;;map of stream name -> shape descriptor.  Streams act as roots of the graph.
+  {:edges []
+   :id->node-map {}
+   :buffers {}
+   :streams {}
    })
 
 
@@ -405,19 +410,15 @@ a vector of floats."
        (reduce (partial generate-parameter-argument-buffer (get node :id))
                graph)))
 
-
-(defn- generate-parameter-buffers
-  [graph id]
-  (generate-node-parameter-buffers graph (get-node graph id)))
-
-
 (defn generate-parameters
   "Go through all the nodes in the graph and generate any parameter buffers
 that do not already exist.  Returns a new graph."
   [graph]
-  (reduce generate-parameter-buffers
-          graph
-          (dfs-seq graph)))
+  (reduce
+    (fn [graph id]
+      (generate-node-parameter-buffers graph (get-node graph id)))
+    graph
+    (dfs-seq graph)))
 
 
 (defn augment-streams

@@ -9,6 +9,13 @@
             [clojure.data :as data]))
 
 
+(def mnist-basic
+  [(layers/input 28 28 1)
+   (layers/linear 200)
+   (layers/relu)
+   (layers/linear 10)
+   (layers/softmax)])
+
 (def mnist-description-with-toys
   [(layers/input 28 28 1)
    (layers/multiplicative-dropout 0.1)
@@ -63,8 +70,9 @@
 (defn build-big-description
   []
   (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1 :stream
-                                                    :labels :loss (loss/softmax-loss))]]
+        output-bindings [(traverse/->output-binding :softmax-1
+                                                    :stream :labels
+                                                    :loss (loss/softmax-loss))]]
     (-> (network/build-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
