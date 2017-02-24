@@ -29,3 +29,9 @@
 
 (deftest split-gradient
   (gradient/split-gradient (create-context)))
+
+(deftest join-+-gradient
+  (gradient/join-+-gradient (create-context)))
+
+(deftest join-*-gradient
+  (gradient/join-*-gradient (create-context)))

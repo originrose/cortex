@@ -33,3 +33,9 @@
 
 (deftest split-gradient
   (verify-gradient/split-gradient (create-context)))
+
+(deftest join-+-gradient
+  (verify-gradient/join-+-gradient (create-context)))
+
+(deftest join-*-gradient
+  (verify-gradient/join-*-gradient (create-context)))

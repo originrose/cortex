@@ -174,3 +174,53 @@
                        inputs outputs
                        1e-4 batch-size)
         check-gradients)))
+
+(defn join-+-gradient
+  [context]
+  (let [batch-size 4
+        input-counts [3 4 5]
+        num-inputs (count input-counts)
+
+        input-sequence (flatten (repeat [-1 -2 1 4]))
+        inputs (->> (mapv #(->>
+                            (take (* batch-size %) input-sequence)
+                            (partition %))
+                          input-counts))
+        output-count (apply max input-counts)
+        outputs [(->> (repeat (* batch-size output-count) 1)
+                      (partition output-count))]]
+    (-> (get-gradients context
+                       [(layers/input 3 1 1 :id :left)
+                        (layers/input 4 1 1 :parents [] :id :middle)
+                        (layers/input 5 1 1 :parents [] :id :right)
+                        (layers/join :parents [:left :middle :right]
+                                     :id :test)]
+                       inputs outputs
+                       1e-4 batch-size)
+        check-gradients)))
+
+
+(defn join-*-gradient
+  [context]
+  (let [batch-size 4
+        input-counts [3 4 5]
+        num-inputs (count input-counts)
+        ;;sums to zero
+        input-sequence (flatten (repeat [-1 -2 1 4]))
+        inputs (->> (mapv #(->>
+                            (take (* batch-size %) input-sequence)
+                            (partition %))
+                          input-counts))
+        output-count (apply max input-counts)
+        outputs [(->> (repeat (* batch-size output-count) 1)
+                      (partition output-count))]]
+        (-> (get-gradients context
+                           [(layers/input 3 1 1 :id :left)
+                            (layers/input 4 1 1 :parents [] :id :middle)
+                            (layers/input 5 1 1 :parents [] :id :right)
+                            (layers/join :parents [:left :middle :right]
+                                         :operation :*
+                                         :id :test)]
+                           inputs outputs
+                           1e-4 batch-size)
+            check-gradients)))

@@ -12,6 +12,12 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
+(defmacro fixed-v-aget-rem
+  [array-view item-offset]
+  `(aget (.data ~array-view) (+ (.offset ~array-view)
+                                (rem ~item-offset
+                                     (.length ~array-view)))))
+
 
 (defprotocol PCPUMathImpl
   (gemm [A a-colstride
@@ -41,8 +47,8 @@
          num-elems# (Math/max (.length x-view#) (.length y-view#))]
      (c-for [idx# 0 (< idx# num-elems#) (inc idx#)]
             (v-aset-rem res-view# idx#
-                  (+ (* alpha# (v-aget-rem x-view# idx#))
-                     (* beta# (v-aget-rem y-view# idx#)))))))
+                  (+ (* alpha# (fixed-v-aget-rem x-view# idx#))
+                     (* beta# (fixed-v-aget-rem y-view# idx#)))))))
 
 
 (defmacro mul-rows-impl
