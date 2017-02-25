@@ -722,6 +722,7 @@
                                         input
                                         output-gradients)]
     (is (m/equals outputs (mapv :buffer outgoing-buffers)))))
+<<<<<<< HEAD
 
 
 ;;I can really name something with a -+ suffix?!!

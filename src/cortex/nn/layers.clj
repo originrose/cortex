@@ -489,6 +489,7 @@ If the input contains no channels then you get a scale factor per input paramete
   {:passes #{:training :inference}})
 
 
+<<<<<<< HEAD
 (defn join
   "Join takes a potential :operation which at this point
 is either :+ or :*.  The output dimensions are the max of any of the
@@ -539,6 +540,7 @@ input dimensions."
 (defmethod graph/get-node-metadata :split
   [desc]
   {:passes #{:training :inference}})
+
 
 (def example-mnist-description
   [(input 28 28 1)

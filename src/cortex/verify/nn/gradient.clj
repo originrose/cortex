@@ -174,6 +174,7 @@
                        inputs outputs
                        1e-4 batch-size)
         check-gradients)))
+<<<<<<< HEAD
 
 (defn join-+-gradient
   [context]
