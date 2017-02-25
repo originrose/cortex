@@ -74,8 +74,8 @@
 (def-double-float-test split
   (verify-layers/split (create-context)))
 
-(deftest join-+
+(def-double-float-test join-+
   (verify-layers/join-+ (create-context)))
 
-(deftest join-+-2
+(def-double-float-test join-+-2
   (verify-layers/join-+-2 (create-context)))

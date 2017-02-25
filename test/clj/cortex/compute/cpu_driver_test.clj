@@ -45,3 +45,6 @@
 
 (def-double-float-test indirect-add
   (verify-driver/indirect-add static-device test-utils/*datatype*))
+
+(def-double-float-test batched-offsetting
+  (verify-driver/batched-offsetting static-device test-utils/*datatype*))

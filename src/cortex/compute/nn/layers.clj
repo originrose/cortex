@@ -398,9 +398,9 @@ and then forward many times for every parameter of the network."
                                (min output-n-elems (dtype/ecount input-gradient))
                                min-elem-count)
                      input-gradient (fixed-with-tensor input-gradient
-                                      (math/create-tensor n-elems) driver)
+                                                       (math/create-tensor n-elems) driver)
                      output-gradient (fixed-with-tensor output-gradient
-                                       (math/create-tensor n-elems) driver)]
+                                                        (math/create-tensor n-elems) driver)]
                  (math/assign! stream input-gradient output-gradient)
                  (when (= operation :*)
                    ;;Multiply the gradient by every other input.
