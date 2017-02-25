@@ -115,12 +115,20 @@ while training no stream or loss is necessary"
   "Auto bind the network's roots and leaves to either :data :labels if there
 are exactly 1 root and leaf or to :data-x where x is a one-based index of the
 root and labels-x where labels are a 1-based index of the leaf."
-  [network]
+  [network & {:keys [input-bindings]}]
   (let [network (clear-io-bindings network)
         ;;Get the graph without any loss terms else we will bind things to the loss nodes.
         graph (get (remove-existing-loss-terms network) :layer-graph)
         roots (graph/roots graph)
         leaves (graph/leaves graph)
+        [roots network] (if input-bindings
+                          [(c-set/difference (set roots)
+                                             (set (keys input-bindings)))
+                           (reduce (fn [network [k v]]
+                                     (bind-input network k v))
+                                   network
+                                   input-bindings)]
+                          [roots network])
         input-name-fn (if (> (count roots) 1)
                         (fn [network]
                           (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
@@ -130,6 +138,7 @@ root and labels-x where labels are a 1-based index of the leaf."
                            (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
                          (constantly :labels))]
     (as-> network network
+
       (reduce (fn [network root]
                 (bind-input network root (input-name-fn network)))
               network
@@ -183,34 +192,70 @@ There is an optional argument to remove nodes of a particular type from
 the traversal.
 
 Each item in the sequence is a map of:
-{:incoming ()
+{:incoming buffer-map-seq
  :id
- :outgoing ()
+ :outgoing buffer-map-seq
 }"
   [{:keys [layer-graph] :as network}]
   (let [{:keys [input-bindings output-bindings]} (get network :traversal)
-        ;;Remove all edges that do not participate in the keep node set.
         child->parent-map (graph/child->parent-map layer-graph)
         output-bindings (->> output-bindings
                              (map (fn [[k v]]
                                     [k (dissoc v :stream)]))
                              (into {}))]
-    (->> (graph/dfs-seq layer-graph)
-         (reduce (fn [[retval id->buffer-map] id]
-                   (let [node-buffer (if-let [output-binding (get output-bindings id)]
-                                       (merge {:output-id id} output-binding)
-                                       {:id id})]
-                     [(conj retval {:incoming (concat
-                                               (->> [id]
-                                                    (map input-bindings)
-                                                    (remove nil?))
-                                               (->> (get child->parent-map id)
-                                                    (map (fn [id]
-                                                           (get id->buffer-map id)))))
-                                    :id id
-                                    :outgoing [node-buffer]})
-                      (assoc id->buffer-map id node-buffer)]))
-                 [[] {}])
+    (->>
+     (graph/dfs-seq layer-graph)
+     (reduce
+      (fn [[retval id->buffer-map] id]
+        (let [node (graph/get-node layer-graph id)
+              output-dims (graph/node->output-dimensions node)
+              output-buffers (if (= 1 (count output-dims))
+                               (-> (assoc
+                                    (if-let [output-binding (get output-bindings id)]
+                                      (merge {:output-id id}
+                                             output-binding)
+                                      {:id id})
+                                    :dimension (graph/node->output-dimension node))
+                                   vector)
+                               (->> output-dims
+                                    (map-indexed (fn [idx output-dim]
+                                                   {:id (keyword (str (name id)
+                                                                      "-"
+                                                                      (+ idx 1)))
+                                                    :dimension output-dim}))
+                                    vec))
+              ;;Take the input bindings and the incoming ids and ensure that all buffers
+              ;;have the correct id and have dimensions on them.
+              incoming (concat
+                        (->> [id]
+                             (map input-bindings)
+                             (remove nil?)
+                             (map #(assoc %
+                                          :dimension
+                                          (graph/node->input-dimension node))))
+                        (->> (get child->parent-map id)
+                             ;;Find the parent output dimension that targets this node.
+                             ;;This accounts for the possibility that a parent could have
+                             ;;different sized outputs for different children.
+                             (map (fn [parent-id]
+                                    (let [output-dims (get id->buffer-map parent-id)
+                                          retval (if (= 1 (count output-dims))
+                                                   (first output-dims)
+                                                   (first (filter
+                                                           #(= id (get-in %
+                                                                          [:dimension :id]))
+                                                           output-dims)))]
+                                      (when-not retval
+                                        (throw (ex-info "Failed to find input buffer"
+                                                        {:node node
+                                                         :parent parent-id
+                                                         :parent-output-dims output-dims})))
+                                      retval)))))]
+          [(conj retval {:incoming (vec incoming)
+                         :id id
+                         :outgoing output-buffers})
+           (assoc id->buffer-map id output-buffers)]))
+      [[] {}])
          first)))
 
 
@@ -246,6 +291,10 @@ Each item in the sequence is a map of:
        first
        reverse))
 
+(defn- buffer-desc->map-key
+  [buffer-desc]
+  (select-keys buffer-desc [:id :stream :output-id]))
+
 
 (defn traversal->buffers
   "Traversals initial hold id of incoming nodes.  For the next steps
@@ -254,18 +303,19 @@ the incoming buffer of the next step points to the outgoing buffer of
 the previous step."
   [traversal buffer-map]
   (->> traversal
-       (reduce (fn [[traversal buffer-map] {:keys [incoming id outgoing] :as entry}]
-                 [(conj traversal
-                        {:incoming (flatten
-                                    (map (fn [incoming-data]
-                                           (if-let [id (get incoming-data :id)]
-                                             (get buffer-map id)
-                                             incoming-data))
-                                         incoming))
-                         :id id
-                         :outgoing outgoing})
-                  (assoc buffer-map id outgoing)])
-               [[] buffer-map])))
+       (mapcat #(concat (get % :incoming)
+                        (get % :outgoing)))
+       (concat (vals buffer-map))
+       (group-by buffer-desc->map-key)
+       (map (fn [[buf-key buf-val-seq]]
+              (let [val-map (group-by #(graph/dimensions->size (get % :dimension))
+                                      buf-val-seq)]
+                (when-not (= 1 (count val-map))
+                  (throw (ex-info "Multiple sized buffers detected for key"
+                                  {:buffer-key buf-key
+                                   :buffer-values buf-val-seq})))
+                [buf-key (first buf-val-seq)])))
+       (into {})))
 
 
 (defn- reverse-forward-traversal
@@ -279,40 +329,15 @@ the previous step."
                      :outgoing incoming)))))
 
 
-(defn- buffer-desc->map-key
-  [buffer-desc]
-  (select-keys buffer-desc [:id :stream :output-id]))
-
-
-(defn- forward-traversal->buffer-map
-  [network forward-traversal]
-  (let [layer-graph (get network :layer-graph)]
-    (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
-              (let [node (graph/get-node layer-graph id)
-                    output-size (get node :output-size)
-                    input-size (get node :input-size)]
-                (when-not (and output-size input-size)
-                  (throw (ex-info "Node does not have input or output size"
-                                  {:node node})))
-                (merge buffer-map
-                       (->> (concat (map #(assoc % :size output-size) outgoing)
-                                    (map #(assoc % :size input-size) incoming))
-                            (map (fn [buffer-desc]
-                                   [(buffer-desc->map-key buffer-desc) buffer-desc]))
-                            (into {})))))
-            {}
-            forward-traversal)))
-
-
-(defn- clean-traversal-incoming-outgoing
+(defn clean-traversal-incoming-outgoing
   "Make the incoming and outgoing edges actually valid buffer keys
 which means removing extra information from them."
   [traversal]
-  (map (fn [entry]
-         (-> entry
-             (update :incoming #(map buffer-desc->map-key %))
-             (update :outgoing #(map buffer-desc->map-key %))))
-       traversal))
+  (mapv (fn [entry]
+          (-> entry
+              (update :incoming #(mapv buffer-desc->map-key %))
+              (update :outgoing #(mapv buffer-desc->map-key %))))
+        traversal))
 
 
 (defn- remove-non-trainable
@@ -450,23 +475,21 @@ parameters by adding buffer-ids in some cases."
 
 
 (defn network->training-traversal
-  "Given network create master buffer list,
-two traversals (forward,backward)
-and input and output buffer lists.
+  "Given network create master buffer list, two traversals (forward,backward) and input and
+  output buffer lists.
 
-!!Note that input-bindings are maps from stream to node-id
-while output-bindings are maps from node-id to {:stream :loss}!!
+!!Note that input-bindings are maps from stream to node-id while output-bindings are maps from
+  node-id to {:stream :loss}!!
 
 
-Each traversal is sequence of maps like in create-forward-traversal
-exception the incoming and outgoing ids are buffer ids.
-Input bindings are pairs of node to stream name.  Output bindings
-for gradient descent are also pairs of node-id to stream name or they can be
-pairs of node-id to [stream-name loss-function].
+Each traversal is sequence of maps like in create-forward-traversal exception the incoming and
+  outgoing ids are buffer ids.  Input bindings are pairs of node to stream name.  Output
+  bindings for gradient descent are also pairs of node-id to stream name or they can be pairs of
+  node-id to [stream-name loss-function].
 
-You can specify a loss here directly or you can specify loss terms around the graph.
-Any terms in the graph are coalesced and appended to the passed-in loss to build a
-datastructure describing the final loss function.
+You can specify a loss here directly or you can specify loss terms around the graph.  Any terms
+  in the graph are coalesced and appended to the passed-in loss to build a datastructure
+  describing the final loss function.
 {:buffers map id->{:size}
  :forward where incoming/outgoing maps to buffer id
  :backward where incoming/outgoing maps to buffer id}"
@@ -475,9 +498,10 @@ datastructure describing the final loss function.
       :or {optimizer (adam/adam)
            loss-function []}}]
   (check-for-io-bindings network)
-  (let [forward-traversal (->> (create-forward-traversal network)
+  (let [network (remove-existing-loss-terms network)
+        forward-traversal (->> (create-forward-traversal network)
                                (filter-traversal network :training))
-        [forward-with-buffers buffer-map] (traversal->buffers forward-traversal {})
+        buffer-map (traversal->buffers forward-traversal {})
         backward-pass (if keep-non-trainable?
                         forward-traversal
                         (remove-non-trainable network forward-traversal))
@@ -497,14 +521,12 @@ datastructure describing the final loss function.
     (update network
             :traversal
             #(merge %
-                    {:forward (-> forward-with-buffers
+                    {:forward (-> forward-traversal
                                   clean-traversal-incoming-outgoing)
                      :backward (-> backward-pass
-                                   (traversal->buffers buffer-map)
-                                   first
                                    reverse-forward-traversal
                                    clean-traversal-incoming-outgoing)
-                     :buffers (forward-traversal->buffer-map network forward-with-buffers)
+                     :buffers buffer-map
                      :type :training
                      :stream-map (->> (get-in network [:layer-graph :streams])
                                       (map (fn [[k v]]
@@ -516,24 +538,21 @@ datastructure describing the final loss function.
 
 
 (defn network->inference-traversal
-  "Similar to network->gradient-descent however in this case we have the option
-  of optimising for memory which means we can aggressively reuse buffers *or*
-  optimising for speed in which case the result is the forward pass of gradient descent
-  and we expect implementations to have multiple batches in flight simultaneously.  We
-  default to optimising for memory because this avoids OOM situations with large networks."
+  "Similar to network->gradient-descent however in this case we have the option of optimising
+  for memory which means we can aggressively reuse buffers *or* optimising for speed in which
+  case the result is the forward pass of gradient descent and we expect implementations to have
+  multiple batches in flight simultaneously."
   [{:keys [layer-graph] :as network} stream-map]
   (check-for-io-bindings network)
   (let [network (remove-existing-loss-terms network)
         forward-traversal (->> (create-forward-traversal network)
-                               (filter-traversal network :inference)
-                               (#(traversal->buffers % {}))
-                               first)]
+                               (filter-traversal network :inference))]
     (update network
             :traversal
             #(merge
               %
               {:forward (clean-traversal-incoming-outgoing forward-traversal)
-               :buffers (forward-traversal->buffer-map network forward-traversal)
+               :buffers (traversal->buffers forward-traversal {})
                :type :inference
                :stream-map stream-map}))))
 

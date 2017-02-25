@@ -15,14 +15,23 @@
 (deftest corn-gradient
   (gradient/corn-gradient (create-context)))
 
-
 (deftest batch-normalization
   (gradient/batch-normalization-gradient (create-context)))
-
 
 (deftest local-response-normalization-gradient
   (gradient/lrn-gradient (create-context)))
 
-
 (deftest prelu-gradient
   (gradient/prelu-gradient (create-context)))
+
+(deftest concat-gradient
+  (gradient/concat-gradient (create-context)))
+
+(deftest split-gradient
+  (gradient/split-gradient (create-context)))
+
+(deftest join-+-gradient
+  (gradient/join-+-gradient (create-context)))
+
+(deftest join-*-gradient
+  (gradient/join-*-gradient (create-context)))

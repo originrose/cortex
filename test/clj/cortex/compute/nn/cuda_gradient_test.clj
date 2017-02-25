@@ -26,3 +26,15 @@
 
 (deftest prelu-gradient
   (verify-gradient/prelu-gradient (create-context)))
+
+(deftest concat-gradient
+  (verify-gradient/concat-gradient (create-context)))
+
+(deftest split-gradient
+  (verify-gradient/split-gradient (create-context)))
+
+(deftest join-+-gradient
+  (verify-gradient/join-+-gradient (create-context)))
+
+(deftest join-*-gradient
+  (verify-gradient/join-*-gradient (create-context)))

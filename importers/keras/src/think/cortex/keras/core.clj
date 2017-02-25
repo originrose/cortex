@@ -312,12 +312,14 @@
   (cond
     (= (:type node) :convolutional)
     [(:kernel-height node) (:kernel-width node)
-     (:input-channels node) (:num-kernels node)]
+     (get-in node [:input-dimensions 0 :channels]) (:num-kernels node)]
     (= (:type node) :linear)
-    (if (:input-channels node)
-      [(:input-width node) (:input-height node)
-       (:input-channels node) (:output-size node)]
-      [(:input-size node) (:output-size node)])))
+    (if (> (get-in (graph/node->input-dimensions node) [0 :channels]) 1)
+      (let [{:keys [channels width height]} (first (graph/node->input-dimensions node))
+            output-size (graph/node->output-size node)]
+       [width height channels output-size])
+      [(graph/node->input-size node)
+       (graph/node->output-size node)])))
 
 (defn- reshape-weights
   "check and possibly reshape weights for a given node."
@@ -440,8 +442,10 @@
 
 (defn- node->keras-output-dims
   [node]
-  (when (every? #(% node) [:output-channels :output-height :output-width])
-    [(:output-height node) (:output-width node) (:output-channels node)]))
+  (let [{:keys [channels width height]} (first (graph/node->output-dimensions node))]
+    (when (or (> channels 1)
+              (> height 1))
+     [height width channels])))
 
 
 (defn- reshape-layer-output

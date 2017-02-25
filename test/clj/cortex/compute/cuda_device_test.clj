@@ -44,3 +44,6 @@
 
 (def-double-float-test indirect-add
   (verify-driver/indirect-add (create-driver) verify-utils/*datatype*))
+
+(def-double-float-test batched-offsetting
+  (verify-driver/batched-offsetting (create-driver) verify-utils/*datatype*))

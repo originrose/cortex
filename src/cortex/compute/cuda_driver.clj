@@ -832,7 +832,8 @@ relies only on blockDim.x block.x and thread.x"
   ;;Ensure this stream cannot proceed until this event is triggered.
   (sync-event [stream ^cuda$CUevent_st event]
     (cuda-call (cuda/cudaStreamWaitEvent (.stream stream) event (int 0))))
-  (indexed-copy [stream src src-indexes dst dst-indexes n-elems-per-index]
+  (indexed-copy-impl [stream src src-indexes src-stride
+                      dst dst-indexes dst-stride n-elems-per-index]
     (let [n-indexes (m/ecount src-indexes)]
       (when-not (= (dtype/get-datatype src)
                    (dtype/get-datatype dst))
@@ -847,11 +848,13 @@ relies only on blockDim.x block.x and thread.x"
       ;;We cannot check that the indexes are valid on the device.
       ;;So only the cpu layer can help with that type of debugging.
       (let [elem-count (* (int n-elems-per-index) (int n-indexes))]
-        (launch-linear-kernel stream (get-or-create-fn stream :indexed-copy (dtype/get-datatype src)
-                                                       #(load-float-double-function "indexed_copy"))
+        (launch-linear-kernel stream (get-or-create-fn stream :indexed-copy
+                                                       (dtype/get-datatype src)
+                                                       #(load-float-double-function
+                                                         "indexed_copy"))
                               elem-count 0
-                              (->ptr src) (->ptr src-indexes)
-                              (->ptr dst) (->ptr dst-indexes)
+                              (->ptr src) (->ptr src-indexes) (int src-stride)
+                              (->ptr dst) (->ptr dst-indexes) (int dst-stride)
                               (int n-elems-per-index) (int n-indexes)))))
   math/PMath
   (gemm-impl [stream trans-a? trans-b?

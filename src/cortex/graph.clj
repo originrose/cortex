@@ -73,13 +73,13 @@ buffers."
   "Callback called when the node is added to the graph.  Note that the node at this point
   is not located in the graph.  Also note that any parameter arguments are generated
   in a separate step.  This is simply a translation from node->node called during
-  the add-node step."
-  (fn [graph node predecessor-ids]
+  the add-node step.  Precessors have been built, successors have not been built."
+  (fn [graph node predecessor-ids successor-ids]
     (get node :type)))
 
 ;;lots of nodes do not need to build built.
 (defmethod build-node :default
-  [graph node p-id-seq]
+  [graph node p-id-seq s-id-seq]
   node)
 
 
@@ -135,7 +135,7 @@ a vector of floats."
 
 
 (defmethod build-node :input
-  [graph node predecessor-seq]
+  [graph node predecessor-seq successor-id-seq]
   (when-not (= 0 (count predecessor-seq))
     (throw (ex-info "Input nodes cannot have predecessor nodes"
                     {:node node
@@ -265,16 +265,25 @@ a vector of floats."
   [graph]
   (edges->map graph second first))
 
+
 (defn dfs-seq
   "Get a sequence of ids in dfs order."
   [graph]
   (let [p->c-map (-> (parent->child-map graph)
                      (assoc :roots (roots graph)))]
-    (->>
-     (tree-seq #(contains? p->c-map %)
-               #(get p->c-map %)
-               :roots)
-     (drop 1))))
+
+    (->> (tree-seq #(contains? p->c-map %)
+                   #(get p->c-map %)
+                   :roots)
+         (drop 1)
+         ;;Account for cases where the graph has multiple roots.
+         ;;by taking the last occurance of a multiply-occuring node.
+         ;;this ensures that a child will not get visited until after
+         ;;every parent has been visited.
+         reverse
+         distinct
+         reverse)))
+
 
 (defn relative-dfs-seq
   [graph node-id]
@@ -284,17 +293,148 @@ a vector of floats."
               node-id)))
 
 
+(defn create-node-dimensions
+  "Create a node dimension map.  Dimensions are a map of
+:channels :height :width with the last item (width) being the most
+rapidly changing index and channels being the least rapidly changing index."
+  ([channels height width]
+   {:channels channels
+    :height height
+    :width width})
+  ([width] (create-node-dimensions 1 1 width)))
+
+
+(defn- node-inline-data->dims
+  [node key-stem]
+  (let [retval
+        (if-let [width (get node (keyword (str key-stem "-width")))]
+          [{:channels (get node (keyword (str key-stem "-channels")))
+            :height (get node (keyword (str key-stem "-height")))
+            :width width}]
+          [{:channels 1
+            :height 1
+            :width (get node (keyword (str key-stem "-size")))}])]
+    (when-not (every? number? (vals (first retval)))
+      (throw (ex-info "Failed to convert node's built information into dimensions"
+                      {:node node
+                       :result retval
+                       })))
+    retval))
+
+(defn node->input-dimensions
+  "Return a list of dimensions in order, one for every input of the node."
+  [node]
+  (or (get node :input-dimensions)
+      (node-inline-data->dims node "input")))
+
+
+(defn node->output-dimensions
+  "Return a list of dimensions in order, one for every input of the node."
+  [node]
+  (or (get node :output-dimensions)
+      (node-inline-data->dims node "output")))
+
+
+(defn dimensions->dims-with-ids
+  "When there are only 1 of dimensions and ids then the id of the first dimension
+is unambiguous and set into the dimension entry.  When there are more ensure
+that each id has an unambiguous mapping to a dimension."
+  [dims-seq id-seq]
+  (when-not (= (count dims-seq) (count id-seq))
+    (throw (ex-info "Dimensions vector and id sequence mismatch"
+                    {:dims-sequence dims-seq
+                     :id-sequence id-seq})))
+  (if (= 1 (count dims-seq))
+    (update (vec dims-seq) 0
+            assoc :id (first id-seq))
+    ;;Error check the dimensions that each id in the id seq appears in them
+    ;;and that id's are not repeated.
+    (do
+      (when-not (every? #(contains? % :id)
+                        dims-seq)
+        (throw (ex-info "Every dimension entry must contain a mapping id"
+                        {:dimensions dims-seq})))
+      (let [dims-ids (set (map :id dims-seq))
+            id-set (set id-seq)]
+        (when-not (= (count id-seq)
+                     (count id-set))
+          (throw (ex-info "Duplicate ids detected"
+                          {:id-set id-set
+                           :id-seq id-seq
+                           :dims-seq dims-seq})))
+        (when-not (= id-set dims-ids)
+          (throw (ex-info "id set differs from dimension id set"
+                          {:id-seq id-seq
+                           :dimension-seq dims-seq})))
+        (vec dims-seq)))))
+
+
+(defn node->output-dimension
+  [node]
+  (let [output-dims (node->output-dimensions node)]
+    (when-not (= 1 (count output-dims))
+      (throw (ex-info "Node has multiple outputs thus canonical dimension is ambiguous."
+                      {:node node
+                       :output-dims output-dims})))
+    (first output-dims)))
+
+
+(defn node->input-dimension
+  [node]
+  (let [input-dims (node->input-dimensions node)]
+    (when-not (= 1 (count input-dims))
+      (throw (ex-info "Node has multiple inputs thus canonical dimension is ambiguous"
+                      {:node node
+                       :input-dims input-dims})))
+    (first input-dims)))
+
+
+(defn dimensions->size
+  ^long [dims]
+  (apply * (vals (dissoc dims :id))))
+
+
+(defn dimensions->shape
+  "Return a vector of integers with the highest indexes changing more rapidly than the
+lower indexes...In other words the dimenion tuple is in big-endian order."
+  [dims]
+  (mapv dims [:channels :height :width]))
+
+
+(defn- dims-vec->size
+  ^long [node dims-vec direction]
+  (when-not (= 1 (count dims-vec))
+    (throw (ex-info "Cannot convert to size, node has multiple or zero dimensions"
+                    {:node node
+                     :direction direction})))
+  (dimensions->size (first dims-vec)))
+
+
+(defn node->input-size
+  "Given a node, ensure it has 1 input dimension and call dimension->size for that dim."
+  ^long [node]
+  (dims-vec->size node (node->input-dimensions node) :input))
+
+
+(defn node->output-size
+  "Given a node, ensure it has 1 input dimension and call dimension->size for that dim."
+  ^long [node]
+  (dims-vec->size node (node->output-dimensions node) :output))
+
+
 (defn- do-build-graph
-  [c->p-map graph node-id]
-  (let [node (build-node graph (get-node graph node-id) (get c->p-map node-id))]
+  [c->p-map p->c-map graph node-id]
+  (let [node (build-node graph (get-node graph node-id)
+                         (get c->p-map node-id) (get p->c-map node-id))]
     (update graph :id->node-map assoc node-id node)))
 
 
 (defn build-graph
   "Propagate size information (input/output sizes) through the graph in dfs order."
   [graph]
-  (let [c->p-map (child->parent-map graph)]
-    (reduce (partial do-build-graph c->p-map)
+  (let [c->p-map (child->parent-map graph)
+        p->c-map (parent->child-map graph)]
+    (reduce (partial do-build-graph c->p-map p->c-map)
             graph
             (dfs-seq graph))))
 
@@ -321,10 +461,11 @@ a vector of floats."
                     {:stream (get argument :stream)
                      :streams (keys stream->size)}))))
 
+
 (defmethod get-argument-shape :node-output
   [graph node argument]
   (let [target-node (get-node graph (get argument :node-id))]
-    (if-let [retval (get target-node :output-size)]
+    (if-let [retval (node->output-size target-node)]
       [(long retval)]
       (throw (ex-info "Failed to find node output size"
                       {:argument argument
@@ -352,13 +493,11 @@ a vector of floats."
                        :argument argument
                        :error e})))))
 
-
 (defmulti initialize-graph-parameter-buffer
   "Initialize a graph parameter buffer"
   (fn
     [graph node argument shape initialization]
     (get initialization :type)))
-
 
 (defmethod initialize-graph-parameter-buffer :default
   [graph node argument shape initialization]

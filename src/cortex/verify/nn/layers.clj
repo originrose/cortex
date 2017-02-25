@@ -13,21 +13,25 @@
             [cortex.graph :as graph]))
 
 (defn bind-test-network
+  [context network batch-size stream->size-map & {:keys [bind-opts input-bindings]
+                                                  :or {bind-opts {}}}]
+  (as-> network network
+    (network/build-network network)
+    (traverse/auto-bind-io network :input-bindings input-bindings)
+    (traverse/network->training-traversal network stream->size-map
+                                          :keep-non-trainable? true)
+    (assoc network :batch-size batch-size)
+    (cp/bind-to-network context network bind-opts)))
+
+
+(defn set-id-and-bind-test-network
   [context network batch-size stream->size-map test-layer-id]
-  (let [test-layer-id :test
-        input-bindings [(traverse/->input-binding :input :data)]
-        output-bindings [(traverse/->output-binding test-layer-id :stream :labels)]]
+  (let [test-layer-id :test]
     (as-> network network
       (flatten network)
       (vec network)
-      (assoc-in network [0 :id] :input)
       (assoc-in network [1 :id] test-layer-id)
-      (network/build-network network)
-      (traverse/bind-input-bindings network input-bindings)
-      (traverse/bind-output-bindings network output-bindings)
-      (traverse/network->training-traversal network stream->size-map :keep-non-trainable? true)
-      (assoc network :batch-size batch-size)
-      (cp/bind-to-network context network {}))))
+      (bind-test-network context network batch-size stream->size-map))))
 
 
 (defn unpack-bound-network
@@ -63,29 +67,75 @@
      :input-gradient (get (first incoming-buffers) :gradient)
      :numeric-input-gradient (get (first incoming-buffers) :numeric-gradient)}))
 
+(defn- vec->id-val-pairs
+  [data-vec id-stem]
+  (if (= (count data-vec) 1)
+    [[id-stem (first data-vec)]]
+    (map-indexed (fn [idx data-item]
+                   ;;I know that id generation throughout cortex starts at 1, not 0.
+                   [(keyword (format "%s-%s" (name id-stem) (inc idx)))
+                    data-item])
+                 data-vec)))
+
+(defn vec->stream-map
+  [input-vec stem]
+  (->> (vec->id-val-pairs input-vec stem)
+       (into {})))
+
 
 (defn forward-backward-bound-network
-  [context network input output-gradient test-layer-id]
-  (let [input-stream {:data input}
-        output-gradient-stream {test-layer-id output-gradient}]
-    (as-> (cp/forward-backward context network input-stream output-gradient-stream) network
-      (unpack-bound-network context network test-layer-id))))
+  [context network input-vec output-gradient-vec test-layer-id]
+  ;;We drop nodes leading up to the test node in the backward pass so a test
+  ;;can just provide the necessary data for that node specifically and does not,
+  ;;for example, need to provide a bunch of output gradients for children of the
+  ;;test layer.
+  (as-> network network
+    (cp/forward-backward context network
+                         (vec->stream-map input-vec :data)
+                         (vec->stream-map output-gradient-vec test-layer-id))
+    (unpack-bound-network context network test-layer-id)))
+
+
+(defn vec->size-vec
+  [data-vec batch-size]
+  (map #(/ (m/ecount %)
+           batch-size)
+       data-vec))
+
+
+(defn io-vec->stream->size-map
+  [input-vec output-grad-vec batch-size]
+  (->> (concat (vec->id-val-pairs (vec->size-vec input-vec batch-size) :data)
+               (vec->id-val-pairs (vec->size-vec output-grad-vec batch-size) :labels))
+       (into {})))
+
+
+(defn forward-backward-test-multiple
+  "General test for when there may be a network with multiple inputs or outputs."
+  [context network batch-size input-vec output-grad-vec
+   & {:keys [input-bindings]}]
+  (as-> (bind-test-network context network batch-size
+                           (io-vec->stream->size-map input-vec
+                                                     output-grad-vec
+                                                     batch-size)
+                           :input-bindings input-bindings)
+      network
+    (forward-backward-bound-network context network
+                                    input-vec
+                                    output-grad-vec :test)))
 
 
 (defn forward-backward-test
   "Given a 2 node network (input,layer) run a test that goes forward and backward
-for that network."
+  for that network."
   [context network batch-size input output-gradient]
   (resource/with-resource-context
-    (let [test-layer-id :test
-          data-size (/ (m/ecount input)
-                       batch-size)
-          labels-size (/ (m/ecount output-gradient)
-                         batch-size)]
-      (as-> (bind-test-network context network batch-size {:data data-size
-                                                           :labels labels-size}
-                               test-layer-id) network
-       (forward-backward-bound-network context network input output-gradient test-layer-id)))))
+    (as-> network network
+      (flatten network)
+      (vec network)
+      (assoc-in network [1 :id] :test)
+      (forward-backward-test-multiple context network batch-size
+                                      [input] [output-gradient]))))
 
 
 (defn relu-activation
@@ -174,11 +224,11 @@ for that network."
 
 (def activation-answers
   {:logistic [[0.2689414213699951 0.7310585786300049 0.2689414213699951 0.7310585786300049
-              0.2689414213699951 0.7310585786300049 0.2689414213699951 0.7310585786300049
-              0.2689414213699951 0.7310585786300049]
-             [-0.19661193324148185 0.19661193324148185 -0.19661193324148185 0.19661193324148185
-              -0.19661193324148185 0.19661193324148185 -0.19661193324148185 0.19661193324148185
-              -0.19661193324148185 0.19661193324148185]]
+               0.2689414213699951 0.7310585786300049 0.2689414213699951 0.7310585786300049
+               0.2689414213699951 0.7310585786300049]
+              [-0.19661193324148185 0.19661193324148185 -0.19661193324148185 0.19661193324148185
+               -0.19661193324148185 0.19661193324148185 -0.19661193324148185 0.19661193324148185
+               -0.19661193324148185 0.19661193324148185]]
    :tanh [[-0.7615941559557649 0.7615941559557649 -0.7615941559557649 0.7615941559557649
            -0.7615941559557649 0.7615941559557649 -0.7615941559557649 0.7615941559557649
            -0.7615941559557649 0.7615941559557649]
@@ -397,37 +447,37 @@ for that network."
 (defn dropout-bernoulli
   [context]
   (resource/with-resource-context
-   (let [batch-size 5
-         item-count 20
-         repeat-count 30
-         input (repeat (* batch-size item-count) 1.0)
-         output-gradient (repeat (* batch-size item-count) 2.0)
-         test-layer-id :test
-         dropout-network (bind-test-network context
-                                            [(layers/input item-count)
-                                             (layers/dropout 0.8)]
-                                            batch-size
-                                            {:data item-count
-                                             :labels item-count}
-                                            test-layer-id)
-         answer-seq
-         (doall
-          (for [iter (range repeat-count)]
-            (let [{:keys [output input-gradient]}
-                  (forward-backward-bound-network context dropout-network
-                                                 input output-gradient
-                                                 test-layer-id)
-                  output (m/eseq output)
-                  input-gradient (m/eseq input-gradient)]
-              [(m/esum output) (count-zeros output)
-               (m/esum input-gradient) (count-zeros input-gradient)])))
-         final-aggregate  (reduce m/add answer-seq)
-         final-answer (m/div final-aggregate repeat-count)
-         total-elem-count (double (* item-count batch-size))]
-     ;;zero count should be identical
-     (is (= (final-answer 1) (final-answer 3)))
-     (is (utils/about-there? (final-answer 0) total-elem-count 3))
-     (is (utils/about-there? (final-answer 2) (* 2.0 total-elem-count) 5)))))
+    (let [batch-size 5
+          item-count 20
+          repeat-count 30
+          input (repeat (* batch-size item-count) 1.0)
+          output-gradient (repeat (* batch-size item-count) 2.0)
+          test-layer-id :test
+          dropout-network (set-id-and-bind-test-network context
+                                                        [(layers/input item-count)
+                                                         (layers/dropout 0.8)]
+                                                        batch-size
+                                                        {:data item-count
+                                                         :labels item-count}
+                                                        test-layer-id)
+          answer-seq
+          (doall
+           (for [iter (range repeat-count)]
+             (let [{:keys [output input-gradient]}
+                   (forward-backward-bound-network context dropout-network
+                                                   [input] [output-gradient]
+                                                   test-layer-id)
+                   output (m/eseq output)
+                   input-gradient (m/eseq input-gradient)]
+               [(m/esum output) (count-zeros output)
+                (m/esum input-gradient) (count-zeros input-gradient)])))
+          final-aggregate  (reduce m/add answer-seq)
+          final-answer (m/div final-aggregate repeat-count)
+          total-elem-count (double (* item-count batch-size))]
+      ;;zero count should be identical
+      (is (= (final-answer 1) (final-answer 3)))
+      (is (utils/about-there? (final-answer 0) total-elem-count 3))
+      (is (utils/about-there? (final-answer 2) (* 2.0 total-elem-count) 5)))))
 
 
 
@@ -439,19 +489,19 @@ for that network."
         input (repeat (* batch-size item-count) 1.0)
         output-gradient (repeat (* batch-size item-count) 2.0)
         test-layer-id :test
-        dropout-network (bind-test-network context
-                                           [(layers/input item-count)
-                                            (layers/multiplicative-dropout 0.5)]
-                                           batch-size
-                                           {:data item-count
-                                            :labels item-count}
-                                           test-layer-id)
+        dropout-network (set-id-and-bind-test-network context
+                                                      [(layers/input item-count)
+                                                       (layers/multiplicative-dropout 0.5)]
+                                                      batch-size
+                                                      {:data item-count
+                                                       :labels item-count}
+                                                      test-layer-id)
         answer-seq
         (doall
          (for [iter (range repeat-count)]
            (let [{:keys [output input-gradient]}
-                  (forward-backward-bound-network context dropout-network
-                                                 input output-gradient
+                 (forward-backward-bound-network context dropout-network
+                                                 [input] [output-gradient]
                                                  test-layer-id)]
              [(m/esum (m/eseq output)) (m/esum (m/eseq input-gradient))])))
         final-aggregate  (reduce m/add answer-seq)
@@ -471,18 +521,19 @@ for that network."
                                             #(-> (repeatedly batch-size cu/rand-gaussian)
                                                  double-array
                                                  (cu/ensure-gaussian! 5 20)))))
-        network (bind-test-network context [(layers/input input-size)
-                                            (layers/batch-normalization :ave-factor 0.8)]
-                                   batch-size
-                                   {:data input-size
-                                    :labels input-size}
-                                   :test)
+        network (set-id-and-bind-test-network context [(layers/input input-size)
+                                                       (layers/batch-normalization
+                                                        :ave-factor 0.8)]
+                                              batch-size
+                                              {:data input-size
+                                               :labels input-size}
+                                              :test)
 
         input (input-data-vector-fn)
         output-gradient (repeat (* batch-size
                                    input-size) 1.0)
         {:keys [output]}
-        (forward-backward-bound-network context network input output-gradient :test)
+        (forward-backward-bound-network context network [input] [output-gradient] :test)
 
         output-batches (mapv vec (partition input-size (m/eseq output)))
         output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))
@@ -496,19 +547,19 @@ for that network."
     (dotimes [iter 5]
       (let [input (input-data-vector-fn)
             {:keys [output]}
-            (forward-backward-bound-network context network input output-gradient :test)
+            (forward-backward-bound-network context network [input] [output-gradient] :test)
             output-batches (mapv vec (partition input-size (m/eseq output)))
             output-stats (mapv cu/calc-mean-variance (m/transpose output-batches))]
-       (doseq [output-idx (range (count output-stats))]
-         (let [{:keys [mean variance]} (output-stats output-idx)]
-           (is (utils/about-there? mean 0.0)
-               (format "Output mean incorrect at index %s" output-idx))
-           (is (utils/about-there? variance 1.0 1e-3)
-               (format "Output variance incorrect at index %s" output-idx))))))
+        (doseq [output-idx (range (count output-stats))]
+          (let [{:keys [mean variance]} (output-stats output-idx)]
+            (is (utils/about-there? mean 0.0)
+                (format "Output mean incorrect at index %s" output-idx))
+            (is (utils/about-there? variance 1.0 1e-3)
+                (format "Output variance incorrect at index %s" output-idx))))))
 
 
     (let [{:keys [parameters]}
-          (forward-backward-bound-network context network input output-gradient :test)
+          (forward-backward-bound-network context network [input] [output-gradient] :test)
           running-means (get-in parameters [:means :buffer :buffer])
           running-inv-vars (get-in parameters [:variances :buffer :buffer])]
       (is (utils/about-there? 5.0 (/ (m/esum running-means)
@@ -517,7 +568,7 @@ for that network."
       ;;instead of a specific calculation for variance meaning
       ;;you divide by n-1 instead of n.
       (is (utils/about-there? 21.05 (/ (m/esum running-inv-vars)
-                                      input-size)
+                                       input-size)
                               1e-2)))))
 
 
@@ -589,3 +640,151 @@ for that network."
            (vec (m/eseq output))))
     (is (= [-10.0 10.0 -10.0 10.0]
            (vec (m/eseq (get-in parameters [:neg-scale :buffer :gradient])))))))
+
+
+(defn concatenate
+  [context]
+  (let [batch-size 4
+        item-count 5
+        num-inputs 2
+        ;;sums to zero
+        inputs (->> (partition (* item-count batch-size)
+                               (range (* batch-size item-count
+                                         num-inputs)))
+                    (map #(partition item-count %))
+                    (mapv vec))
+        outputs (->> (partition (* item-count batch-size)
+                                (range (* batch-size item-count
+                                          num-inputs)))
+                     (map #(partition item-count %))
+                     (apply interleave)
+                     (partition num-inputs)
+                     (mapv #(vec (apply concat %))))
+        output-gradients outputs
+        input-gradients inputs
+        {:keys [incoming-buffers outgoing-buffers]}
+        (forward-backward-test-multiple context
+                                        [(layers/input item-count 1 1 :id :right)
+                                         (layers/input item-count 1 1 :parents [] :id :left)
+                                         (layers/concatenate :parents [:left :right]
+                                                             :id :test)]
+                               batch-size
+                               inputs
+                               [output-gradients]
+                               :input-bindings {:right :data-2
+                                                :left :data-1})]
+    (is (m/equals input-gradients
+                  (mapv :gradient incoming-buffers)))
+    (is (m/equals outputs
+                  (get-in outgoing-buffers [0 :buffer])))
+    (let [{:keys [incoming-buffers outgoing-buffers]}
+          (forward-backward-test-multiple context
+                                          [(layers/input item-count 1 1 :id :right)
+                                           (layers/input item-count 1 1 :parents [] :id :left)
+                                           (layers/concatenate :parents [:right :left]
+                                                               :id :test)]
+                                          batch-size
+                                          inputs
+                                          [output-gradients]
+                                          :input-bindings {:right :data-2
+                                                           :left :data-1})
+          swapped-outputs (->> (partition (* item-count batch-size)
+                                          (range (* batch-size item-count
+                                                    num-inputs)))
+                               (map #(partition item-count %))
+                               (apply interleave)
+                               (partition num-inputs)
+                               (mapv #(vec (->> %
+                                                reverse
+                                                (apply concat)))))]
+      (is (m/equals input-gradients
+                    (mapv :gradient incoming-buffers)))
+      (is (m/equals swapped-outputs
+                    (get-in outgoing-buffers [0 :buffer]))))))
+
+
+(defn split
+  [context]
+  (let [input-size 5
+        batch-size 5
+        output-size 10
+        input [(mapv vec (partition input-size (range (* batch-size input-size))))]
+        output-gradients (repeat 2 (first input))
+        outputs (repeat 2 (first input))
+        ;;Split with <2 children acts as a pass-through node.
+        {:keys [outgoing-buffers input-gradient]}
+        (forward-backward-test-multiple context
+                                        [(layers/input input-size)
+                                         (layers/split :id :test)
+                                         (layers/split)
+                                         (layers/split :parents [:test])]
+                                        batch-size
+                                        input
+                                        output-gradients)]
+    (is (m/equals outputs (mapv :buffer outgoing-buffers)))))
+
+
+;;I can really name something with a -+ suffix?!!
+(defn join-+
+  [context]
+  (let [batch-size 4
+        item-count 5
+        num-inputs 2
+        ;;sums to zero
+        inputs (->> (partition (* item-count batch-size)
+                               (range (* batch-size item-count num-inputs)))
+                    (map #(partition item-count %))
+                    (mapv vec))
+        outputs (->> (apply interleave inputs)
+                     (partition num-inputs)
+                     (mapv #(apply m/add %)))
+        output-gradients (->> (range (* batch-size item-count))
+                              (partition item-count)
+                              (mapv vec))
+        input-gradients (repeat 2 (first inputs))
+        {:keys [incoming-buffers outgoing-buffers]}
+        (forward-backward-test-multiple context
+                                        [(layers/input item-count 1 1 :id :right)
+                                         (layers/input item-count 1 1 :parents [] :id :left)
+                                         (layers/join :parents [:left :right]
+                                                      :id :test)]
+                                        batch-size
+                                        inputs
+                                        [output-gradients]
+                                        :input-bindings {:right :data-2
+                                                         :left :data-1})]
+    (is (m/equals input-gradients
+                  (mapv :gradient incoming-buffers)))
+    (is (m/equals outputs
+                  (get-in outgoing-buffers [0 :buffer])))))
+
+
+(defn join-+-2
+  [context]
+  (let [batch-size 4
+        input-counts [3 4 5]
+        num-inputs (count input-counts)
+        input-sequence (flatten (repeat [-1 -2 1 4]))
+        inputs (->> (mapv #(->>
+                            (take (* batch-size %) input-sequence)
+                            (partition %))
+                          input-counts))
+        output-count (apply max input-counts)
+        output-gradients [(->> (repeat (* batch-size output-count) 1)
+                               (partition output-count))]
+        {:keys [incoming-buffers outgoing-buffers]}
+        (forward-backward-test-multiple context
+                                        [(layers/input 3 1 1 :id :left)
+                                         (layers/input 4 1 1 :parents [] :id :middle)
+                                         (layers/input 5 1 1 :parents [] :id :right)
+                                         (layers/join :parents [:left :middle :right]
+                                                      :id :test)]
+                                        batch-size
+                                        inputs
+                                        output-gradients)]
+    ;;You have to pprint the inputs for this output to make any sense
+    (is (m/equals [[-3.0,-6.0,3.0,8.0,-1.0],
+                   [1.0,-2.0,3.0,3.0,-2.0],
+                   [1.0,6.0,-1.0,2.0,1.0],
+                   [1.0,-2.0,3.0,5.0,4.0]]
+                  (get-in outgoing-buffers [0 :buffer])))))

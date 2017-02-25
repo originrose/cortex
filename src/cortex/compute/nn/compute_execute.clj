@@ -208,7 +208,9 @@
            (update-in compute-binding [:traversal-buffers buffer-key]
                       (fn [buffer]
                         (or buffer
-                            (let [buffer-size (get-in traversal [:buffers buffer-key :size])
+                            (let [buffer-size (-> (get-in traversal
+                                                          [:buffers buffer-key :dimension])
+                                                  (graph/dimensions->size))
                                   gradients? (and gradients?
                                                   (contains? backward-buffers buffer-key))
                                   numeric-gradients? (and numeric-gradients?
@@ -236,7 +238,8 @@
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
                                    (apply +))
-        [network loss-function] (load-loss-function network backend (get traversal :loss-function))]
+        [network loss-function] (load-loss-function network backend
+                                                    (get traversal :loss-function))]
     (-> network
         (assoc-in [:compute-binding :optimizer]
                   (when-let [optimizer (get traversal :optimizer)]
@@ -338,7 +341,9 @@
                                       (let [input-buffer (get id->input-buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
-                                          [map-key (assoc buffer-entry buffer-type input-buffer)]
+                                          (do
+                                            [map-key (assoc buffer-entry buffer-type
+                                                            input-buffer)])
                                           [map-key buffer-entry]))))
                                (into {}))
         buffer-resolve (partial find-buffers traversal-buffers)]
@@ -380,12 +385,14 @@
 (defn- resolve-node-arguments
   ([network id id->output-map]
    (let [special-graph (-> (network/network->graph network)
-                           (assoc :buffers (get-in network [:compute-binding :parameter-buffers])))
+                           (assoc :buffers (get-in network [:compute-binding
+                                                            :parameter-buffers])))
          stream-map (->> (get-in network [:compute-binding :stream->buffer-map])
                          (map (fn [[k v]]
                                 [k {:buffer v}]))
                          (into {}))
-         retval (graph/resolve-arguments special-graph (graph/get-node special-graph id)
+         retval (graph/resolve-arguments special-graph
+                                         (graph/get-node special-graph id)
                                          stream-map id->output-map)]
      retval))
   ([network id]
@@ -459,11 +466,12 @@
       (throw (ex-info "Not sure how to handle multiple output gradients and loss functions"
                       {:output-gradient-count (count incoming)
                        :node-id id})))
-    ;;Sum any node outputs from any loss terms if they apply to this node's incoming gradient (which is it's
-    ;;output gradient).
-    ;;This is so that node implementations can be as simple as possible; they don't need to sum into their
-    ;;input gradient buffers as this oculd imply secondary buffers in some cases as not all math operations
-    ;;have a cumulative summation step at the end.
+    ;;Sum any node  outputs from any loss terms if  they apply to this
+    ;;node's incoming gradient (which  is it's output gradient).  This
+    ;;is so  that node implementations  can be as simple  as possible;
+    ;;they don't need to sum into their input gradient buffers as this
+    ;;oculd  imply secondary  buffers in  some cases  as not  all math
+    ;;operations have a cumulative summation step at the end.
     (->> output-arguments
          (map (fn [argument]
                 (math/sum stream
@@ -547,7 +555,8 @@ and anything that has a loss term attached to it's output becomes an output bind
                                                {:node-id k
                                                 :passes v})))
                              [k (first v)]))
-                      (into {}))]
+                      (into {}))
+        graph (network/network->graph network)]
 
    (->> (concat (traverse/get-output-bindings network)
                 (get-loss-function-output-bindings network))
@@ -563,10 +572,8 @@ and anything that has a loss term attached to it's output becomes an output bind
                   :buffers (get-in network [:compute-binding
                                             :traversal-buffers
                                             output-id])
-                  :output-size (get-in network [:layer-graph
-                                                :id->node-map
-                                                node-id
-                                                :output-size])}))))))
+                  :output-size (graph/node->output-size
+                                (graph/get-node graph node-id))}))))))
 
 
 (defn- get-input-bindings

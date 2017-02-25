@@ -137,31 +137,31 @@
        (distinct)
        (sort)))
 
+(defn- print-graph-dimensions
+  [dim-vec]
+  (let [dims (first dim-vec)]
+    (format "%sx%sx%s - %s"
+            (:channels dims)
+            (:height dims)
+            (:width dims)
+            (graph/dimensions->size dims))))
+
 (defn- layer->input-str
   [layer]
-  (if (:input-width layer)
-    (format "%sx%sx%s - %s"
-            (:input-channels layer)
-            (:input-height layer)
-            (:input-width layer)
-            (:input-size layer))
-    (str (:input-size layer))))
+  (print-graph-dimensions (graph/node->input-dimensions layer)))
+
 
 (defn- layer->output-str
   [layer]
-  (if (:output-width layer)
-    (format "%sx%sx%s - %s"
-            (:output-channels layer)
-            (:output-height layer)
-            (:output-width layer)
-            (:output-size layer))
-    (str (:output-size layer))))
+  (print-graph-dimensions (graph/node->output-dimensions layer)))
+
 
 (defn- layer->buffer-shape
   [network layer k]
   (-> network
       (get-in [:layer-graph :buffers (get-in layer [k :buffer-id]) :buffer])
       m/shape))
+
 
 (defn print-layer-summary
   "Given a network, prints a table summarizing layer input/output sizes as well

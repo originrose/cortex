@@ -10,7 +10,8 @@
             [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.nn.impl :as impl])
+            [cortex.nn.impl :as impl]
+            [cortex.graph :as graph])
   (:import [cortex.compute.cpu_driver CPUDriver CPUStream]
            [java.nio DoubleBuffer FloatBuffer]
            [cortex.compute.math DeviceArray Tensor]
@@ -894,7 +895,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (forward [this parameter-buffers input output]
     (cpu-drv/with-stream-dispatch cpu-stream
       (cpu-softmax-forward (first-buffer input) (first-buffer output)
-                           (:input-size layer) (:output-channels layer))))
+                           (graph/node->input-size layer) (:output-channels layer))))
   (backward [this parameter-buffers output input]
     (compute-layers/softmax-backward! cpu-stream
                                       (compute-layers/first-gradient input)
@@ -904,6 +905,21 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 (defmethod create-cpu-layer :softmax
   [backend layer batch-size]
   (->SoftmaxLayer layer (drv/get-stream backend)))
+
+(defn conv-type-layer->conv-config
+  "Backwards compatibility function necessary as the node format has changed over time."
+  [conv-layer]
+  (let [input-dims (first (graph/node->input-dimensions conv-layer))
+        output-dims (first (graph/node->output-dimensions conv-layer))]
+    (assoc conv-layer
+           :input-channels (get input-dims :channels)
+           :input-width (get input-dims :width)
+           :input-height (get input-dims :height)
+           :input-size (graph/dimensions->size input-dims)
+           :output-channels (get output-dims :channels)
+           :output-width (get output-dims :width)
+           :output-height (get output-dims :height)
+           :output-size (graph/dimensions->size output-dims))))
 
 
 (defrecord ConvolutionalLayer [backend conv-config input-convolved ones])
@@ -920,7 +936,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 
 (defn create-conv-layer [backend conv-config ^long batch-size]
-  (let [num-out-pixels (* (long (:output-width conv-config))
+  (let [conv-config (conv-type-layer->conv-config conv-config)
+        num-out-pixels (* (long (:output-width conv-config))
                           (long (:output-height conv-config)))]
     (->ConvolutionalLayer backend conv-config
                           (create-convolution-matrix conv-config backend batch-size)
@@ -1052,15 +1069,16 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (defmethod create-cpu-layer :max-pooling
   [backend layer batch-size]
-  (->MaxPooling backend layer))
+  (->MaxPooling backend (conv-type-layer->conv-config layer)))
 
 
 (defn- layer-output->tensor
-  [{:keys [output-channels output-width output-height] :as layer} batch-size]
-  (math/create-tensor batch-size
-                      output-channels
-                      output-height
-                      output-width))
+  [layer batch-size]
+  (let [{:keys [channels width height]} (first (graph/node->output-dimensions layer))]
+   (math/create-tensor batch-size
+                       channels
+                       height
+                       width)))
 
 (defrecord BatchNormalization [backend]
   nn-backend/PBatchNormalization

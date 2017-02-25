@@ -85,6 +85,7 @@
 
 (deftest big-description
   (let [network (build-big-description)
+        ;;Run the traversal twice as it is supposed to be idempotent.
         training-net (-> (traverse/network->training-traversal network stream->size-map)
                          (traverse/network->training-traversal stream->size-map))
         gradient-descent (->> training-net
@@ -127,24 +128,55 @@
             (get gradient-descent :forward))))
     (is (= [nil nil]
            (minimal-diff
-            {{:id :batch-normalization-1} {:id :batch-normalization-1, :size 800},
-             {:id :convolutional-1} {:id :convolutional-1, :size 11520},
-             {:id :convolutional-2} {:id :convolutional-2, :size 3200},
-             {:id :dropout-1} {:id :dropout-1, :size 784},
-             {:id :dropout-2} {:id :dropout-2, :size 2880},
-             {:id :dropout-3} {:id :dropout-3, :size 800},
-             {:id :dropout-4} {:id :dropout-4, :size 500},
-             {:id :linear-1} {:id :linear-1, :size 500},
-             {:id :linear-2} {:id :linear-2, :size 10},
-             {:id :max-pooling-1} {:id :max-pooling-1, :size 2880},
-             {:id :max-pooling-2} {:id :max-pooling-2, :size 800},
-             {:id :relu-1} {:id :relu-1, :size 2880},
-             {:id :relu-2} {:id :relu-2, :size 800},
-             {:stream :data} {:stream :data, :size 784},
-             {:id :feature} {:id :feature :size 500},
-             {:output-id :softmax-1} {:loss {:type :softmax-loss},
-                                      :output-id :softmax-1,
-                                      :size 10}}
+            {{:id :max-pooling-2}
+             {:id :max-pooling-2,
+              :dimension {:channels 50, :height 4, :width 4},},
+             {:id :convolutional-1}
+             {:id :convolutional-1,
+              :dimension {:channels 20, :height 24, :width 24},},
+             {:id :batch-normalization-1}
+             {:id :batch-normalization-1,
+              :dimension {:channels 50, :height 4, :width 4},},
+             {:id :relu-2}
+             {:id :relu-2,
+              :dimension {:channels 50, :height 4, :width 4},},
+             {:id :dropout-3}
+             {:id :dropout-3,
+              :dimension {:channels 50, :height 4, :width 4},},
+             {:stream :data}
+             {:stream :data,
+              :dimension {:channels 1, :height 28, :width 28},},
+             {:id :linear-2}
+             {:id :linear-2,
+              :dimension {:channels 1, :height 1, :width 10},},
+             {:id :dropout-4}
+             {:id :dropout-4,
+              :dimension {:channels 1, :height 1, :width 500},},
+             {:id :max-pooling-1}
+             {:id :max-pooling-1,
+              :dimension {:channels 20, :height 12, :width 12},},
+             {:id :linear-1}
+             {:id :linear-1,
+              :dimension {:channels 1, :height 1, :width 500},},
+             {:id :relu-1}
+             {:id :relu-1,
+              :dimension {:channels 20, :height 12, :width 12},},
+             {:id :feature}
+             {:id :feature,
+              :dimension {:channels 1, :height 1, :width 500},},
+             {:id :dropout-2}
+             {:id :dropout-2,
+              :dimension {:channels 20, :height 12, :width 12},},
+             {:output-id :softmax-1}
+             {:output-id :softmax-1,
+              :loss {:type :softmax-loss},
+              :dimension {:channels 1, :height 1, :width 10},},
+             {:id :convolutional-2}
+             {:id :convolutional-2,
+              :dimension {:channels 50, :height 8, :width 8},},
+             {:id :dropout-1}
+             {:id :dropout-1,
+              :dimension {:channels 1, :height 28, :width 28},}}
             (get gradient-descent :buffers))))
     (is (= [nil nil]
            (minimal-diff
@@ -188,20 +220,43 @@
             (get inference-mem :forward))))
     (is (= [nil nil]
            (minimal-diff
-            {{:id :batch-normalization-1} {:id :batch-normalization-1, :size 800},
-             {:id :convolutional-1} {:id :convolutional-1, :size 11520},
-             {:id :convolutional-2} {:id :convolutional-2, :size 3200},
-             {:id :linear-1} {:id :linear-1, :size 500},
-             {:id :linear-2} {:id :linear-2, :size 10},
-             {:id :max-pooling-1} {:id :max-pooling-1, :size 2880},
-             {:id :max-pooling-2} {:id :max-pooling-2, :size 800},
-             {:id :relu-1} {:id :relu-1, :size 2880},
-             {:id :relu-2} {:id :relu-2, :size 800},
-             {:stream :data} {:stream :data, :size 784},
-             {:id :feature} {:id :feature :size 500},
-             {:output-id :softmax-1} {:loss {:type :softmax-loss},
-                                      :output-id :softmax-1,
-                                      :size 10}}
+            {{:id :max-pooling-2}
+             {:id :max-pooling-2,
+              :dimension {:channels 50, :height 4, :width 4},},
+             {:id :convolutional-1}
+             {:id :convolutional-1,
+              :dimension {:channels 20, :height 24, :width 24},},
+             {:id :batch-normalization-1}
+             {:id :batch-normalization-1,
+              :dimension {:channels 50, :height 4, :width 4},},
+             {:id :relu-2}
+             {:id :relu-2,
+              :dimension {:channels 50, :height 4, :width 4},},
+             {:stream :data}
+             {:stream :data,
+              :dimension {:channels 1, :height 28, :width 28},},
+             {:id :linear-2}
+             {:id :linear-2,
+              :dimension {:channels 1, :height 1, :width 10},},
+             {:id :max-pooling-1}
+             {:id :max-pooling-1,
+              :dimension {:channels 20, :height 12, :width 12},},
+             {:id :linear-1}
+             {:id :linear-1,
+              :dimension {:channels 1, :height 1, :width 500},},
+             {:id :relu-1}
+             {:id :relu-1,
+              :dimension {:channels 20, :height 12, :width 12},},
+             {:id :feature}
+             {:id :feature,
+              :dimension {:channels 1, :height 1, :width 500},},
+             {:output-id :softmax-1}
+             {:output-id :softmax-1,
+              :loss {:type :softmax-loss},
+              :dimension {:channels 1, :height 1, :width 10},},
+             {:id :convolutional-2}
+             {:id :convolutional-2,
+              :dimension {:channels 50, :height 8, :width 8},}}
             (get inference-mem :buffers))))))
 
 (def test-data (atom nil))
@@ -212,7 +267,8 @@
         src-desc (flatten mnist-description-with-toys)
         non-trainable-layers (take num-non-trainable src-desc)
         trainable-layers (drop num-non-trainable src-desc)
-        new-desc (concat (map (fn [layer] (assoc layer :learning-attenuation 0)) non-trainable-layers)
+        new-desc (concat (map (fn [layer] (assoc layer :learning-attenuation 0))
+                              non-trainable-layers)
                          trainable-layers)
         network (-> (network/build-network new-desc)
                     traverse/auto-bind-io
@@ -334,10 +390,6 @@
                                        :traversal
                                        realize-traversals)
         layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
-    (clojure.pprint/pprint              (get traversal-after-stacking :backward))
-
-    (println "!!!original")
-    (clojure.pprint/pprint              (get original-traversal :backward))
     (is (= [nil nil]
            (minimal-diff
              (get original-traversal :backward)
@@ -383,7 +435,159 @@
 (deftest inference-after-train
   (let [network (build-big-description)
         training-net (traverse/network->training-traversal network stream->size-map)
-        inference-net (traverse/network->inference-traversal (traverse/auto-bind-io training-net) stream->size-map)
+        inference-net (traverse/network->inference-traversal
+                       (traverse/auto-bind-io training-net) stream->size-map)
         output-bindings (vec (traverse/get-output-bindings inference-net))]
     (is (= 1 (count output-bindings)))
     (is (= :softmax-1 (get-in output-bindings [0 :node-id])))))
+
+
+(deftest concatenate-traversal-1
+  (let [network (-> (network/build-network [(layers/input 10 10 10)
+                                            (layers/linear 500 :id :right)
+                                            (layers/input 500 1 1 :parents [] :id :left)
+                                            (layers/concatenate :parents [:left :right]
+                                                                :id :concat)
+                                            (layers/linear 10)])
+                    (traverse/auto-bind-io))
+        stream->size-map {:data-1 (* 25 25 10)
+                          :data-2 500
+                          :labels 10}
+        train-network (traverse/network->training-traversal network stream->size-map)
+        inference-network (traverse/network->inference-traversal network stream->size-map)
+        train-traversal (-> (get train-network :traversal)
+                            realize-traversals)
+        inference-traversal (-> (get inference-network :traversal)
+                                realize-traversals)]
+    (is (= [nil nil]
+           (minimal-diff
+            [{:incoming [{:output-id :linear-1}],
+              :id :linear-1,
+              :outgoing [{:id :concat}]}
+             {:incoming [{:id :concat}],
+              :id :concat,
+              :outgoing [{:stream :data-2} {:id :right}]}
+             {:incoming [{:id :right}],
+              :id :right,
+              :outgoing [{:stream :data-1}]}]
+            (get train-traversal :backward))))
+
+    (is (= [nil nil]
+           (minimal-diff
+            {{:id :right}
+             {:id :right, :dimension {:channels 1, :height 1, :width 500}},
+             {:stream :data-1}
+             {:stream :data-1, :dimension {:channels 10, :height 10, :width 10}},
+             {:id :concat}
+             {:id :concat, :dimension {:channels 1, :height 1, :width 1000}},
+             {:stream :data-2}
+             {:stream :data-2, :dimension {:channels 1, :height 1, :width 500}},
+             {:output-id :linear-1}
+             {:output-id :linear-1,
+              :loss {:type :mse-loss},
+              :dimension {:channels 1, :height 1, :width 10}}},
+            (get train-traversal :buffers))))
+
+    (is (= [nil nil]
+           (minimal-diff
+            [{:incoming [{:stream :data-1}], :id :right, :outgoing [{:id :right}]}
+             {:incoming [{:stream :data-2} {:id :right}],
+              :id :concat,
+              :outgoing [{:id :concat}]}
+             {:incoming [{:id :concat}],
+              :id :linear-1,
+              :outgoing [{:output-id :linear-1}]}]
+            (get inference-traversal :forward))))))
+
+(deftest concatenate-traversal-2
+  (let [network (-> (network/build-network [(layers/input 10 10 10)
+                                            (layers/linear 500 :id :right)
+                                            (layers/input 500 1 1 :parents [] :id :left)
+                                            ;;Switch the left and right nodes.  Attempting to
+                                            ;;ensure we don't have some hidden dependency upon
+                                            ;;order of layer declaration.
+                                            (layers/concatenate :parents [:right :left]
+                                                                :id :concat)
+                                            (layers/linear 10)])
+                    (traverse/auto-bind-io))
+        stream->size-map {:data-1 (* 25 25 10)
+                          :data-2 500
+                          :labels 10}
+        train-network (traverse/network->training-traversal network stream->size-map)
+        train-traversal (-> (get train-network :traversal)
+                            realize-traversals)]
+    (is (= [nil nil]
+           (minimal-diff
+            [{:incoming [{:output-id :linear-1}],
+              :id :linear-1,
+              :outgoing [{:id :concat}]}
+             {:incoming [{:id :concat}],
+              :id :concat,
+              :outgoing [{:id :right} {:stream :data-2}]}
+             {:incoming [{:id :right}],
+              :id :right,
+              :outgoing [{:stream :data-1}]}]
+            (get train-traversal :backward))))
+
+    (is (= [nil nil]
+           (minimal-diff
+            {{:id :right}
+             {:id :right, :dimension {:channels 1, :height 1, :width 500}},
+             {:stream :data-1}
+             {:stream :data-1, :dimension {:channels 10, :height 10, :width 10}},
+             {:id :concat}
+             {:id :concat, :dimension {:channels 1, :height 1, :width 1000}},
+             {:stream :data-2}
+             {:stream :data-2, :dimension {:channels 1, :height 1, :width 500}},
+             {:output-id :linear-1}
+             {:output-id :linear-1,
+              :loss {:type :mse-loss},
+              :dimension {:channels 1, :height 1, :width 10}}},
+            (get train-traversal :buffers))))))
+
+
+(deftest split-traversal
+  (let [network (-> (network/build-network [(layers/input 50)
+                                            (layers/split :id :split)
+                                            (layers/linear 10)
+                                            (layers/linear 20 :parents [:split])])
+                    (traverse/auto-bind-io))
+        stream->size-map {:data 50
+                          :labels-1 10
+                          :labels-2 20}
+
+        train-network (traverse/network->training-traversal network stream->size-map)
+        train-traversal (-> (get train-network :traversal)
+                            realize-traversals)]
+    (is (= [nil nil]
+           (minimal-diff
+            [{:incoming [{:stream :data}],
+              :id :split,
+              :outgoing [{:id :split-1} {:id :split-2}]}
+             {:incoming [{:id :split-1}],
+              :id :linear-1,
+              :outgoing [{:output-id :linear-1}]}
+             {:incoming [{:id :split-2}],
+              :id :linear-2,
+              :outgoing [{:output-id :linear-2}]}]
+            (get train-traversal :forward))))
+    (is (= [nil nil]
+           (minimal-diff
+            {{:stream :data}
+             {:stream :data, :dimension {:channels 1, :height 1, :width 50}},
+             {:id :split-1}
+             {:id :split-1,
+              :dimension {:channels 1, :height 1, :width 50, :id :linear-1}},
+             {:id :split-2}
+             {:id :split-2,
+              :dimension {:channels 1, :height 1, :width 50, :id :linear-2}},
+             {:output-id :linear-1}
+             {:output-id :linear-1,
+              :loss {:type :mse-loss},
+
+              :dimension {:channels 1, :height 1, :width 10}},
+             {:output-id :linear-2}
+             {:output-id :linear-2,
+              :loss {:type :mse-loss},
+              :dimension {:channels 1, :height 1, :width 20}}}
+            (get train-traversal :buffers))))))
