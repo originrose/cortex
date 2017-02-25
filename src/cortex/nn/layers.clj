@@ -489,7 +489,6 @@ If the input contains no channels then you get a scale factor per input paramete
   {:passes #{:training :inference}})
 
 
-<<<<<<< HEAD
 (defn join
   "Join takes a potential :operation which at this point
 is either :+ or :*.  The output dimensions are the max of any of the
