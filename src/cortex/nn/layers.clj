@@ -489,6 +489,35 @@ If the input contains no channels then you get a scale factor per input paramete
   {:passes #{:training :inference}})
 
 
+(defn join
+  "Join takes a potential :operation which at this point
+is either :+ or :*.  The output dimensions are the max of any of the
+input dimensions."
+  [& args]
+  (merge-args {:type :join :operation :+}
+              args))
+
+(defmethod graph/build-node :join
+  [graph node p-id-seq s-id-seq]
+  "Works almost identically to concatenate at the graph level."
+  (when-not (<= (count s-id-seq) 1)
+    (throw (ex-info "join produces at most 1 output"
+                    {:node node
+                     :successors s-id-seq})))
+  (let [input-dims (mapv #(-> (graph/get-node graph %)
+                              (ensure-single-output-dimensions node)
+                              (assoc :id %))
+                         p-id-seq)]
+    (assoc node
+           :input-dimensions input-dims
+           :output-dimensions [(graph/create-node-dimensions
+                                (apply max (map graph/dimensions->size input-dims)))])))
+
+(defmethod graph/get-node-metadata :join
+  [desc]
+  {:passes #{:training :inference}})
+
+
 (defn split
   [& args]
   [(merge-args
@@ -510,7 +539,6 @@ If the input contains no channels then you get a scale factor per input paramete
 (defmethod graph/get-node-metadata :split
   [desc]
   {:passes #{:training :inference}})
-
 
 
 (def example-mnist-description

@@ -81,8 +81,12 @@ threadsafe while (.position ptr offset) is not."
   (let [addr (.address ptr)
         pos (.position ptr)
         retval (make-empty-pointer-of-type (dtype/get-datatype ptr))]
-    (.set ^Field address-field retval addr)
-    (.set ^Field position-field retval (+ pos offset))
+    ;;Do not ever set position - this will fail in most api calls as the javacpp
+    ;;code for dealing with position is incorrect.
+    (.set ^Field address-field retval (+ addr
+                                         (* (+ pos offset)
+                                            (dtype/datatype->byte-size
+                                             (dtype/get-datatype ptr)))))
     retval))
 
 
