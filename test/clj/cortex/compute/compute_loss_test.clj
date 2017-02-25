@@ -9,4 +9,5 @@
 (use-fixtures :each test-utils/test-wrapper)
 
 (deftest center-loss
-  (verify-loss/center-loss (cpu-backend/create-cpu-backend test-utils/*datatype*)))
+  (verify-loss/center-loss (cpu-backend/create-backend test-utils/*datatype*)))
+

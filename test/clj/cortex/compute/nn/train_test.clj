@@ -14,7 +14,7 @@
 (defn create-context
   []
   (ce/create-context
-   #(cpu-backend/create-cpu-backend test-utils/*datatype*)))
+   #(cpu-backend/create-backend test-utils/*datatype*)))
 
 
 (def-double-float-test corn

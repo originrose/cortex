@@ -21,45 +21,52 @@
                      desc)))
                desc)))
 
+(defn- add-node-to-graph
+  [[graph last-id] desc]
+  (let [predecessor-id-seq (if (get desc :parents)
+                             (get desc :parents)
+                             (if last-id
+                               [last-id]
+                               []))
+        ; TODO: Is this necessary?  For 1.0 why don't we get rid of
+        ; any backward compatibility stuff, and then stabilize
+        ; going forward?
+
+        ;;For backward compatibility we need to embed any parameter argument
+        ;;buffers into maps
+        desc (embed-param-args desc)
+        [graph id] (graph/add-node graph desc
+                                   predecessor-id-seq)]
+    [(if (= :input (get desc :type))
+       (let [{:keys [output-channels
+                     output-height
+                     output-width]} desc]
+         ; If we can generate the stream-descriptor from an input
+         ; node, why store it in the graph?
+         (-> graph
+             (graph/update-node id #(assoc-in % [:input :stream] id))
+             (graph/add-stream id
+                               (graph/create-stream-descriptor
+                                 output-channels
+                                 output-height
+                                 output-width))))
+       graph)
+     id]))
 
 (defn build-network
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
   ([network network-desc]
    (update network :layer-graph
-           (fn [graph]
-             (-> (reduce (fn [[graph last-id] next-desc]
-
-                           (let [predecessor-id-seq (if (get next-desc :parents)
-                                                      (get next-desc :parents)
-                                                      (if last-id
-                                                        [last-id]
-                                                        []))
-                                 ;;For backward compatibility we need to embed any parameter argument
-                                 ;;buffers into maps
-                                 next-desc (embed-param-args next-desc)
-                                 [graph id] (graph/add-node graph next-desc
-                                                            predecessor-id-seq)]
-                             [(if (= :input (get next-desc :type))
-                                (let [{:keys [output-channels
-                                              output-height
-                                              output-width]} next-desc]
-                                  (-> graph
-                                      (graph/update-node id #(assoc-in % [:input :stream] id))
-                                      (graph/add-stream id
-                                                        (graph/create-stream-descriptor
-                                                         output-channels
-                                                         output-height
-                                                         output-width))))
-                                graph)
-                              id]))
-                         [graph nil]
-                         (flatten network-desc))
-                 first
-                 graph/build-graph
-                 graph/generate-parameters))))
+     (fn [graph]
+       (-> (first
+             (reduce add-node-to-graph
+                     [graph nil]
+                     (flatten network-desc)))
+           graph/build-graph
+           graph/generate-parameters))))
   ([network-desc]
-   (build-network {:layer-graph (graph/create-graph)} network-desc)))
+   (build-network {:layer-graph (graph/empty-graph)} network-desc)))
 
 (defn add-property-to-layer
   "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id

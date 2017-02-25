@@ -4,7 +4,6 @@
             [cortex.compute.math :as math]
             [cortex.compute.cpu-driver :as cpu-drv]
             [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
-            [cortex.compute.optimize :as opt]
             [cortex.compute.nn.layers :as compute-layers]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.nn.layers :as layers]
@@ -16,7 +15,6 @@
   (:import [cortex.compute.cpu_driver CPUDriver CPUStream]
            [java.nio DoubleBuffer FloatBuffer]
            [cortex.compute.math DeviceArray Tensor]
-           [cortex.compute.optimize AdadeltaOptimizer AdamOptimizer]
            [java.util Arrays]
            [java.util.concurrent ForkJoinPool Callable Future]
            [think.datatype ArrayView DoubleArrayView FloatArrayView]))
@@ -24,17 +22,15 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
+(defrecord CPUBackend [type ^CPUDriver driver ^CPUStream stream datatype])
 
-(defrecord CPUBackend [^CPUDriver driver ^CPUStream stream datatype])
-
-
-(defn create-cpu-backend
+(defn create-backend
   (^CPUDriver [datatype]
    (let [driver (cpu-drv/create-driver)
          stream (drv/create-stream driver)]
-     (->CPUBackend driver stream datatype)))
+     (->CPUBackend :cpu driver stream datatype)))
   (^CPUBackend []
-   (create-cpu-backend :double)))
+   (create-backend :double)))
 
 
 (defprotocol PCPUNetworkImpl
@@ -43,10 +39,6 @@
   (cpu-activation-backward [input-buf act-type output-buf
                             output-gradient input-gradient])
   (cpu-softmax-forward [input-buf output-buf n-input n-channels])
-  (cpu-adadelta-step! [gradient parameters gradient-alpha param-offset
-                       decay epsilon grad-accum dx-accum])
-  (cpu-adam-step! [gradient parameters gradient-alpha param-offset alpha beta1 beta2 epsilon
-                   pow_beta1_t pow_beta2_t m v])
   (cpu-planar-input->convolution! [input input-convolved conv-config])
   (cpu-convolution->planar-output! [input-convolved input-gradient conv-config])
   (cpu-fill [buffer value])
@@ -748,19 +740,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (cpu-act-backward-impl act-type input output output-gradient input-gradient double))
   (cpu-softmax-forward [input-buf ^DoubleArrayView output-buf ^long n-input ^long n-channels]
     (cpu-softmax-forward-impl n-input input-buf output-buf n-channels double))
-  (cpu-adadelta-step! [gradient ^DoubleArrayView parameters gradient-alpha
-                       param-offset decay epsilon ^DoubleArrayView grad-accum
-                       ^DoubleArrayView dx-accum]
-    (AdadeltaOptimizer/step_d (double gradient-alpha) (.data gradient) (.data parameters)
-                              (int param-offset) (double decay) (double epsilon)
-                              (.data grad-accum) (.data dx-accum)))
-  (cpu-adam-step! [gradient ^DoubleArrayView parameters gradient-alpha param-offset
-                   alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
-                   ^DoubleArrayView m ^DoubleArrayView v]
-    (AdamOptimizer/step_d (double gradient-alpha) (.data gradient) (.data parameters)
-                          param-offset (double alpha) (double beta1) (double beta2)
-                          (double epsilon) (double pow-beta1-t) (double pow-beta2-t)
-                          (.data m) (.data v)))
   (cpu-planar-input->convolution! [input ^DoubleArrayView input-convolved
                                    conv-config]
     (cpu-planar-input->convolution!-impl input input-convolved conv-config double))
@@ -819,18 +798,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (cpu-act-backward-impl act-type input output output-gradient input-gradient float))
   (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input ^long n-channels]
     (cpu-softmax-forward-impl n-input input-buf output-buf n-channels float))
-  (cpu-adadelta-step! [gradient ^FloatArrayView parameters gradient-alpha
-                       param-offset decay epsilon
-                       ^FloatArrayView grad-accum ^FloatArrayView dx-accum]
-    (AdadeltaOptimizer/step_f (float gradient-alpha) (.data gradient) (.data parameters)
-                              (int param-offset) (float decay) (float epsilon)
-                              (.data grad-accum) (.data dx-accum)))
-  (cpu-adam-step! [gradient ^FloatArrayView parameters gradient-alpha param-offset
-                   alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
-                   ^FloatArrayView m ^FloatArrayView v]
-    (AdamOptimizer/step_f (float gradient-alpha) (.data gradient) (.data parameters)
-                          param-offset (float alpha) (float beta1) (float beta2) (float epsilon)
-                          (float pow-beta1-t) (float pow-beta2-t) (.data m) (.data v)))
   (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved conv-config]
     (cpu-planar-input->convolution!-impl input input-convolved conv-config float))
   (cpu-convolution->planar-output! [input-convolved ^FloatArrayView input-gradient conv-config]
@@ -1197,20 +1164,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
     (create-cpu-layer backend layer batch-size))
-  opt/POptimizeBackend
-  (adadelta-step! [backend ^DeviceArray gradient ^DeviceArray parameters
-                   gradient-alpha param-offset decay epsilon
-                   ^DeviceArray grad-sq-accum ^DeviceArray dx-sq-accum]
-    (cpu-drv/with-stream-dispatch (.stream backend)
-      (cpu-adadelta-step! (device-array->view gradient) (device-array->view parameters)
-                          gradient-alpha param-offset decay epsilon
-                          (device-array->view grad-sq-accum) (device-array->view dx-sq-accum))))
-  (adam-step! [backend ^DeviceArray gradient ^DeviceArray parameters gradient-alpha param-offset
-               alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t ^DeviceArray m ^DeviceArray v]
-    (cpu-drv/with-stream-dispatch (.stream backend)
-      (cpu-adam-step! (device-array->view gradient) (device-array->view parameters)
-                      gradient-alpha param-offset alpha beta1 beta2 epsilon
-                      pow-beta1-t pow-beta2-t (device-array->view m) (device-array->view v))))
   nn-backend/PDropout
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]
     (cpu-drv/with-stream-dispatch (.stream backend)

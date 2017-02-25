@@ -2,8 +2,9 @@
   (:require [clojure.test :refer :all]
             [cortex.compute.nn.backend :as nn-backend]
             [think.datatype.core :as dtype]
-            [cortex.compute.optimize :as opt]
-            [cortex.optimize :as cortex-opt]
+            [cortex.optimize :refer [create-optimizer] :as opt]
+            [cortex.optimize.adam :as adam]
+
             [cortex.compute.verify.utils :refer [def-double-float-test] :as utils]
             [cortex.verify.utils :as cortex-utils]
             [clojure.core.matrix :as m]))
@@ -33,15 +34,26 @@
 
 (defn test-adam
   [backend]
-  (let [parameters (nn-backend/array backend [1 2 3 4])
-        optimizer (opt/create-compute-optimizer backend (cortex-opt/adam) 4)]
+  (let [parameters-1 (nn-backend/array backend [1 2 3 4])
+        parameters-2 (nn-backend/array backend [1 2 3 4])
+        optimizer (create-optimizer backend (adam/adam) 8)]
     (reduce (fn [optimizer item]
-              (let [gradient (nn-backend/array backend (map #(* 2.0 %) (nn-backend/to-double-array backend parameters)))
+              (let [gradient-1 (nn-backend/array backend
+                                               (map #(* 2.0 %)
+                                                    (nn-backend/to-double-array backend
+                                                                                parameters-1)))
+                    gradient-2 (nn-backend/array backend
+                                                 (map #(* 2.0 %)
+                                                      (nn-backend/to-double-array backend
+                                                                                  parameters-2)))
                     optimizer (opt/batch-update optimizer)
-                    _ (opt/compute-parameters! optimizer 1.0 0 gradient parameters)
+                    _ (opt/compute-parameters! optimizer 1.0 0 gradient-1 parameters-1)
+                    _ (opt/compute-parameters! optimizer 0.0 4 gradient-2 parameters-2)
                     item (m/eseq item)
-                    guess (m/eseq (nn-backend/to-double-array backend parameters))]
-                (is (cortex-utils/about-there? guess item))
+                    guess-1 (m/eseq (nn-backend/to-double-array backend parameters-1))
+                    guess-2 (m/eseq (nn-backend/to-double-array backend parameters-2))]
+                (is (cortex-utils/about-there? guess-1 item))
+                (is (cortex-utils/about-there? guess-2 [1.0 2.0 3.0 4.0]))
                 optimizer))
             optimizer
             adam-answers)))

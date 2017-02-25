@@ -1,19 +1,23 @@
 (ns cortex.optimize
-  (:require [cortex.util :refer [merge-args]]))
+  "Optimizers are responsible for updating model parameters given their
+  gradients.")
 
-;;Optimization strategies
-(defn adam
-  [& args]
-  (merge-args
-   {:type :adam
-    :alpha 0.001
-    :beta1 0.9
-    :beta2 0.999
-    :epsilon 1e-8}
-   args))
+(defprotocol PGradientOptimizer
+  "An optimizer is a function that takes gradients and parameters and returns updated
+  parameters.  There is an extra parameter called gradient-alpha that is
+  used to modulate the gradients."
 
-(defn adadelta
-  [& args]
-  {:type :adadelta
-   :decay 0.05
-   :epsilon 1e-6})
+  (batch-update [optimizer]
+    "Called once per batch before calling compute-parameters! on each buffer.
+    Returns a new optimizer")
+
+  (compute-parameters! [optimizer gradient-alpha offset gradient parameters]
+    "Called once per parameter buffer to update the parameters.
+    Note: gradient-alpha is most likely 1 / batch-size."))
+
+(defmulti create-optimizer
+  "Create a specific implementation of a compute optimizer.  Add a method to this
+  that returns an object that implements PGradientOptimizer in order to do optimisation
+  within the compute framework."
+  (fn [backend optimizer param-count]
+    [(:type backend) (:type optimizer)]))

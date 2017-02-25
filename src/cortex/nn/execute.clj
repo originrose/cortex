@@ -16,9 +16,9 @@ Furthermore infer should be both wrapped in a resource context and completely re
             [cortex.loss :as loss]
             [cortex.nn.protocols :as cp]
             [cortex.optimize :as optimize]
+            [cortex.optimize.adam :as adam]
             [clojure.pprint :as pprint]
             [cortex.graph :as graph]))
-
 
 (defn- safe-inc
   [num-or-nil]
@@ -245,7 +245,7 @@ in a single map you still need to call cortex-dataset/batches->columns."
   [context network dataset input-bindings output-bindings
    & {:keys [batch-size infer-batch-type optimizer disable-infer?]
       :or {batch-size 128 infer-batch-type :cross-validation
-           optimizer (optimize/adam)}}]
+           optimizer (adam/adam)}}]
   (let [train-fn (if disable-infer?
                    #(train-seq context % dataset)
                    #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
