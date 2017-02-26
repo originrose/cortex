@@ -4,7 +4,15 @@ meant to provide a language in which to implement new things but that explicitly
 to certain parts of the comput ecosystem that the engine driving the ecosystem is expected
 to manage.  Clients should not, for instance, access the stream or the datatype directly.
 Currently the dimensions of tensors (like the dimensions of the graph) are hardcoded to
-[batch-size channels height width]"
+[batch-size channels height width].
+
+There is an implicit assumption throughout this file that implementations will loop through
+smaller entities instead of throwing an exception if sizes don't match.  This allows for
+instance an efficient accumulation of a batch of gradients into a single summed buffer.
+
+It does mean, however, that certain conditions that would actually be error cases are
+harder to detect because one has to check for remainders being zero (which potentially
+could cause a divide by zero error) instead of just checking for equality."
   (:require [cortex.compute.driver :as compute-drv]
             [cortex.compute.math :as compute-math]
             [think.datatype.core :as dtype]
@@ -13,8 +21,8 @@ Currently the dimensions of tensors (like the dimensions of the graph) are hardc
             [clojure.core.matrix :as m]))
 
 
-;;Clients should not ever access this directly.  This is used to implement the tensor
-;;api but should not be used directly
+;;Stream is dynamically bound at execution time presumably by an entity outside of the context
+;;of this file.  Due to this clients of this file should not be manipulating stream.
 (def ^:dynamic *stream*)
 ;;Similar to stream, the engine will set this variable and clients should not set
 ;;the variable themselves.
@@ -155,6 +163,17 @@ that rerequires the items to have the same element count."
    (->Tensor driver dimensions (get dimensions :width) buffer)))
 
 
+(defn get-datatype
+  [tensor]
+  (dtype/get-datatype tensor))
+
+
+(defn unsafe-get-driver
+  "Return the driver for a given tensor.  This should not be necessary."
+  [tensor]
+  (compute-drv/get-driver tensor))
+
+
 (defn dense?
   [tensor]
   (= (get-in tensor [:dimensions :width])
@@ -206,6 +225,16 @@ that rerequires the items to have the same element count."
                                                    (long batch-size)))
                    (:buffer tensor))))
 
+
+(defn as-2d-matrix
+  "As a 2d matrix of shape [everything-else width]"
+  ^Tensor [^Tensor tensor]
+  (let [[n-rows n-cols] (dimensions->width-shape (.dimensions tensor))]
+    (create-tensor (:driver tensor)
+                   (create-dimensions :height n-rows
+                                      :width n-cols)
+                   (:buffer tensor))))
+
 (defn data->tensor
   "Create a tensor from the data.  The shape of the data combined with the batch size
 will determine the shape of the outgoing tensor."
@@ -238,45 +267,88 @@ will determine the shape of the outgoing tensor."
     (create-tensor driver dimensions dev-buffer)))
 
 
-(defn assign!
-  ^Tensor [^Tensor dest ^Tensor src]
-  (m/assign! dest src)
-  dest)
+(defn subvector
+  ^Tensor [^Tensor tensor offset & {:keys [length]}]
+  (when-not (>= offset 0)
+    (throw (ex-info "Offset must be >= 0"
+                    {:offset offset})))
+  (let [vec-tensor (as-vector tensor)
+        tens-ecount (ecount tensor)
+        new-len (long (or length
+                          (- (ecount tensor) offset)))]
+    (when (< new-len 0)
+      (throw (ex-info "new length of tensor is <= 0"
+                      {:tensor-ecount tens-ecount
+                       :offset offset
+                       :new-length new-len})))
+    (let [new-buf (compute-drv/sub-buffer (.driver tensor) (.buffer tensor) offset new-len)]
+      (create-tensor (.driver tensor) (create-dimensions :width new-len) new-buf))))
 
 
-(defn indirect-assign-rows!
-  "Assign rows from src to dest.  Src and dest will both be represented as matrixes with width
-  as n-cols but the rest of the dimensions squashed into n-rows."
-  ^Tensor [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
-  (when-not (= (dtype/ecount src-indexes)
-               (dtype/ecount dest-indexes))
-    (throw (ex-info "src/dest index mismatch"
-                    {:src-index-length (dtype/ecount src-indexes)
-                     :dest-index-length (dtype/ecount dest-indexes)})))
-  (when-not (and (= :int (dtype/get-datatype src-indexes))
-                 (= :int (dtype/get-datatype dest-indexes)))
-    (throw (ex-info "Indexes must of of integer type."
-                    {:src-idx-dtype (dtype/get-datatype src-indexes)
-                     :dest-index-dtype (dtype/get-datatype dest-indexes)})))
-  (when-not (= (dtype/get-datatype src)
-               (dtype/get-datatype dest))
-    (throw (ex-info "src/dest datatype mismatch"
-                    {:src-dtype (dtype/get-datatype src)
-                     :dest-dtype (dtype/get-datatype dest)})))
-  (let [[dest-rows dest-cols] (dimensions->width-shape (.dimensions dest))
-        [src-rows src-cols] (dimensions->width-shape (.dimensions src))]
-    (when-not (= (long dest-cols)
-                 (long src-cols))
-      (throw (ex-info "Width (n-cols) of src and dest must match."
-                      {:num-dest-cols dest-cols
-                       :dest-dimensions (.dimensions dest)
-                       :num-src-cols src-cols
-                       :src-dimensions (.dimensions src)})))
-    (compute-drv/indexed-copy (check-stream) (get src :buffer) src-indexes
-                              (get dest :buffer) dest-indexes src-cols
-                              :dest-stride (.column-stride dest)
-                              :src-stride (.colummn-stride src))
-    dest))
+(defn submatrix
+  "Create a sub matrix of tensor.  Tensor will be interpreted as width being n-cols
+and the rest of the dimensions being squashed into n-rows."
+  ^Tensor [^Tensor tensor row-start row-length col-start col-length]
+  (let [row-start (long row-start)
+        row-length (long row-length)
+        col-start (long col-start)
+        col-length (long col-length)
+        [n-rows n-cols] (dimensions->width-shape (.dimensions tensor))
+        n-rows (long n-rows)
+        n-cols (long n-cols)
+        column-stride (.column-stride tensor)
+        driver (.driver tensor)]
+    (when (< row-start 0)
+      (throw (ex-info "Row start less than 0" {})))
+    (when (< col-start 0)
+      (throw (ex-info "Col start less than 0" {})))
+    (when (> (+ row-start row-length) n-rows)
+      (throw (ex-info "Required row length out of bounds"
+                      {:existing-row-length n-rows
+                       :row-start row-start
+                       :row-length row-length})))
+    (when (> (+ col-start col-length) n-cols)
+      (throw (ex-info "Required col length out of bounds"
+                      {:existing-col-length n-cols
+                       :col-start col-start
+                       :col-length col-length})))
+    (let [start-offset (+ (* column-stride row-start) col-start)
+          required-length (* row-length column-stride)
+          sub-buffer (compute-drv/sub-buffer driver (.buffer tensor)
+                                             start-offset required-length)]
+      (create-tensor (.driver tensor) (create-dimensions :width col-length
+                                                         :height row-length)
+                     column-stride sub-buffer))))
+
+
+(defn rows
+  "Returns a vector rows of dense vectors."
+  [^Tensor tensor]
+  (let [[n-rows n-cols] (as-2d-matrix tensor)
+        column-stride (.column-stride tensor)
+        driver (.driver tensor)
+        buffer (.buffer tensor)]
+    (mapv (fn [^long idx]
+            (let [offset (* idx column-stride)
+                  new-buf (compute-drv/sub-buffer driver buffer offset n-cols)]
+              (create-tensor driver (create-dimensions n-cols) n-cols new-buf)))
+          (range n-rows))))
+
+
+(defn columns
+  "Returns a vector of matrixes with width of 1 but large column strides."
+  [^Tensor tensor]
+  (let [[n-rows n-cols] (as-2d-matrix tensor)
+        column-stride (.column-stride tensor)
+        driver (.driver tensor)
+        buffer (.buffer tensor)
+        col-required-mem (* (- n-rows 1) column-stride)
+        buf-ecount (ecount buffer)]
+    (mapv (fn [^long offset]
+            (let [new-buf (compute-drv/sub-buffer driver buffer offset (- buf-ecount offset))]
+              (create-tensor driver (create-dimensions :height n-rows :width 1)
+                             column-stride new-buf)))
+          (range n-cols))))
 
 (defn- ensure-datatypes
   [datatype & args]
@@ -285,33 +357,136 @@ will determine the shape of the outgoing tensor."
                     {:datatype datatype
                      :argument-datatypes (map dtype/get-datatype args)}))))
 
+(defn- ensure-indexes
+  "Index tensors must be integers and they must all be dense and the same length."
+  [& args]
+  (apply ensure-datatypes :int args)
+  (when-not (every? dense? args)
+    (throw (ex-info "Index tensors must be dense; some passed in are not." {})))
+  (let [first-len (ecount (first args))]
+    (when-not (every? #(= first-len (ecount %)) (rest args))
+      (throw (ex-info "Index tensors must all have matching elememnt-counts")))))
+
+
+(defn assign!
+  ^Tensor [^Tensor dest ^Tensor src]
+  (ensure-datatypes (dtype/get-datatype dest) src)
+  (m/assign! dest src)
+  dest)
+
+
+(defn indirect-assign-rows!
+  "Assign rows from src to dest.  Src and dest will both be represented as matrixes with width
+  as n-cols but the rest of the dimensions squashed into n-rows."
+  ^Tensor [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
+  (ensure-indexes dest-indexes src-indexes)
+  (ensure-datatypes (dtype/get-datatype dest) src)
+  (when-not (= (dtype/get-datatype src)
+               (dtype/get-datatype dest))
+    (throw (ex-info "src/dest datatype mismatch"
+                    {:src-dtype (dtype/get-datatype src)
+                     :dest-dtype (dtype/get-datatype dest)})))
+  (let [[dest-rows dest-cols] (dimensions->width-shape (.dimensions dest))
+        [src-rows src-cols] (dimensions->width-shape (.dimensions src))
+        n-dest-elems (* (long dest-cols) (ecount dest-indexes))
+        n-src-elems (* (long src-cols) (ecount src-indexes))]
+
+    (when-not (= n-dest-elems
+                 n-src-elems)
+      (throw (ex-info "n-cols * n-indexes must match for indirect assignment."
+                      {:dest-cols dest-cols
+                       :n-dest-indexes (ecount dest-indexes)
+                       :src-cols src-cols
+                       :n-src-indexes (ecount src-indexes)})))
+    (compute-math/indirect-assign!-impl
+     (check-stream)
+     (.buffer dest) (.buffer dest-indexes) dest-cols (.column-stride dest)
+     (.buffer src) (.buffer src-indexes) src-cols (.column-stride src))
+    dest))
+
 
 (defn accum!
   "y = alpha * x + beta * y.  Y may be much smaller than X in which case it acts as an
 accumulator.  It may also be larger than x in which case x will sum the overlapping indexes
 of y.  X can also be smaller than Y leading to a broadcast of X into Y."
-  [^Tensor y alpha ^Tensor x beta]
+  ^Tensor [^Tensor y alpha ^Tensor x beta]
   (ensure-datatypes (dtype/get-datatype y) [x])
   (compute-math/accum!-impl (check-stream)
                             alpha (.buffer x) (tensor->width x) (.column-stride x) (ecount x)
-                            beta (.buffer y) (tensor->width y) (.column-stride y) (ecount y)))
+                            beta (.buffer y) (tensor->width y) (.column-stride y) (ecount y))
+  y)
+
 
 (defn add!
   "Elementwise addition into a result.  Result must not overlap with either of the two operands
-and the element count of the destination is expected to be equal to or greater than thegiven
+and the element count of the destination is expected to be equal to or greater than the given
 element count of either operand."
-  ([^Tensor dest alpha ^Tensor x beta ^Tensor y]
-   (ensure-datatypes (dtype/get-datatype dest) [x y])
-   (let [dest-ecount (ecount dest)
-         x-ecount (ecount x)
-         y-ecount (ecount y)
-         max-ecount (long (max x-ecount y-ecount))]
-     (when-not (>= dest-ecount max-ecount)
-       (throw (ex-info "The element count of the destination is less than the maximum"
-                       {:x-ecount x-ecount
-                        :y-ecount y-ecount
-                        :dest-ecount dest-ecount})))
-     (compute-math/add!-impl (check-stream)
-                             (.buffer dest) (tensor->width dest) (.column-stride dest)
-                             alpha (.buffer x) (tensor->width x) (.column-stride x) x-ecount
-                             beta (.buffer y) (tensor->width y) (.column-stride y) y-ecount))))
+  ^Tensor [^Tensor dest alpha ^Tensor x beta ^Tensor y]
+  (ensure-datatypes (dtype/get-datatype dest) [x y])
+  (let [dest-ecount (ecount dest)
+        x-ecount (ecount x)
+        y-ecount (ecount y)
+        max-ecount (long (max x-ecount y-ecount))]
+    (when-not (>= dest-ecount max-ecount)
+      (throw (ex-info "The element count of the destination is less than the maximum"
+                      {:x-ecount x-ecount
+                       :y-ecount y-ecount
+                       :dest-ecount dest-ecount})))
+    (compute-math/add!-impl (check-stream)
+                            (.buffer dest) (tensor->width dest) (.column-stride dest)
+                            alpha (.buffer x) (tensor->width x) (.column-stride x) x-ecount
+                            beta (.buffer y) (tensor->width y) (.column-stride y) y-ecount)
+    dest))
+
+
+(defn indirect-accum-rows!
+  "y[y-idx] = alpha * x[x-idx] + beta * y[y-idx].  Elementwise addition of the rows of x into
+  the rows of y.  x and y will be interpreted as matrixes with width being n-cols and everything
+  else squashed into n-rows."
+  ^Tensor [^Tensor y alpha ^Tensor x ^Tensor x-indexes beta ^Tensor y-indexes]
+  (ensure-indexes x-indexes y-indexes)
+  (ensure-datatypes (dtype/get-datatype x) y)
+  (let [[x-rows x-cols] (dimensions->width-shape (.dimensions x))
+        [y-rows y-cols] (dimensions->width-shape (.dimensions y))]
+    (compute-math/indirect-accum-rows!-impl
+     (check-stream)
+     alpha (.buffer x) (.buffer x-indexes) x-cols (.column-stride x)
+     beta (.buffer y) (.buffer y-indexes) y-cols (.column-stride y))
+    y))
+
+
+(defn indirect-add-rows!
+  "res[res-idx] = alpha * x[x-idx] + beta * y[y-idx].  Elementwise addition of the rows of x and
+  y and place into the result.  Column length of all three res, x, and y must be equal.
+  Indexes must be integer tensors.  It may not be possible for an implementation (aside
+  from the cpu implementation) to check that all indexes are in bounds so that sort of check
+  needs to be done at the user level if required.  It is not expected for a location in
+  res to be assigned to more than once."
+  ^Tensor [^Tensor res ^Tensor res-indexes
+           alpha ^Tensor x ^Tensor x-indexes
+           beta ^Tensor y ^Tensor y-indexes]
+  (ensure-indexes res-indexes x-indexes y-indexes)
+  (ensure-datatypes (get-datatype res) x y)
+  (let [[res-rows res-cols] (dimensions->width-shape (.dimensions res))
+        [x-rows x-cols] (dimensions->width-shape (.dimensions x))
+        [y-rows y-cols] (dimensions->width-shape (.dimensions y))
+        ;;For this indirect add implementations are allowed to assume that each individual
+        ;;res location will be written to exactly once.  If they make this assumption and
+        ;;then the users doesn't respect it the results will be unexpected.  If the number of
+        ;;indicated locations for res is less than the either of the number of indicated
+        ;;locations of x or y then it is clear that some location of result must be written
+        ;;to more than once.
+        res-n-elems (* res-cols (ecount res-indexes))
+        x-n-elems (* x-cols (ecount x-indexes))
+        y-n-elems (* y-cols (ecount y-indexes))]
+    (when-not (<= (max x-n-elems y-n-elems) res-n-elems)
+      (throw (ex-info "Number of write locations appears to be too small."
+                      {:num-res-locations res-n-elems
+                       :num-x-elems x-n-elems
+                       :num-y-elems y-n-elems})))
+    (compute-math/indirect-add-rows!-impl
+     (check-stream)
+     (.buffer res) (.buffer res-indexes) res-cols (.column-stride res)
+     alpha (.buffer x) (.buffer x-indexes) x-cols (.column-stride x)
+     beta (.buffer y) (.buffer y-indexes) y-cols (.column-stride y))
+    res))

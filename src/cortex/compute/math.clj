@@ -75,16 +75,30 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   (assign!-impl [stream dest dest-n-cols dest-col-stride
                  src src-n-cols src-col-stride n-elems]
     "Assign src to dest accounting for potentially differing number of columns of X and Y.")
+  (indirect-assign!-impl [stream
+                          dest dest-indexes dest-n-cols dest-col-stride
+                          src src-indexes src-n-cols src-col-stride]
+    "Ecount is must match, so n-indexes * n-cols must match.")
   (accum!-impl [stream
                 alpha x x-n-cols x-colstride x-n-elems
                 beta y y-n-cols y-colstride y-n-elems]
     "y = alpha * x + beta * y.  Note that y may be smaller than x leading to an accumulation of
 x into y.")
+
   (add!-impl [stream
               res res-n-cols res-colstride
               alpha x x-n-cols x-colstride x-n-elems
               beta y y-n-cols y-colstride y-n-elems]
-    "res = alpha * x + beta * y."))
+    "res = alpha * x + beta * y.")
+  (indirect-accum-rows!-impl [stream
+                              alpha x x-indexes x-n-cols x-colstride
+                              beta y y-indexes u-n-cols y-colstride]
+    "y[y-idx] = alpha * x[x-idx] + beta * y[y-idx].")
+  (indirect-add-rows!-impl [stream
+                            res res-indexes res-n-cols res-colstride
+                            alpha x x-indexes x-n-cols x-colstride
+                            beta y y-indexes y-n-cols y-colstride]
+    "res[res-idx] = alpha * x[x-idx] + beta * y[y-idx]."))
 
 
 (defmacro math-error
