@@ -1,47 +1,47 @@
 (ns cortex.compute.driver
-  "Base set of protocols required to move information from the host to
-  the device  as well as  enable some form  of computation on  a given
-  device.  There is a cpu implementation provided for reference.
+  "Base set of protocols required to move information from the host to the device as well as
+  enable some form of computation on a given device.  There is a cpu implementation provided for
+  reference.
 
   Three basic datatypes are defined:
-   * Driver: Enables enumeration of devices as well as creation of streams
-              and host or device  buffers.
-   * Stream: Stream of execution occuring on the device.
-   * Event: A synchronization primitive emitted in a stream to notify other
-            streams that might be blocking."
+
+  * Driver: Enables enumeration of devices as well as creation of streams and host or device
+    buffers.
+  * Stream: Stream of execution occuring on the device.
+  * Event: A synchronization primitive emitted in a stream to notify other streams that might be
+    blocking."
   (:require [think.datatype.core :as dtype]
             [clojure.core.matrix :as m]
             [think.resource.core :as resource]))
 
 
 (defprotocol PDriver
-  "A driver is a generic compute abstraction.  Could be a group of threads,
-  could be a machine on a network or it could be a CUDA or OpenCL driver.
-  A stream is a stream of execution (analogous to a thread) where
-  subsequent calls are serialized.  All buffers implement a few of the datatype
-  interfaces, at least get-datatype and ecount.  Host buffers are expected to implement
-  enough of the datatype interfaces to allow a copy operation from generic datatypes
+  "A driver is a generic compute abstraction.  Could be a group of threads, could be a machine
+  on a network or it could be a CUDA or OpenCL driver.  A stream is a stream of execution
+  (analogous to a thread) where subsequent calls are serialized.  All buffers implement a few of
+  the datatype interfaces, at least get-datatype and ecount.  Host buffers are expected to
+  implement enough of the datatype interfaces to allow a copy operation from generic datatypes
   into them.  This means at least PAccess."
   (get-devices [impl]
     "Get a list of devices accessible to the system.")
   (set-current-device [impl device]
-    "Set the current device.  In for cuda this sets the current device in thread-specific storage so expecting
-this to work in some thread independent way is a bad assumption.")
+    "Set the current device.  In for cuda this sets the current device in thread-specific
+storage so expecting this to work in some thread independent way is a bad assumption.")
   (get-current-device [impl]
     "Get the current device from the current thread.")
   (create-stream [impl]
-    "Create a stream of execution.  Streams are indepenent threads of execution.  They can be synchronized
-with each other and the main thread using events.")
+    "Create a stream of execution.  Streams are indepenent threads of execution.  They can be
+synchronized with each other and the main thread using events.")
   (allocate-host-buffer [impl elem-count elem-type]
-    "Allocate a host buffer.  Transfer from host to device requires data first copied into a host buffer
-and then uploaded to a device buffer.")
+    "Allocate a host buffer.  Transfer from host to device requires data first copied into a
+host buffer and then uploaded to a device buffer.")
   (allocate-device-buffer [impl elem-count elem-type]
     "Allocate a device buffer.  This is the generic unit of data storage used for computation.")
   (sub-buffer-impl [impl device-buffer offset length]
     "Create a sub buffer that shares the backing store with the main buffer.")
   (allocate-rand-buffer [impl elem-count]
-    "Allocate a buffer used for rands.  Random number generation in general needs a divisible-by-2 element count
-and a floating point buffer (cuda cuRand limitation)"))
+    "Allocate a buffer used for rands.  Random number generation in general needs a
+divisible-by-2 element count and a floating point buffer (cuda cuRand limitation)"))
 
 (defprotocol PDriverProvider
   "Get a driver from an object"
@@ -138,4 +138,3 @@ executes to the event.")
     (dtype/copy! download-buffer 0 download-ary 0 elem-count)
     (resource/release download-buffer)
     download-ary))
-
