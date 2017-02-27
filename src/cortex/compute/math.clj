@@ -24,6 +24,14 @@
   ([]
    {:type :flat}))
 
+
+(def math-binary-operations
+  [:plus ;;a*x + b*y
+   :mul ;;a*x * b*y
+   :div ;;a*x / b*y
+   ])
+
+
 (defprotocol PMath
   "Base math abstraction.  Note the constants (alpha, beta) must be in the same
   datatype as the buffers.  The buffers must be device buffers and the matrixes are
@@ -79,26 +87,29 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
                           dest dest-indexes dest-n-cols dest-col-stride
                           src src-indexes src-n-cols src-col-stride]
     "Ecount is must match, so n-indexes * n-cols must match.")
-  (accum!-impl [stream
+  (accum!-impl [stream primary-op reverse-operands?
                 alpha x x-n-cols x-colstride x-n-elems
                 beta y y-n-cols y-colstride y-n-elems]
-    "y = alpha * x + beta * y.  Note that y may be smaller than x leading to an accumulation of
-x into y.")
+    "y = alpha * x op beta * y.  Note that y may be smaller than x leading to an accumulation of
+x into y.  The reverse operands is specifically in the case where the binary operation is both not
+commutative *and* the operation can't be fixed by providing different alpha,beta values.")
 
-  (add!-impl [stream
-              res res-n-cols res-colstride
-              alpha x x-n-cols x-colstride x-n-elems
-              beta y y-n-cols y-colstride y-n-elems]
-    "res = alpha * x + beta * y.")
-  (indirect-accum-rows!-impl [stream
+  (binary-op!-impl [stream binary-op
+                    res res-n-cols res-colstride
+                    alpha x x-n-cols x-colstride x-n-elems
+                    beta y y-n-cols y-colstride y-n-elems]
+    "res = alpha * x op beta * y.")
+  (indirect-accum-rows!-impl [stream binary-op reverse-operands?
                               alpha x x-indexes x-n-cols x-colstride
                               beta y y-indexes u-n-cols y-colstride]
-    "y[y-idx] = alpha * x[x-idx] + beta * y[y-idx].")
-  (indirect-add-rows!-impl [stream
-                            res res-indexes res-n-cols res-colstride
-                            alpha x x-indexes x-n-cols x-colstride
-                            beta y y-indexes y-n-cols y-colstride]
-    "res[res-idx] = alpha * x[x-idx] + beta * y[y-idx]."))
+    "y[y-idx] = alpha * x[x-idx] op beta * y[y-idx].
+The reverse operands is specifically in the case where the binary operation is both not
+commutative *and* the operation can't be fixed by providing different alpha,beta values.")
+  (indirect-binary-op-rows!-impl [stream binary-op
+                                  res res-indexes res-n-cols res-colstride
+                                  alpha x x-indexes x-n-cols x-colstride
+                                  beta y y-indexes y-n-cols y-colstride]
+    "res[res-idx] = alpha * x[x-idx] op beta * y[y-idx]."))
 
 
 (defmacro math-error

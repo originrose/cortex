@@ -247,6 +247,8 @@ that rerequires the items to have the same element count."
   (when (dense? tensor)
     tensor))
 
+(declare new-tensor)
+
 (defn make-dense
   ^Tensor [tensor]
   (or (as-dense tensor)
@@ -466,20 +468,23 @@ and the rest of the dimensions being squashed into n-rows."
 (defn accum!
   "y = alpha * x + beta * y.  Y may be much smaller than X in which case it acts as an
 accumulator.  It may also be larger than x in which case x will sum the overlapping indexes
-of y.  X can also be smaller than Y leading to a broadcast of X into Y."
-  ^Tensor [^Tensor y alpha ^Tensor x beta]
+of y.  X can also be smaller than Y leading to a broadcast of X into Y.
+Optional operations are :add, :"
+  ^Tensor [^Tensor y alpha ^Tensor x beta & {:keys [operation reverse-operands?]
+                                             :or {operation :add}}]
   (ensure-datatypes (dtype/get-datatype y) [x])
-  (compute-math/accum!-impl (check-stream)
+  (compute-math/accum!-impl (check-stream) operation reverse-operands?
                             alpha (.buffer x) (tensor->width x) (.column-stride x) (ecount x)
                             beta (.buffer y) (tensor->width y) (.column-stride y) (ecount y))
   y)
 
 
-(defn add!
-  "Elementwise addition into a result.  Result must not overlap with either of the two operands
+(defn binary-op!
+  "Elementwise op into a result.  Result must not overlap with either of the two operands
 and the element count of the destination is expected to be equal to or greater than the given
 element count of either operand."
-  ^Tensor [^Tensor dest alpha ^Tensor x beta ^Tensor y]
+  ^Tensor [^Tensor dest alpha ^Tensor x beta ^Tensor y & {:keys [operation]
+                                                          :or {operation :add}}]
   (ensure-datatypes (dtype/get-datatype dest) [x y])
   (let [dest-ecount (ecount dest)
         x-ecount (ecount x)
@@ -490,10 +495,10 @@ element count of either operand."
       {:x-ecount x-ecount
        :y-ecount y-ecount
        :dest-ecount dest-ecount})
-    (compute-math/add!-impl (check-stream)
-                            (.buffer dest) (tensor->width dest) (.column-stride dest)
-                            alpha (.buffer x) (tensor->width x) (.column-stride x) x-ecount
-                            beta (.buffer y) (tensor->width y) (.column-stride y) y-ecount)
+    (compute-math/binary-op!-impl (check-stream) operation
+                                  (.buffer dest) (tensor->width dest) (.column-stride dest)
+                                  alpha (.buffer x) (tensor->width x) (.column-stride x) x-ecount
+                                  beta (.buffer y) (tensor->width y) (.column-stride y) y-ecount)
     dest))
 
 
@@ -501,19 +506,21 @@ element count of either operand."
   "y[y-idx] = alpha * x[x-idx] + beta * y[y-idx].  Elementwise addition of the rows of x into
   the rows of y.  x and y will be interpreted as matrixes with width being n-cols and everything
   else squashed into n-rows."
-  ^Tensor [^Tensor y alpha ^Tensor x ^Tensor x-indexes beta ^Tensor y-indexes]
+  ^Tensor [^Tensor y alpha ^Tensor x ^Tensor x-indexes beta ^Tensor y-indexes
+           & {:keys [operation reverse-operands?]
+              :or [operation :add]}]
   (ensure-indexes x-indexes y-indexes)
   (ensure-datatypes (dtype/get-datatype x) y)
   (let [[x-rows x-cols] (dimensions->width-shape (.dimensions x))
         [y-rows y-cols] (dimensions->width-shape (.dimensions y))]
     (compute-math/indirect-accum-rows!-impl
-     (check-stream)
+     (check-stream) operation reverse-operands?
      alpha (.buffer x) (.buffer x-indexes) x-cols (.column-stride x)
      beta (.buffer y) (.buffer y-indexes) y-cols (.column-stride y))
     y))
 
 
-(defn indirect-add-rows!
+(defn indirect-binary-op-rows!
   "res[res-idx] = alpha * x[x-idx] + beta * y[y-idx].  Elementwise addition of the rows of x and
   y and place into the result.  Column length of all three res, x, and y must be equal.
   Indexes must be integer tensors.  It may not be possible for an implementation (aside
@@ -522,7 +529,9 @@ element count of either operand."
   res to be assigned to more than once."
   ^Tensor [^Tensor res ^Tensor res-indexes
            alpha ^Tensor x ^Tensor x-indexes
-           beta ^Tensor y ^Tensor y-indexes]
+           beta ^Tensor y ^Tensor y-indexes
+           & {:keys [operation]
+              :or {operation :add}}]
   (ensure-indexes res-indexes x-indexes y-indexes)
   (ensure-datatypes (get-datatype res) x y)
   (let [[res-rows res-cols] (dimensions->width-shape (.dimensions res))
@@ -542,8 +551,8 @@ element count of either operand."
       {:num-res-locations res-n-elems
        :num-x-elems x-n-elems
        :num-y-elems y-n-elems})
-    (compute-math/indirect-add-rows!-impl
-     (check-stream)
+    (compute-math/indirect-binary-op-rows!-impl
+     (check-stream) operation
      (.buffer res) (.buffer res-indexes) res-cols (.column-stride res)
      alpha (.buffer x) (.buffer x-indexes) x-cols (.column-stride x)
      beta (.buffer y) (.buffer y-indexes) y-cols (.column-stride y))
@@ -572,8 +581,8 @@ element count of either operand."
       "C col count doesn't match B col count"
       {:a-shape a-shape
        :b-shape b-shape
-       :c-shape c-shape}
-      (compute-math/gemm-impl (check-stream) trans-a? trans-b? a-row-count a-col-count b-col-count
-                              alpha (.buffer A) (.column-stride A)
-                              (.buffer B) (.column-stride B)
-                              beta (.buffer C) (.column-stride C)))))
+       :c-shape c-shape})
+    (compute-math/gemm-impl (check-stream) trans-a? trans-b? a-row-count a-col-count b-col-count
+                            alpha (.buffer A) (.column-stride A)
+                            (.buffer B) (.column-stride B)
+                            beta (.buffer C) (.column-stride C))))
