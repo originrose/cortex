@@ -12,7 +12,6 @@
             [cortex.dataset :as ds]
             [cortex.suite.classification :as classification]
             [cortex.suite.inference :as infer]
-            [cortex.suite.io :as suite-io]
             [cortex.suite.train :as suite-train]
             [cortex.loss :as loss]
             [think.gate.core :as gate]
@@ -246,14 +245,14 @@
   []
   (ensure-dataset-is-created)
   (when-not (.exists (io/file "mnist-dataset.nippy"))
-    (suite-io/write-nippy-file "mnist-dataset.nippy"
-                               {:testing (vec (shuffle
-                                               (walk-directory-and-create-path-label-pairs
-                                                "mnist/testing")))
-                                :training (vec
+    (util/write-nippy-file "mnist-dataset.nippy"
+                           {:testing (vec (shuffle
                                            (walk-directory-and-create-path-label-pairs
-                                            "mnist/training"))}))
-  (let [{:keys [testing training]} (suite-io/read-nippy-file "mnist-dataset.nippy")
+                                            "mnist/testing")))
+                            :training (vec
+                                       (walk-directory-and-create-path-label-pairs
+                                        "mnist/training"))}))
+  (let [{:keys [testing training]} (util/read-nippy-file "mnist-dataset.nippy")
         classes (classification/get-class-names-from-directory "mnist/training")
         label->vec (classification/create-label->vec-fn classes)
         train-load-fn (create-map-load-fn
@@ -271,7 +270,7 @@
 
 (defn load-trained-network
   []
-  (suite-io/read-nippy-file "trained-network.nippy"))
+  (util/read-nippy-file "trained-network.nippy"))
 
 
 (defn display-dataset-and-model
@@ -333,7 +332,7 @@
         test-img (imagez/load-image test-file)
         observation (mnist-png->observation datatype false test-img)]
     (imagez/show test-img)
-    (infer/classify-one-observation (suite-io/read-nippy-file "trained-network.nippy")
+    (infer/classify-one-observation (util/read-nippy-file "trained-network.nippy")
                                     observation (ds/create-image-shape num-channels
                                                                        image-size
                                                                        image-size)

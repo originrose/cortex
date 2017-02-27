@@ -1,14 +1,15 @@
 (ns cortex.util
   (:refer-clojure :exclude [defonce])
-  (:require
-    [clojure.core.matrix :as m]
-    [clojure.core.matrix.random :as rand-matrix]
-    [cortex.core-matrix-backends :as b]
-    [clojure.string :as str]
-    [clojure.pprint :as pp]
-    #?(:cljs [goog.string :refer [format]]))
+  (:require [clojure.core.matrix :as m]
+            [clojure.core.matrix.random :as rand-matrix]
+            [clojure.string :as str]
+            [clojure.pprint :as pp]
+            [clojure.java.io :as io]
+            #?(:cljs [goog.string :refer [format]])
+            [taoensso.nippy :as nippy]
+            [cortex.core-matrix-backends :as b])
   #?(:clj (:import [mikera.vectorz Vectorz]
-                   [java.io Writer]
+                   [java.io Writer InputStream OutputStream ByteArrayOutputStream]
                    [java.util Random])))
 
 #?(:clj (do (set! *warn-on-reflection* true)
@@ -449,3 +450,25 @@
      (m/sub! result target)
      (m/scale! result 2.0)
      result)))
+
+;;;; Nippy
+(defn write-nippy-stream
+  [^OutputStream stream data]
+  (let [^bytes byte-data (nippy/freeze data)]
+    (.write stream byte-data)))
+
+(defn write-nippy-file
+  [fname data]
+  (with-open [^OutputStream stream (io/output-stream fname)]
+    (write-nippy-stream stream data)))
+
+(defn read-nippy-stream
+  [^InputStream stream]
+  (let [temp-stream (ByteArrayOutputStream.)]
+    (io/copy stream temp-stream)
+    (nippy/thaw (.toByteArray temp-stream))))
+
+(defn read-nippy-file
+  [fname]
+  (with-open [^InputStream stream (io/input-stream fname)]
+    (read-nippy-stream stream)))

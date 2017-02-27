@@ -1,9 +1,7 @@
 (ns cortex.suite.classification
   (:require [cortex.dataset :as ds]
-            [cortex.suite.io :as suite-io]
             [clojure.java.io :as io]
             [think.parallel.core :as parallel]
-            [taoensso.nippy :as nippy]
             [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.optimize :as opt]
             [think.resource.core :as resource]
