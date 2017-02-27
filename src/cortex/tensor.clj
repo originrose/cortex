@@ -17,8 +17,16 @@ could cause a divide by zero error) instead of just checking for equality."
             [cortex.compute.math :as compute-math]
             [think.datatype.core :as dtype]
             [clojure.core.matrix.protocols :as mp]
+            [mikera.vectorz.matrix-api]
             [cortex.graph :as graph]
-            [clojure.core.matrix :as m]))
+            [clojure.core.matrix :as m]
+            [think.resource.core :as resource]))
+
+
+(defmacro when-not-error
+  [expr error-msg extra-data]
+  `(when-not ~expr
+     (throw (ex-info ~error-msg ~extra-data))))
 
 
 ;;Stream is dynamically bound at execution time presumably by an entity outside of the context
@@ -31,9 +39,8 @@ could cause a divide by zero error) instead of just checking for equality."
 (defn- check-stream
   []
   (let [retval *stream*]
-   (when-not retval
-     (throw (ex-info "Tensor stream is nil")))
-   retval))
+    (when-not-error retval "Tensor stream is nil" {})
+    retval))
 
 (defn create-dimensions
   "Dimensions are defined the same as the graph dimensions with the exception of the inclusion
@@ -81,23 +88,23 @@ could cause a divide by zero error) instead of just checking for equality."
   "Ensure these two tensors are compatible for an elementwise operation
 that rerequires the items to have the same element count."
   [lhs rhs]
-  (when-not (identical? (compute-drv/get-driver lhs)
-                        (compute-drv/get-driver rhs))
-    (throw (ex-info "Tensor drivers do not match"
-                    {:lhs lhs
-                     :rhs rhs})))
-  (when-not (= (dtype/ecount lhs)
-               (dtype/ecount rhs))
-    (throw (ex-info "Tensors must have same ecount for assignment."
-                    {:lhs-ecount (dtype/ecount lhs)
-                     :rhs-ecount (dtype/ecount rhs)})))
-  (when-not (= (dtype/get-datatype lhs)
-               (dtype/get-datatype rhs))
-    (throw (ex-info "Tensor datatypes are mismatched"
-                    {:lhs-datatype (dtype/get-datatype lhs)
-                     :rhs-datatype (dtype/get-datatype rhs)}))))
+  (when-not-error (identical? (compute-drv/get-driver lhs)
+                              (compute-drv/get-driver rhs))
+    "Tensor drivers do not match"
+    {:lhs lhs
+     :rhs rhs})
+  (when-not-error (= (dtype/ecount lhs)
+                     (dtype/ecount rhs))
+    "Tensors must have same ecount for assignment."
+    {:lhs-ecount (dtype/ecount lhs)
+     :rhs-ecount (dtype/ecount rhs)})
+  (when-not-error (= (dtype/get-datatype lhs)
+                     (dtype/get-datatype rhs))
+    "Tensor datatypes are mismatched"
+    {:lhs-datatype (dtype/get-datatype lhs)
+     :rhs-datatype (dtype/get-datatype rhs)}))
 
-(declare strided?)
+(declare strided? dense?)
 
 ;;Tensors have one extra concept which is column-stride.  This let's us represent
 ;;sub-matrices as long as they are 2d sub-matrixes.
@@ -126,9 +133,9 @@ that rerequires the items to have the same element count."
                          :shape shape})))))
   mp/PVectorView
   (as-vector [m]
-    (when (strided? m)
-      (throw (ex-info "Cannot represent a tensor with colstride != width as a vector"
-                      {:dimensions (get m :dimensions)})))
+    (when-not-error (dense? m)
+      "Cannot represent a tensor with colstride != width as a vector"
+      {:dimensions (get m :dimensions)})
     (->Tensor driver (create-dimensions :width (m/ecount m)) (m/ecount m) buffer))
 
   mp/PAssignment
@@ -148,16 +155,16 @@ that rerequires the items to have the same element count."
                            (apply * column-stride
                                   (select-keys dimensions [:batch-size :channels
                                                            :height])))]
-     (when-not (<= dimension-ecount buffer-ecount)
-       (throw (ex-info "Supplied buffer does not have enough capacity for declared dimensions"
-                       {:buffer-ecount buffer-ecount
-                        :dimensions dimensions
-                        :column-stride column-stride})))
-     (when-not (<= (long (get dimensions :width))
-                   (long column-stride))
-       (throw (ex-info "Dimensions width is greater than supplied column stride"
-                       {:dimensions dimensions
-                        :column-stride column-stride}))))
+     (when-not-error (<= dimension-ecount buffer-ecount)
+       "Supplied buffer does not have enough capacity for declared dimensions"
+       {:buffer-ecount buffer-ecount
+        :dimensions dimensions
+        :column-stride column-stride})
+     (when-not-error (<= (long (get dimensions :width))
+                         (long column-stride))
+       "Dimensions width is greater than supplied column stride"
+       {:dimensions dimensions
+        :column-stride column-stride}))
    (->Tensor driver dimensions column-stride buffer))
   (^Tensor [driver dimensions buffer]
    (->Tensor driver dimensions (get dimensions :width) buffer)))
@@ -235,22 +242,72 @@ that rerequires the items to have the same element count."
                                       :width n-cols)
                    (:buffer tensor))))
 
-(defn data->tensor
+(defn as-dense
+  ^Tensor [tensor]
+  (when (dense? tensor)
+    tensor))
+
+(defn make-dense
+  ^Tensor [tensor]
+  (or (as-dense tensor)
+      (let [retval (new-tensor [(ecount tensor)] :datatype (dtype/get-datatype tensor))]
+        (mp/assign! retval tensor)
+        (create-tensor (.driver retval) (.dimensions tensor) (.buffer retval)))))
+
+(defn copy-to-java-type
+  [dest ^Tensor src]
+  (resource/with-resource-context
+   (let [tensor (make-dense src)
+         n-elems (ecount tensor)
+         driver (.driver tensor)
+         stream (check-stream)
+         host-buffer (compute-drv/allocate-host-buffer driver n-elems (dtype/get-datatype tensor))]
+     (compute-drv/copy-device->host stream (.buffer tensor) 0 host-buffer 0 n-elems)
+     (compute-drv/wait-for-event (compute-drv/create-event stream))
+     (dtype/copy! host-buffer 0 dest 0 n-elems)
+     dest)))
+
+
+(defn to-array-of-type
+  [^Tensor tensor datatype]
+  (copy-to-java-type (dtype/make-array-of-type datatype (ecount tensor))))
+
+
+(defn to-double-array
+  ^doubles [tensor]
+  (to-array-of-type tensor :double))
+
+
+(defn to-core-matrix
+  [^Tensor tensor]
+  (let [[n-rows n-cols] (dimensions->width-shape (.dimensions tensor))
+        retval (m/new-array [n-rows n-cols] :vectorz)
+        double-data (mp/as-double-array retval)]
+    (copy-to-java-type double-data tensor)))
+
+(defn to-core-matrix-vector
+  [tensor]
+  (m/as-vector (to-core-matrix tensor)))
+
+(defn ->tensor
   "Create a tensor from the data.  The shape of the data combined with the batch size
 will determine the shape of the outgoing tensor."
   [data & {:keys [datatype batch-size]
            :or {datatype *datatype*
                 batch-size 1}}]
-  (let [stream (check-stream)
-        data-shape (m/shape data)
-        n-elems (long (apply * data-shape))
-        driver (compute-drv/get-driver stream)
-        host-buffer (compute-drv/allocate-host-buffer driver n-elems datatype)
-        dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
-        dimensions (core-mat-shape->dimensions data-shape batch-size)]
-    (dtype/copy-raw->item! data host-buffer 0)
-    (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
-    (create-tensor driver dimensions dev-buffer)))
+  (resource/with-resource-context
+   (let [stream (check-stream)
+         data-shape (m/shape data)
+         n-elems (long (apply * data-shape))
+         driver (compute-drv/get-driver stream)
+         host-buffer (compute-drv/allocate-host-buffer driver n-elems datatype)
+         dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
+         dimensions (core-mat-shape->dimensions data-shape batch-size)]
+     (dtype/copy-raw->item! data host-buffer 0)
+     (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
+     ;;The wait here is so that we can clean up the host buffer.
+     (compute-drv/wait-for-event (compute-drv/create-event stream))
+     (create-tensor driver dimensions dev-buffer))))
 
 
 (defn new-tensor
@@ -269,9 +326,9 @@ will determine the shape of the outgoing tensor."
 
 (defn subvector
   ^Tensor [^Tensor tensor offset & {:keys [length]}]
-  (when-not (>= offset 0)
-    (throw (ex-info "Offset must be >= 0"
-                    {:offset offset})))
+  (when-not-error (>= offset 0)
+    "Offset must be >= 0"
+    {:offset offset})
   (let [vec-tensor (as-vector tensor)
         tens-ecount (ecount tensor)
         new-len (long (or length
@@ -352,20 +409,21 @@ and the rest of the dimensions being squashed into n-rows."
 
 (defn- ensure-datatypes
   [datatype & args]
-  (when-not (every? #(= datatype (dtype/get-datatype %)) args)
-    (throw (ex-info "Not all arguments match required datatype"
-                    {:datatype datatype
-                     :argument-datatypes (map dtype/get-datatype args)}))))
+  (when-not-error (every? #(= datatype (dtype/get-datatype %)) args)
+    "Not all arguments match required datatype"
+    {:datatype datatype
+     :argument-datatypes (map dtype/get-datatype args)}))
 
 (defn- ensure-indexes
   "Index tensors must be integers and they must all be dense and the same length."
   [& args]
   (apply ensure-datatypes :int args)
-  (when-not (every? dense? args)
-    (throw (ex-info "Index tensors must be dense; some passed in are not." {})))
+  (when-not-error (every? dense? args)
+    "Index tensors must be dense; some passed in are not." {})
   (let [first-len (ecount (first args))]
-    (when-not (every? #(= first-len (ecount %)) (rest args))
-      (throw (ex-info "Index tensors must all have matching elememnt-counts")))))
+    (when-not-error (every? #(= first-len (ecount %)) (rest args))
+      "Index tensors must all have matching element-counts"
+      {:element-counts (map ecount args)})))
 
 
 (defn assign!
@@ -381,23 +439,23 @@ and the rest of the dimensions being squashed into n-rows."
   ^Tensor [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
   (ensure-indexes dest-indexes src-indexes)
   (ensure-datatypes (dtype/get-datatype dest) src)
-  (when-not (= (dtype/get-datatype src)
-               (dtype/get-datatype dest))
-    (throw (ex-info "src/dest datatype mismatch"
-                    {:src-dtype (dtype/get-datatype src)
-                     :dest-dtype (dtype/get-datatype dest)})))
+  (when-not-error (= (dtype/get-datatype src)
+                     (dtype/get-datatype dest))
+    "src/dest datatype mismatch"
+    {:src-dtype (dtype/get-datatype src)
+     :dest-dtype (dtype/get-datatype dest)})
   (let [[dest-rows dest-cols] (dimensions->width-shape (.dimensions dest))
         [src-rows src-cols] (dimensions->width-shape (.dimensions src))
         n-dest-elems (* (long dest-cols) (ecount dest-indexes))
         n-src-elems (* (long src-cols) (ecount src-indexes))]
 
-    (when-not (= n-dest-elems
+    (when-not-error (= n-dest-elems
                  n-src-elems)
-      (throw (ex-info "n-cols * n-indexes must match for indirect assignment."
-                      {:dest-cols dest-cols
-                       :n-dest-indexes (ecount dest-indexes)
-                       :src-cols src-cols
-                       :n-src-indexes (ecount src-indexes)})))
+      "n-cols * n-indexes must match for indirect assignment."
+      {:dest-cols dest-cols
+       :n-dest-indexes (ecount dest-indexes)
+       :src-cols src-cols
+       :n-src-indexes (ecount src-indexes)})
     (compute-math/indirect-assign!-impl
      (check-stream)
      (.buffer dest) (.buffer dest-indexes) dest-cols (.column-stride dest)
@@ -427,11 +485,11 @@ element count of either operand."
         x-ecount (ecount x)
         y-ecount (ecount y)
         max-ecount (long (max x-ecount y-ecount))]
-    (when-not (>= dest-ecount max-ecount)
-      (throw (ex-info "The element count of the destination is less than the maximum"
-                      {:x-ecount x-ecount
-                       :y-ecount y-ecount
-                       :dest-ecount dest-ecount})))
+    (when-not-error (>= dest-ecount max-ecount)
+      "The element count of the destination is less than the maximum"
+      {:x-ecount x-ecount
+       :y-ecount y-ecount
+       :dest-ecount dest-ecount})
     (compute-math/add!-impl (check-stream)
                             (.buffer dest) (tensor->width dest) (.column-stride dest)
                             alpha (.buffer x) (tensor->width x) (.column-stride x) x-ecount
@@ -479,14 +537,43 @@ element count of either operand."
         res-n-elems (* res-cols (ecount res-indexes))
         x-n-elems (* x-cols (ecount x-indexes))
         y-n-elems (* y-cols (ecount y-indexes))]
-    (when-not (<= (max x-n-elems y-n-elems) res-n-elems)
-      (throw (ex-info "Number of write locations appears to be too small."
-                      {:num-res-locations res-n-elems
-                       :num-x-elems x-n-elems
-                       :num-y-elems y-n-elems})))
+    (when-not-error (<= (max x-n-elems y-n-elems) res-n-elems)
+      "Number of write locations appears to be too small."
+      {:num-res-locations res-n-elems
+       :num-x-elems x-n-elems
+       :num-y-elems y-n-elems})
     (compute-math/indirect-add-rows!-impl
      (check-stream)
      (.buffer res) (.buffer res-indexes) res-cols (.column-stride res)
      alpha (.buffer x) (.buffer x-indexes) x-cols (.column-stride x)
      beta (.buffer y) (.buffer y-indexes) y-cols (.column-stride y))
     res))
+
+
+(defn gemm
+  "Generalized matrix multiply:
+  C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C"
+  [^Tensor C trans-a? trans-b? alpha ^Tensor A ^Tensor B beta]
+  (ensure-datatypes (get-datatype A) B C)
+  (let [[a-row-count a-col-count :as a-shape] (dimensions->width-shape (.dimensions A))
+        [b-row-count b-col-count :as b-shape] (dimensions->width-shape (.dimensions B))
+        [c-row-count c-col-count :as c-shape] (dimensions->width-shape (.dimensions C))]
+    (when-not-error (= a-col-count b-row-count)
+      "A col count doesn't match B row count"
+      {:a-shape a-shape
+       :b-shape b-shape
+       :c-shape c-shape})
+    (when-not-error (= a-row-count c-row-count)
+      "C row count doesn't match A row count"
+      {:a-shape a-shape
+       :b-shape b-shape
+       :c-shape c-shape})
+    (when-not-error (= b-col-count c-col-count)
+      "C col count doesn't match B col count"
+      {:a-shape a-shape
+       :b-shape b-shape
+       :c-shape c-shape}
+      (compute-math/gemm-impl (check-stream) trans-a? trans-b? a-row-count a-col-count b-col-count
+                              alpha (.buffer A) (.column-stride A)
+                              (.buffer B) (.column-stride B)
+                              beta (.buffer C) (.column-stride C)))))
