@@ -10,7 +10,7 @@
 
 (defn create-driver
   []
-  (cuda-driver/create-cuda-driver))
+  (cuda-driver/cuda-driver))
 
 (verify-utils/def-all-dtype-test simple-stream
   (verify-driver/simple-stream (create-driver) verify-utils/*datatype*))

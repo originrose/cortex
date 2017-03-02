@@ -46,7 +46,7 @@
          (-> graph
              (graph/update-node id #(assoc-in % [:input :stream] id))
              (graph/add-stream id
-                               (graph/create-stream-descriptor
+                               (graph/stream-descriptor
                                  output-channels
                                  output-height
                                  output-width))))

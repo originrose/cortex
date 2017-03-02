@@ -9,8 +9,8 @@
 
 (defn create-context
   []
-  (ce/create-context :datatype verify-utils/*datatype*
-                     :backend :cuda))
+  (ce/compute-context :datatype verify-utils/*datatype*
+                      :backend :cuda))
 
 (deftest corn
   (verify-train/test-corn (create-context)))

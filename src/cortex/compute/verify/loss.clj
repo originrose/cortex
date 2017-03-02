@@ -43,7 +43,7 @@
                                                            :id :center-loss-1)
                                   [:feature])
                   first
-                  (graph/add-stream :labels (graph/create-stream-descriptor 5))
+                  (graph/add-stream :labels (graph/stream-descriptor 5))
                   graph/build-graph
                   graph/generate-parameters)
         driver (drv/get-driver backend)

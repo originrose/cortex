@@ -8,8 +8,8 @@
 
 (defn create-context
   []
-  (execute/create-context :backend :cpu
-                          :datatype test-utils/*datatype*))
+  (execute/compute-context :backend :cpu
+                           :datatype test-utils/*datatype*))
 
 
 (deftest corn-gradient

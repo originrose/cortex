@@ -74,7 +74,7 @@
             (network/network->node-parameters network (get node :id)))))
 
 
-(defn- create-batching-system
+(defn- batching-system
   [backend built-network stream-map batch-size]
   ;;we have to ensure the batching system knows if the data is used for input or output.
   (let [all-bindings (traverse/get-io-bindings built-network)
@@ -97,9 +97,9 @@
                                             v)]))
                                 (into {}))
                            (traverse/get-io-bindings built-network))]
-    (batching-system/create backend
-                            stream-map
-                            batch-size)))
+    (batching-system/batching-system backend
+                                     stream-map
+                                     batch-size)))
 
 
 (defn- get-node-parameters
@@ -233,9 +233,9 @@
                        :compute-binding
                        (assoc compute-binding
                               :backend backend
-                              :batching-system (create-batching-system backend built-network
-                                                                       stream-map
-                                                                       batch-size)))
+                              :batching-system (batching-system backend built-network
+                                                                stream-map
+                                                                batch-size)))
         trainable-parameters (load-training-parameters network)
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
@@ -733,7 +733,7 @@ any loss-specific parameter buffers."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  Inference
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn- create-infer-seq-support-data
+(defn- infer-seq-support-data
   [network]
   (let [batch-size (long (get network :batch-size))
         backend (get-in network [:compute-binding :backend])
@@ -796,7 +796,7 @@ any loss-specific parameter buffers."
 (defn- batch-infer
   [network batch-map-sequence options]
   (let [bs (get-in network [:compute-binding :batching-system])
-        support-data (create-infer-seq-support-data network)
+        support-data (infer-seq-support-data network)
         required-keys (->> (traverse/get-input-bindings network)
                            (map :stream)
                            distinct)
@@ -897,7 +897,7 @@ any loss-specific parameter buffers."
                                                    (get entry :buffers)))))
                                 (filter #(get % :gradients?) parameters))
         epsilon (double epsilon)
-        support-data (create-infer-seq-support-data network)
+        support-data (infer-seq-support-data network)
         node-id->output-binding (->> output-bindings
                                      (map (fn [{:keys [node-id] :as entry}]
                                             [node-id entry]))

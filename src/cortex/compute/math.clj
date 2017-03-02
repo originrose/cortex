@@ -89,33 +89,33 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
 
 (defrecord Tensor [^long batch-size ^long channel-count ^long height ^long width order])
 
-(defn create-tensor
+(defn tensor
   "Create a tensor from the incoming data.  Currently the tensor members are named in a NN-specific way."
   ([batch-size channel-count height width]
    (->Tensor batch-size channel-count height width planar-order))
   ([channel-count height width]
-   (create-tensor 1 channel-count height width))
+   (tensor 1 channel-count height width))
   ([height width]
-   (create-tensor 1 1 height width))
+   (tensor 1 1 height width))
   ([width]
-   (create-tensor 1 1 1 width)))
+   (tensor 1 1 1 width)))
 
 (defn core-mat-shape->tensor
   "Given a core-matrix shape produce a tensor."
   (^Tensor [shape]
-   (apply create-tensor shape))
+   (apply tensor shape))
   (^Tensor [shape ^long batch-size]
    ;;Divide the highest dimension of shape by batch size.
    (case (count shape)
-     1 (create-tensor batch-size 1 1 (quot ^long (first shape)
-                                           batch-size))
-     2 (create-tensor batch-size 1 (quot ^long (first shape)
-                                         batch-size)
-                      (second shape))
-     3 (create-tensor batch-size (quot ^long (first shape)
-                                       batch-size)
-                      (second shape)
-                      (nth shape 2))
+     1 (tensor batch-size 1 1 (quot ^long (first shape)
+                                    batch-size))
+     2 (tensor batch-size 1 (quot ^long (first shape)
+                                  batch-size)
+               (second shape))
+     3 (tensor batch-size (quot ^long (first shape)
+                                batch-size)
+               (second shape)
+               (nth shape 2))
      (throw (Exception. "Unexpected shape")))))
 
 
@@ -218,31 +218,31 @@ argument for creating an array storing a batch of data."
   "Create a new array with a given core-matrix shape and batch size."
   ([device stream datatype shape batch-size]
    (let [batch-size (long batch-size)
-         tensor (core-mat-shape->tensor shape)
-         tensor (create-tensor batch-size 1 (.height tensor) (.width tensor))
-         n-elems (long (mp/element-count tensor))
+         t (core-mat-shape->tensor shape)
+         t (tensor batch-size 1 (.height t) (.width t))
+         n-elems (long (mp/element-count t))
          dev-buf (drv/allocate-device-buffer device n-elems datatype)]
      (drv/memset stream dev-buf 0 0 n-elems)
-     (->DeviceArray dev-buf tensor)))
+     (->DeviceArray dev-buf t)))
   ([device stream datatype shape] (new-array device stream datatype shape 1))
   ([device stream datatype batch-size channel-count height width]
-   (let [tensor (create-tensor batch-size channel-count height width)
-         n-elems (long (mp/element-count tensor))
+   (let [t (tensor batch-size channel-count height width)
+         n-elems (long (mp/element-count t))
          device-buffer (drv/allocate-device-buffer device n-elems datatype)]
      (drv/memset stream device-buffer 0 0 n-elems)
-     (->DeviceArray device-buffer tensor))))
+     (->DeviceArray device-buffer t))))
 
 (defn allocate-ones
   "Allocate a buffer of ones, not an array of ones"
   [device stream datatype elem-count]
   (let [retval (drv/allocate-device-buffer device elem-count datatype)]
     (drv/memset stream retval 0 1 elem-count)
-    (->DeviceArray retval (create-tensor elem-count))))
+    (->DeviceArray retval (tensor elem-count))))
 
 (defn allocate-rand-buffer
   [device elem-count]
   (let [retval (drv/allocate-rand-buffer device elem-count)]
-    (->DeviceArray retval (create-tensor elem-count))))
+    (->DeviceArray retval (tensor elem-count))))
 
 (defn ecount
   "Wrapper for core-matrix ecount."
@@ -270,27 +270,27 @@ argument for creating an array storing a batch of data."
 (defn as-column-vector
   "Create a vector with 1x(ecount arg) vector."
   [^DeviceArray ary]
-  (with-tensor ary (create-tensor (m/ecount ary))))
+  (with-tensor ary (tensor (m/ecount ary))))
 
 
 (defn as-row-vector
   "Create a vector with (ecount ary) rows and 1 column."
   [^DeviceArray ary]
-  (with-tensor ary (create-tensor (m/ecount ary) 1)))
+  (with-tensor ary (tensor (m/ecount ary) 1)))
 
 
 (defn as-2d-matrix
   "Given a device array create a 2d matrix.  See definition of shape-2d"
   [^DeviceArray ary]
   (let [[n-rows n-cols] (shape-2d ary)]
-    (with-tensor ary (create-tensor 1 1 n-rows n-cols))))
+    (with-tensor ary (tensor 1 1 n-rows n-cols))))
 
 
 (defn as-2d-batch-matrix
   "Given a device array create a batch matrix.  See definition of batch-shape."
   [^DeviceArray ary]
   (let [[n-rows n-cols] (batch-shape ary)]
-    (with-tensor ary (create-tensor 1 1 n-rows n-cols))))
+    (with-tensor ary (tensor 1 1 n-rows n-cols))))
 
 
 (defn to-core-matrix
@@ -412,12 +412,12 @@ being smaller than X so it can act as an accumulator for X."
   "Given a device array with some batch size return a vector
 of device arrays one for each element in the batch."
   [driver ^DeviceArray ary-data]
-  (let [^Tensor tensor (.tensor ary-data)
+  (let [^Tensor t (.tensor ary-data)
         [batch-size batch-stride] (batch-shape ary-data)
         batch-size (long batch-size)
         batch-stride (long batch-stride)
-        sub-tensor (create-tensor 1 (.channel-count tensor)
-                                  (.height tensor) (.width tensor))
+        sub-tensor (tensor 1 (.channel-count t)
+                           (.height t) (.width t))
         dev-buf (device-buffer ary-data)]
     (mapv (fn [^long batch-idx]
             (->DeviceArray (drv/sub-buffer driver dev-buf (* batch-idx batch-stride)

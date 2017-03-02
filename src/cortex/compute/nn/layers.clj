@@ -119,7 +119,7 @@ and then forward many times for every parameter of the network."
                                          (drv/get-driver backend)
                                          (math/ensure-factor-of-2
                                           (* n-items (long batch-size))))
-                                        (math/create-tensor batch-size 1 1 n-items))]
+                                        (math/tensor batch-size 1 1 n-items))]
     (->Dropout backend node batch-size mult-buffer rand-buffer)))
 
 

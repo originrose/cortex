@@ -135,7 +135,7 @@
                      item-count)))
 
 
-(defn- create-adam-step-fn
+(defn- adam-step-fn
   [backend fn-map dev-dispatch-fn]
   (fn [offset
        alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
@@ -173,7 +173,7 @@
   [backend optimizer param-count]
   (let [cpu-fns (datatype-buffer-cast-iterator create-cpu-adam-step-fn)]
     (setup-optimizer backend optimizer
-                     (create-adam-step-fn backend cpu-fns dispatch-to-cpu)
+                     (adam-step-fn backend cpu-fns dispatch-to-cpu)
                      param-count)))
 
 
@@ -182,7 +182,7 @@
   ;; Load the compiled GPU kernel for floats and doubles
   (let [cuda-fns (cuda-drv/load-float-double-function "adam.fatbin" "adam_step")]
     (setup-optimizer backend optimizer
-                     (create-adam-step-fn backend cuda-fns dispatch-to-gpu)
+                     (adam-step-fn backend cuda-fns dispatch-to-gpu)
                      param-count)))
 
 (defn adam

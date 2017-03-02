@@ -26,7 +26,7 @@
     (is (= [100.0 1.0 2.0 3.0 4.0 20.0 20.0 20.0 20.0 20.0]
            (mapv double output-data)))))
 
-(defn create-make-buffer
+(defn make-buffer-fn
   [device stream datatype]
    (fn [elem-seq]
      (drv/host-array->device-buffer device stream
@@ -35,7 +35,7 @@
 (defmacro backend-test-pre
   [device datatype & body]
   `(let [~'stream (drv/create-stream ~device)
-         ~'make-buffer (create-make-buffer ~device ~'stream ~datatype)
+         ~'make-buffer (make-buffer-fn ~device ~'stream ~datatype)
          ~'->array (fn [buffer#] (drv/device-buffer->host-array ~device ~'stream buffer#))]
      ~@body
      ))

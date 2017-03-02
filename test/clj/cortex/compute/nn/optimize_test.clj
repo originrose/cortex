@@ -8,7 +8,7 @@
 
 (defn create-backend
   []
-  (cpu/create-backend *datatype*))
+  (cpu/backend *datatype*))
 
 (def-double-float-test adam
   (verify-optimize/test-adam (create-backend)))

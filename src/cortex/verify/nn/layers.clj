@@ -378,7 +378,7 @@ give specific results for layers."
            (m/eseq input-gradient)))))
 
 
-(defn create-conv-layer
+(defn conv-layer
   [input-dim num-channels k-dim pad stride n-kernels]
   [(layers/input input-dim input-dim num-channels)
    (layers/convolutional k-dim pad stride n-kernels
@@ -396,7 +396,7 @@ give specific results for layers."
                          (repeat (* 4 batch-size) [1 1 1 1]))
         {:keys [output input-gradient parameters]}
         (forward-backward-test context
-                               (create-conv-layer 3 1 2 0 1 channel-count)
+                               (conv-layer 3 1 2 0 1 channel-count)
                                batch-size
                                input
                                output-gradient)]

@@ -19,7 +19,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [cortex.nn.network :as network]
     [cortex.nn.layers :as layers]
     [cortex.nn.protocols :refer :all]
-    [cortex.compute.cpu.backend :as cpu-backend]
+    [cortex.compute.cpu.backend :as cpu]
     [cortex.compute.nn.compute-execute :as compute-execute]))
 
 
@@ -138,7 +138,7 @@ in a single map you still need to call cortex-dataset/batches->columns."
     (-> (setup-network context network input-bindings output-bindings batch-size
                        #(traverse/add-training-traversal
                          %
-                         (ds/dataset->stream->size-map dataset)
+                         (ds/stream-descriptions dataset)
                          :optimizer optimizer))
       train-fn)))
 
@@ -152,8 +152,8 @@ call cortex-dataset/batches->columns"
       :or {batch-size 128 infer-batch-type :holdout}}]
   (as-> (setup-network context network input-bindings output-bindings batch-size
                        #(traverse/add-forward-traversal
-                         % (ds/dataset->stream->size-map dataset))) network-or-seq
-    (infer-batch-sequence context network-or-seq
+                          % (ds/stream-descriptions dataset))) network-or-seq
+        (infer-batch-sequence context network-or-seq
                              (ds/get-batches dataset
                                              batch-size
                                              infer-batch-type
@@ -172,14 +172,14 @@ This does not need to be wrapped in a resource context; that is done for you."
   [datatype force-cuda?]
   (try
     (require 'cortex.compute.cuda.backend)
-    #((resolve 'cortex.compute.cuda.backend/create-backend) datatype)
+    #((resolve 'cortex.compute.cuda.backend/backend) datatype)
     (catch Exception e
       (if force-cuda?
         (throw (ex-info "Unable to initialize CUDA back-end for GPU support."
                         {:error e}))
         false))))
 
-(defn create-context
+(defn compute-context
   "Attempt to create a cuda context, and then only if that fails create a cpu context."
   [& {:keys [datatype backend]
       :or {datatype :float}}]
@@ -190,8 +190,8 @@ This does not need to be wrapped in a resource context; that is done for you."
         config (if cuda-fn
                  {:backend :cuda
                   :backend-fn cuda-fn}
-                 {:backend :cpu
-                  :backend-fn #(cpu-backend/create-backend datatype)})
+                 {:backend    :cpu
+                  :backend-fn #(cpu/backend datatype)})
         config (assoc config :datatype datatype)]
     (compute-execute/map->ComputeExecutionContext config)))
 
@@ -205,9 +205,9 @@ call cortex-dataset/batches->columns"
       :as options}]
 
   (resource/with-resource-context
-    (let [context (create-context)
+    (let [context (compute-context)
           ; Creates a map of {:<stream-name> {:channel-count c :width w :height h}
-          stream-map (ds/dataset->stream->size-map dataset)
+          stream-map (ds/stream-descriptions dataset)
 
           ; convert from vector to graph description if needed
           network (if (and (map? network) (:layer-graph network))

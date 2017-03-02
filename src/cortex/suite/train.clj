@@ -145,7 +145,7 @@ we continue to train forever.
                                  ds/batches->columns)
           cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
           best-network-atom (atom network)
-          context (execute/create-context :force-gpu? force-gpu?)
+          context (execute/compute-context :force-gpu? force-gpu?)
           train-sequence (execute/train context network dataset [] []
                                         :batch-size batch-size
                                         :optimizer optimizer
@@ -157,7 +157,7 @@ we continue to train forever.
       (network/print-layer-summary (-> network
                                        traverse/auto-bind-io
                                        (traverse/add-training-traversal
-                                        (ds/dataset->stream->size-map dataset))))
+                                         (ds/stream-descriptions dataset))))
       (->> (if epoch-count
              (take epoch-count train-sequence)
              train-sequence)
@@ -184,7 +184,7 @@ existing traversal bindings."
            force-gpu? true}}]
   (let [input-streams (traverse/get-input-streams network)
         output-streams (traverse/get-output-streams network)
-        inferences (execute/infer-columns (execute/create-context :force-gpu? force-gpu?) network dataset
+        inferences (execute/infer-columns (execute/compute-context :force-gpu? force-gpu?) network dataset
                                           [] []
                                           :batch-size batch-size
                                           :infer-batch-type batch-type)

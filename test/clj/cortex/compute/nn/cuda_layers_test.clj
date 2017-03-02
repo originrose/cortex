@@ -9,8 +9,8 @@
 
 (defn create-context
   []
-  (execute/create-context :backend :cuda
-                          :datatype verify-utils/*datatype*))
+  (execute/compute-context :backend :cuda
+                           :datatype verify-utils/*datatype*))
 
 (def-double-float-test relu-activation
   (verify-layers/relu-activation (create-context)))
