@@ -15,6 +15,30 @@
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]))
 
+
+(defprotocol PLayerCreation
+  "For layers completely implemented in the backend we allow the backend to create
+some specific data from a description.  Most layers need to implement
+computelayer/forward,backward."
+  (create [backend layer batch-size]))
+
+
+(defprotocol PDropout
+  ;;Flat distribution -> scaled 1 or 0 multiplicative buffer.
+  (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer])
+  ;;Gaussian distribution copied to mult buffer.
+  (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]))
+
+
+(defprotocol PBatchNormalization
+  (batch-norm-inference! [backend input running-means running-variances scale bias output epsilon])
+  (batch-norm-forward! [backend input
+                        running-means running-variances batch-means batch-variances
+                        scale bias output average-factor epsilon])
+  (batch-norm-backward! [backend input batch-means batch-variances scale bias output
+                         scale-gradient bias-gradient input-gradient output-gradient
+                         epsilon]))
+
 (defn array
   ([backend data items-per-batch]
    (math/array (drv/get-driver backend) (drv/get-stream backend) (dtype/get-datatype backend)
@@ -85,26 +109,3 @@
                  1.0 (math/as-2d-batch-matrix output-gradient) (math/as-2d-batch-matrix input)
                  1.0 weight-gradient))))
 
-
-(defprotocol PLayerCreation
-  "For layers completely implemented in the backend we allow the backend to create
-some specific data from a description.  Most layers need to implement
-computelayer/forward,backward."
-  (create [backend layer batch-size]))
-
-
-(defprotocol PDropout
-  ;;Flat distribution -> scaled 1 or 0 multiplicative buffer.
-  (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer])
-  ;;Gaussian distribution copied to mult buffer.
-  (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]))
-
-
-(defprotocol PBatchNormalization
-  (batch-norm-inference! [backend input running-means running-variances scale bias output epsilon])
-  (batch-norm-forward! [backend input
-                        running-means running-variances batch-means batch-variances
-                        scale bias output average-factor epsilon])
-  (batch-norm-backward! [backend input batch-means batch-variances scale bias output
-                         scale-gradient bias-gradient input-gradient output-gradient
-                         epsilon]))

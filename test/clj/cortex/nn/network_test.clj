@@ -1,9 +1,12 @@
 (ns cortex.nn.network-test
-  (:require [clojure.test :refer :all]
-            [cortex.nn.layers :as layers]
-            [cortex.nn.network :as network]
-            [cortex.graph :as graph]
-            [clojure.core.matrix :as m]))
+  (:require
+    [clojure.test :refer :all]
+    [clojure.core.matrix :as m]
+    [cortex.graph :as graph]
+    [cortex.dataset :as ds]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.execute :as execute]
+    [cortex.nn.network :as network]))
 
 
 (deftest specify-weights-bias
@@ -75,3 +78,20 @@
                  (assoc (first (graph/node->output-dimensions (graph/get-node graph :left)))
                         :id :left)])
            (set (graph/node->input-dimensions concat-node))))))
+
+
+(defn test-run
+  []
+  (let [dataset (ds/create-in-memory-dataset
+                  {:data {:data CORN-DATA
+                          :shape 2}
+                   :yield {:data CORN-LABELS
+                            :shape 1}}
+                  (ds/create-index-sets (count CORN-DATA)
+                                        :training-split 1.0
+                                        :randomize? false))
+        size-map (ds/dataset->stream->size-map dataset)]
+    (execute/run [(layers/input 2 1 1 :id :data)
+                  (layers/linear 1 :id :yield)]
+                 dataset
+                 :batch-size 1)))

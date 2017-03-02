@@ -1,16 +1,15 @@
 (ns ^:gpu cortex.compute.nn.cuda-gradient-test
   (:require [clojure.test :refer :all]
             [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
-            [cortex.compute.nn.cuda-backend :as cuda-backend]
+            [cortex.compute.cuda.backend :as cuda-backend]
             [cortex.verify.nn.gradient :as verify-gradient]
-            [cortex.compute.nn.compute-execute :as ce]))
+            [cortex.nn.execute :as execute]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
 (defn create-context
   []
-  (ce/create-context
-   #(cuda-backend/create-backend verify-utils/*datatype*)))
+  (execute/create-context :datatype verify-utils/*datatype* :backend :cuda))
 
 ;;The gradient tests are just too sensitive to precision to work well here as the GPU
 ;;has different precision than the CPU for things. Doubles work fine but

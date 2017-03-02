@@ -94,7 +94,6 @@
         data-shape (mat/shape all-rows)
         num-cols (long (second data-shape))
         num-rows (long (first data-shape))
-        _ (println "normalizing mnist data")
         normalized (math/global-whiten! all-rows)
         norm-mat (get normalized :data)
         num-train-d (count train-d)

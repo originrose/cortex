@@ -1,12 +1,16 @@
 (ns cortex.nn.traverse-test
-  (:require [cortex.nn.traverse :as traverse]
-            [cortex.nn.layers :as layers]
-            [cortex.nn.network :as network]
-            [cortex.graph :as graph]
-            [clojure.test :refer :all]
-            [clojure.core.matrix :as m]
-            [cortex.loss :as loss]
-            [clojure.data :as data]))
+  (:require
+    [clojure.data :as data]
+    [clojure.test :refer :all]
+    [clojure.core.matrix :as m]
+    [cortex.graph :as graph]
+    [cortex.dataset :as ds]
+    [cortex.loss :as loss]
+    [cortex.nn.traverse :as traverse]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.execute :as execute]
+    [cortex.nn.network :as network]
+    [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]]))
 
 
 (def mnist-basic
@@ -69,10 +73,10 @@
 
 (defn build-big-description
   []
-  (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1
-                                                    :stream :labels
-                                                    :loss (loss/softmax-loss))]]
+  (let [input-bindings [(traverse/input-binding :input-1 :data)]
+        output-bindings [(traverse/output-binding :softmax-1
+                                                  :stream :labels
+                                                  :loss (loss/softmax-loss))]]
     (-> (network/build-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
@@ -591,3 +595,4 @@
               :loss {:type :mse-loss},
               :dimension {:channels 1, :height 1, :width 20}}}
             (get train-traversal :buffers))))))
+

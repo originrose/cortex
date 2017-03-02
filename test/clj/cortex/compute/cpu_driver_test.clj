@@ -1,5 +1,5 @@
 (ns cortex.compute.cpu-driver-test
-  (:require [cortex.compute.cpu-driver :as cpu]
+  (:require [cortex.compute.cpu.driver :as cpu]
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
             [think.resource.core :as resource]

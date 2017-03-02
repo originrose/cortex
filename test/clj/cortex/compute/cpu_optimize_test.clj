@@ -1,8 +1,9 @@
 (ns cortex.compute.cpu-optimize-test
-  (:require [cortex.compute.nn.cpu-backend :as cpu-backend]
-            [cortex.compute.verify.optimize :as verify-optimize]
-            [clojure.test :refer :all]
-            [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]))
+  (:require
+    [cortex.compute.cpu.backend :as cpu-backend]
+    [cortex.compute.verify.optimize :as verify-optimize]
+    [clojure.test :refer :all]
+    [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
