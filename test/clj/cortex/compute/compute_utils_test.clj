@@ -1,6 +1,6 @@
 (ns cortex.compute.compute-utils-test
   (:require [clojure.test :refer :all]
-            [cortex.compute.cpu-driver :as cpu-drv]
+            [cortex.compute.cpu.driver :as cpu-drv]
             [cortex.compute.driver :as drv]
             [cortex.compute.math :as math]
             [cortex.compute.compute-utils :as cu]

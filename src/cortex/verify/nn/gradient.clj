@@ -41,8 +41,8 @@
                     flatten
                     vec)
         num-items (count network)
-        input-bindings [(traverse/->input-binding :input :data)]
-        output-bindings [(traverse/->output-binding test-id :stream :labels :loss loss-fn)]]
+        input-bindings [(traverse/input-binding :input :data)]
+        output-bindings [(traverse/output-binding test-id :stream :labels :loss loss-fn)]]
     (as-> (-> network
               (assoc-in [0 :id] :input)
               (assoc-in [(- num-items 1) :id] test-id)) network

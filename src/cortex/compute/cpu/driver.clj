@@ -1,4 +1,4 @@
-(ns cortex.compute.cpu-driver
+(ns cortex.compute.cpu.driver
   (:require [cortex.compute.driver :as drv]
             [cortex.compute.math :as c-math]
             [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]

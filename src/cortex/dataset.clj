@@ -128,7 +128,7 @@
    ({:image (image image image) :label (label label label) :histogram (hist hist hist)}
     {:image (image image image) :label (label label label) :histogram (hist hist hist)})
 
-  Put another way, within each batch the data is columnar labled by stream (shape) name"))
+  Put another way, within each batch the data is columnar labeled by stream (shape) name"))
 
 
 (defn dataset->stream->size-map
@@ -243,7 +243,6 @@
            batches))))
 
 
-
 (defn create-in-memory-dataset
   [data-shape-map index-sets]
   ;;Small bit of basic error checking.
@@ -253,8 +252,11 @@
         (throw (Exception. (format "Either data or shape missing for key: %s" k))))
       (when-not (= (m/ecount (first data))
                    (shape-ecount shape))
-        (throw (Exception. (format "shape ecount (%s) doesn't match (first data) ecount (%s) for key %s."
-                                   (shape-ecount shape) (m/ecount (first data)) k))))))
+        (throw (Exception.
+                 (format "shape ecount (%s) doesn't match (first data) ecount (%s) for key %s."
+                         (shape-ecount shape)
+                         (m/ecount (first data))
+                         k))))))
   (->InMemoryDataset data-shape-map index-sets))
 
 

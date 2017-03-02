@@ -1,34 +1,36 @@
-(ns cortex.compute.nn.cpu-backend
-  (:require [cortex.compute.nn.backend :as nn-backend]
-            [cortex.compute.driver :as drv]
-            [cortex.compute.math :as math]
-            [cortex.compute.cpu-driver :as cpu-drv]
-            [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
-            [cortex.compute.nn.layers :as compute-layers]
-            [cortex.compute.nn.protocols :as compute-protocols]
-            [cortex.nn.layers :as layers]
-            [clojure.core.matrix :as m]
-            [clojure.core.matrix.protocols :as mp]
-            [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.nn.impl :as impl])
-  (:import [cortex.compute.cpu_driver CPUDriver CPUStream]
-           [java.nio DoubleBuffer FloatBuffer]
-           [cortex.compute.math DeviceArray Tensor]
-           [java.util Arrays]
-           [java.util.concurrent ForkJoinPool Callable Future]
-           [think.datatype ArrayView DoubleArrayView FloatArrayView]))
+(ns cortex.compute.cpu.backend
+  (:require
+    [clojure.core.matrix :as m]
+    [clojure.core.matrix.protocols :as mp]
+    [clojure.core.matrix.macros :refer [c-for]]
+    [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.impl :as impl]
+    [cortex.compute.driver :as drv]
+    [cortex.compute.math :as math]
+    [cortex.compute.cpu.driver :as cpu-drv]
+    [cortex.compute.nn.layers :as compute-layers]
+    [cortex.compute.nn.protocols :as compute-protocols]
+    [cortex.compute.nn.backend :as nn-backend])
+  (:import
+    [java.util Arrays]
+    [java.util.concurrent ForkJoinPool Callable Future]
+    [java.nio DoubleBuffer FloatBuffer]
+    [think.datatype ArrayView DoubleArrayView FloatArrayView]
+    [cortex.compute.cpu.driver CPUDriver CPUStream]
+    [cortex.compute.math DeviceArray Tensor]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-(defrecord CPUBackend [type ^CPUDriver driver ^CPUStream stream datatype])
+(defrecord CPUBackend [type driver stream datatype])
 
 (defn create-backend
-  (^CPUDriver [datatype]
+  ([datatype]
    (let [driver (cpu-drv/create-driver)
          stream (drv/create-stream driver)]
      (->CPUBackend :cpu driver stream datatype)))
-  (^CPUBackend []
+  ([]
    (create-backend :double)))
 
 
@@ -56,6 +58,7 @@
                     output-gradient batch-size batch-stride])
   (cpu-lrn-forward [input output input-tensor n k alpha beta])
   (cpu-lrn-backward [input output-gradient input-gradient input-tensor n k alpha beta]))
+
 
 (defn launch-parallel-for
   [^long num-iters parallel-for-fn]
@@ -101,7 +104,6 @@
                                     (< ~idx-var group-end#)
                                     (inc ~idx-var)]
                                    ~@body)))))
-
 
 (defmacro cpu-act-forward-impl
   [act-type input output cast-fn]

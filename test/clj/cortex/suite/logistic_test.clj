@@ -44,3 +44,5 @@
                                                                       2 :batch-size 2)]
     (is (> should-def 0.97))
     (is (< shouldnt-def 0.02))))
+
+(logistic-test)

@@ -1,12 +1,16 @@
 (ns cortex.nn.traverse-test
-  (:require [cortex.nn.traverse :as traverse]
-            [cortex.nn.layers :as layers]
-            [cortex.nn.network :as network]
-            [cortex.graph :as graph]
-            [clojure.test :refer :all]
-            [clojure.core.matrix :as m]
-            [cortex.loss :as loss]
-            [clojure.data :as data]))
+  (:require
+    [clojure.data :as data]
+    [clojure.test :refer :all]
+    [clojure.core.matrix :as m]
+    [cortex.graph :as graph]
+    [cortex.dataset :as ds]
+    [cortex.loss :as loss]
+    [cortex.nn.traverse :as traverse]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.execute :as execute]
+    [cortex.nn.network :as network]
+    [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]]))
 
 
 (def mnist-basic
@@ -69,10 +73,10 @@
 
 (defn build-big-description
   []
-  (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1
-                                                    :stream :labels
-                                                    :loss (loss/softmax-loss))]]
+  (let [input-bindings [(traverse/input-binding :input-1 :data)]
+        output-bindings [(traverse/output-binding :softmax-1
+                                                  :stream :labels
+                                                  :loss (loss/softmax-loss))]]
     (-> (network/build-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
@@ -334,10 +338,8 @@
                                        :traversal
                                        realize-traversals)
         layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
-    (clojure.pprint/pprint              (get traversal-after-stacking :backward))
-
-    (println "!!!original")
-    (clojure.pprint/pprint              (get original-traversal :backward))
+    ;(clojure.pprint/pprint              (get traversal-after-stacking :backward))
+    ;(clojure.pprint/pprint              (get original-traversal :backward))
     (is (= [nil nil]
            (minimal-diff
              (get original-traversal :backward)
@@ -387,3 +389,22 @@
         output-bindings (vec (traverse/get-output-bindings inference-net))]
     (is (= 1 (count output-bindings)))
     (is (= :softmax-1 (get-in output-bindings [0 :node-id])))))
+
+
+(defn test-run
+  []
+  (let [dataset (ds/create-in-memory-dataset
+                  {:data {:data CORN-DATA
+                          :shape 2}
+                   :yield {:data CORN-LABELS
+                            :shape 1}}
+                  (ds/create-index-sets (count CORN-DATA)
+                                        :training-split 1.0
+                                        :randomize? false))
+        size-map (ds/dataset->stream->size-map dataset)]
+    (execute/run [(layers/input 2 1 1 :id :data)
+                  (layers/linear 1 :id :yield)]
+                 dataset
+                 :batch-size 1)))
+
+

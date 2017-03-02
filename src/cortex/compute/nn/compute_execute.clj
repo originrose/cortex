@@ -1,25 +1,27 @@
 (ns cortex.compute.nn.compute-execute
-  (:require [cortex.nn.execute :as execute]
-            [cortex.nn.layers :as layers]
-            [cortex.nn.traverse :as traverse]
-            [cortex.compute.nn.layers :as compute-layers]
-            [cortex.optimize :as opt]
-            [cortex.compute.nn.backend :as backend]
-            [cortex.nn.protocols :as cp]
-            [cortex.compute.nn.protocols :as compute-protocols]
-            [clojure.core.matrix :as m]
-            [think.resource.core :as resource]
-            [cortex.compute.batching-system :as batching-system]
-            [cortex.compute.loss :as compute-loss]
-            [cortex.loss :as cortex-loss]
-            [clojure.set :as c-set]
-            [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.compute.driver :as drv]
-            [think.datatype.core :as dtype]
-            [cortex.compute.math :as math]
-            [cortex.compute.nn.cpu-backend :as cpu-backend]
-            [cortex.nn.network :as network]
-            [cortex.graph :as graph]))
+  (:require
+    [clojure.core.matrix :as m]
+    [clojure.set :as c-set]
+    [clojure.core.matrix.macros :refer [c-for]]
+    [think.resource.core :as resource]
+    [think.datatype.core :as dtype]
+    [cortex.loss :as cortex-loss]
+    [cortex.graph :as graph]
+    [cortex.optimize :as opt]
+    [cortex.loss :as loss]
+    [cortex.nn.network :as network]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.traverse :as traverse]
+    [cortex.nn.protocols :as nn]
+    [cortex.compute.driver :as drv]
+    [cortex.compute.math :as math]
+    [cortex.compute.batching-system :as batching-system]
+    [cortex.compute.loss :as compute-loss]
+    [cortex.compute.cpu.backend :as cpu-backend]
+    [cortex.compute.cuda.backend :as cuda-backend]
+    [cortex.compute.nn.layers :as compute-layers]
+    [cortex.compute.nn.backend :as backend]
+    [cortex.compute.nn.protocols :as compute-protocols]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -352,7 +354,6 @@
 
 (defn- print-traversal-buffers
   [network]
-  (println "!!Traversal buffers!!")
   (let [backend (get-in network [:compute-binding :backend])
         to-double #(vec (backend/to-double-array backend %))]
    (clojure.pprint/pprint (mapv (fn [[k v]]
@@ -360,7 +361,6 @@
                                       :gradient (to-double (get v :gradient))}])
                                 (get-in network [:compute-binding :traversal-buffers])))
    network))
-
 
 
 (defmulti perform-pass
@@ -698,7 +698,6 @@ any loss-specific parameter buffers."
                                               (rest batch-seq))))))))
 
 
-
 (defn- train-sequence
   [network batch-map-sequence options]
   (let [batch-map-sequence (->> batch-map-sequence
@@ -793,10 +792,84 @@ any loss-specific parameter buffers."
         support-data (create-infer-seq-support-data network)
         required-keys (->> (traverse/get-input-bindings network)
                            (map :stream)
-                           distinct)]
-    (->> (batching-system/get-batches bs batch-map-sequence required-keys)
-         (do-infer-seq network support-data :inference))))
+                           distinct)
+        batches (batching-system/get-batches bs batch-map-sequence required-keys)]
+    (do-infer-seq network support-data :inference batches)))
 
+
+(defn- normalize-argument-buffer
+  [arg-buf]
+  (let [buf-value (get arg-buf :buffer)]
+    (if (map? buf-value)
+      (assoc arg-buf :buffer (get buf-value :data))
+      arg-buf)))
+
+
+(defn execute-live-loss-term
+  "Execute a loss term.  This uses the context to find node and loss parameters."
+  [context network loss-term inference-columns dataset-columns]
+  (let [graph (-> (network/network->graph network)
+                  (assoc :buffers #(hash-map :buffer
+                                             [(get-parameter network %)])))
+        buffer-map (fn [m]
+                               (zipmap (keys m)
+                                       (for [v (vals m)]
+                                         {:buffer v})))
+        arguments (->> (graph/resolve-arguments graph loss-term
+                                                (buffer-map dataset-columns)
+                                                (buffer-map inference-columns))
+                       (map (fn [[k v]]
+                              (let [v (normalize-argument-buffer v)]
+                               (try
+                                 [k (assoc v
+                                           :count
+                                           (count (get v :buffer)))]
+                                 (catch Throwable e
+                                   (throw (ex-info "Argument resolved to odd value"
+                                                   {:arg-key k
+                                                    :error e})))))))
+                       (into {}))
+        distinct-count (->> arguments
+                            (map (comp :count second))
+                            distinct)
+        _ (when-not (< (count distinct-count)
+                       3)
+            (throw (ex-info "There should be at most 2 distinct argument buffer counts"
+                            {:buffer-counts (map (fn [[k v]]
+                                                   [k
+                                                    (dissoc v :buffer)])
+                                                 arguments)})))
+        max-argument-num-items (apply max distinct-count)
+        even-arguments (->> arguments
+                            (map (fn [[k argument]]
+                                   [k
+                                    (update argument :buffer
+                                            (fn [buffer]
+                                              (->> (repeat buffer)
+                                                   (apply concat)
+                                                   (take max-argument-num-items)
+                                                   vec)))])))
+        argument-keys (map first arguments)
+        argument-vals (map second arguments)
+        partitioned-buffers (->> argument-vals
+                                 (map :buffer)
+                                 (apply interleave)
+                                 (partition (count even-arguments)))
+        buffer-map-seq (map (fn [key-seq buf-seq]
+                              (->> (map vector key-seq buf-seq)
+                                   (into {})))
+                            (repeat argument-keys) partitioned-buffers)]
+    (* (double (loss/get-loss-lambda loss-term))
+       (/ (->> buffer-map-seq
+               (map #(loss/loss loss-term %))
+               (apply +))
+          (count buffer-map-seq)))))
+
+(defn- execute-live-loss-fn
+  "Execute a loss function against a running network returning the loss value as a double.  Inferences and dataset outputs are expected to be maps of columns of data."
+  [context network inferences dataset-outputs]
+  (apply + (->> (get-in network [:traversal :loss-function])
+                (map #(execute-live-loss-term context network % inferences dataset-outputs)))))
 
 (defn- generate-numeric-gradients
   [context network stream->input-map epsilon]
@@ -839,9 +912,9 @@ any loss-specific parameter buffers."
                                                 (mapv vec))]))
                                  (into {}))
         data->loss (fn [inference-data]
-                     (execute/execute-live-loss-fn context network
-                                                   inference-data
-                                                   stream->batches-map))]
+                     (execute-live-loss-fn context network
+                                           inference-data
+                                           stream->batches-map))]
     (doseq [{:keys [buffer numeric-gradient host-buffer] :as entry} numeric-buffers]
       (let [device-buffer (math/device-buffer buffer)]
        (when-not (and numeric-gradient host-buffer)
@@ -867,8 +940,8 @@ any loss-specific parameter buffers."
     network))
 
 
-(defrecord ComputeExecutionContext [backend-fn]
-  cp/PExecutionContext
+(defrecord ComputeExecutionContext [datatype backend backend-fn]
+  nn/PExecutionContext
   (bind-to-network [context built-network options]
     (bind backend-fn built-network options))
   (train-batch-sequence [context built-network batch-map-sequence options]
@@ -883,12 +956,3 @@ any loss-specific parameter buffers."
     (traverse bound-network id->input-map direction))
   (generate-numeric-gradients [context built-network stream->data-map epsilon]
     (generate-numeric-gradients context built-network stream->data-map epsilon)))
-
-
-(defn create-context
-  ([backend-fn]
-   (->ComputeExecutionContext backend-fn))
-  ([]
-   (create-context #(cpu-backend/create-backend))))
-
-

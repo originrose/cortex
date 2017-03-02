@@ -16,7 +16,22 @@ while output bindings are maps from node-id to {:stream :loss}."
             [cortex.buffer-initialization :as buf-init]
             [cortex.argument :as arg]))
 
+
+(defn input-binding
+  "Create a stand-alone input binding"
+  [node-id stream-name]
+  [node-id {:stream stream-name}])
+
+
+(defn output-binding
+  "Create a stand-alone output-binding"
+  [node-id & {:keys [stream loss]}]
+  [node-id {:stream stream
+            :loss loss}])
+
+
 (defn- check-node-id
+  "Check whether a given node-id is in the network."
   [network node-id]
   (when-not (get-in network [:layer-graph :id->node-map node-id])
     (throw (ex-info "Failed to find node id in graph"
@@ -24,23 +39,17 @@ while output bindings are maps from node-id to {:stream :loss}."
                      :graph-nodes (keys (get-in network [:layer-graph :id->node-map]))}))))
 
 
-(defn bind-input
+(defn bind-input-to-stream
   "Create an input binding.  Inputs are always bound to incoming streams."
   [network node-id stream-name]
   (check-node-id network node-id)
   (assoc-in network [:traversal :input-bindings node-id] {:stream stream-name}))
 
 
-(defn ->input-binding
-  "Create a stand-alone input binding"
-  [node-id stream-name]
-  [node-id {:stream stream-name}])
-
-
 (defn bind-input-bindings
   [network input-bindings]
   (reduce (fn [network [node-id {:keys [stream]}]]
-            (bind-input network node-id stream))
+            (bind-input-to-stream network node-id stream))
           network
           input-bindings))
 
@@ -63,13 +72,6 @@ while training no stream or loss is necessary"
              :loss (or loss
                        (layers/get-layer-default-loss
                         (graph/get-node (get network :layer-graph) node-id)))}))
-
-
-(defn ->output-binding
-  "Create a stand-alone output-binding"
-  [node-id & {:keys [stream loss]}]
-  [node-id {:stream stream
-            :loss loss}])
 
 
 (defn bind-output-bindings
@@ -108,8 +110,29 @@ while training no stream or loss is necessary"
             (-> traversal
                 (dissoc :input-bindings)
                 (dissoc :output-bindings)))))
+
 (declare remove-existing-loss-terms)
 
+(defn bind-vars-to-network
+  "Bind network nodes to dataset variables."
+  [network]
+  (let [network (clear-io-bindings network)
+        ;;Get the graph without any loss terms else we will bind things to the loss nodes.
+        graph (get (remove-existing-loss-terms network) :layer-graph)
+        inputs (graph/roots graph)
+        outputs (graph/leaves graph)
+
+        ; Bind the inputs
+        network (reduce (fn [network node-id]
+                          (bind-input-to-stream network node-id node-id))
+                        network
+                        inputs)
+        ; Bind the outputs
+        network (reduce (fn [network node-id]
+                          (bind-output-train network node-id node-id))
+                        network
+                        outputs)]
+    network))
 
 (defn auto-bind-io
   "Auto bind the network's roots and leaves to either :data :labels if there
@@ -119,25 +142,27 @@ root and labels-x where labels are a 1-based index of the leaf."
   (let [network (clear-io-bindings network)
         ;;Get the graph without any loss terms else we will bind things to the loss nodes.
         graph (get (remove-existing-loss-terms network) :layer-graph)
-        roots (graph/roots graph)
-        leaves (graph/leaves graph)
-        input-name-fn (if (> (count roots) 1)
+        inputs (graph/roots graph)
+        outputs (graph/leaves graph)
+        input-name-fn (if (> (count inputs) 1)
                         (fn [network]
                           (keyword (str "data-" (+ 1 (count (get-input-bindings network))))))
                         (constantly :data))
-        output-name-fn (if (> (count leaves) 1)
+        output-name-fn (if (> (count outputs) 1)
                          (fn [network]
                            (keyword (str "labels-" (+ 1 (count (get-output-bindings network))))))
-                         (constantly :labels))]
-    (as-> network network
-      (reduce (fn [network root]
-                (bind-input network root (input-name-fn network)))
-              network
-              roots)
-      (reduce (fn [network leaf]
-                (bind-output-train network leaf (output-name-fn network)))
-              network
-              leaves))))
+                         (constantly :labels))
+        ; Bind the inputs
+        network (reduce (fn [network root]
+                          (bind-input-to-stream network root (input-name-fn network)))
+                        network
+                        inputs)
+        ; Bind the outputs
+        network (reduce (fn [network leaf]
+                          (bind-output-train network leaf (output-name-fn network)))
+                        network
+                        outputs)]
+    network))
 
 
 (defn get-io-bindings
@@ -456,7 +481,6 @@ and input and output buffer lists.
 
 !!Note that input-bindings are maps from stream to node-id
 while output-bindings are maps from node-id to {:stream :loss}!!
-
 
 Each traversal is sequence of maps like in create-forward-traversal
 exception the incoming and outgoing ids are buffer ids.

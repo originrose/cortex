@@ -25,17 +25,17 @@
 
 (extend-protocol dtype/PDatatype
   BytePointer
-  (get-datatype [item] :byte)
+  (get-datatype [ptr] :byte)
   ShortPointer
-  (get-datatype [item] :short)
+  (get-datatype [ptr] :short)
   IntPointer
-  (get-datatype [item] :int)
+  (get-datatype [ptr] :int)
   LongPointer
-  (get-datatype [item] :long)
+  (get-datatype [ptr] :long)
   FloatPointer
-  (get-datatype [item] :float)
+  (get-datatype [ptr] :float)
   DoublePointer
-  (get-datatype [item] :double))
+  (get-datatype [ptr] :double))
 
 
 (defn make-pointer-of-type
@@ -101,16 +101,16 @@ threadsafe while (.position ptr offset) is not."
 
 
 (defn release-pointer
-  [^Pointer item]
-  (.close item)
-  (.deallocate item false)
-  (.set ^Field deallocator-field item nil))
+  [^Pointer ptr]
+  (.close ptr)
+  (.deallocate ptr false)
+  (.set ^Field deallocator-field ptr nil))
 
 
 (defn as-buffer
   "Get a nio buffer from the pointer to use in other places.  Note this
-  function is threadsafe while a raw .asBuffer call is not (!!)
-https://github.com/bytedeco/javacpp/issues/155"
+  function is threadsafe while a raw .asBuffer call is not!!!
+  https://github.com/bytedeco/javacpp/issues/155"
   [^Pointer ptr]
   (.asBuffer (duplicate-pointer ptr)))
 
@@ -118,22 +118,25 @@ https://github.com/bytedeco/javacpp/issues/155"
 (extend-type Pointer
   dtype/PCopyQueryDirect
   (get-direct-copy-fn [dest dest-offset]
-    (fn [item item-offset elem-count]
-      (dtype/copy-to-buffer-direct! item item-offset
+    (fn [ptr ptr-offset elem-count]
+      (dtype/copy-to-buffer-direct! ptr ptr-offset
                                     (as-buffer dest) dest-offset
                                     elem-count)))
+
   dtype/PCopyToItemDirect
-  (copy-to-array-direct! [item item-offset dest dest-offset elem-count]
-    (dtype/copy-to-array-direct! (as-buffer item) item-offset dest dest-offset elem-count))
-  (copy-to-buffer-direct! [item item-offset dest dest-offset elem-count]
-    (dtype/copy-to-buffer-direct! (as-buffer item) item-offset dest dest-offset elem-count))
+  (copy-to-array-direct! [ptr ptr-offset dest dest-offset elem-count]
+    (dtype/copy-to-array-direct! (as-buffer ptr) ptr-offset dest dest-offset elem-count))
+  (copy-to-buffer-direct! [ptr ptr-offset dest dest-offset elem-count]
+    (dtype/copy-to-buffer-direct! (as-buffer ptr) ptr-offset dest dest-offset elem-count))
+
   dtype/PAccess
-  (set-value! [item ^long offset value] (dtype/set-value! (as-buffer item) offset value))
-  (set-constant! [item offset value elem-count]
-    (dtype/set-constant! (as-buffer item) offset value elem-count))
-  (get-value [item ^long offset] (dtype/get-value (as-buffer item) offset))
+  (set-value! [ptr ^long offset value] (dtype/set-value! (as-buffer ptr) offset value))
+  (set-constant! [ptr offset value elem-count]
+    (dtype/set-constant! (as-buffer ptr) offset value elem-count))
+  (get-value [ptr ^long offset] (dtype/get-value (as-buffer ptr) offset))
+
   mp/PElementCount
-  (element-count [item] (mp/element-count (as-buffer item))))
+  (element-count [ptr] (.capacity ptr)))
 
 (defn to-pointer
   ^Pointer [obj] obj)

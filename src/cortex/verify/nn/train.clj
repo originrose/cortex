@@ -1,18 +1,20 @@
 (ns cortex.verify.nn.train
-  (:require [cortex.nn.layers :as layers]
-            [cortex.nn.execute :as execute]
-            [cortex.nn.traverse :as traverse]
-            [cortex.nn.network :as network]
-            [cortex.dataset :as ds]
-            [cortex.loss :as loss]
-            [cortex.datasets.mnist :as mnist]
-            [cortex.optimize :as opt]
-            [cortex.optimize.adam :as adam]
-            [cortex.optimize.adadelta :as adadelta]
-            [clojure.test :refer :all]
-            [think.resource.core :as resource]
-            [clojure.core.matrix :as m]
-            [clojure.pprint :as pprint]))
+  (:require
+    [clojure.test :refer :all]
+    [clojure.pprint :as pprint]
+    [clojure.core.matrix :as m]
+    [think.resource.core :as resource]
+    [cortex.dataset :as ds]
+    [cortex.loss :as loss]
+    [cortex.optimize :as opt]
+    [cortex.optimize.adam :as adam]
+    [cortex.optimize.adadelta :as adadelta]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.execute :as execute]
+    [cortex.nn.traverse :as traverse]
+    [cortex.nn.network :as network]
+    [cortex.nn.protocols :as cp]
+    [cortex.datasets.mnist :as mnist]))
 
 ;; Data from: Dominick Salvator and Derrick Reagle
 ;; Shaum's Outline of Theory and Problems of Statistics and Economics
@@ -111,7 +113,7 @@
         (take n-epochs net-or-seq)
         (map map-fn net-or-seq)
         (last net-or-seq)
-        (execute/save-to-network context (get net-or-seq :network) {})
+        (cp/save-to-network context (get net-or-seq :network) {})
         (execute/infer-columns context net-or-seq dataset input-bindings output-bindings
                                :batch-size batch-size)
         (get net-or-seq output-id)))))
@@ -121,19 +123,20 @@
 (defn test-corn
   [context]
   (let [epoch-counter (atom 0)
-        dataset (ds/create-in-memory-dataset {:data {:data CORN-DATA
-                                                     :shape 2}
-                                              :labels {:data CORN-LABELS
-                                                       :shape 1}}
-                                             (ds/create-index-sets (count CORN-DATA)
-                                                                   :training-split 1.0
-                                                                   :randomize? false))
+        dataset (ds/create-in-memory-dataset
+                  {:data {:data CORN-DATA
+                          :shape 2}
+                   :labels {:data CORN-LABELS
+                            :shape 1}}
+                  (ds/create-index-sets (count CORN-DATA)
+                                        :training-split 1.0
+                                        :randomize? false))
 
         loss-fn (loss/mse-loss)
-        input-bindings [(traverse/->input-binding :input :data)]
-        output-bindings [(traverse/->output-binding :output
-                                                    :stream :labels
-                                                    :loss loss-fn)]
+        input-bindings [(traverse/input-binding :input :data)]
+        output-bindings [(traverse/output-binding :output
+                                                  :stream :labels
+                                                  :loss loss-fn)]
         batch-size 2
         results (train-and-get-results context [(layers/input 2 1 1 :id :input)
                                                 (layers/linear 1 :id :output)]
@@ -155,10 +158,10 @@
         dataset (->> (mnist-dataset)
                      (ds/take-n max-sample-count))
 
-        input-bindings [(traverse/->input-binding :input :data)]
-        output-bindings [(traverse/->output-binding :output
-                                                    :stream :labels
-                                                    :loss loss-fn)]
+        input-bindings [(traverse/input-binding :input :data)]
+        output-bindings [(traverse/output-binding :output
+                                                  :stream :labels
+                                                  :loss loss-fn)]
         inference-batch-type :cross-validation
         label-seq (ds/get-batches dataset batch-size inference-batch-type [:labels])
         answers (->> (ds/batches->columnsv label-seq)
@@ -175,7 +178,7 @@
                                           (println (format "Loss for epoch %s: %s%s\n\n"
                                                            (get network :epoch-count)
                                                            (apply + (map :value loss-fn))
-                                                           (execute/loss-fn->table-str loss-fn))))
+                                                           (loss/loss-fn->table-str loss-fn))))
                                          entry))
         score (loss/evaluate-softmax results answers)]
     (is (> score 0.6))))

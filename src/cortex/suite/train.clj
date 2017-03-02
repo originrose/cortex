@@ -1,18 +1,20 @@
 (ns cortex.suite.train
-  (:require [cortex.suite.io :as suite-io]
-            [cortex.nn.protocols :as cp]
-            [think.resource.core :as resource]
-            [clojure.java.io :as io]
-            [cortex.dataset :as ds]
-            [cortex.compute.batching-system :as bs]
-            [cortex.compute.nn.compute-execute :as ce]
-            [cortex.compute.nn.cpu-backend :as cpu-backend]
-            [cortex.nn.execute :as execute]
-            [cortex.nn.traverse :as traverse]
-            [cortex.optimize :as opt]
-            [cortex.optimize.adam :as adam]
-            [cortex.nn.network :as network]
-            [cortex.graph :as graph]))
+  (:require
+    [clojure.java.io :as io]
+    [think.resource.core :as resource]
+    [cortex.graph :as graph]
+    [cortex.dataset :as ds]
+    [cortex.optimize :as opt]
+    [cortex.loss :as loss]
+    [cortex.optimize.adam :as adam]
+    [cortex.nn.execute :as execute]
+    [cortex.nn.traverse :as traverse]
+    [cortex.nn.protocols :as cp]
+    [cortex.nn.network :as network]
+    [cortex.compute.batching-system :as bs]
+    [cortex.compute.nn.compute-execute :as ce]
+    [cortex.compute.cpu.backend :as cpu-backend]
+    [cortex.suite.io :as suite-io]))
 
 (def default-network-filestem "trained-network")
 (def trained-networks-folder "trained-networks/")
@@ -50,7 +52,7 @@ in initial description.  Else returns the initial description"
                               (apply + (map :value best-loss))))]
     (println (format "Loss for epoch %s: %s" (get network :epoch-count) loss-val))
     (when-not simple-loss-print?
-      (println (execute/loss-fn->table-str loss-fn)))
+      (println (loss/loss-fn->table-str loss-fn)))
     (when (or (nil? current-best-loss)
               (< (double loss-val) (double current-best-loss)))
       (println "Saving network")
@@ -68,24 +70,6 @@ in initial description.  Else returns the initial description"
                                 :leaves (network/leaf-inference-layers network)}))))
   true)
 
-
-(defn create-context
-  "Attempt to create a gpu context.  If that fails create a cpu context."
-  [& {:keys [datatype force-gpu?]
-      :or {datatype :float force-gpu? false}}]
-  (ce/create-context (fn []
-                       (try
-                         (require 'cortex.compute.nn.cuda-backend)
-                         ((resolve 'cortex.compute.nn.cuda-backend/create-backend) datatype)
-                         (catch Exception e
-                           (if force-gpu?
-                             (throw (ex-info "Failed to create cuda context:"
-                                             {:error e
-                                              :force-gpu? force-gpu?}))
-                             (do
-                               (println
-                                (format "Failed to create cuda backend (%s); will use cpu backend" e))
-                               (cpu-backend/create-backend datatype))))))))
 
 (defn backup-trained-network
   [network-filestem]
@@ -161,7 +145,7 @@ we continue to train forever.
                                  ds/batches->columns)
           cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
           best-network-atom (atom network)
-          context (create-context :force-gpu? force-gpu?)
+          context (execute/create-context :force-gpu? force-gpu?)
           train-sequence (execute/train context network dataset [] []
                                         :batch-size batch-size
                                         :optimizer optimizer
@@ -200,7 +184,7 @@ existing traversal bindings."
            force-gpu? true}}]
   (let [input-streams (traverse/get-input-streams network)
         output-streams (traverse/get-output-streams network)
-        inferences (execute/infer-columns (create-context :force-gpu? force-gpu?) network dataset
+        inferences (execute/infer-columns (execute/create-context :force-gpu? force-gpu?) network dataset
                                           [] []
                                           :batch-size batch-size
                                           :infer-batch-type batch-type)

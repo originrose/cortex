@@ -1,22 +1,23 @@
 (ns cortex.verify.nn.layers
   "Verify that layers do actually produce their advertised results."
-  (:require [cortex.nn.layers :as layers]
-            [cortex.nn.network :as network]
-            [cortex.nn.traverse :as traverse]
-            [cortex.nn.execute :as execute]
-            [clojure.test :refer :all]
-            [clojure.core.matrix :as m]
-            [cortex.verify.utils :as utils]
-            [cortex.gaussian :as cu]
-            [think.resource.core :as resource]
-            [cortex.nn.protocols :as cp]
-            [cortex.graph :as graph]))
+  (:require
+    [clojure.test :refer :all]
+    [clojure.core.matrix :as m]
+    [think.resource.core :as resource]
+    [cortex.graph :as graph]
+    [cortex.gaussian :as cu]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.network :as network]
+    [cortex.nn.traverse :as traverse]
+    [cortex.nn.execute :as execute]
+    [cortex.nn.protocols :as cp]
+    [cortex.verify.utils :as utils]))
 
 (defn bind-test-network
   [context network batch-size stream->size-map test-layer-id]
   (let [test-layer-id :test
-        input-bindings [(traverse/->input-binding :input :data)]
-        output-bindings [(traverse/->output-binding test-layer-id :stream :labels)]]
+        input-bindings [(traverse/input-binding :input :data)]
+        output-bindings [(traverse/output-binding test-layer-id :stream :labels)]]
     (as-> network network
       (flatten network)
       (vec network)
@@ -63,13 +64,21 @@
      :input-gradient (get (first incoming-buffers) :gradient)
      :numeric-input-gradient (get (first incoming-buffers) :numeric-gradient)}))
 
+(defn forward-backward
+  "Given a bound network traverse forward and backward using exactly these inputs and
+these output-gradients.  This is used for testing that specific input/output-gradient pairs
+give specific results for layers."
+  [context bound-network stream->input-map node-id->output-gradient-map]
+  (let [bound-network (cp/traverse context bound-network stream->input-map :forward)]
+    (cp/traverse context bound-network node-id->output-gradient-map :backward)))
+
 
 (defn forward-backward-bound-network
   [context network input output-gradient test-layer-id]
   (let [input-stream {:data input}
-        output-gradient-stream {test-layer-id output-gradient}]
-    (as-> (cp/forward-backward context network input-stream output-gradient-stream) network
-      (unpack-bound-network context network test-layer-id))))
+        output-gradient-stream {test-layer-id output-gradient}
+        network (forward-backward context network input-stream output-gradient-stream)]
+    (unpack-bound-network context network test-layer-id)))
 
 
 (defn forward-backward-test
