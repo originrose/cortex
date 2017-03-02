@@ -136,7 +136,7 @@ in a single map you still need to call cortex-dataset/batches->columns."
                    #(train-seq context % dataset)
                    #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
     (-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/network->training-traversal
+                       #(traverse/add-training-traversal
                          %
                          (ds/dataset->stream->size-map dataset)
                          :optimizer optimizer))
@@ -151,7 +151,7 @@ call cortex-dataset/batches->columns"
    & {:keys [batch-size infer-batch-type]
       :or {batch-size 128 infer-batch-type :holdout}}]
   (as-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/network->inference-traversal
+                       #(traverse/add-forward-traversal
                          % (ds/dataset->stream->size-map dataset))) network-or-seq
     (infer-batch-sequence context network-or-seq
                              (ds/get-batches dataset
@@ -223,8 +223,7 @@ call cortex-dataset/batches->columns"
                       ; Adds a :traversal map to the network with :forward and
                       ; :backward lists, :buffers, :type, :optimizer, and
                       ; :loss-function keys.
-                      ; TODO: change to add inference traversal
-                      (traverse/network->inference-traversal stream-map))
+                      (traverse/add-forward-traversal stream-map))
           ; Connect the execution context to the network so it can setup any
           ; backend specific data structures or initialization.
           network (bind-to-network context network {})

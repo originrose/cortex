@@ -102,7 +102,7 @@
       (network/print-layer-summary (-> network
                                        network/build-network
                                        traverse/auto-bind-io
-                                       (traverse/network->training-traversal
+                                       (traverse/add-training-traversal
                                         (ds/dataset->stream->size-map dataset))))
       (as-> (network/build-network network) net-or-seq
         (execute/train context net-or-seq dataset input-bindings output-bindings
