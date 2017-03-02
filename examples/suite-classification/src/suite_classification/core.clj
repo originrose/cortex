@@ -173,7 +173,7 @@
 (defonce ensure-dataset-is-created
   (memoize
    (fn []
-     (println "checking that we have produced all images")
+     (println "Ensuring image data is built...")
      (build-image-data))))
 
 
