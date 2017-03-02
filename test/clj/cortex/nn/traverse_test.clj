@@ -89,12 +89,12 @@
 
 (deftest big-description
   (let [network (build-big-description)
-        training-net (-> (traverse/network->training-traversal network stream->size-map)
-                         (traverse/network->training-traversal stream->size-map))
+        training-net (-> (traverse/add-training-traversal network stream->size-map)
+                         (traverse/add-training-traversal stream->size-map))
         gradient-descent (->> training-net
                               :traversal
                               realize-traversals)
-        inference-mem (->> (traverse/network->inference-traversal network stream->size-map)
+        inference-mem (->> (traverse/add-forward-traversal network stream->size-map)
                            :traversal
                            realize-traversals)]
     (is (= 434280 (graph/parameter-count (get network :layer-graph))))
@@ -220,7 +220,7 @@
                          trainable-layers)
         network (-> (network/build-network new-desc)
                     traverse/auto-bind-io
-                    (traverse/network->training-traversal stream->size-map))
+                    (traverse/add-training-traversal stream->size-map))
         traversal (-> (get network :traversal)
                       realize-traversals)]
     (reset! test-data traversal)
@@ -265,7 +265,7 @@
                          trainable-layers)
         network (-> (network/build-network new-desc)
                     traverse/auto-bind-io
-                    (traverse/network->training-traversal stream->size-map))
+                    (traverse/add-training-traversal stream->size-map))
         traversal (-> (get network :traversal)
                       realize-traversals)]
     (is (= [nil nil]
@@ -310,31 +310,31 @@
         top-layers (drop layer-split src-desc)
         top-network (-> (network/assoc-layers-to-network bottom-network top-layers)
                         traverse/auto-bind-io
-                        (traverse/network->training-traversal stream->size-map))
+                        (traverse/add-training-traversal stream->size-map))
 
         traversal-after-stacking (-> (get top-network :traversal)
                                      realize-traversals)
 
         original-network (-> (network/build-network mnist-description-with-toys)
                              traverse/auto-bind-io
-                             (traverse/network->training-traversal stream->size-map))
+                             (traverse/add-training-traversal stream->size-map))
 
         original-traversal (-> (get original-network :traversal)
                                realize-traversals)
 
-        inference-mem-top (->> (traverse/network->inference-traversal top-network stream->size-map)
+        inference-mem-top (->> (traverse/add-forward-traversal top-network stream->size-map)
                                :traversal
                                realize-traversals)
 
-        inference-mem-original (->> (traverse/network->inference-traversal original-network stream->size-map)
+        inference-mem-original (->> (traverse/add-forward-traversal original-network stream->size-map)
                                     :traversal
                                     realize-traversals)
 
-        gradient-descent-top (->> (traverse/network->training-traversal top-network stream->size-map)
+        gradient-descent-top (->> (traverse/add-training-traversal top-network stream->size-map)
                                   :traversal
                                   realize-traversals)
 
-        gradient-descent-original (->> (traverse/network->training-traversal original-network stream->size-map)
+        gradient-descent-original (->> (traverse/add-training-traversal original-network stream->size-map)
                                        :traversal
                                        realize-traversals)
         layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
@@ -384,8 +384,8 @@
 
 (deftest inference-after-train
   (let [network (build-big-description)
-        training-net (traverse/network->training-traversal network stream->size-map)
-        inference-net (traverse/network->inference-traversal (traverse/auto-bind-io training-net) stream->size-map)
+        training-net (traverse/add-training-traversal network stream->size-map)
+        inference-net (traverse/add-forward-traversal (traverse/auto-bind-io training-net) stream->size-map)
         output-bindings (vec (traverse/get-output-bindings inference-net))]
     (is (= 1 (count output-bindings)))
     (is (= :softmax-1 (get-in output-bindings [0 :node-id])))))

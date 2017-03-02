@@ -156,7 +156,7 @@ we continue to train forever.
       (println "Training network:")
       (network/print-layer-summary (-> network
                                        traverse/auto-bind-io
-                                       (traverse/network->training-traversal
+                                       (traverse/add-training-traversal
                                         (ds/dataset->stream->size-map dataset))))
       (->> (if epoch-count
              (take epoch-count train-sequence)

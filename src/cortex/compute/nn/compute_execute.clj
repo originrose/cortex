@@ -177,7 +177,7 @@
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))
         backward-buffers (if gradients?
-                           (traverse/network->backward-buffer-set built-network)
+                           (traverse/get-backward-buffers built-network)
                            #{})
 
         ; Setup the parameter buffers
