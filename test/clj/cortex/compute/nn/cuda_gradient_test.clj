@@ -9,7 +9,7 @@
 
 (defn create-context
   []
-  (execute/create-context :datatype verify-utils/*datatype* :backend :cuda))
+  (execute/compute-context :datatype verify-utils/*datatype* :backend :cuda))
 
 ;;The gradient tests are just too sensitive to precision to work well here as the GPU
 ;;has different precision than the CPU for things. Doubles work fine but

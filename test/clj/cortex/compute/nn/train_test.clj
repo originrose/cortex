@@ -13,8 +13,8 @@
 
 (defn create-context
   []
-  (execute/create-context :backend :cuda
-                          :datatype test-utils/*datatype*))
+  (execute/compute-context :backend :cuda
+                           :datatype test-utils/*datatype*))
 
 
 (def-double-float-test corn

@@ -30,7 +30,7 @@
     [batch-size item-total-size]"))
 
 
-(defn- create-batch-buffers
+(defn- batch-buffers
   [backend size-entry & [batch-size]]
   (let [driver (drv/get-driver backend)
         datatype (get size-entry :datatype (dtype/get-datatype backend))
@@ -79,9 +79,9 @@
                           [k existing])
                         [k
                          (assoc (dissoc v :data)
-                                :batch-buffers (create-batch-buffers backend
-                                                                     (assoc v :size item-size)
-                                                                     batch-size))]))))
+                                :batch-buffers (batch-buffers backend
+                                                              (assoc v :size item-size)
+                                                              batch-size))]))))
              (into {})))))
 
   (get-batches [bs batch-map-sequence required-keys]
@@ -127,12 +127,12 @@
          batch-map-sequence)))
 
 
-(defn create
+(defn batching-system
   [backend stream-map batch-size]
   (->DatasetBatchingSystem backend batch-size
     (->> stream-map
          (map (fn [[k v]]
                 [k (assoc v :batch-buffers
-                            (create-batch-buffers backend v batch-size))]))
+                            (batch-buffers backend v batch-size))]))
          (into {}))))
 

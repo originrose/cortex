@@ -74,14 +74,14 @@
         training-split (double (/ num-training-data
                                   total-data))
         cv-split (- 1.0 training-split)]
-    (ds/create-in-memory-dataset {:data {:data data
-                                         :shape (ds/create-image-shape 1 28 28)}
-                                  :labels {:data labels
+    (ds/in-memory-dataset {:data          {:data  data
+                                           :shape (ds/image-shape 1 28 28)}
+                                  :labels {:data  labels
                                            :shape 10}}
-                                 (ds/create-index-sets total-data
-                                                       :training-split training-split
-                                                       :cv-split cv-split
-                                                       :randimize? false))))
+                          (ds/index-sets total-data
+                                                :training-split training-split
+                                                :cv-split cv-split
+                                                :randimize? false))))
 
 (defn- print-layer-weights
   [network]
@@ -103,7 +103,7 @@
                                        network/build-network
                                        traverse/auto-bind-io
                                        (traverse/add-training-traversal
-                                        (ds/dataset->stream->size-map dataset))))
+                                         (ds/stream-descriptions dataset))))
       (as-> (network/build-network network) net-or-seq
         (execute/train context net-or-seq dataset input-bindings output-bindings
                        :batch-size batch-size
@@ -123,14 +123,14 @@
 (defn test-corn
   [context]
   (let [epoch-counter (atom 0)
-        dataset (ds/create-in-memory-dataset
+        dataset (ds/in-memory-dataset
                   {:data {:data CORN-DATA
                           :shape 2}
                    :labels {:data CORN-LABELS
                             :shape 1}}
-                  (ds/create-index-sets (count CORN-DATA)
-                                        :training-split 1.0
-                                        :randomize? false))
+                  (ds/index-sets (count CORN-DATA)
+                                 :training-split 1.0
+                                 :randomize? false))
 
         loss-fn (loss/mse-loss)
         input-bindings [(traverse/input-binding :input :data)]

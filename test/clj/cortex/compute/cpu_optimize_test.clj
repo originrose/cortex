@@ -10,7 +10,7 @@
 
 (defn create-backend
   []
-  (cpu-backend/create-backend verify-utils/*datatype*))
+  (cpu-backend/backend verify-utils/*datatype*))
 
 
 (def-double-float-test adam

@@ -393,15 +393,15 @@
 
 (defn test-run
   []
-  (let [dataset (ds/create-in-memory-dataset
+  (let [dataset (ds/in-memory-dataset
                   {:data {:data CORN-DATA
                           :shape 2}
                    :yield {:data CORN-LABELS
                             :shape 1}}
-                  (ds/create-index-sets (count CORN-DATA)
-                                        :training-split 1.0
-                                        :randomize? false))
-        size-map (ds/dataset->stream->size-map dataset)]
+                  (ds/index-sets (count CORN-DATA)
+                                 :training-split 1.0
+                                 :randomize? false))
+        size-map (ds/stream-descriptions dataset)]
     (execute/run [(layers/input 2 1 1 :id :data)
                   (layers/linear 1 :id :yield)]
                  dataset

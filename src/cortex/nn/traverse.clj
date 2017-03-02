@@ -202,7 +202,7 @@ stream and loss members."
                      (get % :loss)))))
 
 
-(defn create-forward-traversal
+(defn forward-traversal
   "A forward traversal is a linear dfs order sequence.
 There is an optional argument to remove nodes of a particular type from
 the traversal.
@@ -272,7 +272,7 @@ Each item in the sequence is a map of:
        reverse))
 
 
-(defn get-traversal-buffers
+(defn traversal->buffers
   "Traversals initial hold id of incoming nodes.  For the next steps
 we need the incoming and outgoing edges to hold unique ids such that
 the incoming buffer of the next step points to the outgoing buffer of
@@ -310,7 +310,7 @@ the previous step."
   (select-keys buffer-desc [:id :stream :output-id]))
 
 
-(defn- create-traversal-buffer-maps
+(defn- traversal-buffer-maps
   [network forward-traversal]
   (let [layer-graph (get network :layer-graph)]
     (reduce (fn [buffer-map {:keys [incoming id outgoing]}]
@@ -426,7 +426,7 @@ which means removing extra information from them."
   [stream-map graph]
   (reduce (fn [graph [stream size]]
             (if-not (contains? (get graph :streams) stream)
-              (graph/add-stream graph stream (graph/create-stream-descriptor
+              (graph/add-stream graph stream (graph/stream-descriptor
                                               (long size)))
               graph))
           graph
@@ -500,9 +500,9 @@ datastructure describing the final loss function.
       :or {optimizer (adam/adam)
            loss-function []}}]
   (check-for-io-bindings network)
-  (let [forward-traversal (->> (create-forward-traversal network)
+  (let [forward-traversal (->> (forward-traversal network)
                                (filter-traversal network :training))
-        [forward-with-buffers buffer-map] (get-traversal-buffers forward-traversal {})
+        [forward-with-buffers buffer-map] (traversal->buffers forward-traversal {})
         backward-pass (if keep-non-trainable?
                         forward-traversal
                         (remove-non-trainable network forward-traversal))
@@ -525,11 +525,11 @@ datastructure describing the final loss function.
                     {:forward (-> forward-with-buffers
                                   clean-traversal-incoming-outgoing)
                      :backward (-> backward-pass
-                                   (get-traversal-buffers buffer-map)
+                                   (traversal->buffers buffer-map)
                                    first
                                    reverse-forward-traversal
                                    clean-traversal-incoming-outgoing)
-                     :buffers (create-traversal-buffer-maps network forward-with-buffers)
+                     :buffers (traversal-buffer-maps network forward-with-buffers)
                      :type :training
                      :stream-map (->> (get-in network [:layer-graph :streams])
                                       (map (fn [[k v]]
@@ -549,21 +549,21 @@ datastructure describing the final loss function.
   [{:keys [layer-graph] :as network} stream-map]
   (check-for-io-bindings network)
   (let [network (remove-existing-loss-terms network)
-        forward-traversal (->> (create-forward-traversal network)
+        forward-traversal (->> (forward-traversal network)
                                (filter-traversal network :inference)
-                               (#(get-traversal-buffers % {}))
+                               (#(traversal->buffers % {}))
                                first)]
     (update network
             :traversal
             #(merge
               %
               {:forward (clean-traversal-incoming-outgoing forward-traversal)
-               :buffers (create-traversal-buffer-maps network forward-traversal)
+               :buffers (traversal-buffer-maps network forward-traversal)
                :type :inference
                :stream-map stream-map}))))
 
 
-(defn- get-traversal-buffers
+(defn- traversal-buffers
   [traversal]
   (->> traversal
        (mapcat (fn [{:keys [incoming outgoing]}]
@@ -575,11 +575,11 @@ datastructure describing the final loss function.
   "Get the set of buffers used for the forward pass"
   [network]
   (->> (get-in network [:traversal :forward])
-       get-traversal-buffers))
+       traversal-buffers))
 
 
 (defn get-backward-buffers
   "Get the set of buffers used for the backward pass"
   [network]
   (->> (get-in network [:traversal :backward])
-       get-traversal-buffers))
+       traversal-buffers))

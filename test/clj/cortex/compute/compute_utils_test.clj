@@ -11,7 +11,7 @@
   (let [data-size 50
         result-seq
         (cu/compute-map (fn []
-                          (let [driver (cpu-drv/create-driver)
+                          (let [driver (cpu-drv/driver)
                                 stream (drv/create-stream driver)
                                 upload-buffer (drv/allocate-host-buffer driver data-size :double)
                                 process-buffer (drv/allocate-device-buffer driver

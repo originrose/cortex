@@ -83,7 +83,7 @@ buffers."
   node)
 
 
-(defn create-stream-descriptor
+(defn stream-descriptor
   "Shape descriptors are used to describe streams.  Currently there are two types
 of streams, a multi-channeled input like an image and a single channel input like
 a vector of floats."
@@ -92,7 +92,7 @@ a vector of floats."
     :height height
     :width width})
   ([width]
-   (create-stream-descriptor 1 1 width)))
+   (stream-descriptor 1 1 width)))
 
 
 (defn stream-descriptor->size
