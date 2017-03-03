@@ -5,7 +5,7 @@ common details of training or execution into one place written in such a way tha
 can affect the behavior of various implementations and design new execution strategies
 (like parameter sharing) at least partially without needing to work withing a specific
 implementation.  It is important to realize that training the network means essentially
-a transformation from layer-graph -> layer-graph via some training process.
+a transformation from compute-graph -> compute-graph via some training process.
 Both train and infer should be wrapped in resource contexts; this is not done at this level.
 Furthermore infer should be both wrapped in a resource context and completely realized."
   (:require
@@ -174,15 +174,15 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 (defn bind-context-to-network
 "Bind an execution context to a network.  This should return a new network with any specific information the context needs embedded in it.  The network contains at least:
-  {:layer-graph ...
+  {:compute-graph ...
    :traversal   ...
    :batch-size  ...}"
   [{:keys [backend-fn] :as context}
-   {:keys [batch-size layer-graph traversal] :as built-network}
+   {:keys [batch-size compute-graph traversal] :as built-network}
    {:keys [gradients? numeric-gradients?] :as options}]
   (let [backend (backend-fn)
         stream-map (get traversal :stream-map)
-        id->node-map (get layer-graph :id->node-map)
+        id->node-map (get compute-graph :id->node-map)
         traverse-type (get traversal :type)
         gradients? (or gradients? (= traverse-type :training))
         driver (drv/get-driver backend)
@@ -197,7 +197,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
         compute-binding
         (reduce
           (fn [compute-binding id]
-            (let [node (graph/get-node layer-graph id)
+            (let [node (graph/get-node compute-graph id)
                   node-params (network/network->node-parameters built-network id)]
               (-> (update-in compute-binding [:id->node-map id]
                              (fn [compute-node]
@@ -278,7 +278,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
                         (dtype/copy! host-buffer 0 retval 0 (m/ecount host-buffer))
                         retval)))]
     (-> network
-        (update-in [:layer-graph :buffers]
+        (update-in [:compute-graph :buffers]
                    (fn [buffers]
                      (reduce
                        (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
@@ -585,7 +585,7 @@ and anything that has a loss term attached to it's output becomes an output bind
                    :buffers (get-in network [:compute-binding
                                              :traversal-buffers
                                              output-id])
-                   :output-size (get-in network [:layer-graph
+                   :output-size (get-in network [:compute-graph
                                                  :id->node-map
                                                  node-id
                                                  :output-size])}))))))
@@ -601,7 +601,7 @@ and anything that has a loss term attached to it's output becomes an output bind
                 (get-in network [:compute-binding
                                  :traversal-buffers
                                  {:stream stream}])
-                :size (get-in network [:layer-graph
+                :size (get-in network [:compute-graph
                                        :id->node-map
                                        node-id
                                        :input-size]))))))
@@ -1158,7 +1158,7 @@ call cortex-dataset/batches->columns"
           stream-map (ds/stream-descriptions dataset)
 
           ; convert from vector to graph description if needed
-          network (if (and (map? network) (:layer-graph network))
+          network (if (and (map? network) (:compute-graph network))
                     network
                     (network/build-network network))
           network (-> network

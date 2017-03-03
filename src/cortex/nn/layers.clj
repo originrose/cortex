@@ -541,6 +541,23 @@ input dimensions."
   {:passes #{:training :inference}})
 
 
+(defn network-description
+  "A network description must have 1 key and that is the actual
+network graph description."
+  [compute-graph & args]
+  (merge-args
+   {:compute-graph compute-graph}
+   args))
+
+
+(defn network-description-or-vec->network-description
+  "Make anything into a network description."
+  [network-desc-or-vec]
+  (if-not (map? network-desc-or-vec)
+    {:compute-graph network-desc-or-vec}
+    network-desc-or-vec))
+
+
 (def example-mnist-description
   [(input 28 28 1)
    (convolutional 5 0 1 20)
