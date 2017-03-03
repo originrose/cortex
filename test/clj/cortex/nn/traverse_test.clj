@@ -77,7 +77,7 @@
         output-bindings [(traverse/output-binding :softmax-1
                                                   :stream :labels
                                                   :loss (loss/softmax-loss))]]
-    (-> (network/build-network mnist-description-with-toys)
+    (-> (network/linear-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
 
@@ -273,7 +273,7 @@
         new-desc (concat (map (fn [layer] (assoc layer :learning-attenuation 0))
                               non-trainable-layers)
                          trainable-layers)
-        network (-> (network/build-network new-desc)
+        network (-> (network/linear-network new-desc)
                     traverse/auto-bind-io
                     (traverse/add-training-traversal stream->size-map))
         traversal (-> (get network :traversal)
@@ -318,7 +318,7 @@
         trainable-layers (drop num-non-trainable src-desc)
         new-desc (concat (map (fn [layer] (assoc layer :non-trainable? true)) non-trainable-layers)
                          trainable-layers)
-        network (-> (network/build-network new-desc)
+        network (-> (network/linear-network new-desc)
                     traverse/auto-bind-io
                     (traverse/add-training-traversal stream->size-map))
         traversal (-> (get network :traversal)
@@ -357,7 +357,7 @@
   (let [layer-split 9
         src-desc (flatten mnist-description-with-toys)
         bottom-layers (take layer-split src-desc)
-        bottom-network (-> (network/build-network bottom-layers)
+        bottom-network (-> (network/linear-network bottom-layers)
                          traverse/auto-bind-io)
         ;; Added io binding and traversals to make sure that when
         ;; the network is modified and rebuilt, these 2 steps are also rebuilt correctly
@@ -370,7 +370,7 @@
         traversal-after-stacking (-> (get top-network :traversal)
                                      realize-traversals)
 
-        original-network (-> (network/build-network mnist-description-with-toys)
+        original-network (-> (network/linear-network mnist-description-with-toys)
                              traverse/auto-bind-io
                              (traverse/add-training-traversal stream->size-map))
 
@@ -419,13 +419,13 @@
 
 
 (deftest remove-layers-from-network
-  (let [mnist-net (-> (network/build-network mnist-description-with-toys)
+  (let [mnist-net (-> (network/linear-network mnist-description-with-toys)
                     traverse/auto-bind-io)
         chopped-net (network/dissoc-layers-from-network mnist-net :dropout-4)]
     (is (= #{:softmax-1 :linear-2 :dropout-4}
            (clojure.set/difference
-             (set (keys (get-in mnist-net [:compute-graph :id->node-map])))
-             (set (keys (get-in chopped-net [:compute-graph :id->node-map]))))))
+             (set (keys (get-in mnist-net [:compute-graph :nodes])))
+             (set (keys (get-in chopped-net [:compute-graph :nodes]))))))
     (is (= #{[:feature :dropout-4] [:dropout-4 :linear-2] [:linear-2 :softmax-1]}
            (clojure.set/difference
              (set (get-in mnist-net [:compute-graph :edges]))

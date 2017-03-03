@@ -29,7 +29,7 @@
         centers (vec (repeat n-classes (vec (repeat n-features center-val))))
         features (vec (repeatedly batch-size #(vec (repeat n-features feature-val))))
         gradients (mapv #(m/sub % 1) features)
-        network (network/build-network [(layers/input n-features 1 1)
+        network (network/linear-network [(layers/input n-features 1 1)
                                         (layers/linear n-features :id :feature)])
 
         graph (-> (graph/add-node (network/network->graph network)

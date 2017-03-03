@@ -12,6 +12,7 @@
     [cortex.nn.execute :as execute]
     [cortex.verify.utils :as utils]))
 
+
 (defn bind-test-network
   [context network batch-size stream->size-map & {:keys [bind-opts input-bindings]
                                                   :or {bind-opts {}}}]
@@ -38,7 +39,7 @@
   [context network test-layer-id]
   (let [network (execute/save-to-network context network {:save-gradients? true})
         traversal (get network :traversal)
-        test-node (get-in network [:compute-graph :id->node-map test-layer-id])
+        test-node (get-in network [:compute-graph :nodes test-layer-id])
         parameter-descriptions (->> (graph/get-node-arguments test-node)
                                     (filter #(= :parameter (get % :type))))
         parameters (->> (map (fn [{:keys [key] :as description}]

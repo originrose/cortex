@@ -53,7 +53,13 @@
        graph)
      id]))
 
-(defn build-network
+
+(defn network
+  ([]
+   {:compute-graph (graph/empty-graph)}))
+
+
+(defn linear-network
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
   ([network network-desc]
@@ -66,17 +72,7 @@
            graph/build-graph
            graph/generate-parameters))))
   ([network-desc]
-   (build-network {:compute-graph (graph/empty-graph)} network-desc)))
-
-(defn add-property-to-layer
-  "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id
-  To get a list of node-id -> (keys (get-in network [:compute-graph :id->node-map)))
-  ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0 :regularization )"
-  [network node-id key value]
-  (update network :compute-graph
-          (fn [graph]
-           (graph/update-node graph node-id #(assoc % key value)))))
-
+   (linear-network {:compute-graph (graph/empty-graph)} network-desc)))
 
 ;; When using these functions, make sure to call traverse/auto-bind-io
 ;; and traverse/network->training-traversal on the resulting network
@@ -88,13 +84,24 @@
     (when-not (= 1 (count leaves))
       (throw (ex-info "cannot auto-append to graphs with either zero or multiple leaves"
                       {:leaves leaves})))
-    (build-network network (update layer-list 0 #(assoc % :parents leaves)))))
+    (linear-network network (update layer-list 0 #(assoc % :parents leaves)))))
 
 
 (defn dissoc-layers-from-network
   "Removes layers (nodes, edges, buffers) from the given parent node till the last leaf node"
   [network parent-node-id]
   (update network :compute-graph graph/remove-node parent-node-id))
+
+
+
+(defn add-property-to-layer
+  "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id
+  To get a list of node-id -> (keys (get-in network [:compute-graph :nodes)))
+  ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0 :regularization )"
+  [network node-id key value]
+  (update network :compute-graph
+          (fn [graph]
+           (graph/update-node graph node-id #(assoc % key value)))))
 
 
 (defn network->graph
@@ -129,7 +136,7 @@
   [network]
   (->> network
        :compute-graph
-       :id->node-map
+       :nodes
        vals
        (mapcat graph/get-node-arguments)
        (filter #(= :parameter (get % :type)))

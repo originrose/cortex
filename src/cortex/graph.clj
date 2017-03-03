@@ -1,10 +1,10 @@
 (ns cortex.graph
   "Several algorithms in cortex are simplified by using a simple directed graph structure.  There
-are at this point two different general classes of nodes and these are differentiated by
-understanding which pass they take part in.  All node's have a type and this type links
-to a metadata multimethod which gives further information on the node.  All nodes are functions
-taking a map of arguments.  Layers are functions which also have implicit input and output
-arguments which correspond to the edges of the graph the layers attach to."
+  are at this point two different general classes of nodes and these are differentiated by
+  understanding which pass they take part in.  All node's have a type and this type links
+  to a metadata multimethod which gives further information on the node.  All nodes are functions
+  taking a map of arguments.  Layers are functions which also have implicit input and output
+  arguments which correspond to the edges of the graph the layers attach to."
   (:require [cortex.util :as util]
             [clojure.set :as c-set]
             [cortex.keyword-fn :as keyword-fn]
@@ -22,15 +22,6 @@ arguments which correspond to the edges of the graph the layers attach to."
 (defmethod get-node-metadata :default [node] {})
 
 
-(defn deep-merge
-  "Like merge, but merges maps recursively.  Note that this is pulled from a rejected
-patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
-  [& maps]
-  (if (every? map? maps)
-    (apply merge-with deep-merge maps)
-    (last maps)))
-
-
 (defn get-node-argument
   [node arg-key]
   (let [learn-atten (get node :learning-attenuation 1.0)
@@ -44,7 +35,7 @@ patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
                        :argument-name arg-key
                        :arguments (get (get-node-metadata node) :arguments)})))
     (let [retval (->> (assoc retval :key arg-key)
-                      (deep-merge retval (get node arg-key)))
+                      (util/deep-merge retval (get node arg-key)))
           param-learn-atten (get retval :learning-attenuation learn-atten)]
       (if (or (zero? param-learn-atten)
               non-trainable?)
@@ -108,11 +99,10 @@ a vector of floats."
    :streams {} stream-name -> shape-descriptor.  Streams act as roots of the graph.
    }"
   []
-  {:edges []
-   :id->node-map {}
+  {:nodes   {}
+   :edges   []
    :buffers {}
-   :streams {}
-   })
+   :streams {}})
 
 
 (defn add-stream
@@ -169,11 +159,11 @@ a vector of floats."
 
 (defn get-node
   [graph node-id]
-  (let [retval (get-in graph [:id->node-map node-id])]
+  (let [retval (get-in graph [:nodes node-id])]
     (when-not retval
       (throw (ex-info "Failed to find node:"
                       {:node-id node-id
-                       :nodes (keys (get graph :id->node-map))})))
+                       :nodes (keys (get graph :nodes))})))
     retval))
 
 
@@ -182,13 +172,13 @@ a vector of floats."
   [graph node]
   (if-let [existing-id (get node :id)]
     (do
-      (when-let [existing-node (get-in graph [:id->node-map existing-id])]
+      (when-let [existing-node (get-in graph [:nodes existing-id])]
         (throw (ex-info "Duplicate id detected in graph:"
                         {:new-node node
                          :existing-node existing-node})))
       node)
     (assoc node :id (util/generate-id (name (get node :type))
-                                      (set (keys (get graph :id->node-map)))))))
+                                      (set (keys (get graph :nodes)))))))
 
 
 (defn add-node
@@ -197,14 +187,14 @@ a vector of floats."
   If any of the predecessors does not exist an error will be thrown.  Returns a pair
   of [graph node-id]"
   [graph node predecessor-id-seq]
-  (when-not (every? (get graph :id->node-map) predecessor-id-seq)
+  (when-not (every? (get graph :nodes) predecessor-id-seq)
     (throw (ex-info "Failed to find all predecessor id's in graph"
                     {:id-seq predecessor-id-seq
-                     :missing-ids (remove (get graph :id->node-map) predecessor-id-seq)
-                     :existing-ids (vec (keys (get graph :id->node-map)))})))
+                     :missing-ids (remove (get graph :nodes) predecessor-id-seq)
+                     :existing-ids (vec (keys (get graph :nodes)))})))
   (let [node (get-or-create-node-id graph node)]
     [(-> graph
-         (assoc-in [:id->node-map (get node :id)] node)
+         (assoc-in [:nodes (get node :id)] node)
          (update :edges #(concat %
                                  (map vector
                                       predecessor-id-seq
@@ -426,7 +416,7 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   [c->p-map p->c-map graph node-id]
   (let [node (build-node graph (get-node graph node-id)
                          (get c->p-map node-id) (get p->c-map node-id))]
-    (update graph :id->node-map assoc node-id node)))
+    (update graph :nodes assoc node-id node)))
 
 
 (defn build-graph
@@ -441,10 +431,10 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
 
 (defn update-node
   [graph node-id update-fn]
-  (when-not (contains? (get graph :id->node-map) node-id)
+  (when-not (contains? (get graph :nodes) node-id)
     (throw (ex-info "Update failed to find node"
                     {:node-id node-id})))
-  (update-in graph [:id->node-map node-id] update-fn))
+  (update-in graph [:nodes node-id] update-fn))
 
 
 (defmulti get-argument-shape
@@ -469,7 +459,7 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
       [(long retval)]
       (throw (ex-info "Failed to find node output size"
                       {:argument argument
-                       :nodes (keys (get graph :id->node-map))})))))
+                       :nodes (keys (get graph :nodes))})))))
 
 (defmethod get-argument-shape :node-argument
   [graph node argument]
@@ -535,9 +525,9 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
         (-> graph
             (assoc-in [:buffers param-buffer-id :buffer]
                       param-buffer)
-            (update-in [:id->node-map node-id (get argument :key)]
+            (update-in [:nodes node-id (get argument :key)]
                        dissoc :buffer)
-            (update-in [:id->node-map node-id (get argument :key)]
+            (update-in [:nodes node-id (get argument :key)]
                        assoc :buffer-id param-buffer-id))))))
 
 
@@ -667,7 +657,7 @@ link to both {:buffer :gradient}."
                                       (= c node-id)))
                                 %))
         (update :buffers #(apply dissoc % buffer-ids))
-        (update :id->node-map dissoc node-id))))
+        (update :nodes dissoc node-id))))
 
 
 (defn remove-children

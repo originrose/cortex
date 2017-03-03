@@ -37,7 +37,7 @@
   (let [default-data (default-dataset)
         inf-data (repeatedly #(rand-nth default-data))
         dataset (dataset/map-sequence->dataset inf-data (/ (count default-data) 20))
-        network (-> description network/build-network traverse/auto-bind-io)
+        network (-> description network/linear-network traverse/auto-bind-io)
         _ (with-out-str
             (train/train-n dataset description network :batch-size 50 :epoch-count 300 :simple-loss-print? false))
         trained-network (train/load-network "trained-network.nippy" description)

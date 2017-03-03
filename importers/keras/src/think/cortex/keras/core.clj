@@ -417,7 +417,7 @@
                           {})
                          (get-in [:traversal :forward]))]
             (->> (map :id forward-pass)
-                 (map #(get-in network [:compute-graph :id->node-map %])))))
+                 (map #(get-in network [:compute-graph :nodes %])))))
 
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.

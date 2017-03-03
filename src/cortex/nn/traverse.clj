@@ -33,10 +33,10 @@ while output bindings are maps from node-id to {:stream :loss}."
 (defn- check-node-id
   "Check whether a given node-id is in the network."
   [network node-id]
-  (when-not (get-in network [:compute-graph :id->node-map node-id])
+  (when-not (get-in network [:compute-graph :nodes node-id])
     (throw (ex-info "Failed to find node id in graph"
                     {:node-id node-id
-                     :graph-nodes (keys (get-in network [:compute-graph :id->node-map]))}))))
+                     :graph-nodes (keys (get-in network [:compute-graph :nodes]))}))))
 
 
 (defn bind-input-to-stream
@@ -300,7 +300,7 @@ Each item in the sequence is a map of:
        first
        reverse
        (reduce (fn [[traversal output-alias-map] {:keys [id outgoing] :as entry}]
-                 (let [graph-node (get-in compute-graph [:id->node-map id])
+                 (let [graph-node (get-in compute-graph [:nodes id])
                        pass-set (layers/get-pass-set graph-node)
                        new-outgoing (flatten (map #(get output-alias-map
                                                         (get % :id) %) outgoing))]
