@@ -10,7 +10,6 @@
     [cortex.nn.network :as network]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.execute :as execute]
-    [cortex.nn.protocols :as cp]
     [cortex.verify.utils :as utils]))
 
 (defn bind-test-network
@@ -19,21 +18,21 @@
         input-bindings [(traverse/input-binding :input :data)]
         output-bindings [(traverse/output-binding test-layer-id :stream :labels)]]
     (as-> network network
-      (flatten network)
-      (vec network)
-      (assoc-in network [0 :id] :input)
-      (assoc-in network [1 :id] test-layer-id)
-      (network/build-network network)
-      (traverse/bind-input-bindings network input-bindings)
-      (traverse/bind-output-bindings network output-bindings)
-      (traverse/add-training-traversal network stream->size-map :keep-non-trainable? true)
-      (assoc network :batch-size batch-size)
-      (cp/bind-to-network context network {}))))
+          (flatten network)
+          (vec network)
+          (assoc-in network [0 :id] :input)
+          (assoc-in network [1 :id] test-layer-id)
+          (network/build-network network)
+          (traverse/bind-input-bindings network input-bindings)
+          (traverse/bind-output-bindings network output-bindings)
+          (traverse/add-training-traversal network stream->size-map :keep-non-trainable? true)
+          (assoc network :batch-size batch-size)
+          (execute/bind-context-to-network context network {}))))
 
 
 (defn unpack-bound-network
   [context network test-layer-id]
-  (let [network (cp/save-to-network context network {:save-gradients? true})
+  (let [network (execute/save-to-network context network {:save-gradients? true})
         traversal (get network :traversal)
         test-node (get-in network [:layer-graph :id->node-map test-layer-id])
         parameter-descriptions (->> (graph/get-node-arguments test-node)
@@ -69,8 +68,8 @@
 these output-gradients.  This is used for testing that specific input/output-gradient pairs
 give specific results for layers."
   [context bound-network stream->input-map node-id->output-gradient-map]
-  (let [bound-network (cp/traverse context bound-network stream->input-map :forward)]
-    (cp/traverse context bound-network node-id->output-gradient-map :backward)))
+  (let [bound-network (execute/traverse context bound-network stream->input-map :forward)]
+    (execute/traverse context bound-network node-id->output-gradient-map :backward)))
 
 
 (defn forward-backward-bound-network

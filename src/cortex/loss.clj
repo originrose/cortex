@@ -25,7 +25,6 @@ evaluating loss terms."
             [cortex.stream-augment :as stream-aug]))
 
 
-
 (defn loss-metadata
   "Get the metadata for a particular loss function.
 

@@ -8,7 +8,6 @@
             [cortex.compute.optimize :as opt]
             [cortex.compute.verify.nn.train :as train-test]
             [cortex.compute.math :as math]
-            [cortex.nn.protocols :as cp]
             [cortex.util :as cu]))
 
 

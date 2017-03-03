@@ -38,7 +38,8 @@
         inf-data (repeatedly #(rand-nth default-data))
         dataset (dataset/map-sequence->dataset inf-data (/ (count default-data) 20))
         network (-> description network/build-network traverse/auto-bind-io)
-        _ (train/train-n dataset description network :batch-size 50 :epoch-count 300 :simple-loss-print? true)
+        _ (with-out-str
+            (train/train-n dataset description network :batch-size 50 :epoch-count 300 :simple-loss-print? false))
         trained-network (train/load-network "trained-network.nippy" description)
         [[should-def] [shouldnt-def]] (inference/infer-n-observations trained-network [[5000.0 10.0] [5.0 100000.0]]
                                                                       2 :batch-size 2)]

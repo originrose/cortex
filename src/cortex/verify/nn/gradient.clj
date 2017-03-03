@@ -3,7 +3,6 @@
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
-            [cortex.nn.protocols :as cp]
             [cortex.verify.utils :as utils]
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.verify.nn.train :as verify-train]
@@ -55,8 +54,8 @@
                                                      :labels (/ (m/ecount output)
                                                                 batch-size)}
                                        :keep-non-trainable? true)
-      (cp/bind-to-network context network {:numeric-gradients? true})
-      (cp/generate-numeric-gradients context network
+      (execute/bind-context-to-network context network {:numeric-gradients? true})
+      (execute/generate-numeric-gradients context network
                                      {:data input
                                       :labels output}
                                      epsilon)
