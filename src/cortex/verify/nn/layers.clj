@@ -10,7 +10,6 @@
     [cortex.nn.network :as network]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.execute :as execute]
-    [cortex.nn.protocols :as cp]
     [cortex.verify.utils :as utils]))
 
 (defn bind-test-network
@@ -19,10 +18,10 @@
   (as-> network network
     (network/build-network network)
     (traverse/auto-bind-io network :input-bindings input-bindings)
-    (traverse/network->training-traversal network stream->size-map
-                                          :keep-non-trainable? true)
+    (traverse/add-training-traversal network stream->size-map
+                                     :keep-non-trainable? true)
     (assoc network :batch-size batch-size)
-    (cp/bind-to-network context network bind-opts)))
+    (execute/bind-context-to-network context network bind-opts)))
 
 
 (defn set-id-and-bind-test-network
@@ -37,7 +36,7 @@
 
 (defn unpack-bound-network
   [context network test-layer-id]
-  (let [network (cp/save-to-network context network {:save-gradients? true})
+  (let [network (execute/save-to-network context network {:save-gradients? true})
         traversal (get network :traversal)
         test-node (get-in network [:layer-graph :id->node-map test-layer-id])
         parameter-descriptions (->> (graph/get-node-arguments test-node)
@@ -86,6 +85,15 @@
        (into {})))
 
 
+(defn forward-backward
+  "Given a bound network traverse forward and backward using exactly these inputs and
+these output-gradients.  This is used for testing that specific input/output-gradient pairs
+give specific results for layers."
+  [context bound-network stream->input-map node-id->output-gradient-map]
+  (let [bound-network (execute/traverse context bound-network stream->input-map :forward)]
+    (execute/traverse context bound-network node-id->output-gradient-map :backward)))
+
+
 (defn forward-backward-bound-network
   [context network input output-gradient test-layer-id]
   (let [input-stream {:data input}
@@ -121,15 +129,6 @@
     (forward-backward-bound-network context network
                                     input-vec
                                     output-grad-vec :test)))
-(defn forward-backward
-  "Given a bound network traverse forward and backward using exactly these inputs and
-these output-gradients.  This is used for testing that specific input/output-gradient pairs
-give specific results for layers."
-  [context bound-network stream->input-map node-id->output-gradient-map]
-  (let [bound-network (cp/traverse context bound-network stream->input-map :forward)]
-    (cp/traverse context bound-network node-id->output-gradient-map :backward)))
-
-
 (defn forward-backward-test
   "Given a 2 node network (input,layer) run a test that goes forward and backward
   for that network."

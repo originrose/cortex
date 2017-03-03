@@ -10,7 +10,7 @@
             [cortex.verify.nn.import :as verify-import]
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
-            [cortex.compute.nn.compute-execute :as compute-execute]
+            [cortex.nn.execute :as execute]
             [taoensso.nippy :as nippy]
             [cortex.nn.traverse :as traverse])
   (:import [java.io StringReader FileOutputStream]))
@@ -351,13 +351,13 @@ whitespace = #'\\s*'")
   (let [import-result (apply caffe-h5->model fname args)]
     (println (format "Verifying %d layers" (count (get-in import-result [:model :layer-graph
                                                                          :id->node-map]))))
-    (verify-import/verify-model (compute-execute/create-context) import-result)))
+    (verify-import/verify-model (execute/compute-context) import-result)))
 
 
 (defn import-and-write
   [^String fname & args]
   (let [import-result (apply caffe-h5->model fname args)]
-    (if-let [failures (seq (verify-import/verify-model (compute-execute/create-context)
+    (if-let [failures (seq (verify-import/verify-model (execute/compute-context)
                                                        import-result))]
       (throw (ex-info "import verification failures: " (vec failures)))
       (let [f-stem (.substring fname 0 (.lastIndexOf fname "."))

@@ -4,7 +4,6 @@
             [cortex.nn.network :as network]
             [clojure.core.matrix :as m]
             [cortex.verify.nn.import :as import]
-            [cortex.compute.nn.compute-execute :as ce]
             [cortex.graph :as graph]))
 
 

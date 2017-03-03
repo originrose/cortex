@@ -11,7 +11,7 @@
             [think.datatype.core :as dtype]
             [cortex.verify.nn.import :as compute-verify]
             [clojure.string :as string]
-            [cortex.compute.nn.compute-execute :as compute-execute]
+            [cortex.nn.execute :as execute]
             [cortex.graph :as graph]))
 
 (set! *warn-on-reflection* true)
@@ -537,7 +537,7 @@
                      :layer-id->output (assoc reshaped
                                               (first roots)
                                               test-image)}
-        verified     (compute-verify/verify-model (compute-execute/create-context) for-verify)]
+        verified     (compute-verify/verify-model (execute/compute-context) for-verify)]
     (if (empty? verified)
       network
       (throw (ex-info "Model did not pass verification."

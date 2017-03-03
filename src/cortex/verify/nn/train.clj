@@ -13,7 +13,6 @@
     [cortex.nn.execute :as execute]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.network :as network]
-    [cortex.nn.protocols :as cp]
     [cortex.datasets.mnist :as mnist]))
 
 ;; Data from: Dominick Salvator and Derrick Reagle
@@ -113,7 +112,7 @@
         (take n-epochs net-or-seq)
         (map map-fn net-or-seq)
         (last net-or-seq)
-        (cp/save-to-network context (get net-or-seq :network) {})
+        (execute/save-to-network context (get net-or-seq :network) {})
         (execute/infer-columns context net-or-seq dataset input-bindings output-bindings
                                :batch-size batch-size)
         (get net-or-seq output-id)))))

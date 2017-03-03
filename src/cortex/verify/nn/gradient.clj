@@ -3,7 +3,6 @@
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
-            [cortex.nn.protocols :as cp]
             [cortex.verify.utils :as utils]
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.verify.nn.train :as verify-train]

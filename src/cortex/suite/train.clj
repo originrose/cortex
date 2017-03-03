@@ -9,11 +9,8 @@
     [cortex.optimize.adam :as adam]
     [cortex.nn.execute :as execute]
     [cortex.nn.traverse :as traverse]
-    [cortex.nn.protocols :as cp]
     [cortex.nn.network :as network]
     [cortex.compute.batching-system :as bs]
-    [cortex.compute.nn.compute-execute :as ce]
-    [cortex.compute.cpu.backend :as cpu-backend]
     [cortex.suite.io :as suite-io]))
 
 (def default-network-filestem "trained-network")
@@ -32,7 +29,7 @@ in initial description.  Else returns the initial description"
 
 (defn save-network
   [context network network-loss initial-description network-filename]
-  (let [write-data (-> (cp/save-to-network context network {})
+  (let [write-data (-> (execute/save-to-network context network {})
                        (assoc :cv-loss network-loss
                               :initial-description initial-description))]
     (util/write-nippy-file network-filename write-data)

@@ -2,7 +2,6 @@
   (:require [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.execute :as execute]
-            [cortex.nn.protocols :as cp]
             [cortex.graph :as graph]
             [think.resource.core :as resource]
             [clojure.pprint :as pprint]
@@ -31,10 +30,10 @@
            (as-> (traverse/auto-bind-io network) network
              (traverse/add-forward-traversal network {:data (m/ecount input)})
              (assoc network :batch-size 1)
-             (cp/bind-to-network context network {})
-             (cp/traverse context network {:data input} :inference)
+             (execute/bind-context-to-network context network {})
+             (execute/traverse context network {:data input} :inference)
              ;;save gradients at this point implies save io buffers
-             (cp/save-to-network context network {:save-gradients? true}))
+             (execute/save-to-network context network {:save-gradients? true}))
            traversal (get-in network [:traversal :forward])
            io-buffers (get-in network [:traversal :buffers])]
        (->> traversal
