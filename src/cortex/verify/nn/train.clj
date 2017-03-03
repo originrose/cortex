@@ -84,7 +84,7 @@
 
 (defn- print-layer-weights
   [network]
-  (clojure.pprint/pprint (->> (get-in network [:layer-graph :buffers])
+  (clojure.pprint/pprint (->> (get-in network [:compute-graph :buffers])
                               (map (fn [[k v]]
                                      [k
                                       (vec (take 10 (m/eseq (get v :buffer))))]))

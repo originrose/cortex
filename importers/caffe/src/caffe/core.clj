@@ -337,7 +337,7 @@ whitespace = #'\\s*'")
                                  (#(traverse/network->inference-traversal % {}))
                                  (#(get-in % [:traversal :forward]))
                                  (mapv (fn [{:keys [incoming id outgoing]}]
-                                         (get-in network [:layer-graph :id->node-map id]))))]
+                                           (get-in network [:compute-graph :id->node-map id]))))]
          (throw (ex-info "Verification failures detected:"
                          {:verification-failures (vec failures)
                           :layers ordered-nodes}))))
@@ -349,7 +349,7 @@ whitespace = #'\\s*'")
 (defn test-caffe-file
   [fname & args]
   (let [import-result (apply caffe-h5->model fname args)]
-    (println (format "Verifying %d layers" (count (get-in import-result [:model :layer-graph
+    (println (format "Verifying %d layers" (count (get-in import-result [:model :compute-graph
                                                                          :id->node-map]))))
     (verify-import/verify-model (execute/compute-context) import-result)))
 

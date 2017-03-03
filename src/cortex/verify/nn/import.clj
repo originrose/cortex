@@ -11,7 +11,7 @@
 
 (defn verify-model
   ([context network layer-id->output]
-   (when-not (contains? network :layer-graph)
+   (when-not (contains? network :compute-graph)
      (throw (ex-info "Network appears to not be built (cortex.nn.network/build-network)"
                      {:network-keys (try (keys network)
                                          (catch Exception e []))})))
@@ -47,7 +47,7 @@
                          {:cortex-input (m/as-vector (get-in io-buffers [(first incoming) :buffer]))
                           :import-output import-output
                           :cortex-output buffer-data
-                          :layer (get-in network [:layer-graph :id->node-map id])})))))
+                          :layer (get-in network [:compute-graph :id->node-map id])})))))
             (remove nil?)
             vec))))
   ([context {:keys [model layer-id->output]}]

@@ -459,9 +459,9 @@ If the input contains no channels then you get a scale factor per input paramete
 (defn network-description
   "A network description must have 1 key and that is the actual
 network graph description."
-  [layer-graph & args]
+  [compute-graph & args]
   (merge-args
-   {:layer-graph layer-graph}
+   {:compute-graph compute-graph}
    args))
 
 
@@ -469,7 +469,7 @@ network graph description."
   "Make anything into a network description."
   [network-desc-or-vec]
   (if-not (map? network-desc-or-vec)
-    {:layer-graph network-desc-or-vec}
+    {:compute-graph network-desc-or-vec}
     network-desc-or-vec))
 
 

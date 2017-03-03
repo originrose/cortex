@@ -66,7 +66,7 @@
                                               {:feature {:buffer (backend/array backend features batch-size)
                                                          :gradient (backend/new-array backend [n-features]
                                                                                       batch-size)}})
-        loss-term (compute-loss/create-compute-loss-term backend {:layer-graph graph} loss-term batch-size)
+        loss-term (compute-loss/create-compute-loss-term backend {:compute-graph graph} loss-term batch-size)
         nonzero-classes [1 0 1 1 0]
         adjusted-centers (mapv #(if (zero? %)
                                   (vec (repeat n-features 1.0))

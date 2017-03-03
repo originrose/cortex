@@ -97,13 +97,13 @@
         inference-mem (->> (traverse/add-forward-traversal network stream->size-map)
                            :traversal
                            realize-traversals)]
-    (is (= 434280 (graph/parameter-count (get network :layer-graph))))
-    (is (= 434280 (->> (get-in network [:layer-graph :buffers])
+    (is (= 434280 (graph/parameter-count (get network :compute-graph))))
+    (is (= 434280 (->> (get-in network [:compute-graph :buffers])
                        (map (comp m/ecount :buffer second))
                        (reduce +))))
     ;;Adding in the parameters required for the center loss centers.  10 * 500 = 5000
     ;;extra parameters
-    (is (= 439280 (graph/parameter-count (get training-net :layer-graph))))
+    (is (= 439280 (graph/parameter-count (get training-net :compute-graph))))
     (is (= :node-argument (-> (network/network->graph training-net)
                               (graph/get-node :l1-regularization-1)
                               (graph/get-node-argument :output)
@@ -337,7 +337,7 @@
         gradient-descent-original (->> (traverse/add-training-traversal original-network stream->size-map)
                                        :traversal
                                        realize-traversals)
-        layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
+        compute-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
     ;(clojure.pprint/pprint              (get traversal-after-stacking :backward))
     ;(clojure.pprint/pprint              (get original-traversal :backward))
     (is (= [nil nil]
@@ -359,8 +359,8 @@
     (is (nil? (:verification-failures top-network)))
     (is (= (graph/parameter-count (network/network->graph top-network))
            (graph/parameter-count (network/network->graph original-network))))
-    (is (= (layer-graph->buffer-id-size-fn (get-in top-network [:layer-graph :buffers]))
-           (layer-graph->buffer-id-size-fn (get-in original-network [:layer-graph :buffers]))))))
+    (is (= (compute-graph->buffer-id-size-fn (get-in top-network [:compute-graph :buffers]))
+           (compute-graph->buffer-id-size-fn (get-in original-network [:compute-graph :buffers]))))))
 
 
 (deftest remove-layers-from-network
@@ -369,16 +369,16 @@
         chopped-net (network/dissoc-layers-from-network mnist-net :dropout-4)]
     (is (= #{:softmax-1 :linear-2 :dropout-4}
            (clojure.set/difference
-             (set (keys (get-in mnist-net [:layer-graph :id->node-map])))
-             (set (keys (get-in chopped-net [:layer-graph :id->node-map]))))))
+             (set (keys (get-in mnist-net [:compute-graph :id->node-map])))
+             (set (keys (get-in chopped-net [:compute-graph :id->node-map]))))))
     (is (= #{[:feature :dropout-4] [:dropout-4 :linear-2] [:linear-2 :softmax-1]}
            (clojure.set/difference
-             (set (get-in mnist-net [:layer-graph :edges]))
-             (set (get-in chopped-net [:layer-graph :edges])))))
+             (set (get-in mnist-net [:compute-graph :edges]))
+             (set (get-in chopped-net [:compute-graph :edges])))))
     (is (= #{:linear-2-bias-1 :linear-2-weights-1}
            (clojure.set/difference
-             (set (keys (get-in mnist-net [:layer-graph :buffers])))
-             (set (keys (get-in chopped-net [:layer-graph :buffers]))))))))
+             (set (keys (get-in mnist-net [:compute-graph :buffers])))
+             (set (keys (get-in chopped-net [:compute-graph :buffers]))))))))
 
 
 

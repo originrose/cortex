@@ -355,20 +355,20 @@
                             (reshape-data weight-double-data keras-dims [1 0]))
                           (to-core-matrix (graph/get-argument-shape graph node weights-arg)))]
           (-> network
-              (assoc-in [:layer-graph :buffers
+              (assoc-in [:compute-graph :buffers
                          (get weights-arg :buffer-id)
                          :buffer]
                         weights)
-              (assoc-in [:layer-graph :buffers
+              (assoc-in [:compute-graph :buffers
                          (get bias-arg :buffer-id)
                          :buffer]
                         (ensure-doubles (:data (hdf5/->clj bias-ds)))))))
       network)))
 
 (defn- description->network
-  "Given a simple list of descriptors load the weights and return a network."
-  [desc-seq weight-file]
-  (let [weight-entry (first (filter (fn [node]
+       "Given a simple list of descriptors load the weights and return a network."
+       [desc-seq weight-file]
+       (let [weight-entry (first (filter (fn [node]
                                       (= (hdf5/get-name node)
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
@@ -379,8 +379,8 @@
         network (reduce (partial reshape-weights id->weight-map)
                         network
                         (graph/dfs-seq (network/network->graph network)))]
-    ;;Generate parameters and check that all our shapes are correct.
-    (update network :layer-graph graph/generate-parameters)))
+            ;;Generate parameters and check that all our shapes are correct.
+            (update network :compute-graph graph/generate-parameters)))
 
 
 (defn description-weight-file->network
@@ -408,14 +408,14 @@
 
 
 (defn- network->nodes
-  "Given a network return a list of nodes in forward pass order"
-  [network]
-  (let [forward-pass (-> (traverse/auto-bind-io network)
+       "Given a network return a list of nodes in forward pass order"
+       [network]
+       (let [forward-pass (-> (traverse/auto-bind-io network)
                          (traverse/network->training-traversal
                           {})
                          (get-in [:traversal :forward]))]
-    (->> (map :id forward-pass)
-         (map #(get-in network [:layer-graph :id->node-map %])))))
+            (->> (map :id forward-pass)
+                 (map #(get-in network [:compute-graph :id->node-map %])))))
 
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.

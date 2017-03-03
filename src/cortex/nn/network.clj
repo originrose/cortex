@@ -57,7 +57,7 @@
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
   ([network network-desc]
-   (update network :layer-graph
+   (update network :compute-graph
      (fn [graph]
        (-> (first
              (reduce add-node-to-graph
@@ -66,14 +66,14 @@
            graph/build-graph
            graph/generate-parameters))))
   ([network-desc]
-   (build-network {:layer-graph (graph/empty-graph)} network-desc)))
+   (build-network {:compute-graph (graph/empty-graph)} network-desc)))
 
 (defn add-property-to-layer
   "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id
-  To get a list of node-id -> (keys (get-in network [:layer-graph :id->node-map)))
+  To get a list of node-id -> (keys (get-in network [:compute-graph :id->node-map)))
   ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0 :regularization )"
   [network node-id key value]
-  (update network :layer-graph
+  (update network :compute-graph
           (fn [graph]
            (graph/update-node graph node-id #(assoc % key value)))))
 
@@ -81,9 +81,9 @@
 ;; When using these functions, make sure to call traverse/auto-bind-io
 ;; and traverse/network->training-traversal on the resulting network
 (defn assoc-layers-to-network
-  "Appends a list of layers to the end of the layer-graph"
+  "Appends a list of layers to the end of the compute-graph"
   [network layer-list]
-  (let [leaves (graph/leaves (get network :layer-graph))
+  (let [leaves (graph/leaves (get network :compute-graph))
         layer-list (vec (flatten layer-list))]
     (when-not (= 1 (count leaves))
       (throw (ex-info "cannot auto-append to graphs with either zero or multiple leaves"
@@ -94,14 +94,14 @@
 (defn dissoc-layers-from-network
   "Removes layers (nodes, edges, buffers) from the given parent node till the last leaf node"
   [network parent-node-id]
-  (update network :layer-graph graph/remove-node parent-node-id))
+  (update network :compute-graph graph/remove-node parent-node-id))
 
 
 (defn network->graph
   [network]
-  (if-let [retval (get network :layer-graph)]
+  (if-let [retval (get network :compute-graph)]
     retval
-    (throw (ex-info "Network does not appear to contain a graph; keys should contain :layer-graph"
+    (throw (ex-info "Network does not appear to contain a graph; keys should contain :compute-graph"
                     {:network-keys (keys network)}))))
 
 (defn network->node
@@ -128,7 +128,7 @@
 (defn- network->parameter-keys
   [network]
   (->> network
-       :layer-graph
+       :compute-graph
        :id->node-map
        vals
        (mapcat graph/get-node-arguments)
@@ -160,7 +160,7 @@
 (defn- layer->buffer-shape
   [network layer k]
   (-> network
-      (get-in [:layer-graph :buffers (get-in layer [k :buffer-id]) :buffer])
+      (get-in [:compute-graph :buffers (get-in layer [k :buffer-id]) :buffer])
       m/shape))
 
 (defn print-layer-summary

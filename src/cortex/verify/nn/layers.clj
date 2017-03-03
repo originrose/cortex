@@ -34,13 +34,13 @@
   [context network test-layer-id]
   (let [network (execute/save-to-network context network {:save-gradients? true})
         traversal (get network :traversal)
-        test-node (get-in network [:layer-graph :id->node-map test-layer-id])
+        test-node (get-in network [:compute-graph :id->node-map test-layer-id])
         parameter-descriptions (->> (graph/get-node-arguments test-node)
                                     (filter #(= :parameter (get % :type))))
         parameters (->> (map (fn [{:keys [key] :as description}]
                                (let [parameter (get test-node key)
                                      buffer (get-in network
-                                                    [:layer-graph :buffers
+                                                    [:compute-graph :buffers
                                                      (get parameter :buffer-id)])]
                                  [key
                                   {:description description
