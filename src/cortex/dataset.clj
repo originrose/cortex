@@ -403,3 +403,4 @@ data."
                        (parallel/create-next-item-fn (repeat holdout-map-seq)))
           train-fn (parallel/create-next-item-fn (partition num-epoch-elements infinite-map-seq))]
       (->InfiniteDataset shape-map cv-fn holdout-fn train-fn seq-of-map->map-of-seq shutdown-fn))))
+

@@ -99,23 +99,23 @@
   (let [output-id (ffirst output-bindings)]
     (resource/with-resource-context
       (network/print-layer-summary (-> network
-                                       network/build-network
+                                       network/linear-network
                                        traverse/auto-bind-io
                                        (traverse/add-training-traversal
                                          (ds/stream-descriptions dataset))))
-      (as-> (network/build-network network) net-or-seq
-        (execute/train context net-or-seq dataset input-bindings output-bindings
+      (as-> (network/linear-network network) net-or-seq
+            (execute/train context net-or-seq dataset input-bindings output-bindings
                        :batch-size batch-size
                        :optimizer optimizer
                        :disable-infer? disable-infer?
                        :infer-batch-type infer-batch-type)
-        (take n-epochs net-or-seq)
-        (map map-fn net-or-seq)
-        (last net-or-seq)
-        (execute/save-to-network context (get net-or-seq :network) {})
-        (execute/infer-columns context net-or-seq dataset input-bindings output-bindings
+            (take n-epochs net-or-seq)
+            (map map-fn net-or-seq)
+            (last net-or-seq)
+            (execute/save-to-network context (get net-or-seq :network) {})
+            (execute/infer-columns context net-or-seq dataset input-bindings output-bindings
                                :batch-size batch-size)
-        (get net-or-seq output-id)))))
+            (get net-or-seq output-id)))))
 
 
 

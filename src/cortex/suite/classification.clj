@@ -362,7 +362,7 @@ training will continue from there."
       :or {batch-size 128
            force-gpu? false
            confusion-matrix-atom (atom {})}}]
-  (let [network (-> (network/build-network initial-description)
+  (let [network (-> (network/linear-network initial-description)
                     traverse/auto-bind-io)]
    (doseq [_ (repeatedly
               #(suite-train/train-n dataset initial-description network

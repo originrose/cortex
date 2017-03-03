@@ -45,7 +45,7 @@
     (as-> (-> network
               (assoc-in [0 :id] :input)
               (assoc-in [(- num-items 1) :id] test-id)) network
-      (network/build-network network)
+      (network/linear-network network)
       (traverse/bind-input-bindings network input-bindings)
       (traverse/bind-output-bindings network output-bindings)
       (assoc network :batch-size batch-size)

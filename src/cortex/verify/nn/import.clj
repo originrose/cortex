@@ -44,10 +44,10 @@
                            buffer-data (m/as-vector
                                         (get-in io-buffers [(first outgoing) :buffer]))]
                        (when-not (m/equals import-output buffer-data 1e-3)
-                         {:cortex-input (m/as-vector (get-in io-buffers [(first incoming) :buffer]))
+                         {:cortex-input  (m/as-vector (get-in io-buffers [(first incoming) :buffer]))
                           :import-output import-output
                           :cortex-output buffer-data
-                          :layer (get-in network [:compute-graph :id->node-map id])})))))
+                          :layer         (get-in network [:compute-graph :nodes id])})))))
             (remove nil?)
             vec))))
   ([context {:keys [model layer-id->output]}]

@@ -144,6 +144,15 @@
 
 ;;;; Collections
 
+(defn deep-merge
+  "Like merge, but merges maps recursively.  Note that this is pulled from a rejected
+patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
+  [& maps]
+  (if (every? map? maps)
+    (apply merge-with deep-merge maps)
+    (last maps)))
+
+
 (defn map-keys
   "Applies f to each of the keys of a map, returning a new map."
   [f map]

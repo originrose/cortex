@@ -124,7 +124,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 (defn- load-training-parameters
   [network]
-  (->> (get-in network [:compute-binding :id->node-map])
+  (->> (get-in network [:compute-binding :nodes])
        keys
        (mapcat #(map second
                      (get-node-parameters network %)))
@@ -182,7 +182,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
    {:keys [gradients? numeric-gradients?] :as options}]
   (let [backend (backend-fn)
         stream-map (get traversal :stream-map)
-        id->node-map (get compute-graph :id->node-map)
+        id->node-map (get compute-graph :nodes)
         traverse-type (get traversal :type)
         gradients? (or gradients? (= traverse-type :training))
         driver (drv/get-driver backend)
@@ -199,7 +199,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
           (fn [compute-binding id]
             (let [node (graph/get-node compute-graph id)
                   node-params (network/network->node-parameters built-network id)]
-              (-> (update-in compute-binding [:id->node-map id]
+              (-> (update-in compute-binding [:nodes id]
                              (fn [compute-node]
                                (or compute-node
                                    (when (->> (layers/get-pass-set node)
@@ -422,7 +422,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                    incoming))))
 
   (pass-function
-    (get-in network [:compute-binding :id->node-map id])
+    (get-in network [:compute-binding :nodes id])
     (resolve-node-arguments network id)
     incoming outgoing))
 
@@ -586,7 +586,7 @@ and anything that has a loss term attached to it's output becomes an output bind
                                              :traversal-buffers
                                              output-id])
                    :output-size (get-in network [:compute-graph
-                                                 :id->node-map
+                                                 :nodes
                                                  node-id
                                                  :output-size])}))))))
 
@@ -602,7 +602,7 @@ and anything that has a loss term attached to it's output becomes an output bind
                                  :traversal-buffers
                                  {:stream stream}])
                 :size (get-in network [:compute-graph
-                                       :id->node-map
+                                       :nodes
                                        node-id
                                        :input-size]))))))
 
@@ -1155,12 +1155,13 @@ call cortex-dataset/batches->columns"
   (resource/with-resource-context
     (let [context (compute-context)
           ; Creates a map of {:<stream-name> {:channel-count c :width w :height h}
+          ; TODO: get rid of stream-map
           stream-map (ds/stream-descriptions dataset)
 
           ; convert from vector to graph description if needed
           network (if (and (map? network) (:compute-graph network))
                     network
-                    (network/build-network network))
+                    (network/linear-network network))
           network (-> network
                       ; set the batch-size
                       (assoc :batch-size batch-size)

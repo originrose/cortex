@@ -22,7 +22,7 @@
           (vec network)
           (assoc-in network [0 :id] :input)
           (assoc-in network [1 :id] test-layer-id)
-          (network/build-network network)
+          (network/linear-network network)
           (traverse/bind-input-bindings network input-bindings)
           (traverse/bind-output-bindings network output-bindings)
           (traverse/add-training-traversal network stream->size-map :keep-non-trainable? true)
@@ -34,7 +34,7 @@
   [context network test-layer-id]
   (let [network (execute/save-to-network context network {:save-gradients? true})
         traversal (get network :traversal)
-        test-node (get-in network [:compute-graph :id->node-map test-layer-id])
+        test-node (get-in network [:compute-graph :nodes test-layer-id])
         parameter-descriptions (->> (graph/get-node-arguments test-node)
                                     (filter #(= :parameter (get % :type))))
         parameters (->> (map (fn [{:keys [key] :as description}]
