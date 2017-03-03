@@ -10,6 +10,9 @@ constructors are all variable args with the extra arguments expected to be
             [cortex.graph :as graph]
             [cortex.buffer-initialization :as buf-init]))
 
+
+;; Helpers
+
 (defn- ensure-single-output-dimensions
   [previous node]
   (let [output-dims (graph/node->output-dimensions previous)]
@@ -54,11 +57,13 @@ constructors are all variable args with the extra arguments expected to be
   (let [previous (ensure-single-parent graph node predecessor-ids)]
     (carry-image-dims-forward previous node)))
 
+
 (defn- default-layer-metadata
   []
   {:arguments {}
    :passes [:training :inference]
    :default-loss (loss/mse-loss)})
+
 
 (defn get-pass-set
   [node]
@@ -66,57 +71,12 @@ constructors are all variable args with the extra arguments expected to be
       (get :passes)
       set))
 
+
 (defn get-layer-default-loss
   [layer]
   (get (graph/get-node-metadata layer)
        :default-loss
        (loss/mse-loss)))
-
-(defn input
-  ([width height channels & args]
-   [(merge-args
-     {:type :input :output-size (* width height channels)
-      :output-width width
-      :output-height height
-      :output-channels channels}
-     args)])
-  ([output-size]
-   (input output-size 1 1)))
-
-
-(defn linear
-  [num-output & args]
-  [(merge-args {:type :linear :output-size num-output} args)])
-
-
-(defn linear-weight-parameter-shape
-  [graph node argument]
-  [(graph/node->output-size node)
-   (graph/node->input-size node)])
-
-
-(defn linear-bias-parameter-shape
-  [graph node argument]
-  [(graph/node->output-size node)])
-
-(defmethod graph/build-node :linear
-  [graph node predecessor-id-seq successor-id-seq]
-  (-> (ensure-single-parent graph node predecessor-id-seq)
-      (carry-input-image-dims-forward node)))
-
-(defmethod graph/get-node-metadata :linear
-  [node]
-  {:arguments
-   {:weights {:type :parameter
-              :shape-fn :cortex.nn.layers/linear-weight-parameter-shape
-              :initialization {:type :weight-initialization}
-              :gradients? true}
-    :bias {:type :parameter
-           :shape-fn :cortex.nn.layers/linear-bias-parameter-shape
-           :initialization {:type :constant :value 0}
-           :gradients? true}}
-   :passes [:inference :training]})
-
 
 ;;This type of initialization finds the next activation in the graph and then
 ;;decides what to do from there.
@@ -133,6 +93,94 @@ constructors are all variable args with the extra arguments expected to be
       (buf-init/initialize-buffer {:type :xavier
                                    :shape shape}))))
 
+
+;; Input Layer
+
+(defmethod graph/build-node :input
+  [graph node predecessor-seq]
+  (when-not (= 0 (count predecessor-seq))
+    (throw (ex-info "Input nodes cannot have predecessor nodes"
+                    {:node node
+                     :predecessors predecessor-seq})))
+  (let [input-data (graph/get-node-argument node :input)]
+    (when-not (= :stream (get input-data :type))
+      (throw (ex-info "Input nodes can only link to streams"
+                      {:node node})))
+    (if-let [stream-desc (get-in graph [:streams (get input-data :stream)])]
+      (let [channels (long (get stream-desc :channels))
+            width (long (get stream-desc :width))
+            height (long (get stream-desc :height))]
+        ; TODO: why does an input node have input-* anything?
+       (assoc node
+              :input-channels channels
+              :output-channels channels
+              :input-height height
+              :output-height height
+              :input-width width
+              :output-width width
+              :input-size (* channels width height)
+              :output-size (* channels width height)))
+      (throw (ex-info "Failed to find stream to bind to input"
+                      {:node node
+                       :stream (get input-data :stream)})))))
+
+
+(defmethod get-node-metadata :input
+  [node]
+  {:arguments {:input {:type :stream}}})
+
+
+(defn input
+  ([width height channels & args]
+   [(merge-args
+     {:type :input
+      :output-size (* width height channels)
+      :output-width width
+      :output-height height
+      :output-channels channels}
+     args)])
+  ([output-size]
+   (input output-size 1 1)))
+
+;; Linear layer
+
+(defn linear
+  [num-output & args]
+  [(merge-args {:type :linear :output-size num-output} args)])
+
+
+(defn linear-weight-parameter-shape
+  [graph node argument]
+  [(graph/node->output-size node)
+   (graph/node->input-size node)])
+
+
+(defn linear-bias-parameter-shape
+  [graph node argument]
+  [(graph/node->output-size node)])
+
+
+(defmethod graph/build-node :linear
+  [graph node predecessor-id-seq successor-id-seq]
+  (-> (ensure-single-parent graph node predecessor-id-seq)
+      (carry-input-image-dims-forward node)))
+
+
+(defmethod graph/get-node-metadata :linear
+  [node]
+  {:arguments
+   {:weights {:type :parameter
+              :shape-fn :cortex.nn.layers/linear-weight-parameter-shape
+              :initialization {:type :weight-initialization}
+              :gradients? true}
+    :bias {:type :parameter
+           :shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+           :initialization {:type :constant :value 0}
+           :gradients? true}}
+   :passes [:inference :training]})
+
+
+;; Softmax
 
 (defn softmax
     "Define a softmax which may be multi-channelled.  The data is expected
@@ -159,37 +207,81 @@ channel 2 with n-outputs"
          :default-loss (loss/softmax-loss)))
 
 
-(defn linear->softmax
-  [num-classes & args]
-  (vec
-   (concat (apply linear num-classes args)
-           (apply softmax args))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Activation Functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 (defn relu
   [& args]
   [(merge-args {:type :relu} args)])
-(defn linear->relu
-  [num-output & args]
-  (concat (apply linear num-output args)
-          (apply relu args)))
+
+
 (defmethod graph/build-node :relu
   [& args]
   (apply default-build-fn args))
+
+
 (defmethod graph/get-node-metadata :relu
   [& args]
   (default-layer-metadata))
 
 
+(defn prelu
+  "https://arxiv.org/pdf/1502.01852.pdf
+At this point we only support per-channel scale, not across channel scale.
+If the input contains no channels then you get a scale factor per input parameter."
+  [& args]
+  [(merge-args
+    {:type :prelu}
+    args)])
+
+
+(defn prelu-layer->prelu-size
+  [layer]
+  (let [{:keys [channels] :as dims} (first (graph/node->input-dimensions layer))]
+    (if (= 1 channels)
+      (graph/dimensions->size dims)
+      channels)))
+
+
+(defn prelu-neg-scale-shape
+  [graph layer argument]
+  [(prelu-layer->prelu-size layer)])
+
+
+(defmethod graph/build-node :prelu
+  [& args]
+  (apply default-build-fn args))
+
+
+(defmethod graph/get-node-metadata :prelu
+  [desc]
+  {:arguments
+   {:neg-scale {:shape-fn :cortex.nn.layers/prelu-neg-scale-shape
+                :initialization {:type :constant
+                                 :value 0.25}
+                :gradients? true
+                :type :parameter}}
+   :passes #{:training :inference}})
+
+
 (defn logistic
   [& args]
   [(merge-args {:type :logistic} args)])
+
+
 (defn linear->logistic
   [num-output & args]
   (concat (apply linear num-output args)
           (apply logistic args)))
+
+
 (defmethod graph/build-node :logistic
   [& args]
   (apply default-build-fn args))
+
+
 (defmethod graph/get-node-metadata :logistic
   [& args]
   (default-layer-metadata))
@@ -198,13 +290,19 @@ channel 2 with n-outputs"
 (defn tanh
   [& args]
   [(merge-args {:type :tanh} args)])
+
+
 (defn linear->tanh
   [num-output & args]
   (concat (apply linear num-output args)
           (apply tanh args)))
+
+
 (defmethod graph/build-node :tanh
   [& args]
   (apply default-build-fn args))
+
+
 (defmethod graph/get-node-metadata :tanh
   [& args]
   (default-layer-metadata))
@@ -231,20 +329,35 @@ no change to the input."
     {:type :dropout :distribution :gaussian :variance variance}
     args)])
 
+
 (defmethod graph/build-node :dropout
   [& args]
   (apply default-build-fn args))
+
+
 (defmethod graph/get-node-metadata :dropout
   [layer]
   {:passes #{:training}})
 
 
-(def default-layer-type-dimension-op
-  {:convolutional :floor
-   :max-pooling :ceil})
+;; Composites
+
+(defn linear->softmax
+  [num-classes & args]
+  (vec
+   (concat (apply linear num-classes args)
+           (apply softmax args))))
 
 
-(defn convolutional-type-layer
+(defn linear->relu
+  [num-output & args]
+  (concat (apply linear num-output args)
+          (apply relu args)))
+
+
+;; Convolutional Layers
+
+(defn- convolutional-type-layer
   [layer-type kernel-width kernel-height pad-x pad-y
    stride-x stride-y num-kernels dimension-op
    & args]
@@ -338,6 +451,8 @@ a few compatibility issues."
                      :node node})))
   (build-convolutional-type-node (ensure-single-parent graph node predecessor-id-seq)
                                  node (get node :num-kernels)))
+
+
 (defmethod graph/get-node-metadata :convolutional
   [desc]
   {:arguments
@@ -352,22 +467,29 @@ a few compatibility issues."
    :passes #{:training :inference}})
 
 
+;; Pooling Layers
+
 (defn max-pooling
   ([kernel-dim pad stride & args]
    [(apply convolutional-type-layer :max-pooling
            kernel-dim kernel-dim pad pad
            stride stride 0 :ceil args)]))
 
+
 (defmethod graph/build-node :max-pooling
   [graph node predecessor-ids successor-ids]
   (let [previous (ensure-single-parent graph node predecessor-ids)]
-    (build-convolutional-type-node previous node
-                                   (get (ensure-single-output-dimensions previous node)
+   (build-convolutional-type-node previous
+                                  node (get (ensure-single-output-dimensions previous node)
                                         :channels))))
+
+
 (defmethod graph/get-node-metadata :max-pooling
   [layer]
   (default-layer-metadata))
 
+
+;; Normalization
 
 (defn batch-normalization
   "Create a batch normalization layer:
@@ -388,9 +510,11 @@ This is for cudnn compatibility.")))
      :epsilon epsilon}
     (dissoc arg-map :epsilon))])
 
+
 (defmethod graph/build-node :batch-normalization
   [& args]
   (apply default-build-fn args))
+
 
 (defmethod graph/get-node-metadata :batch-normalization
   [desc]
@@ -421,46 +545,15 @@ This is for cudnn compatibility.")))
     {:type :local-response-normalization
      :k k :n n :alpha alpha :beta beta}
     (dissoc arg-map :k :n :alpha :beta))])
-(defmethod graph/build-node :local-response-normalization
-  [& args]
-  (apply default-build-fn args))
+
+
 (defmethod graph/get-node-metadata :local-response-normalization
   [& args]
   (default-layer-metadata))
 
-
-(defn prelu
-  "https://arxiv.org/pdf/1502.01852.pdf
-At this point we only support per-channel scale, not across channel scale.
-If the input contains no channels then you get a scale factor per input parameter."
-  [& args]
-  [(merge-args
-    {:type :prelu}
-    args)])
-
-(defn prelu-layer->prelu-size
-  [layer]
-  (let [{:keys [channels] :as dims} (first (graph/node->input-dimensions layer))]
-    (if (= 1 channels)
-      (graph/dimensions->size dims)
-      channels)))
-
-(defn prelu-neg-scale-shape
-  [graph layer argument]
-  [(prelu-layer->prelu-size layer)])
-
-(defmethod graph/build-node :prelu
+(defmethod graph/build-node :local-response-normalization
   [& args]
   (apply default-build-fn args))
-(defmethod graph/get-node-metadata :prelu
-  [desc]
-  {:arguments
-   {:neg-scale {:shape-fn :cortex.nn.layers/prelu-neg-scale-shape
-                :initialization {:type :constant
-                                 :value 0.25}
-                :gradients? true
-                :type :parameter}}
-   :passes #{:training :inference}})
 
 
 (defn concatenate
@@ -468,6 +561,7 @@ If the input contains no channels then you get a scale factor per input paramete
   [(merge-args
     {:type :concatenate}
     args)])
+
 
 (defmethod graph/build-node :concatenate
   [graph node p-id-seq s-id-seq]
@@ -484,6 +578,7 @@ If the input contains no channels then you get a scale factor per input paramete
           :output-dimensions [(graph/create-node-dimensions
                                (apply + (map graph/dimensions->size input-dims)))])))
 
+
 (defmethod graph/get-node-metadata :concatenate
   [desc]
   {:passes #{:training :inference}})
@@ -496,6 +591,7 @@ input dimensions."
   [& args]
   (merge-args {:type :join :operation :+}
               args))
+
 
 (defmethod graph/build-node :join
   [graph node p-id-seq s-id-seq]
@@ -513,6 +609,7 @@ input dimensions."
            :output-dimensions [(graph/create-node-dimensions
                                 (apply max (map graph/dimensions->size input-dims)))])))
 
+
 (defmethod graph/get-node-metadata :join
   [desc]
   {:passes #{:training :inference}})
@@ -523,6 +620,7 @@ input dimensions."
   [(merge-args
     {:type :split}
     args)])
+
 
 (defmethod graph/build-node :split
   [graph node p-id-seq s-id-seq]
@@ -536,33 +634,9 @@ input dimensions."
            :input-dimensions [input-dims]
            :output-dimensions output-dim-vec)))
 
+
 (defmethod graph/get-node-metadata :split
   [desc]
   {:passes #{:training :inference}})
 
 
-(defn network-description
-  "A network description must have 1 key and that is the actual
-network graph description."
-  [compute-graph & args]
-  (merge-args
-   {:compute-graph compute-graph}
-   args))
-
-
-(defn network-description-or-vec->network-description
-  "Make anything into a network description."
-  [network-desc-or-vec]
-  (if-not (map? network-desc-or-vec)
-    {:compute-graph network-desc-or-vec}
-    network-desc-or-vec))
-
-
-(def example-mnist-description
-  [(input 28 28 1)
-   (convolutional 5 0 1 20)
-   (max-pooling 2 0 2)
-   (convolutional 5 0 1 50)
-   (max-pooling 2 0 2)
-   (linear->relu 500)
-   (linear->softmax 10)])
