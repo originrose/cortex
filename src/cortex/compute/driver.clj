@@ -41,7 +41,13 @@ host buffer and then uploaded to a device buffer.")
     "Create a sub buffer that shares the backing store with the main buffer.")
   (allocate-rand-buffer [impl elem-count]
     "Allocate a buffer used for rands.  Random number generation in general needs a
-divisible-by-2 element count and a floating point buffer (cuda cuRand limitation)"))
+divisible-by-2 element count and a floating point buffer (cuda cuRand limitation)")
+  (alias? [impl lhs-dev-buffer rhs-dev-buffer]
+    "Do these two buffers alias each other?  Meaning do they start at the same address
+and overlap completely?")
+  (partially-alias? [impl lhs-dev-buffer rhs-dev-buffer]
+    "Do these two buffers partially alias each other?  Does some sub-range of their
+data overlap?"))
 
 (defprotocol PDriverProvider
   "Get a driver from an object"

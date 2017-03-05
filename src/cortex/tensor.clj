@@ -12,7 +12,34 @@ instance an efficient accumulation of a batch of gradients into a single summed 
 
 It does mean, however, that certain conditions that would actually be error cases are
 harder to detect because one has to check for remainders being zero (which potentially
-could cause a divide by zero error) instead of just checking for equality."
+could cause a divide by zero error) instead of just checking for equality.
+
+Assignment has two forms
+y = x
+y[idx] = x[idx]
+
+For binary operations there are four forms:
+
+y = a*x op b*y
+result = a*x op b*y.
+y[idx] = a*x[idx] op b*y[idx]
+result[idx] = a*x[idx] op b*y[idx]
+
+Op may be: [:+ :* :/].
+
+In the non-indexed cases the element counts of y or x may differ but they need to be commensurate meaning
+that the smaller evenly divides the larger.
+When writing to result it is important that result is as large as the largest.
+
+For indexed cases we can't enforce really any constraints but if a location in result is written to more
+than once then the outcome is not defined; this is considered a programmatic error *!!that cannot be
+  detected at runtime!!*  Locations in Y may be written to more than once.
+
+In general we want as much error checking and analysis done in this file as opposed to at the implementation
+level (compute stream level) so that different implementations of this duplicate the least number of
+possible operations and so their edge cases agree to the extent possible."
+
+
   (:require [cortex.compute.driver :as compute-drv]
             [cortex.compute.math :as compute-math]
             [think.datatype.core :as dtype]
@@ -42,12 +69,54 @@ could cause a divide by zero error) instead of just checking for equality."
     (when-not-error retval "Tensor stream is nil" {})
     retval))
 
+(defn- ensure-datatypes
+  [datatype & args]
+  (when-not-error (every? #(= datatype (dtype/get-datatype %)) args)
+    "Not all arguments match required datatype"
+    {:datatype datatype
+     :argument-datatypes (map dtype/get-datatype args)}))
+
+
+(defn default-dimension-order
+  []
+  [:batch-size :channels :height :width])
+
+
+(defn get-dimension-order
+  [dims]
+  (get dims :order (default-dimension-order)))
+
+
 (defn create-dimensions
   "Dimensions are defined the same as the graph dimensions with the exception of the inclusion
   of batch size to the map as the slowest-changing dimension."
   [& {:keys [width height channels batch-size]
       :or {width 1 height 1 channels 1 batch-size 1} :as args}]
-  args)
+  {:shape [batch-size channels height width]})
+
+
+(defn dimensions->map
+  "Convert dimensions into a map containing {batch-size channels height width}"
+  [{:keys [shape order]
+    :or {order (default-dimension-order)}}]
+  (let [[batch-size channels height width] shape]
+    {:batch-size batch-size
+     :channels channels
+     :height height
+     :width width
+     :order order}))
+
+
+(defn map->dimensions
+  [{:keys [batch-size channels height width order]
+    :or {batch-size 1
+         channels 1
+         height 1
+         width 1
+         order (default-dimension-order)}}]
+  {:shape [batch-size channels height width]
+   :order order})
+
 
 (defn core-mat-shape->dimensions
   "Given a core-matrix shape produce a dimension map."
@@ -72,17 +141,50 @@ could cause a divide by zero error) instead of just checking for equality."
   ([shape]
    (core-mat-shape->dimensions shape 1)))
 
+
 (defn dimension-ecount
   "Return the element count indicated by the dimension map"
-  ^long [dimensions]
-  (long (apply * (select-keys dimensions [:batch-size :channels :width :height]))))
+  ^long [{:keys [shape]}]
+  (long (apply * shape)))
 
-(defn dimensions->width-shape
-  "Given dimensions, return new dimensions with the width unchanged but the rest of the
-  dimensions multiplied into the height"
-  [dimensions]
-  [(long (apply * (select-keys dimensions [:batch-size :channels :height])))
-   (long (get dimensions :width))])
+
+(defn dimensions->2d-shape
+  "Given dimensions, return new dimensions with the lowest (fastest-changing) dimension
+  unchanged and the rest of the dimensions multiplied into the higher dimension."
+  [{:keys [shape]}]
+  (when-not-error (seq shape)
+    "Invalid shape in dimension map"
+    {:shape shape})
+  (if (= 1 (count shape))
+    [1 (first shape)]
+    [(apply * (drop-last shape)) (last shape)]))
+
+
+(defn dimensions->batch-shape
+  "Given dimensions, return new dimensions with the lowest (fastest-changing) dimension
+  unchanged and the rest of the dimensions multiplied into the higher dimension."
+  [{:keys [shape]}]
+  (when-not-error (seq shape)
+    "Invalid shape in dimension map"
+    {:shape shape})
+  (if (= 1 (count shape))
+    [1 (first shape)]
+    [(first shape) (apply * (drop 1 shape))]))
+
+
+(defn dimensions->shape
+  [{:keys [shape]}]
+  shape)
+
+(defn dimensions->most-rapidly-changing
+  "Get the size of the most rapidly changing dimension"
+  ^long [{:keys [shape]}]
+  (last shape))
+
+(defn dimensions->least-rapidly-changing
+  "Get the size of the least rapidly changing dimension"
+  ^long [{:keys [shape]}]
+  (first shape))
 
 (defn- ensure-elementwise-compatible
   "Ensure these two tensors are compatible for an elementwise operation
@@ -104,98 +206,20 @@ that rerequires the items to have the same element count."
     {:lhs-datatype (dtype/get-datatype lhs)
      :rhs-datatype (dtype/get-datatype rhs)}))
 
+
 (declare strided? dense?)
 
-;;Tensors have one extra concept which is column-stride.  This let's us represent
-;;sub-matrices as long as they are 2d sub-matrixes.
-(defrecord Tensor [driver dimensions ^long column-stride buffer]
-  dtype/PDatatype
-  (get-datatype [tensor] (dtype/get-datatype (:buffer tensor)))
-  compute-drv/PDriverProvider
-  (get-driver [tensor] driver)
-  mp/PElementCount
-  (element-count [tensor]
-    (dimension-ecount dimensions))
-  mp/PDimensionInfo
-  (dimensionality [m] (count (mp/get-shape m)))
-  (get-shape [m] (let [{:keys [batch-size channels height width]} dimensions]
-                   (->> [batch-size channels height width]
-                        (filter #(> % 1))
-                        vec)))
-  (is-scalar? [m] false)
-  (is-vector? [m] true)
-  (dimension-count [m dimension-number]
-    (let [shape (mp/get-shape m)]
-      (if (<= (count shape) (long dimension-number))
-        (get shape dimension-number)
-        (throw (ex-info "Array does not have specific dimension"
-                        {:dimension-number dimension-number
-                         :shape shape})))))
-  mp/PVectorView
-  (as-vector [m]
-    (when-not-error (dense? m)
-      "Cannot represent a tensor with colstride != width as a vector"
-      {:dimensions (get m :dimensions)})
-    (->Tensor driver (create-dimensions :width (m/ecount m)) (m/ecount m) buffer))
-
-  mp/PAssignment
-  (assign! [dest src]
-    (ensure-elementwise-compatible dest src)
-    (let [^Tensor src src
-          [_ dest-width] (dimensions->width-shape dimensions)
-          [_ src-width] (dimensions->width-shape (.dimensions src))]
-      (compute-math/assign!-impl (check-stream) buffer dest-width column-stride
-                                 (.buffer src) src-width (.column-stride src)
-                                 (dtype/ecount src)))))
-
-(defn- create-tensor
-  (^Tensor [driver dimensions column-stride buffer]
-   (let [buffer-ecount (dtype/ecount buffer)
-         dimension-ecount (long
-                           (apply * column-stride
-                                  (select-keys dimensions [:batch-size :channels
-                                                           :height])))]
-     (when-not-error (<= dimension-ecount buffer-ecount)
-       "Supplied buffer does not have enough capacity for declared dimensions"
-       {:buffer-ecount buffer-ecount
-        :dimensions dimensions
-        :column-stride column-stride})
-     (when-not-error (<= (long (get dimensions :width))
-                         (long column-stride))
-       "Dimensions width is greater than supplied column stride"
-       {:dimensions dimensions
-        :column-stride column-stride}))
-   (->Tensor driver dimensions column-stride buffer))
-  (^Tensor [driver dimensions buffer]
-   (->Tensor driver dimensions (get dimensions :width) buffer)))
-
+(defn scalar?
+  [item] (number? item))
 
 (defn get-datatype
   [tensor]
   (dtype/get-datatype tensor))
 
-
 (defn unsafe-get-driver
   "Return the driver for a given tensor.  This should not be necessary."
   [tensor]
   (compute-drv/get-driver tensor))
-
-
-(defn dense?
-  [tensor]
-  (= (get-in tensor [:dimensions :width])
-     (get tensor :column-stride)))
-
-(def strided? (complement dense?))
-
-
-(defn reinterpret-tensor
-  "Create a new tensor with new dimensions.  This is like an in place reinterpretation of the
-  data."
-  ^Tensor [tensor new-dimensions]
-  (create-tensor (:driver tensor) new-dimensions
-                 (:column-stride tensor) (:buffer tensor)))
-
 
 (defn shape
   [tensor]
@@ -205,21 +229,180 @@ that rerequires the items to have the same element count."
   [tensor]
   (m/as-vector tensor))
 
+(defn to-vector
+  [tensor]
+  (m/to-vector tensor))
+
 (defn ecount
   ^long [tensor]
-  (m/ecount tensor))
+  (long (mp/element-count tensor)))
+
+;;Tensors have one extra concept which is column-stride.  This let's us represent sub-matrices
+;;as long as they are 2d sub-matrixes.
+;;Note that they have num-columns and column-stride separate from their dimensions.  This is required
+;;to represent row vectors and column vectors from a vector with a nonzero stride.  It is conceivable
+;;to have dimensions completely decoupled from those two variables *except* we need to ensure we keep
+;;the complexity low enough that a reasonable implementation doesn't need to rebuild gemm.
+;;So here are the rules:a
+;;Elementwise operations need to work regardless of dimensions, num-columns and column stride.
+;;Matrix operations require num-columns = most-rapidly-changing-dimension.  Matrix-vector operations
+;;require that both items are treated like a matrix which means that num-columns matches the
+;;most rapidly changing dimension (this is required for most blas implementation compatibility).
+(defrecord Tensor [driver dimensions ^long num-columns ^long column-stride buffer]
+  dtype/PDatatype
+  (get-datatype [tensor] (dtype/get-datatype (:buffer tensor)))
+  compute-drv/PDriverProvider
+  (get-driver [tensor] driver)
+  mp/PElementCount
+  (element-count [tensor]
+    (dimension-ecount dimensions))
+  mp/PDimensionInfo
+  (dimensionality [m] (count (mp/get-shape m)))
+  (get-shape [m] (dimensions->shape dimensions))
+  (is-scalar? [m] false)
+  (is-vector? [m] true)
+  (dimension-count [m dimension-number]
+    (let [shape (mp/get-shape m)]
+      (if (<= (count shape) (long dimension-number))
+        (get shape dimension-number)
+        (throw (ex-info "Array does not have specific dimension"
+                        {:dimension-number dimension-number
+                         :shape shape}))))))
+
+
+(defn- create-tensor
+  (^Tensor [driver dimensions num-columns column-stride buffer]
+   (let [buffer-ecount (ecount buffer)
+         shape (dimensions->shape dimensions)
+         required-buffer-ecount (long
+                                 (apply * column-stride
+                                        (drop-last shape)))]
+     (when-not-error (<= required-buffer-ecount buffer-ecount)
+       "Supplied buffer does not have enough capacity for declared dimensions"
+       {:buffer-ecount buffer-ecount
+        :dimensions dimensions
+        :required-buffer-ecount required-buffer-ecount
+        :column-stride column-stride})
+     (when-not-error (<= (long num-columns)
+                         (long column-stride))
+       "Tensor buffer column-count is greater than supplied column stride"
+       {:num-columns num-columns
+        :column-stride column-stride}))
+   (->Tensor driver dimensions num-columns column-stride buffer))
+  (^Tensor [driver dimensions buffer]
+   (let [mrc (dimensions->most-rapidly-changing dimensions)]
+     (->Tensor driver dimensions mrc mrc buffer))))
+
+
+(defn reinterpret-tensor
+  "Create a new tensor with new dimensions.  This is like an in place reinterpretation of the
+  data."
+  ^Tensor [^Tensor tensor new-dimensions]
+  (create-tensor (.driver tensor) new-dimensions
+                 (.num-columns tensor) (.column-stride tensor)
+                 (:buffer tensor)))
+
+
+(defn as-column-vector
+  [^Tensor tensor]
+  (when-not-error (or (= 1 (.num-columns tensor))
+                      (dense? tensor))
+    "Column vectors must either be dense or have num-columns = 1"
+    {:dense? (dense? tensor)
+     :num-columns (.num-columns tensor)})
+  (reinterpret-tensor tensor (create-dimensions :height (ecount tensor)
+                                                :width 1)))
+
+
+(defn- datatype->keyword
+  [item]
+  (cond
+    (instance? Tensor item) :tensor
+    (number? item) :number))
+
+
+(defn- element-counts-commensurate?
+  [^long lhs-ecount ^long rhs-ecount]
+  (or (= 0 rhs-ecount)
+      (= 0 (rem lhs-ecount rhs-ecount))))
+
+
+
+(defmulti typed-assign!
+  "Multimethods for typed assignment."
+  (fn
+    [dest src]
+    [(datatype->keyword dest)
+     (datatype->keyword src)]))
+
+
+(defmethod typed-assign! [:tensor :number]
+  [^Tensor dest src]
+  (compute-math/assign-constant! (check-stream)
+                                 (.buffer dest) (.num-columns dest) (.column-stride dest)
+                                 src (m/ecount dest)))
+
+
+(defmethod typed-assign! [:tensor :tensor]
+  [^Tensor dest src]
+  (let [dest-ecount (ecount dest)
+        src-ecount (ecount src)]
+   (when-not-error (>= dest-ecount
+                       src-ecount)
+     "destination element count must be >= src element count"
+     {:dest-ecount dest-ecount
+      :src-count src-ecount})
+   (when-not-error (element-counts-commensurate? dest-ecount src-ecount)
+     "Src element count must evenly divide dest ecount:"
+     {:dest-ecount dest-ecount
+      :src-ecount src-ecount})
+   (ensure-datatypes (get-datatype dest) src)
+   (compute-math/assign!-impl (check-stream)
+                              (.buffer dest) (.num-columns dest) (.column-stride dest) dest-ecount
+                              (.buffer src) (.num-columns src) (.column-stride src) src-ecount)))
+
+
+(extend-type Tensor
+  mp/PVectorView
+  (as-vector [m]
+    (reinterpret-tensor m (create-dimensions :width (ecount m))))
+
+  mp/PVectorisable
+  (to-vector [m]
+    (mp/as-vector m))
+
+  mp/PAssignment
+  (assign! [dest src]
+    (typed-assign! dest src)))
+
+
+
+(defn dense?
+  [^Tensor tensor]
+  (= (.column-stride tensor)
+     (.num-columns tensor)))
+
+(def strided? (complement dense?))
+
 
 (defn tensor->batch-size
-  ^long [tensor] (get-in tensor [:dimensions :batch-size]))
+  ^long [^Tensor tensor] (dimensions->least-rapidly-changing (.dimensions tensor)))
+
 
 (defn tensor->channels
-  ^long [tensor] (get-in tensor [:dimensions :channels]))
+  ^long [^Tensor tensor]
+  (get (dimensions->map (.dimensions tensor)) :channels))
+
 
 (defn tensor->height
-  ^long [tensor] (get-in tensor [:dimensions :height]))
+  ^long [^Tensor tensor]
+  (get (dimensions->map (.dimensions tensor)) :height))
+
 
 (defn tensor->width
-  ^long [tensor] (get-in tensor [:dimensions :width]))
+  ^long [^Tensor tensor]
+  (get (dimensions->map (.dimensions tensor)) :width))
+
 
 (defn as-batch-matrix
   "As a 2d matrix of shape [batch-size everything-else]"
@@ -236,7 +419,7 @@ that rerequires the items to have the same element count."
 (defn as-2d-matrix
   "As a 2d matrix of shape [everything-else width]"
   ^Tensor [^Tensor tensor]
-  (let [[n-rows n-cols] (dimensions->width-shape (.dimensions tensor))]
+  (let [[n-rows n-cols] (dimensions->2d-shape (.dimensions tensor))]
     (create-tensor (:driver tensor)
                    (create-dimensions :height n-rows
                                       :width n-cols)
@@ -282,7 +465,7 @@ that rerequires the items to have the same element count."
 
 (defn to-core-matrix
   [^Tensor tensor]
-  (let [[n-rows n-cols] (dimensions->width-shape (.dimensions tensor))
+  (let [[n-rows n-cols] (dimensions->2d-shape (.dimensions tensor))
         retval (m/new-array [n-rows n-cols] :vectorz)
         double-data (mp/as-double-array retval)]
     (copy-to-java-type double-data tensor)))
@@ -352,7 +535,7 @@ and the rest of the dimensions being squashed into n-rows."
         row-length (long row-length)
         col-start (long col-start)
         col-length (long col-length)
-        [n-rows n-cols] (dimensions->width-shape (.dimensions tensor))
+        [n-rows n-cols] (dimensions->2d-shape (.dimensions tensor))
         n-rows (long n-rows)
         n-cols (long n-cols)
         column-stride (.column-stride tensor)
@@ -377,6 +560,7 @@ and the rest of the dimensions being squashed into n-rows."
                                              start-offset required-length)]
       (create-tensor (.driver tensor) (create-dimensions :width col-length
                                                          :height row-length)
+                     col-length
                      column-stride sub-buffer))))
 
 
@@ -390,7 +574,7 @@ and the rest of the dimensions being squashed into n-rows."
     (mapv (fn [^long idx]
             (let [offset (* idx column-stride)
                   new-buf (compute-drv/sub-buffer driver buffer offset n-cols)]
-              (create-tensor driver (create-dimensions n-cols) n-cols new-buf)))
+              (create-tensor driver (create-dimensions :width n-cols) new-buf)))
           (range n-rows))))
 
 
@@ -405,16 +589,10 @@ and the rest of the dimensions being squashed into n-rows."
         buf-ecount (ecount buffer)]
     (mapv (fn [^long offset]
             (let [new-buf (compute-drv/sub-buffer driver buffer offset (- buf-ecount offset))]
-              (create-tensor driver (create-dimensions :height n-rows :width 1)
+              (create-tensor driver (create-dimensions :width n-rows)
+                             1
                              column-stride new-buf)))
           (range n-cols))))
-
-(defn- ensure-datatypes
-  [datatype & args]
-  (when-not-error (every? #(= datatype (dtype/get-datatype %)) args)
-    "Not all arguments match required datatype"
-    {:datatype datatype
-     :argument-datatypes (map dtype/get-datatype args)}))
 
 (defn- ensure-indexes
   "Index tensors must be integers and they must all be dense and the same length."
@@ -430,7 +608,6 @@ and the rest of the dimensions being squashed into n-rows."
 
 (defn assign!
   ^Tensor [^Tensor dest ^Tensor src]
-  (ensure-datatypes (dtype/get-datatype dest) src)
   (m/assign! dest src)
   dest)
 
@@ -446,22 +623,14 @@ and the rest of the dimensions being squashed into n-rows."
     "src/dest datatype mismatch"
     {:src-dtype (dtype/get-datatype src)
      :dest-dtype (dtype/get-datatype dest)})
-  (let [[dest-rows dest-cols] (dimensions->width-shape (.dimensions dest))
-        [src-rows src-cols] (dimensions->width-shape (.dimensions src))
+  (let [[dest-rows dest-cols] (dimensions->2d-shape (.dimensions dest))
+        [src-rows src-cols] (dimensions->2d-shape (.dimensions src))
         n-dest-elems (* (long dest-cols) (ecount dest-indexes))
         n-src-elems (* (long src-cols) (ecount src-indexes))]
-
-    (when-not-error (= n-dest-elems
-                 n-src-elems)
-      "n-cols * n-indexes must match for indirect assignment."
-      {:dest-cols dest-cols
-       :n-dest-indexes (ecount dest-indexes)
-       :src-cols src-cols
-       :n-src-indexes (ecount src-indexes)})
-    (compute-math/indirect-assign!-impl
+    (compute-math/indirect-assign!
      (check-stream)
-     (.buffer dest) (.buffer dest-indexes) dest-cols (.column-stride dest)
-     (.buffer src) (.buffer src-indexes) src-cols (.column-stride src))
+     (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-stride dest)
+     (.buffer src) (.buffer src-indexes) (.num-columns src) (.column-stride src))
     dest))
 
 
@@ -511,8 +680,8 @@ element count of either operand."
               :or [operation :add]}]
   (ensure-indexes x-indexes y-indexes)
   (ensure-datatypes (dtype/get-datatype x) y)
-  (let [[x-rows x-cols] (dimensions->width-shape (.dimensions x))
-        [y-rows y-cols] (dimensions->width-shape (.dimensions y))]
+  (let [[x-rows x-cols] (dimensions->2d-shape (.dimensions x))
+        [y-rows y-cols] (dimensions->2d-shape (.dimensions y))]
     (compute-math/indirect-accum-rows!-impl
      (check-stream) operation reverse-operands?
      alpha (.buffer x) (.buffer x-indexes) x-cols (.column-stride x)
@@ -534,9 +703,9 @@ element count of either operand."
               :or {operation :add}}]
   (ensure-indexes res-indexes x-indexes y-indexes)
   (ensure-datatypes (get-datatype res) x y)
-  (let [[res-rows res-cols] (dimensions->width-shape (.dimensions res))
-        [x-rows x-cols] (dimensions->width-shape (.dimensions x))
-        [y-rows y-cols] (dimensions->width-shape (.dimensions y))
+  (let [[res-rows res-cols] (dimensions->2d-shape (.dimensions res))
+        [x-rows x-cols] (dimensions->2d-shape (.dimensions x))
+        [y-rows y-cols] (dimensions->2d-shape (.dimensions y))
         ;;For this indirect add implementations are allowed to assume that each individual
         ;;res location will be written to exactly once.  If they make this assumption and
         ;;then the users doesn't respect it the results will be unexpected.  If the number of
@@ -564,9 +733,9 @@ element count of either operand."
   C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C"
   [^Tensor C trans-a? trans-b? alpha ^Tensor A ^Tensor B beta]
   (ensure-datatypes (get-datatype A) B C)
-  (let [[a-row-count a-col-count :as a-shape] (dimensions->width-shape (.dimensions A))
-        [b-row-count b-col-count :as b-shape] (dimensions->width-shape (.dimensions B))
-        [c-row-count c-col-count :as c-shape] (dimensions->width-shape (.dimensions C))]
+  (let [[a-row-count a-col-count :as a-shape] (dimensions->2d-shape (.dimensions A))
+        [b-row-count b-col-count :as b-shape] (dimensions->2d-shape (.dimensions B))
+        [c-row-count c-col-count :as c-shape] (dimensions->2d-shape (.dimensions C))]
     (when-not-error (= a-col-count b-row-count)
       "A col count doesn't match B row count"
       {:a-shape a-shape

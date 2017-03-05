@@ -80,13 +80,24 @@ dest-buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;")
 need to be setup correctly.  Like sum, however, res could be either x or y and thus you
 could use this to accumulate particular results in addition to adding into a separate vector.
 result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];")
-  (assign!-impl [stream dest dest-n-cols dest-col-stride
-                 src src-n-cols src-col-stride n-elems]
+  (assign!-impl [stream
+                 dest dest-n-cols dest-col-stride dest-n-elems
+                 src src-n-cols src-col-stride src-n-elems]
     "Assign src to dest accounting for potentially differing number of columns of X and Y.")
-  (indirect-assign!-impl [stream
-                          dest dest-indexes dest-n-cols dest-col-stride
-                          src src-indexes src-n-cols src-col-stride]
-    "Ecount is must match, so n-indexes * n-cols must match.")
+  (assign-constant! [stream dest dest-n-cols dest-col-stride
+                     src n-elems]
+    "Assign scalar src to dest accounting for potentially differing number of columns of X and Y.")
+  (indirect-assign! [stream
+                     dest dest-indexes dest-n-cols dest-col-stride
+                     src src-indexes src-n-cols src-col-stride]
+    "dest indexes must *not* repeat!!  This cannot be checked efficiently at runtime but it will
+result in undefined behavior from some implementations")
+
+  (indirect-assign-constant! [stream
+                              dest dest-indexes dest-n-cols dest-col-stride
+                              src]
+    "Indirect assignment of a constant value.")
+
   (accum!-impl [stream primary-op reverse-operands?
                 alpha x x-n-cols x-colstride x-n-elems
                 beta y y-n-cols y-colstride y-n-elems]
