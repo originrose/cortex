@@ -1,5 +1,5 @@
 (ns cortex.suite.train
-  (:require [cortex.suite.io :as suite-io]
+  (:require [cortex.util :as util]
             [cortex.nn.protocols :as cp]
             [think.resource.core :as resource]
             [clojure.java.io :as io]
@@ -23,7 +23,7 @@ iff the initial description saved with the network matches the passed
 in initial description.  Else returns the initial description"
   [network-filename initial-description]
   (when (.exists (io/file network-filename))
-    (let [network-data (suite-io/read-nippy-file network-filename)]
+    (let [network-data (util/read-nippy-file network-filename)]
       (when (= initial-description (get network-data :initial-description))
         network-data))))
 
@@ -33,7 +33,7 @@ in initial description.  Else returns the initial description"
   (let [write-data (-> (cp/save-to-network context network {})
                        (assoc :cv-loss network-loss
                               :initial-description initial-description))]
-    (suite-io/write-nippy-file network-filename write-data)
+    (util/write-nippy-file network-filename write-data)
     write-data))
 
 
@@ -228,7 +228,7 @@ existing traversal bindings."
          (filter #(let [n (.getPath %)]
                     (and (.contains n (.concat trained-networks-folder network-filestem))
                          (.endsWith n ".nippy"))))
-         (map (fn [f] [f (suite-io/read-nippy-file f)]))
+         (map (fn [f] [f (util/read-nippy-file f)]))
          (map (fn [[f network]] (assoc network :filename (.getName f))))
          (map (fn [network] (update network :cv-loss cv-loss->number)))
          (sort-by :cv-loss)
