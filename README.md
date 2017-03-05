@@ -20,10 +20,10 @@ nailed down then we are a major step closer to 1.0.0.
 ## Cortex Design
 
 Design is detailed here:
-[Cortex Design Document](design.md)
+[Cortex Design Document](docs/design.md)
 
 Please see the various unit tests and examples for training a model.  Specifically see:
-[mnist verification](cortex/src/cortex/verify/nn/train.clj)
+[mnist verification](src/cortex/verify/nn/train.clj)
 
 Also, for an example of using cortex in a more real-world scenario please see:
 [mnist example](examples/suite-classification/src/suite_classification/core.clj).
@@ -98,7 +98,7 @@ Once downloaded and unzipped, moving the files:
     $ sudo mv include/cudnn.h /Developer/NVIDIA/CUDA-8.0/include/
     $ sudo mv lib/libcudnn* /Developer/NVIDIA/CUDA-8.0/lib
     $ sudo ln -s /Developer/NVIDIA/CUDA-8.0/lib/libcudnn* /usr/local/cuda/lib/
-    
+
 Should you see a jni linking error similar to this
 
 ```
@@ -112,6 +112,8 @@ lj:82:28)
 
 Make sure you have installed the appropriate CUDNN for your version of CUDA.
 
+If attempting a fresh install and run from `Master` you should also make sure to run `cortex/local-install.sh` before running an example (examples/suite-classification/trains.sh for example).
+
 ### See also:
 
-[Roadmap](ROADMAP.md)
+[Roadmap](docs/ROADMAP.md)
