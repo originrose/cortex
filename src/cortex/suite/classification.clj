@@ -345,7 +345,7 @@ observations in each cell instead of just a count."
    "dataset-image" (partial get-dataset-image dataset-display-atom)})
 
 
-(defn best-network-function
+(defn best-network-fn
   [confusion-matrix-atom observation->img-fn dataset network-eval]
   (reset-confusion-matrix confusion-matrix-atom observation->img-fn
                           dataset network-eval))
@@ -364,7 +364,7 @@ training will continue from there."
                     traverse/auto-bind-io)]
    (doseq [_ (repeatedly
               #(suite-train/train-n dataset initial-description network
-                                    :best-network-fn (partial best-network-function
+                                    :best-network-fn (partial best-network-fn
                                                               confusion-matrix-atom
                                                               observation->image-fn
                                                               dataset)
