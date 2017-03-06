@@ -74,6 +74,7 @@
   ([network-desc]
    (linear-network {:compute-graph (graph/empty-graph)} network-desc)))
 
+
 ;; When using these functions, make sure to call traverse/auto-bind-io
 ;; and traverse/network->training-traversal on the resulting network
 (defn assoc-layers-to-network

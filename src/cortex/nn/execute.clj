@@ -18,6 +18,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [cortex.dataset :as ds]
     [cortex.graph :as graph]
     [cortex.loss :as loss]
+    [cortex.util :as util]
     [cortex.optimize :as optimize]
     [cortex.optimize.adam :as adam]
     [cortex.nn.network :as network]
@@ -431,7 +432,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   [network {:keys [compute-term loss-term gradients]}]
   (let [backend (get-in network [:compute-binding :backend])
         buffer-map (-> (resolve-node-arguments network (get loss-term :id))
-                       (graph/deep-merge gradients))]
+                       (util/deep-merge gradients))]
     (compute-loss/compute-loss-gradient compute-term buffer-map)
     ;;Useful debugging tool.
     (comment

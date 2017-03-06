@@ -13,6 +13,68 @@
             [cortex.argument :as arg]))
 
 
+(defn- edges
+  [graph]
+  (get graph :edges))
+
+
+(defn- edges->map
+  [graph key-fn val-fn]
+  (->> (edges graph)
+       (group-by key-fn)
+       (map (fn [[k v]]
+              [k (map val-fn v)]))
+       (into {})))
+
+
+(defn parent->child-map
+  [graph]
+  (edges->map graph first second))
+
+
+(defn child->parent-map
+  [graph]
+  (edges->map graph second first))
+
+
+(defmulti get-node-metadata
+  "Given that any node has a type member, return metadata on the node which
+  must contain at least an :arguments member listing the arguments to the node."
+  :type)
+
+(defmethod get-node-metadata :default [node] {})
+
+(defn get-node-argument
+  [node arg-key]
+  (let [learn-atten (get node :learning-attenuation 1.0)
+        non-trainable? (get node :non-trainable? false)
+        retval (->> (get-node-metadata node)
+                    :arguments
+                    (#(get % arg-key)))]
+    (when-not retval
+      (throw (ex-info "Failed to find node argument"
+                      {:node node
+                       :argument-name arg-key
+                       :arguments (get (get-node-metadata node) :arguments)})))
+    (let [retval (->> (assoc retval :key arg-key)
+                      (util/deep-merge retval (get node arg-key)))
+          param-learn-atten (get retval :learning-attenuation learn-atten)]
+      (if (or (zero? param-learn-atten)
+              non-trainable?)
+        (assoc retval :gradients? false)
+        (assoc retval :learning-attenuation param-learn-atten)))))
+
+
+(defn get-node-arguments
+  "Get the node arguments 'before' being merged with the node
+buffers."
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       keys
+       (map #(get-node-argument node %))))
+
+
 (defn empty-graph
   "Create an empty graph, which is stored as a map of:
   {:edges [] adjacency list of [id id]
@@ -72,12 +134,6 @@
      (get node :id)]))
 
 
-(defn remove-node
-  "Remove a node, its buffers and all children from the graph."
-  [graph node-id]
-  (recur-remove-node (parent->child-map graph) graph node-id))
-
-
 (defn- recur-remove-node
   [p->c-map graph node-id]
   (let [graph (reduce (partial recur-remove-node p->c-map)
@@ -95,6 +151,12 @@
         (update :nodes dissoc node-id))))
 
 
+(defn remove-node
+  "Remove a node, its buffers and all children from the graph."
+  [graph node-id]
+  (recur-remove-node (parent->child-map graph) graph node-id))
+
+
 (defn remove-children
   "Remove all children of a node (and there children, recursively)."
   [graph parent-node-id]
@@ -103,45 +165,6 @@
             graph
             (get p->c-map parent-node-id))))
 
-
-(defmulti get-node-metadata
-  "Given that any node has a type member, return metadata on the node which
-  must contain at least an :arguments member listing the arguments to the node."
-  :type)
-
-
-(defmethod get-node-metadata :default [node] {})
-
-
-(defn get-node-argument
-  [node arg-key]
-  (let [learn-atten (get node :learning-attenuation 1.0)
-        non-trainable? (get node :non-trainable? false)
-        retval (->> (get-node-metadata node)
-                    :arguments
-                    (#(get % arg-key)))]
-    (when-not retval
-      (throw (ex-info "Failed to find node argument"
-                      {:node node
-                       :argument-name arg-key
-                       :arguments (get (get-node-metadata node) :arguments)})))
-    (let [retval (->> (assoc retval :key arg-key)
-                      (util/deep-merge retval (get node arg-key)))
-          param-learn-atten (get retval :learning-attenuation learn-atten)]
-      (if (or (zero? param-learn-atten)
-              non-trainable?)
-        (assoc retval :gradients? false)
-        (assoc retval :learning-attenuation param-learn-atten)))))
-
-
-(defn get-node-arguments
-  "Get the node arguments 'before' being merged with the node
-buffers."
-  [node]
-  (->> (get-node-metadata node)
-       :arguments
-       keys
-       (map #(get-node-argument node %))))
 
 
 (defn any-trainable-arguments?
@@ -196,45 +219,6 @@ a vector of floats."
                      :available-streams (keys (get graph :streams))}))))
 
 
-(defn input-node
-  [stream-name]
-  {:type :input
-   :input {:stream stream-name}})
-
-
-(defmethod build-node :input
-  [graph node predecessor-seq successor-id-seq]
-  (when-not (= 0 (count predecessor-seq))
-    (throw (ex-info "Input nodes cannot have predecessor nodes"
-                    {:node node
-                     :predecessors predecessor-seq})))
-  (let [input-data (get-node-argument node :input)]
-    (when-not (= :stream (get input-data :type))
-      (throw (ex-info "Input nodes can only link to streams"
-                      {:node node})))
-    (if-let [stream-desc (get-in graph [:streams (get input-data :stream)])]
-      (let [channels (long (get stream-desc :channels))
-            width (long (get stream-desc :width))
-            height (long (get stream-desc :height))]
-       (assoc node
-              :input-channels channels
-              :output-channels channels
-              :input-height height
-              :output-height height
-              :input-width width
-              :output-width width
-              :input-size (* channels width height)
-              :output-size (* channels width height)))
-      (throw (ex-info "Failed to find stream to bind to input"
-                      {:node node
-                       :stream (get input-data :stream)})))))
-
-
-(defmethod get-node-metadata :input
-  [node]
-  {:arguments {:input {:type :stream}}})
-
-
 (defn get-node
   [graph node-id]
   (let [retval (get-in graph [:nodes node-id])]
@@ -259,55 +243,42 @@ a vector of floats."
                                       (set (keys (get graph :nodes)))))))
 
 
-(defn add-node
-  "Add a node to the graph with a list of predecessors.  If the node has no id one will
-  be generated; if it does and it is not unique and exception will be thrown.
-  If any of the predecessors does not exist an error will be thrown.  Returns a pair
-  of [graph node-id]"
-  [graph node predecessor-id-seq]
-  (when-not (every? (get graph :nodes) predecessor-id-seq)
-    (throw (ex-info "Failed to find all predecessor id's in graph"
-                    {:id-seq predecessor-id-seq
-                     :missing-ids (remove (get graph :nodes) predecessor-id-seq)
-                     :existing-ids (vec (keys (get graph :nodes)))})))
-  (let [node (get-or-create-node-id graph node)]
-    [(-> graph
-         (assoc-in [:nodes (get node :id)] node)
-         (update :edges #(concat %
-                                 (map vector
-                                      predecessor-id-seq
-                                      (repeat (get node :id))))))
-     (get node :id)]))
 
-=======
->>>>>>> e234263... Streamlining namespaces around core abstractions.
+
+
 (defn- edges
   [graph]
   (get graph :edges))
+
 
 (defn- parent-seq
   [graph]
   (map first (edges graph)))
 
+
 (defn- child-seq
   [graph]
   (map second (edges graph)))
+
 
 (defn- parent-set
   [graph]
   (-> (parent-seq graph)
       set))
 
+
 (defn- child-set
   [graph]
   (-> (child-seq graph)
       set))
+
 
 (defn- set->ordered-vec
   [item-set item-seq]
   (->> (filter item-set item-seq)
        distinct
        vec))
+
 
 (defn roots
   [graph]
@@ -319,21 +290,6 @@ a vector of floats."
   (-> (c-set/difference (child-set graph) (parent-set graph))
       (set->ordered-vec (child-seq graph))))
 
-(defn- edges->map
-  [graph key-fn val-fn]
-  (->> (edges graph)
-       (group-by key-fn)
-       (map (fn [[k v]]
-              [k (map val-fn v)]))
-       (into {})))
-
-(defn parent->child-map
-  [graph]
-  (edges->map graph first second))
-
-(defn child->parent-map
-  [graph]
-  (edges->map graph second first))
 
 
 (defn dfs-seq
