@@ -3,7 +3,7 @@
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
             [think.datatype.core :as dtype]
             [cortex.compute.driver :as drv]
-            [cortex.compute.optimize :as opt]
+            [cortex.optimize :as opt]
             [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.compute.nn.layers :as compute-layers]
@@ -180,17 +180,19 @@
   (^cudnn$cudnnActivationStruct [mode] (create-activation-desc mode cudnn/CUDNN_PROPAGATE_NAN 0.0)))
 
 
-(defrecord CudaBackend [^CudaDriver driver ^CudaStream stream ^cudnn$cudnnContext cudnn-context datatype network-functions])
+(defrecord CudaBackend [type ^CudaDriver driver ^CudaStream stream ^cudnn$cudnnContext cudnn-context datatype network-functions])
 
 (defn create-backend
   ([^CudaDriver driver ^CudaStream stream datatype]
-   (let [network-functions {:adadelta-step (cuda-drv/load-float-double-function "adadelta.fatbin" "adadelta_step")
-                            :adam-step (cuda-drv/load-float-double-function "adam.fatbin" "adam_step")
-                            :prepare-bernoulli-dropout (cuda-drv/load-float-double-function "prepare_bernoulli_dropout.fatbin"
-                                                                                            "prepare_bernoulli_dropout")
-                            :prepare-gaussian-dropout (cuda-drv/load-float-double-function "prepare_gaussian_dropout.fatbin"
-                                                                                           "prepare_gaussian_dropout")}]
-     (->CudaBackend driver stream (create-cudnn-context) datatype network-functions)))
+   (let [network-functions {:prepare-bernoulli-dropout
+                            (cuda-drv/load-float-double-function
+                              "prepare_bernoulli_dropout.fatbin"
+                              "prepare_bernoulli_dropout")
+                            :prepare-gaussian-dropout
+                            (cuda-drv/load-float-double-function
+                              "prepare_gaussian_dropout.fatbin"
+                              "prepare_gaussian_dropout")}]
+     (->CudaBackend :cuda driver stream (create-cudnn-context) datatype network-functions)))
   ([datatype] (let [driver (cuda-drv/create-cuda-driver)
                     stream (drv/create-stream driver)]
                 (create-backend driver stream datatype)))
@@ -210,9 +212,6 @@
 
 
 (defprotocol PCUDAOptimizeMethod
-  (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count stream])
-  (cuda-adam-step! [gradient parameters gradient-alpha alpha beta1 beta2 epsilon
-                    pow-beta1-t pow-beta2-t m v item-count stream])
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability rand-buffer elem-count backend])
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]))
 
@@ -223,19 +222,6 @@
 
 (extend-type DoublePointer
   PCUDAOptimizeMethod
-  (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adadelta-step :double) item-count 0
-                                   (double decay) (double epsilon)
-                                   grad-accum dx-accum
-                                   (double gradient-alpha)
-                                   gradient parameters item-count))
-  (cuda-adam-step! [gradient parameters gradient-alpha alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t m v item-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adam-step :double) item-count 0
-                                   (double alpha) (double beta1) (double beta2) (double epsilon)
-                                   (double pow-beta1-t) (double pow-beta2-t)
-                                   (double gradient-alpha)
-                                   gradient parameters m v
-                                   item-count))
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
     (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
                                    mult-buffer rand-buffer (double probability) elem-count))
@@ -246,19 +232,6 @@
 
 (extend-type FloatPointer
   PCUDAOptimizeMethod
-  (cuda-adadelta-step! [gradient parameters gradient-alpha decay epsilon grad-accum dx-accum item-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adadelta-step :float) item-count 0
-                                   (float decay) (float epsilon)
-                                   grad-accum dx-accum
-                                   (float gradient-alpha)
-                                   gradient parameters item-count))
-  (cuda-adam-step! [gradient parameters gradient-alpha alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t m v item-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :adam-step :float) item-count 0
-                                   (float alpha) (float beta1) (float beta2) (float epsilon)
-                                   (float pow-beta1-t) (float pow-beta2-t)
-                                   (float gradient-alpha)
-                                   gradient parameters m v
-                                   item-count))
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
     (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :float) elem-count 0
                                    mult-buffer rand-buffer (float probability) elem-count))
@@ -904,22 +877,6 @@ Backward Data: %s %d"
   (get-stream [impl] (.stream impl))
   dtype/PDatatype
   (get-datatype [impl] (.datatype impl))
-  opt/POptimizeBackend
-  (adadelta-step! [backend gradient parameters gradient-alpha param-offset decay
-                   epsilon grad-sq-accum dx-sq-accum]
-    (cuda-adadelta-step! (->ptr gradient) (->ptr parameters) gradient-alpha
-                         decay epsilon (->ptr grad-sq-accum param-offset)
-                         (->ptr dx-sq-accum param-offset)
-                         (dtype/ecount gradient)
-                         backend))
-  (adam-step! [backend gradient parameters gradient-alpha param-offset
-               alpha beta1 beta2 epsilon
-               pow-beta1-t pow-beta2-t m v]
-    (cuda-adam-step! (->ptr gradient) (->ptr parameters) gradient-alpha
-                     alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
-                     (->ptr m param-offset) (->ptr v param-offset)
-                     (dtype/ecount gradient)
-                     backend))
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
     (create-cuda-layer backend layer batch-size))

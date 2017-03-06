@@ -109,7 +109,6 @@
                          [1.0 2.0])))))
 
 
-
 (deftest test-convergence
   (is (converges? (range 10) 5))
   (is (not (converges? [] 5)))

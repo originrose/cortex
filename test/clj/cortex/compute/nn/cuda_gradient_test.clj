@@ -5,7 +5,6 @@
             [cortex.verify.nn.gradient :as verify-gradient]
             [cortex.compute.nn.compute-execute :as ce]))
 
-
 (use-fixtures :each verify-utils/test-wrapper)
 
 (defn create-context
@@ -30,3 +29,12 @@
 
 (deftest concat-gradient
   (verify-gradient/concat-gradient (create-context)))
+
+(deftest split-gradient
+  (verify-gradient/split-gradient (create-context)))
+
+(deftest join-+-gradient
+  (verify-gradient/join-+-gradient (create-context)))
+
+(deftest join-*-gradient
+  (verify-gradient/join-*-gradient (create-context)))

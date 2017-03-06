@@ -26,14 +26,18 @@ constructors are all variable args with the extra arguments expected to be
 
 (defn- carry-input-image-dims-forward
   [previous item]
-  (assoc item :input-dimensions [(ensure-single-output-dimensions previous item)]))
+  (assoc item :input-dimensions [(assoc
+                                  (ensure-single-output-dimensions previous item)
+                                  :id (get previous :id))]))
 
 
 (defn- carry-image-dims-forward
   [previous item]
   (let [input-dims (ensure-single-output-dimensions previous item)]
-   (assoc item :input-dimensions [input-dims]
-          :output-dimensions [input-dims])))
+    ;;For single input nodes it is still important to note the parent this input came from.
+    (assoc item :input-dimensions [(assoc input-dims :id (get previous :id))]
+           ;;But for single outputs the source is clear.
+          :output-dimensions [(dissoc input-dims :id)])))
 
 
 (defn- ensure-single-parent
@@ -429,8 +433,10 @@ This is for cudnn compatibility.")))
   "https://arxiv.org/pdf/1502.01852.pdf
 At this point we only support per-channel scale, not across channel scale.
 If the input contains no channels then you get a scale factor per input parameter."
-  []
-  [{:type :prelu}])
+  [& args]
+  [(merge-args
+    {:type :prelu}
+    args)])
 
 (defn prelu-layer->prelu-size
   [layer]
@@ -441,8 +447,7 @@ If the input contains no channels then you get a scale factor per input paramete
 
 (defn prelu-neg-scale-shape
   [graph layer argument]
-  [(prelu-layer->prelu-size layer)]
-)
+  [(prelu-layer->prelu-size layer)])
 
 (defmethod graph/build-node :prelu
   [& args]
@@ -483,6 +488,57 @@ If the input contains no channels then you get a scale factor per input paramete
   [desc]
   {:passes #{:training :inference}})
 
+
+(defn join
+  "Join takes a potential :operation which at this point
+is either :+ or :*.  The output dimensions are the max of any of the
+input dimensions."
+  [& args]
+  (merge-args {:type :join :operation :+}
+              args))
+
+(defmethod graph/build-node :join
+  [graph node p-id-seq s-id-seq]
+  "Works almost identically to concatenate at the graph level."
+  (when-not (<= (count s-id-seq) 1)
+    (throw (ex-info "join produces at most 1 output"
+                    {:node node
+                     :successors s-id-seq})))
+  (let [input-dims (mapv #(-> (graph/get-node graph %)
+                              (ensure-single-output-dimensions node)
+                              (assoc :id %))
+                         p-id-seq)]
+    (assoc node
+           :input-dimensions input-dims
+           :output-dimensions [(graph/create-node-dimensions
+                                (apply max (map graph/dimensions->size input-dims)))])))
+
+(defmethod graph/get-node-metadata :join
+  [desc]
+  {:passes #{:training :inference}})
+
+
+(defn split
+  [& args]
+  [(merge-args
+    {:type :split}
+    args)])
+
+(defmethod graph/build-node :split
+  [graph node p-id-seq s-id-seq]
+  (let [previous (ensure-single-parent graph node p-id-seq)
+        input-dims (ensure-single-output-dimensions previous node)
+        output-dim-vec (if (empty? s-id-seq)
+                         [input-dims]
+                         (mapv #(assoc input-dims :id %)
+                               s-id-seq))]
+    (assoc node
+           :input-dimensions [input-dims]
+           :output-dimensions output-dim-vec)))
+
+(defmethod graph/get-node-metadata :split
+  [desc]
+  {:passes #{:training :inference}})
 
 
 (def example-mnist-description

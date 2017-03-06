@@ -221,3 +221,18 @@
                         buf-b dst-indexes 1)
      (is (= answer
             (vec (m/eseq (->array buf-b))))))))
+
+
+(defn batched-offsetting
+  [device datatype]
+  (backend-test-pre
+   device datatype
+   (let [batched-data (->>
+                       (math/batched-data-to-per-input-data device
+                                                            [(math/array device stream datatype
+                                                                         (range 100) 10)])
+                       (apply interleave)
+                       (map #(vec (math/to-double-array device stream %)))
+                       flatten)]
+     (is (m/equals (partition 10 (range 100))
+            (partition 10 batched-data))))))

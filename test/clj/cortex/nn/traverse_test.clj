@@ -9,6 +9,13 @@
             [clojure.data :as data]))
 
 
+(def mnist-basic
+  [(layers/input 28 28 1)
+   (layers/linear 200)
+   (layers/relu)
+   (layers/linear 10)
+   (layers/softmax)])
+
 (def mnist-description-with-toys
   [(layers/input 28 28 1)
    (layers/multiplicative-dropout 0.1)
@@ -63,8 +70,9 @@
 (defn build-big-description
   []
   (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1 :stream
-                                                    :labels :loss (loss/softmax-loss))]]
+        output-bindings [(traverse/->output-binding :softmax-1
+                                                    :stream :labels
+                                                    :loss (loss/softmax-loss))]]
     (-> (network/build-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
@@ -535,4 +543,51 @@
              {:output-id :linear-1,
               :loss {:type :mse-loss},
               :dimension {:channels 1, :height 1, :width 10}}},
+            (get train-traversal :buffers))))))
+
+
+(deftest split-traversal
+  (let [network (-> (network/build-network [(layers/input 50)
+                                            (layers/split :id :split)
+                                            (layers/linear 10)
+                                            (layers/linear 20 :parents [:split])])
+                    (traverse/auto-bind-io))
+        stream->size-map {:data 50
+                          :labels-1 10
+                          :labels-2 20}
+
+        train-network (traverse/network->training-traversal network stream->size-map)
+        train-traversal (-> (get train-network :traversal)
+                            realize-traversals)]
+    (is (= [nil nil]
+           (minimal-diff
+            [{:incoming [{:stream :data}],
+              :id :split,
+              :outgoing [{:id :split-1} {:id :split-2}]}
+             {:incoming [{:id :split-1}],
+              :id :linear-1,
+              :outgoing [{:output-id :linear-1}]}
+             {:incoming [{:id :split-2}],
+              :id :linear-2,
+              :outgoing [{:output-id :linear-2}]}]
+            (get train-traversal :forward))))
+    (is (= [nil nil]
+           (minimal-diff
+            {{:stream :data}
+             {:stream :data, :dimension {:channels 1, :height 1, :width 50}},
+             {:id :split-1}
+             {:id :split-1,
+              :dimension {:channels 1, :height 1, :width 50, :id :linear-1}},
+             {:id :split-2}
+             {:id :split-2,
+              :dimension {:channels 1, :height 1, :width 50, :id :linear-2}},
+             {:output-id :linear-1}
+             {:output-id :linear-1,
+              :loss {:type :mse-loss},
+
+              :dimension {:channels 1, :height 1, :width 10}},
+             {:output-id :linear-2}
+             {:output-id :linear-2,
+              :loss {:type :mse-loss},
+              :dimension {:channels 1, :height 1, :width 20}}}
             (get train-traversal :buffers))))))

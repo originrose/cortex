@@ -1,5 +1,5 @@
 (ns cortex.suite.train
-  (:require [cortex.suite.io :as suite-io]
+  (:require [cortex.util :as util]
             [cortex.nn.protocols :as cp]
             [think.resource.core :as resource]
             [clojure.java.io :as io]
@@ -9,7 +9,8 @@
             [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
-            [cortex.optimize :as cortex-opt]
+            [cortex.optimize :as opt]
+            [cortex.optimize.adam :as adam]
             [cortex.nn.network :as network]
             [cortex.graph :as graph]))
 
@@ -21,8 +22,8 @@
 initial description saved with the network matches the provided description."
   [network-filename initial-description]
   (when (.exists (io/file network-filename))
-    (let [network-data (suite-io/read-nippy-file network-filename)]
-      (when (= initial-description (:initial-description network-data))
+    (let [network-data (util/read-nippy-file network-filename)]
+      (when (= initial-description (get network-data :initial-description))
         network-data))))
 
 
@@ -31,7 +32,7 @@ initial description saved with the network matches the provided description."
   (let [write-data (-> (cp/save-to-network context network {})
                        (assoc :cv-loss network-loss
                               :initial-description initial-description))]
-    (suite-io/write-nippy-file network-filename write-data)
+    (util/write-nippy-file network-filename write-data)
     write-data))
 
 
@@ -87,7 +88,7 @@ initial description saved with the network matches the provided description."
                              (do
                                (println
                                 (format "Failed to create cuda backend (%s); will use cpu backend" e))
-                               (cpu-backend/create-cpu-backend datatype))))))))
+                               (cpu-backend/create-backend datatype))))))))
 
 (defn backup-trained-network
   [network-filestem]
@@ -131,7 +132,7 @@ initial description saved with the network matches the provided description."
              simple-loss-print?]
       :or {batch-size 128
            network-filestem default-network-filestem
-           optimizer (cortex-opt/adam)
+           optimizer (adam/adam)
            reset-score false
            force-gpu? false}}]
   (resource/with-resource-context
@@ -204,7 +205,7 @@ existing traversal bindings."
          (filter #(let [n (.getPath %)]
                     (and (.contains n (.concat trained-networks-folder network-filestem))
                          (.endsWith n ".nippy"))))
-         (map (fn [f] [f (suite-io/read-nippy-file f)]))
+         (map (fn [f] [f (util/read-nippy-file f)]))
          (map (fn [[f network]] (assoc network :filename (.getName f))))
          (map (fn [network] (update network :cv-loss cv-loss->number)))
          (sort-by :cv-loss)

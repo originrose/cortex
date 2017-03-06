@@ -6,7 +6,6 @@
 
 (use-fixtures :each verify-utils/test-wrapper)
 
-
 (defn create-backend
   []
   (cuda-backend/create-backend verify-utils/*datatype*))

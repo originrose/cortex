@@ -9,7 +9,7 @@
 (defn create-context
   []
   (compute-execute/create-context
-   #(cpu-backend/create-cpu-backend test-utils/*datatype*)))
+   #(cpu-backend/create-backend test-utils/*datatype*)))
 
 
 (deftest corn-gradient
@@ -26,3 +26,12 @@
 
 (deftest concat-gradient
   (gradient/concat-gradient (create-context)))
+
+(deftest split-gradient
+  (gradient/split-gradient (create-context)))
+
+(deftest join-+-gradient
+  (gradient/join-+-gradient (create-context)))
+
+(deftest join-*-gradient
+  (gradient/join-*-gradient (create-context)))

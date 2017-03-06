@@ -288,3 +288,136 @@ and then forward many times for every parameter of the network."
                                  (drv/get-stream backend)
                                  :int (range batch-size))
                      math/device-buffer)))
+
+(defrecord Split [backend layer]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (let [input-array (first-buffer input-buffers)
+          n-elems (dtype/ecount input-array)
+          input-buffer (math/device-buffer input-array)
+          stream (drv/get-stream backend)]
+      (->> output-buffers
+           (map (comp math/device-buffer :buffer))
+           (map #(drv/copy-device->device stream input-buffer 0 % 0 n-elems))
+           dorun)))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (let [input-array (first-gradient input-buffers)
+          n-elems (dtype/ecount input-array)
+          stream (drv/get-stream backend)]
+      (drv/memset stream (math/device-buffer input-array) 0 0 n-elems)
+      (->> output-buffers
+           (map (comp math/device-buffer :gradient))
+           (map #(math/sum stream 1.0 % 1.0 input-array))
+           dorun))))
+
+
+(defmethod create :split
+  [backend layer batch-size]
+  (->Split backend layer))
+
+
+(defn fixed-with-tensor
+  "Given the data in this array, create a new array with a different tensor."
+  [ary tensor driver]
+  (when-not (<= (long (m/ecount tensor))
+                (long (m/ecount ary)))
+    (throw (ex-info "Array reshaped to larger size!")))
+  (math/->DeviceArray
+   (drv/sub-buffer driver (math/device-buffer ary) 0 (m/ecount tensor))
+   tensor))
+
+
+(defrecord Join [backend layer]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (let [batch-row-data (math/batched-data-to-per-input-data (drv/get-driver backend)
+                                                              (map :buffer
+                                                                   (concat output-buffers
+                                                                           input-buffers)))
+          output-n-elems (dtype/ecount (ffirst batch-row-data))
+          stream (drv/get-stream backend)
+          operation (get layer :operation :+)
+          min-input-count (apply min (map dtype/ecount (rest (first batch-row-data))))
+          driver (drv/get-driver backend)]
+      (drv/memset stream (math/device-buffer (first-buffer output-buffers)) 0 0
+                  (dtype/ecount (first-buffer output-buffers)))
+      (mapv
+       (fn [batch-row]
+         ;;The code below is carefully constructed to account for the possibility that
+         ;;the various input buffers are not all the same size and the size of the output
+         ;;buffer is the max of the input buffers.  The input buffers are logically zero
+         ;;extended to be the size of the output buffer.
+         (let [output-array (first batch-row)]
+           (->>
+            (rest batch-row)
+            (map-indexed
+             (fn [idx input-array]
+               (let [n-elems (if (= operation :+)
+                               (long (min output-n-elems (dtype/ecount input-array)))
+                               min-input-count)
+                     input-array (fixed-with-tensor input-array (math/create-tensor n-elems)
+                                                    driver)
+                     output-array (fixed-with-tensor output-array (math/create-tensor n-elems)
+                                                     driver)]
+                 (condp = operation
+                   :+
+                   (do (math/sum stream 1.0 input-array 1.0 output-array))
+                   :*
+                   (if (= 0 idx)
+                     (math/assign! stream output-array input-array)
+                     (math/elem-mul stream 1.0 input-array 1
+                                    output-array 1
+                                    output-array 1))))))
+            dorun)))
+       batch-row-data)))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (let [batch-row-data (math/batched-data-to-per-input-data (drv/get-driver backend)
+                                                              (map :gradient
+                                                                   (concat output-buffers
+                                                                           input-buffers)))
+          batch-row-inputs (math/batched-data-to-per-input-data (drv/get-driver backend)
+                                                                (map :buffer
+                                                                     input-buffers))
+          output-n-elems (dtype/ecount (ffirst batch-row-data))
+          stream (drv/get-stream backend)
+          operation (get layer :operation :+)
+          min-elem-count (apply min (map dtype/ecount (rest (first batch-row-data))))
+          input-idx-set (set (range (count input-buffers)))
+          driver (drv/get-driver backend)]
+      (mapv
+       (fn [batch-row input-buffers]
+         (let [output-gradient (first batch-row)
+               input-buffers (vec input-buffers)]
+           (->>
+            (rest batch-row)
+            (map-indexed
+             (fn [idx input-gradient]
+               (let [n-elems (if (= operation :+)
+                               (min output-n-elems (dtype/ecount input-gradient))
+                               min-elem-count)
+                     input-gradient (fixed-with-tensor input-gradient
+                                                       (math/create-tensor n-elems) driver)
+                     output-gradient (fixed-with-tensor output-gradient
+                                                        (math/create-tensor n-elems) driver)]
+                 (math/assign! stream input-gradient output-gradient)
+                 (when (= operation :*)
+                   ;;Multiply the gradient by every other input.
+                   (->> (disj input-idx-set idx)
+                        (mapv (fn [^long other-idx]
+                                (let [other-array (-> (get input-buffers other-idx)
+                                                      (fixed-with-tensor
+                                                       (math/create-tensor n-elems)
+                                                       driver))]
+                                  (math/elem-mul stream
+                                                 1.0 other-array 1
+                                                 input-gradient 1
+                                                 input-gradient 1)))))))))
+            dorun)))
+       batch-row-data batch-row-inputs))))
+
+
+(defmethod create :join
+  [backend layer batch-size]
+  (->Join backend layer))

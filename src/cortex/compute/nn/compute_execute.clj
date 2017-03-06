@@ -3,7 +3,7 @@
             [cortex.nn.layers :as layers]
             [cortex.nn.traverse :as traverse]
             [cortex.compute.nn.layers :as compute-layers]
-            [cortex.compute.optimize :as compute-optimize]
+            [cortex.optimize :as opt]
             [cortex.compute.nn.backend :as backend]
             [cortex.nn.protocols :as cp]
             [cortex.compute.nn.protocols :as compute-protocols]
@@ -177,6 +177,8 @@
         backward-buffers (if gradients?
                            (traverse/network->backward-buffer-set built-network)
                            #{})
+
+        ; Setup the parameter buffers
         compute-binding
         (reduce
          (fn [compute-binding id]
@@ -198,6 +200,8 @@
          (->> (concat (get traversal :forward)
                       (get traversal :loss-function))
               (map :id)))
+
+        ; Setup the traversal buffers (for passing activations and gradients)
         compute-binding
         (reduce
          (fn [compute-binding buffer-key]
@@ -239,9 +243,9 @@
     (-> network
         (assoc-in [:compute-binding :optimizer]
                   (when-let [optimizer (get traversal :optimizer)]
-                    (compute-optimize/create-compute-optimizer backend
-                                                               optimizer
-                                                               trainable-param-count)))
+                    (opt/create-optimizer backend
+                                          optimizer
+                                          trainable-param-count)))
         (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
         (assoc-in [:compute-binding :loss-function] loss-function))))
 
@@ -337,7 +341,9 @@
                                       (let [input-buffer (get id->input-buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
-                                          [map-key (assoc buffer-entry buffer-type input-buffer)]
+                                          (do
+                                            [map-key (assoc buffer-entry buffer-type
+                                                            input-buffer)])
                                           [map-key buffer-entry]))))
                                (into {}))
         buffer-resolve (partial find-buffers traversal-buffers)]
@@ -379,12 +385,14 @@
 (defn- resolve-node-arguments
   ([network id id->output-map]
    (let [special-graph (-> (network/network->graph network)
-                           (assoc :buffers (get-in network [:compute-binding :parameter-buffers])))
+                           (assoc :buffers (get-in network [:compute-binding
+                                                            :parameter-buffers])))
          stream-map (->> (get-in network [:compute-binding :stream->buffer-map])
                          (map (fn [[k v]]
                                 [k {:buffer v}]))
                          (into {}))
-         retval (graph/resolve-arguments special-graph (graph/get-node special-graph id)
+         retval (graph/resolve-arguments special-graph
+                                         (graph/get-node special-graph id)
                                          stream-map id->output-map)]
      retval))
   ([network id]
@@ -612,9 +620,12 @@ and anything that has a loss term attached to it's output becomes an output bind
     (let [backend (get-in network [:compute-binding :backend])
           stream (drv/get-stream backend)
           driver (drv/get-driver backend)
-          optimizer (compute-optimize/batch-update (get-in network [:compute-binding
-                                                                    :optimizer]))
+
+          ; Call batch-update so the optimizer can do batch level computations
+          optimizer (opt/batch-update (get-in network [:compute-binding :optimizer]))
           buffer-alpha (/ 1.0 (double (get network :batch-size)))]
+
+      ; Call compute-parameters! on all of the paramter buffers
       (reduce (fn [offset {:keys [buffer gradient
                                   learning-attenuation non-trainable?] :as parameter}]
                 (let [elem-count (long (m/ecount buffer))
@@ -625,9 +636,9 @@ and anything that has a loss term attached to it's output becomes an output bind
                       gradient-buf (math/device-buffer gradient)
                       param-buf (math/device-buffer buffer)]
                   (when-not non-trainable?
-                    (compute-optimize/compute-parameters! optimizer
-                                                          (* buffer-alpha learning-attenuation)
-                                                          offset gradient buffer)
+                    (opt/compute-parameters! optimizer
+                                             (* buffer-alpha learning-attenuation)
+                                             offset gradient buffer)
                     (when (is-l2-max-constraint-valid? parameter)
                       (apply-l2-max-constraint backend parameter)))
                   (when gradient
@@ -681,12 +692,7 @@ any loss-specific parameter buffers."
     ;;Sometimes you have to print the entire batch out to see what is going on.
     (let [backend (get-in network [:compute-binding :backend])
           stream (drv/get-stream backend)
-          driver (drv/get-driver backend)
-          ten-doubles #(vec (take 10 (backend/to-double-array backend %)))]
-      (comment
-        (clojure.pprint/pprint (mapv (fn [[k v]]
-                                       [k (ten-doubles v)])
-                                     stream->buffer-map)))
+          driver (drv/get-driver backend)]
       (let [network
             (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
                 (do-traverse stream->buffer-map :forward)
@@ -890,4 +896,6 @@ any loss-specific parameter buffers."
   ([backend-fn]
    (->ComputeExecutionContext backend-fn))
   ([]
-   (create-context #(cpu-backend/create-cpu-backend))))
+   (create-context #(cpu-backend/create-backend))))
+
+
