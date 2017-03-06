@@ -116,7 +116,7 @@ constructors are all variable args with the extra arguments expected to be
                        :stream (get input-data :stream)})))))
 
 
-(defmethod get-node-metadata :input
+(defmethod graph/get-node-metadata :input
   [node]
   {:arguments {:input {:type :stream}}})
 

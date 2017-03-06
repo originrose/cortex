@@ -13,6 +13,68 @@
             [cortex.argument :as arg]))
 
 
+(defn- edges
+  [graph]
+  (get graph :edges))
+
+
+(defn- edges->map
+  [graph key-fn val-fn]
+  (->> (edges graph)
+       (group-by key-fn)
+       (map (fn [[k v]]
+              [k (map val-fn v)]))
+       (into {})))
+
+
+(defn parent->child-map
+  [graph]
+  (edges->map graph first second))
+
+
+(defn child->parent-map
+  [graph]
+  (edges->map graph second first))
+
+
+(defmulti get-node-metadata
+  "Given that any node has a type member, return metadata on the node which
+  must contain at least an :arguments member listing the arguments to the node."
+  :type)
+
+(defmethod get-node-metadata :default [node] {})
+
+(defn get-node-argument
+  [node arg-key]
+  (let [learn-atten (get node :learning-attenuation 1.0)
+        non-trainable? (get node :non-trainable? false)
+        retval (->> (get-node-metadata node)
+                    :arguments
+                    (#(get % arg-key)))]
+    (when-not retval
+      (throw (ex-info "Failed to find node argument"
+                      {:node node
+                       :argument-name arg-key
+                       :arguments (get (get-node-metadata node) :arguments)})))
+    (let [retval (->> (assoc retval :key arg-key)
+                      (util/deep-merge retval (get node arg-key)))
+          param-learn-atten (get retval :learning-attenuation learn-atten)]
+      (if (or (zero? param-learn-atten)
+              non-trainable?)
+        (assoc retval :gradients? false)
+        (assoc retval :learning-attenuation param-learn-atten)))))
+
+
+(defn get-node-arguments
+  "Get the node arguments 'before' being merged with the node
+buffers."
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       keys
+       (map #(get-node-argument node %))))
+
+
 (defn empty-graph
   "Create an empty graph, which is stored as a map of:
   {:edges [] adjacency list of [id id]
@@ -72,12 +134,6 @@
      (get node :id)]))
 
 
-(defn remove-node
-  "Remove a node, its buffers and all children from the graph."
-  [graph node-id]
-  (recur-remove-node (parent->child-map graph) graph node-id))
-
-
 (defn- recur-remove-node
   [p->c-map graph node-id]
   (let [graph (reduce (partial recur-remove-node p->c-map)
@@ -95,6 +151,12 @@
         (update :nodes dissoc node-id))))
 
 
+(defn remove-node
+  "Remove a node, its buffers and all children from the graph."
+  [graph node-id]
+  (recur-remove-node (parent->child-map graph) graph node-id))
+
+
 (defn remove-children
   "Remove all children of a node (and there children, recursively)."
   [graph parent-node-id]
@@ -103,45 +165,6 @@
             graph
             (get p->c-map parent-node-id))))
 
-
-(defmulti get-node-metadata
-  "Given that any node has a type member, return metadata on the node which
-  must contain at least an :arguments member listing the arguments to the node."
-  :type)
-
-
-(defmethod get-node-metadata :default [node] {})
-
-
-(defn get-node-argument
-  [node arg-key]
-  (let [learn-atten (get node :learning-attenuation 1.0)
-        non-trainable? (get node :non-trainable? false)
-        retval (->> (get-node-metadata node)
-                    :arguments
-                    (#(get % arg-key)))]
-    (when-not retval
-      (throw (ex-info "Failed to find node argument"
-                      {:node node
-                       :argument-name arg-key
-                       :arguments (get (get-node-metadata node) :arguments)})))
-    (let [retval (->> (assoc retval :key arg-key)
-                      (util/deep-merge retval (get node arg-key)))
-          param-learn-atten (get retval :learning-attenuation learn-atten)]
-      (if (or (zero? param-learn-atten)
-              non-trainable?)
-        (assoc retval :gradients? false)
-        (assoc retval :learning-attenuation param-learn-atten)))))
-
-
-(defn get-node-arguments
-  "Get the node arguments 'before' being merged with the node
-buffers."
-  [node]
-  (->> (get-node-metadata node)
-       :arguments
-       keys
-       (map #(get-node-argument node %))))
 
 
 (defn any-trainable-arguments?
@@ -195,33 +218,35 @@ a vector of floats."
                     {:stream stream-name
                      :available-streams (keys (get graph :streams))}))))
 
-(defn- edges
-  [graph]
-  (get graph :edges))
 
 (defn- parent-seq
   [graph]
   (map first (edges graph)))
 
+
 (defn- child-seq
   [graph]
   (map second (edges graph)))
+
 
 (defn- parent-set
   [graph]
   (-> (parent-seq graph)
       set))
 
+
 (defn- child-set
   [graph]
   (-> (child-seq graph)
       set))
+
 
 (defn- set->ordered-vec
   [item-set item-seq]
   (->> (filter item-set item-seq)
        distinct
        vec))
+
 
 (defn roots
   [graph]
@@ -233,21 +258,6 @@ a vector of floats."
   (-> (c-set/difference (child-set graph) (parent-set graph))
       (set->ordered-vec (child-seq graph))))
 
-(defn- edges->map
-  [graph key-fn val-fn]
-  (->> (edges graph)
-       (group-by key-fn)
-       (map (fn [[k v]]
-              [k (map val-fn v)]))
-       (into {})))
-
-(defn parent->child-map
-  [graph]
-  (edges->map graph first second))
-
-(defn child->parent-map
-  [graph]
-  (edges->map graph second first))
 
 (defn dfs-seq
   "Get a sequence of ids in dfs order."
