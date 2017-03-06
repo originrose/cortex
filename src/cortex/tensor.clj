@@ -37,9 +37,12 @@ than once then the outcome is not defined; this is considered a programmatic err
 
 In general we want as much error checking and analysis done in this file as opposed to at the implementation
 level (compute stream level) so that different implementations of this duplicate the least number of
-possible operations and so their edge cases agree to the extent possible."
+possible operations and so their edge cases agree to the extent possible.
 
 
+For indirect operations element count is num-indexes * num-columns.  After that they should obey the same rules
+if the element counts of various things do not match meaning the smaller should evenly divide the larger and
+if a separate result is provided it must be the size of the larger."
   (:require [cortex.compute.driver :as compute-drv]
             [cortex.compute.math :as compute-math]
             [think.datatype.core :as dtype]
@@ -356,7 +359,7 @@ that rerequires the items to have the same element count."
      "Src element count must evenly divide dest ecount:"
      {:dest-ecount dest-ecount
       :src-ecount src-ecount})
-   (ensure-datatypes (get-datatype dest) src)
+   ;;There is no datatype check here because assignment may be marshalling.
    (compute-math/assign!-impl (check-stream)
                               (.buffer dest) (.num-columns dest) (.column-stride dest) dest-ecount
                               (.buffer src) (.num-columns src) (.column-stride src) src-ecount)))
@@ -594,6 +597,7 @@ and the rest of the dimensions being squashed into n-rows."
                              column-stride new-buf)))
           (range n-cols))))
 
+
 (defn- ensure-indexes
   "Index tensors must be integers and they must all be dense and the same length."
   [& args]
@@ -612,26 +616,52 @@ and the rest of the dimensions being squashed into n-rows."
   dest)
 
 
-(defn indirect-assign-rows!
-  "Assign rows from src to dest.  Src and dest will both be represented as matrixes with width
-  as n-cols but the rest of the dimensions squashed into n-rows."
-  ^Tensor [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
+(defn- ensure-indexed-op
+  [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
   (ensure-indexes dest-indexes src-indexes)
-  (ensure-datatypes (dtype/get-datatype dest) src)
-  (when-not-error (= (dtype/get-datatype src)
-                     (dtype/get-datatype dest))
-    "src/dest datatype mismatch"
-    {:src-dtype (dtype/get-datatype src)
-     :dest-dtype (dtype/get-datatype dest)})
   (let [[dest-rows dest-cols] (dimensions->2d-shape (.dimensions dest))
         [src-rows src-cols] (dimensions->2d-shape (.dimensions src))
         n-dest-elems (* (long dest-cols) (ecount dest-indexes))
-        n-src-elems (* (long src-cols) (ecount src-indexes))]
-    (compute-math/indirect-assign!
-     (check-stream)
-     (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-stride dest)
-     (.buffer src) (.buffer src-indexes) (.num-columns src) (.column-stride src))
-    dest))
+        n-src-elems (* (long src-cols) (ecount src-indexes))
+        min-n-elems (long (min n-dest-elems n-src-elems))
+        max-n-elems (long (max n-dest-elems n-src-elems))]
+    (when-not-error (or (= 0 min-n-elems)
+                        (= 0 (rem max-n-elems
+                                  min-n-elems)))
+      "Indexed operations must be commensurate"
+      {:min-n-elems min-n-elems
+       :max-n-elems max-n-elems
+       :remainder (rem max-n-elems min-n-elems)})))
+
+
+(defn indirect-assign-rows!
+  "Assign rows from src to dest.  Src and dest will both be represented as matrixes with width
+  as n-cols but the rest of the dimensions squashed into n-rows."
+  (^Tensor [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
+   ;;Datatypes are not checked because assignment should be marshalling.
+   (let [[dest-rows dest-cols] (dimensions->2d-shape (.dimensions dest))
+         [src-rows src-cols] (dimensions->2d-shape (.dimensions src))
+         n-dest-elems (* (long dest-cols) (ecount dest-indexes))
+         n-src-elems (* (long src-cols) (ecount src-indexes))]
+    (when-not-error (>= n-dest-elems n-src-elems)
+      "Number of destination elements (n-indexes*dest-cols) must be >= src elements"
+      {:n-dest-elems n-dest-elems
+       :n-src-elems n-src-elems}))
+   (ensure-indexed-op dest dest-indexes src src-indexes)
+   (compute-math/indirect-assign!
+    (check-stream)
+    (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-stride dest)
+    (.buffer src) (.buffer src-indexes) (.num-columns src) (.column-stride src))
+   dest)
+  (^Tensor [^Tensor dest ^Tensor dest-indexes src]
+   (when-not-error (number? src)
+     "Assignment of a constant not a constant:"
+     {:src src})
+   (ensure-indexes dest-indexes)
+   (compute-math/indirect-assign-constant!
+    (check-stream)
+    (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-count dest)
+    src)))
 
 
 (defn accum!
