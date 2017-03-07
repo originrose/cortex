@@ -178,9 +178,10 @@ buffers."
   "Callback called when the node is added to the graph.  Note that the node at this point
   is not located in the graph.  Also note that any parameter arguments are generated
   in a separate step.  This is simply a translation from node->node called during
-  the add-node step.  Precessors have been built, successors have not been built."
+  the add-node step.  Predessors have been built, successors have not been built."
   (fn [graph node predecessor-ids successor-ids]
     (get node :type)))
+
 
 ;;lots of nodes do not need to be built.
 (defmethod build-node :default
@@ -221,12 +222,11 @@ a vector of floats."
 
 (defn get-node
   [graph node-id]
-  (let [retval (get-in graph [:nodes node-id])]
-    (when-not retval
-      (throw (ex-info "Failed to find node:"
-                      {:node-id node-id
-                       :nodes (keys (get graph :nodes))})))
-    retval))
+  (if-let [node (get-in graph [:nodes node-id])]
+    node
+    (throw (ex-info (str "Failed to find node: " node-id (nil? node-id))
+                    {:node-id node-id
+                     :nodes (keys (:nodes graph))}))))
 
 
 (defn- get-or-create-node-id

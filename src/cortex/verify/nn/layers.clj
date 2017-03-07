@@ -17,7 +17,7 @@
   [context network batch-size stream->size-map & {:keys [bind-opts input-bindings]
                                                   :or {bind-opts {}}}]
   (as-> network network
-    (network/build-network network)
+    (network/linear-network network)
     (traverse/auto-bind-io network :input-bindings input-bindings)
     (traverse/add-training-traversal network stream->size-map
                                      :keep-non-trainable? true)
@@ -87,18 +87,18 @@
 
 
 (defn forward-backward
-  "Given a bound network traverse forward and backward using exactly these inputs and
-these output-gradients.  This is used for testing that specific input/output-gradient pairs
-give specific results for layers."
+  "Given a bound network traverse forward and backward using these inputs and
+  these output-gradients.  This is used for testing that specific input/output-gradient
+  pairs give specific results for layers."
   [context bound-network stream->input-map node-id->output-gradient-map]
   (let [bound-network (execute/traverse context bound-network stream->input-map :forward)]
     (execute/traverse context bound-network node-id->output-gradient-map :backward)))
 
 
 (defn forward-backward-bound-network
-  [context network input output-gradient test-layer-id]
-  (let [input-stream {:data input}
-        output-gradient-stream {test-layer-id output-gradient}
+  [context network input-vec output-gradient-vec test-layer-id]
+  (let [input-stream (vec->stream-map input-vec :data)
+        output-gradient-stream (vec->stream-map output-gradient-vec test-layer-id)
         network (forward-backward context network input-stream output-gradient-stream)]
     (unpack-bound-network context network test-layer-id)))
 
@@ -121,12 +121,12 @@ give specific results for layers."
   "General test for when there may be a network with multiple inputs or outputs."
   [context network batch-size input-vec output-grad-vec
    & {:keys [input-bindings]}]
-  (as-> (bind-test-network context network batch-size
-                           (io-vec->stream->size-map input-vec
-                                                     output-grad-vec
-                                                     batch-size)
-                           :input-bindings input-bindings)
-      network
+  (let [size-map (io-vec->stream->size-map input-vec
+                                  output-grad-vec
+                                  batch-size)
+        _ (println "size-map: " size-map)
+        network (bind-test-network context network batch-size size-map
+                                   :input-bindings input-bindings)]
     (forward-backward-bound-network context network
                                     input-vec
                                     output-grad-vec :test)))
@@ -667,30 +667,28 @@ give specific results for layers."
                      (mapv #(vec (apply concat %))))
         output-gradients outputs
         input-gradients inputs
+        network-lr [(layers/input item-count 1 1 :id :right)
+                    (layers/input item-count 1 1 :parents [] :id :left)
+                    (layers/concatenate :parents [:left :right]
+                                        :id :test)]
+        bindings {:right :data-2
+                  :left :data-1}
         {:keys [incoming-buffers outgoing-buffers]}
-        (forward-backward-test-multiple context
-                                        [(layers/input item-count 1 1 :id :right)
-                                         (layers/input item-count 1 1 :parents [] :id :left)
-                                         (layers/concatenate :parents [:left :right]
-                                                             :id :test)]
-                               batch-size
-                               inputs
-                               [output-gradients]
-                               :input-bindings {:right :data-2
-                                                :left :data-1})]
+        (forward-backward-test-multiple context network-lr batch-size
+                                        inputs [output-gradients]
+                                        :input-bindings bindings)]
     (is (m/equals input-gradients
                   (mapv :gradient incoming-buffers)))
     (is (m/equals outputs
                   (get-in outgoing-buffers [0 :buffer])))
-    (let [{:keys [incoming-buffers outgoing-buffers]}
-          (forward-backward-test-multiple context
-                                          [(layers/input item-count 1 1 :id :right)
-                                           (layers/input item-count 1 1 :parents [] :id :left)
-                                           (layers/concatenate :parents [:right :left]
-                                                               :id :test)]
-                                          batch-size
-                                          inputs
-                                          [output-gradients]
+
+    (let [network-rl [(layers/input item-count 1 1 :id :right)
+                      (layers/input item-count 1 1 :parents [] :id :left)
+                      (layers/concatenate :parents [:right :left]
+                                          :id :test)]
+          {:keys [incoming-buffers outgoing-buffers]}
+          (forward-backward-test-multiple context network-rl batch-size
+                                          inputs [output-gradients]
                                           :input-bindings {:right :data-2
                                                            :left :data-1})
           swapped-outputs (->> (partition (* item-count batch-size)

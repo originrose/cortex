@@ -34,6 +34,7 @@ implementation as possible."
   (math/assign! stream input-gradient output-gradient))
 
 
+;; TODO: rename me, and/or merge these into cortex.nn.layers
 (defmulti create
   "Create a compute layer"
   (fn [backend node batch-size]
@@ -356,9 +357,9 @@ and then forward many times for every parameter of the network."
                (let [n-elems (if (= operation :+)
                                (long (min output-n-elems (dtype/ecount input-array)))
                                min-input-count)
-                     input-array (fixed-with-tensor input-array (math/create-tensor n-elems)
+                     input-array (fixed-with-tensor input-array (math/tensor n-elems)
                                                     driver)
-                     output-array (fixed-with-tensor output-array (math/create-tensor n-elems)
+                     output-array (fixed-with-tensor output-array (math/tensor n-elems)
                                                      driver)]
                  (condp = operation
                    :+
@@ -398,9 +399,9 @@ and then forward many times for every parameter of the network."
                                (min output-n-elems (dtype/ecount input-gradient))
                                min-elem-count)
                      input-gradient (fixed-with-tensor input-gradient
-                                                       (math/create-tensor n-elems) driver)
+                                                       (math/tensor n-elems) driver)
                      output-gradient (fixed-with-tensor output-gradient
-                                                        (math/create-tensor n-elems) driver)]
+                                                        (math/tensor n-elems) driver)]
                  (math/assign! stream input-gradient output-gradient)
                  (when (= operation :*)
                    ;;Multiply the gradient by every other input.
@@ -408,7 +409,7 @@ and then forward many times for every parameter of the network."
                         (mapv (fn [^long other-idx]
                                 (let [other-array (-> (get input-buffers other-idx)
                                                       (fixed-with-tensor
-                                                       (math/create-tensor n-elems)
+                                                       (math/tensor n-elems)
                                                        driver))]
                                   (math/elem-mul stream
                                                  1.0 other-array 1

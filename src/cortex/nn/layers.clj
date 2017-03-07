@@ -93,11 +93,14 @@ constructors are all variable args with the extra arguments expected to be
       (buf-init/initialize-buffer {:type :xavier
                                    :shape shape}))))
 
+(defmethod graph/build-node :default
+  [& args]
+  (apply default-build-fn args))
 
 ;; Input Layer
 
 (defmethod graph/build-node :input
-  [graph node predecessor-seq]
+  [graph node predecessor-seq _]
   (when-not (= 0 (count predecessor-seq))
     (throw (ex-info "Input nodes cannot have predecessor nodes"
                     {:node node
@@ -217,11 +220,6 @@ channel 2 with n-outputs"
   [(merge-args {:type :relu} args)])
 
 
-(defmethod graph/build-node :relu
-  [& args]
-  (apply default-build-fn args))
-
-
 (defmethod graph/get-node-metadata :relu
   [& args]
   (default-layer-metadata))
@@ -250,11 +248,6 @@ If the input contains no channels then you get a scale factor per input paramete
   [(prelu-layer->prelu-size layer)])
 
 
-(defmethod graph/build-node :prelu
-  [& args]
-  (apply default-build-fn args))
-
-
 (defmethod graph/get-node-metadata :prelu
   [desc]
   {:arguments
@@ -277,11 +270,6 @@ If the input contains no channels then you get a scale factor per input paramete
           (apply logistic args)))
 
 
-(defmethod graph/build-node :logistic
-  [& args]
-  (apply default-build-fn args))
-
-
 (defmethod graph/get-node-metadata :logistic
   [& args]
   (default-layer-metadata))
@@ -296,11 +284,6 @@ If the input contains no channels then you get a scale factor per input paramete
   [num-output & args]
   (concat (apply linear num-output args)
           (apply tanh args)))
-
-
-(defmethod graph/build-node :tanh
-  [& args]
-  (apply default-build-fn args))
 
 
 (defmethod graph/get-node-metadata :tanh
@@ -328,11 +311,6 @@ no change to the input."
   [(merge-args
     {:type :dropout :distribution :gaussian :variance variance}
     args)])
-
-
-(defmethod graph/build-node :dropout
-  [& args]
-  (apply default-build-fn args))
 
 
 (defmethod graph/get-node-metadata :dropout
@@ -511,11 +489,6 @@ This is for cudnn compatibility.")))
     (dissoc arg-map :epsilon))])
 
 
-(defmethod graph/build-node :batch-normalization
-  [& args]
-  (apply default-build-fn args))
-
-
 (defmethod graph/get-node-metadata :batch-normalization
   [desc]
   {:arguments
@@ -550,10 +523,6 @@ This is for cudnn compatibility.")))
 (defmethod graph/get-node-metadata :local-response-normalization
   [& args]
   (default-layer-metadata))
-
-(defmethod graph/build-node :local-response-normalization
-  [& args]
-  (apply default-build-fn args))
 
 
 (defn concatenate

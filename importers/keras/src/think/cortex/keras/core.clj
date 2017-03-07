@@ -377,7 +377,7 @@
         id->weight-map (if weight-entry
                    (hdf5-child-map weight-entry)
                    (hdf5-child-map weight-file))
-        network (network/build-network desc-seq)
+        network (network/linear-network desc-seq)
         network (reduce (partial reshape-weights id->weight-map)
                         network
                         (graph/dfs-seq (network/network->graph network)))]

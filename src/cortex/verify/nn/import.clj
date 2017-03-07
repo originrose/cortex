@@ -12,7 +12,7 @@
 (defn verify-model
   ([context network layer-id->output]
    (when-not (contains? network :compute-graph)
-     (throw (ex-info "Network appears to not be built (cortex.nn.network/build-network)"
+     (throw (ex-info "Network appears to not be built (cortex.nn.network/linear-network)"
                      {:network-keys (try (keys network)
                                          (catch Exception e []))})))
    (when-let [failures (seq (get network :verification-failures))]

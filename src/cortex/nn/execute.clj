@@ -222,23 +222,25 @@ Furthermore infer should be both wrapped in a resource context and completely re
         (reduce
           (fn [compute-binding buffer-key]
             (update-in compute-binding [:traversal-buffers buffer-key]
-                       (fn [buffer]
-                         (or buffer
-                             (let [buffer-size (get-in traversal [:buffers buffer-key :size])
-                                   gradients? (and gradients?
-                                                   (contains? backward-buffers buffer-key))
-                                   numeric-gradients? (and numeric-gradients?
-                                                           (contains? backward-buffers
-                                                                      buffer-key))]
-                               (cond-> {:buffer (backend/new-array backend [buffer-size]
-                                                                   batch-size)}
-                                       gradients?
-                                       (assoc :gradient (backend/new-array backend [buffer-size]
-                                                                           batch-size))
-                                       numeric-gradients?
-                                       (assoc :numeric-gradient (alloc-host (* buffer-size batch-size))
-                                              :host-buffer (alloc-host (* buffer-size
-                                                                          batch-size)))))))))
+              (fn [buffer]
+                (or buffer
+                    (let [buffer-size (-> (get-in traversal
+                                                          [:buffers buffer-key :dimension])
+                                                  (graph/dimensions->size))
+                          gradients? (and gradients?
+                                          (contains? backward-buffers buffer-key))
+                          numeric-gradients? (and numeric-gradients?
+                                                  (contains? backward-buffers
+                                                             buffer-key))]
+                      (cond-> {:buffer (backend/new-array backend [buffer-size]
+                                                          batch-size)}
+                        gradients?
+                        (assoc :gradient (backend/new-array backend [buffer-size]
+                                                            batch-size))
+                        numeric-gradients?
+                        (assoc :numeric-gradient (alloc-host (* buffer-size batch-size))
+                               :host-buffer (alloc-host (* buffer-size
+                                                           batch-size)))))))))
           compute-binding
           (keys (get traversal :buffers)))
         network (assoc built-network
@@ -421,7 +423,6 @@ Furthermore infer should be both wrapped in a resource context and completely re
       (clojure.pprint/pprint (mapv (fn [{:keys [buffer gradient]}]
                                      [:incoming {:buffer (to-double buffer)}])
                                    incoming))))
-
   (pass-function
     (get-in network [:compute-binding :nodes id])
     (resolve-node-arguments network id)
@@ -451,7 +452,6 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defmethod perform-pass :backward
   [_ network pass-function {:keys [incoming id outgoing] :as entry}]
   (let [loss-terms (get-in network [:compute-binding :loss-function])
-        stream->buffer-map (get-in network [:compute-binding :stream->buffer-map])
         loss-buffer-map {:output (first incoming)}
         backend (get-in network [:compute-binding :backend])
         stream (drv/get-stream backend)
@@ -460,15 +460,17 @@ Furthermore infer should be both wrapped in a resource context and completely re
         incoming-gradient (get incoming-buffer :gradient)
         ;;coalesce all the loss term arguments that apply to this node.  Note we do not know
         ;;if they apply to the output buffer or a parameter of this node.
-        node-term-arguments (->> loss-terms
-                                 (mapcat (fn [{:keys [compute-term gradients loss-term]}]
-                                           (->> (graph/get-node-arguments loss-term)
-                                                (filter #(and (= id (get % :node-id))
-                                                              (get % :gradients?)))
-                                                (map #(assoc %
-                                                        :lambda (loss/get-loss-lambda loss-term)
-                                                        :gradient (get-in gradients
-                                                                          [(get % :key) :gradient])))))))
+        node-term-arguments
+        (->> loss-terms
+          (mapcat
+            (fn [{:keys [compute-term gradients loss-term]}]
+              (->> (graph/get-node-arguments loss-term)
+                   (filter #(and (= id (get % :node-id))
+                                 (get % :gradients?)))
+                   (map #(assoc %
+                                :lambda (loss/get-loss-lambda loss-term)
+                                :gradient (get-in gradients
+                                                  [(get % :key) :gradient])))))))
         output-arguments (filter #(= :node-output (get % :type))
                                  node-term-arguments)
         parameter-arguments  (filter #(= :node-parameter (get % :type))
@@ -528,6 +530,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn- load-id->input-map
+  "Takes a map of buffer-id to input value and copies the input values
+  into device buffers."
   [network id->input-map]
   (let [batch-size (get network :batch-size)
         backend (get-in network [:compute-binding :backend])]
@@ -543,9 +547,10 @@ Furthermore infer should be both wrapped in a resource context and completely re
   expectiation is that the id->input-map has buffers that aren't
   already uploaded to the device."
   [context network id->input-map pass-direction]
-  (do-traverse network
-               (load-id->input-map network id->input-map)
-               pass-direction))
+  (let [input-map (load-id->input-map network id->input-map)]
+    (do-traverse network
+                 input-map
+                 pass-direction)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

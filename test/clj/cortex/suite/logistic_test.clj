@@ -28,16 +28,17 @@
               :labels (if (= default "\"Yes\"") [1.0] [0.0])}))))
 
 (def description
-  [(layers/input 2)
+  [(layers/input 2 1 1 :id :data)
    (layers/batch-normalization)
-   (layers/linear->logistic 1)])
+   (layers/linear 1)
+   (layers/logistic :id :labels)])
 
 (deftest logistic-test
   (io/delete-file "trained-network.nippy" true)
   (let [default-data (default-dataset)
         inf-data (repeatedly #(rand-nth default-data))
         dataset (dataset/map-sequence->dataset inf-data (/ (count default-data) 20))
-        network (-> description network/linear-network traverse/auto-bind-io)
+        network (-> description network/linear-network traverse/bind-vars-to-network)
         _ (with-out-str
             (train/train-n dataset description network :batch-size 50 :epoch-count 300 :simple-loss-print? false))
         trained-network (train/load-network "trained-network.nippy" description)
@@ -46,4 +47,3 @@
     (is (> should-def 0.97))
     (is (< shouldnt-def 0.02))))
 
-(logistic-test)

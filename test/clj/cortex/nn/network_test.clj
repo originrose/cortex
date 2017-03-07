@@ -3,6 +3,7 @@
     [clojure.test :refer :all]
     [clojure.core.matrix :as m]
     [cortex.graph :as graph]
+    [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]]
     [cortex.dataset :as ds]
     [cortex.nn.layers :as layers]
     [cortex.nn.execute :as execute]
@@ -65,7 +66,7 @@
 
 
 (deftest build-concatenate
-  (let [network (network/build-network [(layers/input 25 25 10 :id :right)
+  (let [network (network/linear-network [(layers/input 25 25 10 :id :right)
                                         (layers/input 500 1 1 :parents [] :id :left)
                                         (layers/concatenate :parents [:left :right] :id :concat)
                                         (layers/linear 10)])
@@ -82,15 +83,14 @@
 
 (defn test-run
   []
-  (let [dataset (ds/create-in-memory-dataset
+  (let [dataset (ds/in-memory-dataset
                   {:data {:data CORN-DATA
                           :shape 2}
                    :yield {:data CORN-LABELS
                             :shape 1}}
-                  (ds/create-index-sets (count CORN-DATA)
+                  (ds/index-sets (count CORN-DATA)
                                         :training-split 1.0
-                                        :randomize? false))
-        size-map (ds/dataset->stream->size-map dataset)]
+                                        :randomize? false))]
     (execute/run [(layers/input 2 1 1 :id :data)
                   (layers/linear 1 :id :yield)]
                  dataset

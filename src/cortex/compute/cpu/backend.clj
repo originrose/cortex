@@ -4,6 +4,7 @@
     [clojure.core.matrix.protocols :as mp]
     [clojure.core.matrix.macros :refer [c-for]]
     [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
+    [cortex.graph :as graph]
     [cortex.nn.layers :as layers]
     [cortex.nn.impl :as impl]
     [cortex.compute.driver :as drv]
@@ -938,7 +939,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (nn-backend/new-array backend [n-rows n-cols] batch-size)))
 
 
-(defn create-conv-layer [backend conv-config ^long batch-size]
+(defn conv-layer [backend conv-config ^long batch-size]
   (let [conv-config (conv-type-layer->conv-config conv-config)
         num-out-pixels (* (long (:output-width conv-config))
                           (long (:output-height conv-config)))]
@@ -967,8 +968,9 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
       (cpu-drv/with-stream-dispatch cpu-stream
         (doall (pmap (fn [[input output input-convolved]]
                       ;;Redefine output to be the correct shape
-                      (let [output (math/with-tensor output
-                                                     (math/tensor num-out-channels num-out-pixels))]
+                      (let [output (math/with-tensor
+                                     output
+                                     (math/tensor num-out-channels num-out-pixels))]
                         (cpu-planar-input->convolution! (device-array->view input)
                                                         (device-array->view input-convolved)
                                                         (.conv-config layer))
@@ -982,6 +984,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                     (math/batched-data-to-per-input-data
                      (drv/get-driver (.backend layer))
                      [input output (.input-convolved layer)]))))))
+
   (backward [layer parameter-buffers output-buffers input-buffers]
     (let [{:keys [num-kernels] :as conv-config} (.conv-config layer)
           output-width (long (:output-width conv-config))
@@ -1007,7 +1010,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
         ;;parallelize this because it is an accumulation.
         (doseq [[input output input-gradient output-gradient input-convolved] io-data]
           (let [output-gradient (math/with-tensor output-gradient
-                                                  (math/tensor num-out-channels num-out-pixels))]
+                                  (math/tensor num-out-channels num-out-pixels))]
             (math/gemm current-thread-stream false true
                        1.0 (.ones layer) output-gradient
                        1.0 bias-gradient)
@@ -1077,11 +1080,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (defn- layer-output->tensor
   [layer batch-size]
-  [{:keys [output-channels output-width output-height] :as layer} batch-size]
-  (math/tensor batch-size
-               output-channels
-               output-height
-               output-width))
+  (let [{:keys [channels width height]} (first (graph/node->output-dimensions layer))]
+    (math/tensor batch-size channels height width)))
 
 
 (defrecord BatchNormalization [backend]

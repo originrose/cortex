@@ -330,7 +330,7 @@ whitespace = #'\\s*'")
                           (assoc desc :caffe-output-size (count output-vec))
                           desc))
                       model)
-          network (network/build-network model)]
+          network (network/linear-network model)]
       (when-let [failures (seq (get network :verification-failures))]
         (let [ordered-nodes (->> network
                                  traverse/auto-bind-io

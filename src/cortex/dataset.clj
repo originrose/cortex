@@ -59,6 +59,7 @@
      :cross-validation-range cv-range
      :holdout-range holdout-range}))
 
+
 (defn rel-range->absolute-range
   [[rel-start rel-end :as range] ^long item-count]
   [(long (Math/round (* item-count (double rel-start))))
@@ -70,6 +71,7 @@
   (->> (drop abs-start coll)
        (take (- abs-end abs-start))
        vec))
+
 
 (defn takev-rel-range
   [item-range item-count coll]

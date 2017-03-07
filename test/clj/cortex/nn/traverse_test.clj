@@ -447,7 +447,7 @@
 
 
 (deftest concatenate-traversal-1
-  (let [network (-> (network/build-network [(layers/input 10 10 10)
+  (let [network (-> (network/linear-network [(layers/input 10 10 10)
                                             (layers/linear 500 :id :right)
                                             (layers/input 500 1 1 :parents [] :id :left)
                                             (layers/concatenate :parents [:left :right]
@@ -457,8 +457,8 @@
         stream->size-map {:data-1 (* 25 25 10)
                           :data-2 500
                           :labels 10}
-        train-network (traverse/network->training-traversal network stream->size-map)
-        inference-network (traverse/network->inference-traversal network stream->size-map)
+        train-network (traverse/add-training-traversal network stream->size-map)
+        inference-network (traverse/add-forward-traversal network stream->size-map)
         train-traversal (-> (get train-network :traversal)
                             realize-traversals)
         inference-traversal (-> (get inference-network :traversal)
@@ -504,7 +504,7 @@
             (get inference-traversal :forward))))))
 
 (deftest concatenate-traversal-2
-  (let [network (-> (network/build-network [(layers/input 10 10 10)
+  (let [network (-> (network/linear-network [(layers/input 10 10 10)
                                             (layers/linear 500 :id :right)
                                             (layers/input 500 1 1 :parents [] :id :left)
                                             ;;Switch the left and right nodes.  Attempting to
@@ -517,7 +517,7 @@
         stream->size-map {:data-1 (* 25 25 10)
                           :data-2 500
                           :labels 10}
-        train-network (traverse/network->training-traversal network stream->size-map)
+        train-network (traverse/add-training-traversal network stream->size-map)
         train-traversal (-> (get train-network :traversal)
                             realize-traversals)]
     (is (= [nil nil]
@@ -551,7 +551,7 @@
 
 
 (deftest split-traversal
-  (let [network (-> (network/build-network [(layers/input 50)
+  (let [network (-> (network/linear-network [(layers/input 50)
                                             (layers/split :id :split)
                                             (layers/linear 10)
                                             (layers/linear 20 :parents [:split])])
@@ -560,7 +560,7 @@
                           :labels-1 10
                           :labels-2 20}
 
-        train-network (traverse/network->training-traversal network stream->size-map)
+        train-network (traverse/add-training-traversal network stream->size-map)
         train-traversal (-> (get train-network :traversal)
                             realize-traversals)]
     (is (= [nil nil]

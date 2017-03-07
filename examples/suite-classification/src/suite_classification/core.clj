@@ -360,7 +360,7 @@
         modified-description (vec (concat (drop-last 3 initial-description) layers-to-add))
         modified-network (network/assoc-layers-to-network network-bottleneck layers-to-add)
         modified-network (dissoc modified-network :traversal)
-        modified-network (-> (network/build-network modified-network)
+        modified-network (-> (network/linear-network modified-network)
                              (traverse/auto-bind-io))]
     (suite-train/train-n mnist-dataset modified-description modified-network
                          :batch-size 128 :epoch-count 1)))

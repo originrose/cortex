@@ -1,12 +1,13 @@
 (ns cortex.nn.network
   "Translation from cortex layer vectors into actual network graphs."
-  (:require [cortex.nn.layers :as layers]
-            [clojure.core.matrix :as m]
-            [cortex.core-matrix-backends :as b]
-            [cortex.graph :as graph]
-            [clojure.pprint :as pprint]
-            [clojure.set :as c-set])
+  (:require
+    [clojure.set :as c-set]
+    [clojure.pprint :as pprint]
+    [clojure.core.matrix :as m]
+    [cortex.graph :as graph]
+    [cortex.nn.layers :as layers])
   (:import [java.util UUID]))
+
 
 (defn embed-param-args
   [desc]
@@ -112,10 +113,12 @@
     (throw (ex-info "Network does not appear to contain a graph; keys should contain :compute-graph"
                     {:network-keys (keys network)}))))
 
+
 (defn network->node
   [network node-id]
   (-> (network->graph network)
       (graph/get-node node-id)))
+
 
 (defn network->node-parameters
   ([network node-id]
@@ -177,7 +180,7 @@ as parameter buffer shapes. This function does not work with descriptions (as
 opposed to networks), but consider:
 
     (->> description
-         network/build-network
+         network/linear-network
          traverse/auto-bind-io
          traverse/network->training-traversal
          network/print-layer-summary)"

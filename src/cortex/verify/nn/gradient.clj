@@ -47,7 +47,7 @@
                                          (verify-layers/io-vec->stream->size-map
                                           input output batch-size)
                                          :bind-opts {:numeric-gradients? true}) network
-    (cp/generate-numeric-gradients context network
+    (execute/generate-numeric-gradients context network
                                    (merge (verify-layers/vec->stream-map input :data)
                                           (verify-layers/vec->stream-map output :labels))
                                    epsilon)

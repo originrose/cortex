@@ -2,16 +2,16 @@
   (:require
     [clojure.java.io :as io]
     [think.resource.core :as resource]
+    [cortex.util :as util]
     [cortex.graph :as graph]
     [cortex.dataset :as ds]
-    [cortex.optimize :as opt]
     [cortex.loss :as loss]
+    [cortex.optimize :as opt]
     [cortex.optimize.adam :as adam]
     [cortex.nn.execute :as execute]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.network :as network]
-    [cortex.compute.batching-system :as bs]
-    [cortex.suite.io :as suite-io]))
+    [cortex.compute.batching-system :as bs]))
 
 (def default-network-filestem "trained-network")
 (def trained-networks-folder "trained-networks/")
