@@ -50,7 +50,8 @@ if a separate result is provided it must be the size of the larger."
             [mikera.vectorz.matrix-api]
             [cortex.graph :as graph]
             [clojure.core.matrix :as m]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [clojure.math.combinatorics :as combo]))
 
 
 (defmacro when-not-error
@@ -78,6 +79,25 @@ if a separate result is provided it must be the size of the larger."
     "Not all arguments match required datatype"
     {:datatype datatype
      :argument-datatypes (map dtype/get-datatype args)}))
+
+
+(defn- ensure-same-driver
+  "Given a set of tensors, ensure they share the same driver."
+  [& args]
+  (let [driver (:driver (first args))
+        wrong-driver (->> (rest args)
+                          (remove #(identical? driver (get % :driver)))
+                          seq)]
+    (when-not-error (nil? wrong-driver)
+      "Tensor arguments must have same driver."
+      {})))
+
+
+(defn- ensure-same-device
+  "Given a set of tensors, ensure they share the same device.  Only assignment of identical
+types is guaranteed to work across devices."
+  [& args]
+  (apply ensure-same-driver args))
 
 
 (defn default-dimension-order
@@ -329,8 +349,6 @@ that rerequires the items to have the same element count."
   (or (= 0 rhs-ecount)
       (= 0 (rem lhs-ecount rhs-ecount))))
 
-
-
 (defmulti typed-assign!
   "Multimethods for typed assignment."
   (fn
@@ -346,8 +364,21 @@ that rerequires the items to have the same element count."
                                  src (m/ecount dest)))
 
 
+(defn- ensure-assignment-matches
+  [^Tensor dest ^Tensor src]
+  ;;In order for marshalling or striding to work we need to ensure
+  ;;we are on the same device.  device->device transfers only work with
+  ;;a bulk dma transfer and that does not do any marshalling nor does it
+  ;;do any indexing.
+  (if-not (and (= (get-datatype dest) (get-datatype src))
+               (dense? dest)
+               (dense? src))
+    (ensure-same-device dest src)
+    (ensure-same-driver dest src)))
+
+
 (defmethod typed-assign! [:tensor :tensor]
-  [^Tensor dest src]
+  [^Tensor dest ^Tensor src]
   (let [dest-ecount (ecount dest)
         src-ecount (ecount src)]
    (when-not-error (>= dest-ecount
@@ -359,10 +390,12 @@ that rerequires the items to have the same element count."
      "Src element count must evenly divide dest ecount:"
      {:dest-ecount dest-ecount
       :src-ecount src-ecount})
-   ;;There is no datatype check here because assignment may be marshalling.
-   (compute-math/assign!-impl (check-stream)
-                              (.buffer dest) (.num-columns dest) (.column-stride dest) dest-ecount
-                              (.buffer src) (.num-columns src) (.column-stride src) src-ecount)))
+   (ensure-assignment-matches dest src)
+   (when-not (compute-drv/alias? (.driver dest) (.buffer dest) (.buffer src))
+     (check-partial-alias dest src)
+     (compute-math/assign!-impl (check-stream)
+                                (.buffer dest) (.num-columns dest) (.column-stride dest) dest-ecount
+                                (.buffer src) (.num-columns src) (.column-stride src) src-ecount))))
 
 
 (extend-type Tensor
@@ -610,12 +643,6 @@ and the rest of the dimensions being squashed into n-rows."
       {:element-counts (map ecount args)})))
 
 
-(defn assign!
-  ^Tensor [^Tensor dest ^Tensor src]
-  (m/assign! dest src)
-  dest)
-
-
 (defn- ensure-indexed-op
   [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
   (ensure-indexes dest-indexes src-indexes)
@@ -631,74 +658,88 @@ and the rest of the dimensions being squashed into n-rows."
       "Indexed operations must be commensurate"
       {:min-n-elems min-n-elems
        :max-n-elems max-n-elems
-       :remainder (rem max-n-elems min-n-elems)})))
+       :remainder (rem max-n-elems min-n-elems)})
+    (ensure-same-device dest dest-indexes src src-indexes)))
 
 
-(defn indirect-assign-rows!
-  "Assign rows from src to dest.  Src and dest will both be represented as matrixes with width
-  as n-cols but the rest of the dimensions squashed into n-rows."
-  (^Tensor [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
-   ;;Datatypes are not checked because assignment should be marshalling.
-   (let [[dest-rows dest-cols] (dimensions->2d-shape (.dimensions dest))
-         [src-rows src-cols] (dimensions->2d-shape (.dimensions src))
-         n-dest-elems (* (long dest-cols) (ecount dest-indexes))
-         n-src-elems (* (long src-cols) (ecount src-indexes))]
+(defn- check-partial-alias
+  [driver & args]
+  (let [partially-overlapping-args (->> args
+                                        (map #(.buffer ^Tensor %))
+                                        (combo/combinations args 2)
+                                        (filter #(apply compute-drv/partially-alias? %))
+                                        seq)]
+    (when-not-error (nil? partially-overlapping-args)
+      "Partially overlapping arguments detected."
+      {})))
+
+
+
+(defn assign!
+  ^Tensor [^Tensor dest src]
+  (m/assign! dest src)
+  dest)
+
+
+(defn assign-indexed-constaint!
+  ^Tensor [^Tensor dest ^Tensor dest-indexes src]
+  (when-not-error (number? src)
+    "Assignment of a constant not a constant:"
+    {:src src})
+  (ensure-indexes dest-indexes)
+  (ensure-same-device dest dest-indexes)
+  (compute-math/indirect-assign-constant!
+   (check-stream)
+   (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-count dest)
+   src))
+
+
+(defn assign-indexed!
+  ^Tensor [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
+  ;;Datatypes are not checked because assignment should be marshalling.
+  (let [[dest-rows dest-cols] (dimensions->2d-shape (.dimensions dest))
+        [src-rows src-cols] (dimensions->2d-shape (.dimensions src))
+        n-dest-elems (* (long dest-cols) (ecount dest-indexes))
+        n-src-elems (* (long src-cols) (ecount src-indexes))]
     (when-not-error (>= n-dest-elems n-src-elems)
       "Number of destination elements (n-indexes*dest-cols) must be >= src elements"
       {:n-dest-elems n-dest-elems
        :n-src-elems n-src-elems}))
-   (ensure-indexed-op dest dest-indexes src src-indexes)
-   (compute-math/indirect-assign!
-    (check-stream)
-    (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-stride dest)
-    (.buffer src) (.buffer src-indexes) (.num-columns src) (.column-stride src))
-   dest)
-  (^Tensor [^Tensor dest ^Tensor dest-indexes src]
-   (when-not-error (number? src)
-     "Assignment of a constant not a constant:"
-     {:src src})
-   (ensure-indexes dest-indexes)
-   (compute-math/indirect-assign-constant!
-    (check-stream)
-    (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-count dest)
-    src)))
+  (ensure-indexed-op dest dest-indexes src src-indexes)
+  (compute-math/indirect-assign!
+   (check-stream)
+   (.buffer dest) (.buffer dest-indexes) (.num-columns dest) (.column-stride dest)
+   (.buffer src) (.buffer src-indexes) (.num-columns src) (.column-stride src))
+  dest)
 
 
-(defn accum!
-  "y = alpha * x + beta * y.  Y may be much smaller than X in which case it acts as an
+
+(defn binary-accum!
+  "y = beta * y op alpha * x.  Y may be much smaller than X in which case it acts as an
 accumulator.  It may also be larger than x in which case x will sum the overlapping indexes
 of y.  X can also be smaller than Y leading to a broadcast of X into Y.
-Optional operations are :add, :"
-  ^Tensor [^Tensor y alpha ^Tensor x beta & {:keys [operation reverse-operands?]
-                                             :or {operation :add}}]
+Optional operations are :+ :- :* :/"
+  ^Tensor [^Tensor y beta ^Tensor x alpha & {:keys [operation reverse-operands?]
+                                             :or {operation :+}}]
   (ensure-datatypes (dtype/get-datatype y) [x])
+  (ensure-same-device y x)
   (compute-math/accum!-impl (check-stream) operation reverse-operands?
                             alpha (.buffer x) (tensor->width x) (.column-stride x) (ecount x)
                             beta (.buffer y) (tensor->width y) (.column-stride y) (ecount y))
   y)
 
 
-(defn binary-op!
-  "Elementwise op into a result.  Result must not overlap with either of the two operands
-and the element count of the destination is expected to be equal to or greater than the given
-element count of either operand."
-  ^Tensor [^Tensor dest alpha ^Tensor x beta ^Tensor y & {:keys [operation]
-                                                          :or {operation :add}}]
-  (ensure-datatypes (dtype/get-datatype dest) [x y])
-  (let [dest-ecount (ecount dest)
-        x-ecount (ecount x)
-        y-ecount (ecount y)
-        max-ecount (long (max x-ecount y-ecount))]
-    (when-not-error (>= dest-ecount max-ecount)
-      "The element count of the destination is less than the maximum"
-      {:x-ecount x-ecount
-       :y-ecount y-ecount
-       :dest-ecount dest-ecount})
-    (compute-math/binary-op!-impl (check-stream) operation
-                                  (.buffer dest) (tensor->width dest) (.column-stride dest)
-                                  alpha (.buffer x) (tensor->width x) (.column-stride x) x-ecount
-                                  beta (.buffer y) (tensor->width y) (.column-stride y) y-ecount)
-    dest))
+(defn binary-accum-constant!
+  "y = beta * y op x.  Y may be much smaller than X in which case it acts as an
+accumulator.  It may also be larger than x in which case x will sum the overlapping indexes
+of y.  X can also be smaller than Y leading to a broadcast of X into Y.
+Optional operations are :+ :- :* :/"
+  ^Tensor [^Tensor y beta x & {:keys [operation reverse-operands?]
+                               :or {operation :+}}]
+  (compute-math/accum-constant! (check-stream) operation reverse-operands?
+                                beta (.buffer y) (tensor->width y) (.column-stride y) (ecount y)
+                                x)
+  y)
 
 
 (defn indirect-accum-rows!
@@ -719,7 +760,38 @@ element count of either operand."
     y))
 
 
-(defn indirect-binary-op-rows!
+(defn binary-op!
+  "Elementwise op into a result.  Result must not overlap with either of the two operands
+and the element count of the destination is expected to be equal to or greater than the given
+element count of either operand."
+  ^Tensor [^Tensor dest ^Tensor y beta ^Tensor x alpha & {:keys [operation]
+                                                          :or {operation :+}}]
+  (ensure-datatypes (dtype/get-datatype dest) [x y])
+  (cond
+    (compute-drv/alias? (.driver x) (.buffer dest) (.buffer y))
+    (binary-accum! y beta x alpha :operation operation)
+    (compute-drv/alias? (.driver x) (.buffer dest) (.buffer x))
+    (binary-accum! x alpha y beta :operation operation :reverse-operands? true)
+    :else
+    (let [dest-ecount (ecount dest)
+          x-ecount (ecount x)
+          y-ecount (ecount y)
+          max-ecount (long (max x-ecount y-ecount))]
+      (ensure-same-device dest y x)
+      (check-partial-alias dest x y)
+      (when-not-error (>= dest-ecount max-ecount)
+        "The element count of the destination is less than the maximum"
+        {:x-ecount x-ecount
+         :y-ecount y-ecount
+         :dest-ecount dest-ecount})
+      (compute-math/binary-op!-impl (check-stream) operation
+                                    (.buffer dest) (tensor->width dest) (.column-stride dest)
+                                    alpha (.buffer x) (tensor->width x) (.column-stride x) x-ecount
+                                    beta (.buffer y) (tensor->width y) (.column-stride y) y-ecount)
+      dest)))
+
+
+(defn binary-op-indexed!
   "res[res-idx] = alpha * x[x-idx] + beta * y[y-idx].  Elementwise addition of the rows of x and
   y and place into the result.  Column length of all three res, x, and y must be equal.
   Indexes must be integer tensors.  It may not be possible for an implementation (aside

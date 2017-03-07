@@ -23,7 +23,8 @@
                  [thinktopic/think.datatype "0.3.9" :exclusions [net.mikera/vectorz-clj]]
 
                  [thinktopic/resource "1.1.0"]
-                 [thinktopic/think.image "0.4.6"]]
+                 [thinktopic/think.image "0.4.6"]
+                 [org.clojure/math.combinatorics "0.1.4"]]
 
   :java-source-paths ["java"]
 

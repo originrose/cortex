@@ -87,40 +87,71 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   (assign-constant! [stream dest dest-n-cols dest-col-stride
                      src n-elems]
     "Assign scalar src to dest accounting for potentially differing number of columns of X and Y.")
-  (indirect-assign! [stream
-                     dest dest-indexes dest-n-cols dest-col-stride
-                     src src-indexes src-n-cols src-col-stride]
+  (assign-indexed! [stream
+                    dest dest-indexes dest-elems-per-idx dest-n-cols dest-col-stride
+                    src src-indexes src-elems-per-idx src-n-cols src-col-stride]
     "dest indexes must *not* repeat!!  This cannot be checked efficiently at runtime but it will
 result in undefined behavior from some implementations")
 
-  (indirect-assign-constant! [stream
-                              dest dest-indexes dest-n-cols dest-col-stride
-                              src]
+  (assign-indexed-constant! [stream
+                             dest dest-indexes dest-elems-per-idx dest-n-cols dest-col-stride
+                             src]
     "Indirect assignment of a constant value.")
 
-  (accum!-impl [stream primary-op reverse-operands?
-                alpha x x-n-cols x-colstride x-n-elems
-                beta y y-n-cols y-colstride y-n-elems]
-    "y = alpha * x op beta * y.  Note that y may be smaller than x leading to an accumulation of
+  (binary-accum! [stream binary-op reverse-operands?
+                  beta y y-n-cols y-colstride y-n-elems
+                  alpha x x-n-cols x-colstride x-n-elems]
+    "y = beta * y op alpha * x.  Note that y may be smaller than x leading to an accumulation of
 x into y.  The reverse operands is specifically in the case where the binary operation is both not
 commutative *and* the operation can't be fixed by providing different alpha,beta values.")
 
-  (binary-op!-impl [stream binary-op
-                    res res-n-cols res-colstride
-                    alpha x x-n-cols x-colstride x-n-elems
-                    beta y y-n-cols y-colstride y-n-elems]
+  (binary-accum-indexed! [stream binary-op reverse-operands?
+                          beta y y-indexes y-elems-per-idx y-n-cols y-colstride
+                          alpha x x-indexes x-elems-per-idx x-n-cols x-colstride]
+    "y = beta * y op alpha * x.  Note that y may be smaller than x leading to an accumulation of
+x into y.  The reverse operands is specifically in the case where the binary operation is both not
+commutative *and* the operation can't be fixed by providing different alpha,beta values.")
+
+  (binary-accum-constant! [stream binary-op reverse-operands?
+                           beta y y-n-cols y-colstride y-n-elems
+                           x]
+    "y = beta * y op alpha * x.  Note that y may be smaller than x leading to an accumulation of
+x into y.  The reverse operands is specifically in the case where the binary operation is both not
+commutative *and* the operation can't be fixed by providing different alpha,beta values.")
+
+  (binary-accum-constant-indexed! [stream binary-op reverse-operands?
+                                   beta y y-indexes y-elems-per-idx y-n-cols y-colstride
+                                   x]
+    "y = beta * y op alpha * x.  Note that y may be smaller than x leading to an accumulation of
+x into y.  The reverse operands is specifically in the case where the binary operation is both not
+commutative *and* the operation can't be fixed by providing different alpha,beta values.")
+
+  (binary-op! [stream binary-op
+               res res-n-cols res-colstride
+               alpha x x-n-cols x-colstride x-n-elems
+               beta y y-n-cols y-colstride y-n-elems]
     "res = alpha * x op beta * y.")
-  (indirect-accum-rows!-impl [stream binary-op reverse-operands?
-                              alpha x x-indexes x-n-cols x-colstride
-                              beta y y-indexes u-n-cols y-colstride]
+
+  (binary-op-constant! [stream binary-op reverse-operands?
+                        res res-n-cols res-colstride
+                        alpha x x-n-cols x-colstride x-n-elems
+                        y]
+    "res = alpha * x op y.")
+
+  (binary-op-indexed! [stream binary-op
+                       res res-indexes res-elems-per-idx res-n-cols res-colstride
+                       beta y y-indexes y-elems-per-idx u-n-cols y-colstride
+                       alpha x x-indexes x-elems-per-idx x-n-cols x-colstride]
     "y[y-idx] = alpha * x[x-idx] op beta * y[y-idx].
 The reverse operands is specifically in the case where the binary operation is both not
 commutative *and* the operation can't be fixed by providing different alpha,beta values.")
-  (indirect-binary-op-rows!-impl [stream binary-op
-                                  res res-indexes res-n-cols res-colstride
-                                  alpha x x-indexes x-n-cols x-colstride
-                                  beta y y-indexes y-n-cols y-colstride]
-    "res[res-idx] = alpha * x[x-idx] op beta * y[y-idx]."))
+  (binary-op-constant-indexed! [stream binary-op reverse-operands?
+                                res res-indexes res-elems-per-idx res-n-cols res-colstride
+                                alpha x x-indexes x-elems-per-idx x-n-cols x-colstride
+                                y]
+    "y[y-idx] = alpha * x[x-idx] op beta * y[y-idx].
+The reverse operands is specifically in the case where the binary operation is both not
+commutative *and* the operation can't be fixed by providing different alpha,beta values."))
 
 
 (defmacro math-error
