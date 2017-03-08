@@ -12,7 +12,7 @@ ENV TERM xterm
 ENV DEBIAN_FRONTEND noninteractive
 
 # Install CUDA 8.0 for cortex gpu support
-RUN apt-get install -y nvidia-cuda-toolkit nvidia-367 libcuda1-367
+RUN apt-get install -y --no-install-recommends nvidia-cuda-toolkit nvidia-367 libcuda1-367
 
 # Install CUDNN v5
 ENV CUDNN_VERSION 5.1
