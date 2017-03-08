@@ -2,7 +2,7 @@
   (:require [cortex.dataset :as ds]
             [clojure.java.io :as io]
             [think.parallel.core :as parallel]
-            [cortex.compute.nn.cpu-backend :as cpu-backend]
+            [cortex.compute.cpu.backend :as cpu-backend]
             [cortex.optimize :as opt]
             [think.resource.core :as resource]
             [cortex.util :as util]
