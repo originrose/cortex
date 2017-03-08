@@ -17,6 +17,7 @@ The loss term can state which of it's arguments it produces gradients for when a
 gradients. This makes it a little easier for implementations to manage gradients when
 evaluating loss terms."
   (:require [clojure.core.matrix :as m]
+            [clojure.pprint :as pprint]
             [cortex.util :refer [arg-list->arg-map merge-args
                                  generate-id max-index]]
             [cortex.graph :as graph]
@@ -397,3 +398,24 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
 (defmethod generate-loss-term :center-loss
   [item-key]
   (center-loss))
+
+(defn loss-fn->table-str
+  [loss-fn]
+  (with-out-str
+    (pprint/print-table
+      [:type :value :lambda :node-id :argument]
+                        (mapv (fn [loss-term]
+                                (assoc loss-term
+                                       :lambda
+                                       (get-loss-lambda
+                                        loss-term)
+                                       :node-id
+                                       (get-in loss-term
+                                               [:output
+                                                :node-id])
+                                       :argument
+                                       (get-in loss-term
+                                               [:output
+                                                :argument])))
+                              loss-fn))))
+ 

@@ -11,7 +11,7 @@
             [think.datatype.core :as dtype]
             [cortex.verify.nn.import :as compute-verify]
             [clojure.string :as string]
-            [cortex.compute.nn.compute-execute :as compute-execute]
+            [cortex.nn.execute :as execute]
             [cortex.graph :as graph]))
 
 (set! *warn-on-reflection* true)
@@ -357,32 +357,32 @@
                             (reshape-data weight-double-data keras-dims [1 0]))
                           (to-core-matrix (graph/get-argument-shape graph node weights-arg)))]
           (-> network
-              (assoc-in [:layer-graph :buffers
+              (assoc-in [:compute-graph :buffers
                          (get weights-arg :buffer-id)
                          :buffer]
                         weights)
-              (assoc-in [:layer-graph :buffers
+              (assoc-in [:compute-graph :buffers
                          (get bias-arg :buffer-id)
                          :buffer]
                         (ensure-doubles (:data (hdf5/->clj bias-ds)))))))
       network)))
 
 (defn- description->network
-  "Given a simple list of descriptors load the weights and return a network."
-  [desc-seq weight-file]
-  (let [weight-entry (first (filter (fn [node]
+       "Given a simple list of descriptors load the weights and return a network."
+       [desc-seq weight-file]
+       (let [weight-entry (first (filter (fn [node]
                                       (= (hdf5/get-name node)
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
         id->weight-map (if weight-entry
                    (hdf5-child-map weight-entry)
                    (hdf5-child-map weight-file))
-        network (network/build-network desc-seq)
+        network (network/linear-network desc-seq)
         network (reduce (partial reshape-weights id->weight-map)
                         network
                         (graph/dfs-seq (network/network->graph network)))]
-    ;;Generate parameters and check that all our shapes are correct.
-    (update network :layer-graph graph/generate-parameters)))
+            ;;Generate parameters and check that all our shapes are correct.
+            (update network :compute-graph graph/generate-parameters)))
 
 
 (defn description-weight-file->network
@@ -410,14 +410,14 @@
 
 
 (defn- network->nodes
-  "Given a network return a list of nodes in forward pass order"
-  [network]
-  (let [forward-pass (-> (traverse/auto-bind-io network)
-                         (traverse/network->training-traversal
+       "Given a network return a list of nodes in forward pass order"
+       [network]
+       (let [forward-pass (-> (traverse/auto-bind-io network)
+                         (traverse/add-training-traversal
                           {})
                          (get-in [:traversal :forward]))]
-    (->> (map :id forward-pass)
-         (map #(get-in network [:layer-graph :id->node-map %])))))
+            (->> (map :id forward-pass)
+                 (map #(get-in network [:compute-graph :nodes %])))))
 
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.
@@ -537,7 +537,7 @@
                      :layer-id->output (assoc reshaped
                                               (first roots)
                                               test-image)}
-        verified     (compute-verify/verify-model (compute-execute/create-context) for-verify)]
+        verified     (compute-verify/verify-model (execute/compute-context) for-verify)]
     (if (empty? verified)
       network
       (throw (ex-info "Model did not pass verification."

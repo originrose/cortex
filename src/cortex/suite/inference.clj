@@ -1,6 +1,5 @@
 (ns cortex.suite.inference
   (:require [cortex.dataset :as ds]
-            [cortex.compute.nn.compute-execute :as ce]
             [cortex.nn.execute :as execute]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.network :as network]
@@ -15,7 +14,7 @@
   [network observations observation-dataset-shape & {:keys [datatype batch-size force-cpu?]
                                                      :or {datatype :float
                                                           batch-size 1}}]
-  (let [context (suite-train/create-context)
+  (let [context (execute/compute-context)
         ;;Creating an in-memory dataset with exactly 1 set of indexes causes it to use
         ;;that set of indexes without a shuffle or anything for all the different batch types.
         dataset (ds/->InMemoryDataset {:data {:data observations

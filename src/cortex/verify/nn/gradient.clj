@@ -3,7 +3,6 @@
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
-            [cortex.nn.protocols :as cp]
             [cortex.verify.utils :as utils]
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.verify.nn.train :as verify-train]
@@ -48,7 +47,7 @@
                                          (verify-layers/io-vec->stream->size-map
                                           input output batch-size)
                                          :bind-opts {:numeric-gradients? true}) network
-    (cp/generate-numeric-gradients context network
+    (execute/generate-numeric-gradients context network
                                    (merge (verify-layers/vec->stream-map input :data)
                                           (verify-layers/vec->stream-map output :labels))
                                    epsilon)

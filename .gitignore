@@ -3,7 +3,6 @@
 /checkouts
 pom.xml
 pom.xml.asc
-cuda
 *.jar
 *.class
 /.lein-*

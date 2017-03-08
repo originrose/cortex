@@ -1,12 +1,16 @@
 (ns cortex.nn.traverse-test
-  (:require [cortex.nn.traverse :as traverse]
-            [cortex.nn.layers :as layers]
-            [cortex.nn.network :as network]
-            [cortex.graph :as graph]
-            [clojure.test :refer :all]
-            [clojure.core.matrix :as m]
-            [cortex.loss :as loss]
-            [clojure.data :as data]))
+  (:require
+    [clojure.data :as data]
+    [clojure.test :refer :all]
+    [clojure.core.matrix :as m]
+    [cortex.graph :as graph]
+    [cortex.dataset :as ds]
+    [cortex.loss :as loss]
+    [cortex.nn.traverse :as traverse]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.execute :as execute]
+    [cortex.nn.network :as network]
+    [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]]))
 
 
 (def mnist-basic
@@ -69,11 +73,11 @@
 
 (defn build-big-description
   []
-  (let [input-bindings [(traverse/->input-binding :input-1 :data)]
-        output-bindings [(traverse/->output-binding :softmax-1
-                                                    :stream :labels
-                                                    :loss (loss/softmax-loss))]]
-    (-> (network/build-network mnist-description-with-toys)
+  (let [input-bindings [(traverse/input-binding :input-1 :data)]
+        output-bindings [(traverse/output-binding :softmax-1
+                                                  :stream :labels
+                                                  :loss (loss/softmax-loss))]]
+    (-> (network/linear-network mnist-description-with-toys)
         (traverse/bind-input-bindings input-bindings)
         (traverse/bind-output-bindings output-bindings))))
 
@@ -85,22 +89,21 @@
 
 (deftest big-description
   (let [network (build-big-description)
-        ;;Run the traversal twice as it is supposed to be idempotent.
-        training-net (-> (traverse/network->training-traversal network stream->size-map)
-                         (traverse/network->training-traversal stream->size-map))
+        training-net (-> (traverse/add-training-traversal network stream->size-map)
+                         (traverse/add-training-traversal stream->size-map))
         gradient-descent (->> training-net
                               :traversal
                               realize-traversals)
-        inference-mem (->> (traverse/network->inference-traversal network stream->size-map)
+        inference-mem (->> (traverse/add-forward-traversal network stream->size-map)
                            :traversal
                            realize-traversals)]
-    (is (= 434280 (graph/parameter-count (get network :layer-graph))))
-    (is (= 434280 (->> (get-in network [:layer-graph :buffers])
+    (is (= 434280 (graph/parameter-count (get network :compute-graph))))
+    (is (= 434280 (->> (get-in network [:compute-graph :buffers])
                        (map (comp m/ecount :buffer second))
                        (reduce +))))
     ;;Adding in the parameters required for the center loss centers.  10 * 500 = 5000
     ;;extra parameters
-    (is (= 439280 (graph/parameter-count (get training-net :layer-graph))))
+    (is (= 439280 (graph/parameter-count (get training-net :compute-graph))))
     (is (= :node-argument (-> (network/network->graph training-net)
                               (graph/get-node :l1-regularization-1)
                               (graph/get-node-argument :output)
@@ -270,9 +273,9 @@
         new-desc (concat (map (fn [layer] (assoc layer :learning-attenuation 0))
                               non-trainable-layers)
                          trainable-layers)
-        network (-> (network/build-network new-desc)
+        network (-> (network/linear-network new-desc)
                     traverse/auto-bind-io
-                    (traverse/network->training-traversal stream->size-map))
+                    (traverse/add-training-traversal stream->size-map))
         traversal (-> (get network :traversal)
                       realize-traversals)]
     (reset! test-data traversal)
@@ -315,9 +318,9 @@
         trainable-layers (drop num-non-trainable src-desc)
         new-desc (concat (map (fn [layer] (assoc layer :non-trainable? true)) non-trainable-layers)
                          trainable-layers)
-        network (-> (network/build-network new-desc)
+        network (-> (network/linear-network new-desc)
                     traverse/auto-bind-io
-                    (traverse/network->training-traversal stream->size-map))
+                    (traverse/add-training-traversal stream->size-map))
         traversal (-> (get network :traversal)
                       realize-traversals)]
     (is (= [nil nil]
@@ -354,7 +357,7 @@
   (let [layer-split 9
         src-desc (flatten mnist-description-with-toys)
         bottom-layers (take layer-split src-desc)
-        bottom-network (-> (network/build-network bottom-layers)
+        bottom-network (-> (network/linear-network bottom-layers)
                          traverse/auto-bind-io)
         ;; Added io binding and traversals to make sure that when
         ;; the network is modified and rebuilt, these 2 steps are also rebuilt correctly
@@ -362,34 +365,36 @@
         top-layers (drop layer-split src-desc)
         top-network (-> (network/assoc-layers-to-network bottom-network top-layers)
                         traverse/auto-bind-io
-                        (traverse/network->training-traversal stream->size-map))
+                        (traverse/add-training-traversal stream->size-map))
 
         traversal-after-stacking (-> (get top-network :traversal)
                                      realize-traversals)
 
-        original-network (-> (network/build-network mnist-description-with-toys)
+        original-network (-> (network/linear-network mnist-description-with-toys)
                              traverse/auto-bind-io
-                             (traverse/network->training-traversal stream->size-map))
+                             (traverse/add-training-traversal stream->size-map))
 
         original-traversal (-> (get original-network :traversal)
                                realize-traversals)
 
-        inference-mem-top (->> (traverse/network->inference-traversal top-network stream->size-map)
+        inference-mem-top (->> (traverse/add-forward-traversal top-network stream->size-map)
                                :traversal
                                realize-traversals)
 
-        inference-mem-original (->> (traverse/network->inference-traversal original-network stream->size-map)
+        inference-mem-original (->> (traverse/add-forward-traversal original-network stream->size-map)
                                     :traversal
                                     realize-traversals)
 
-        gradient-descent-top (->> (traverse/network->training-traversal top-network stream->size-map)
+        gradient-descent-top (->> (traverse/add-training-traversal top-network stream->size-map)
                                   :traversal
                                   realize-traversals)
 
-        gradient-descent-original (->> (traverse/network->training-traversal original-network stream->size-map)
+        gradient-descent-original (->> (traverse/add-training-traversal original-network stream->size-map)
                                        :traversal
                                        realize-traversals)
-        layer-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
+        compute-graph->buffer-id-size-fn #(reduce (fn [m [id {:keys [buffer]}]] (assoc m id (m/ecount buffer))) {} %)]
+    ;(clojure.pprint/pprint              (get traversal-after-stacking :backward))
+    ;(clojure.pprint/pprint              (get original-traversal :backward))
     (is (= [nil nil]
            (minimal-diff
              (get original-traversal :backward)
@@ -409,41 +414,40 @@
     (is (nil? (:verification-failures top-network)))
     (is (= (graph/parameter-count (network/network->graph top-network))
            (graph/parameter-count (network/network->graph original-network))))
-    (is (= (layer-graph->buffer-id-size-fn (get-in top-network [:layer-graph :buffers]))
-           (layer-graph->buffer-id-size-fn (get-in original-network [:layer-graph :buffers]))))))
+    (is (= (compute-graph->buffer-id-size-fn (get-in top-network [:compute-graph :buffers]))
+           (compute-graph->buffer-id-size-fn (get-in original-network [:compute-graph :buffers]))))))
 
 
 (deftest remove-layers-from-network
-  (let [mnist-net (-> (network/build-network mnist-description-with-toys)
+  (let [mnist-net (-> (network/linear-network mnist-description-with-toys)
                     traverse/auto-bind-io)
         chopped-net (network/dissoc-layers-from-network mnist-net :dropout-4)]
     (is (= #{:softmax-1 :linear-2 :dropout-4}
            (clojure.set/difference
-             (set (keys (get-in mnist-net [:layer-graph :id->node-map])))
-             (set (keys (get-in chopped-net [:layer-graph :id->node-map]))))))
+             (set (keys (get-in mnist-net [:compute-graph :nodes])))
+             (set (keys (get-in chopped-net [:compute-graph :nodes]))))))
     (is (= #{[:feature :dropout-4] [:dropout-4 :linear-2] [:linear-2 :softmax-1]}
            (clojure.set/difference
-             (set (get-in mnist-net [:layer-graph :edges]))
-             (set (get-in chopped-net [:layer-graph :edges])))))
+             (set (get-in mnist-net [:compute-graph :edges]))
+             (set (get-in chopped-net [:compute-graph :edges])))))
     (is (= #{:linear-2-bias-1 :linear-2-weights-1}
            (clojure.set/difference
-             (set (keys (get-in mnist-net [:layer-graph :buffers])))
-             (set (keys (get-in chopped-net [:layer-graph :buffers]))))))))
+             (set (keys (get-in mnist-net [:compute-graph :buffers])))
+             (set (keys (get-in chopped-net [:compute-graph :buffers]))))))))
 
 
 
 (deftest inference-after-train
   (let [network (build-big-description)
-        training-net (traverse/network->training-traversal network stream->size-map)
-        inference-net (traverse/network->inference-traversal
-                       (traverse/auto-bind-io training-net) stream->size-map)
+        training-net (traverse/add-training-traversal network stream->size-map)
+        inference-net (traverse/add-forward-traversal (traverse/auto-bind-io training-net) stream->size-map)
         output-bindings (vec (traverse/get-output-bindings inference-net))]
     (is (= 1 (count output-bindings)))
     (is (= :softmax-1 (get-in output-bindings [0 :node-id])))))
 
 
 (deftest concatenate-traversal-1
-  (let [network (-> (network/build-network [(layers/input 10 10 10)
+  (let [network (-> (network/linear-network [(layers/input 10 10 10)
                                             (layers/linear 500 :id :right)
                                             (layers/input 500 1 1 :parents [] :id :left)
                                             (layers/concatenate :parents [:left :right]
@@ -453,8 +457,8 @@
         stream->size-map {:data-1 (* 25 25 10)
                           :data-2 500
                           :labels 10}
-        train-network (traverse/network->training-traversal network stream->size-map)
-        inference-network (traverse/network->inference-traversal network stream->size-map)
+        train-network (traverse/add-training-traversal network stream->size-map)
+        inference-network (traverse/add-forward-traversal network stream->size-map)
         train-traversal (-> (get train-network :traversal)
                             realize-traversals)
         inference-traversal (-> (get inference-network :traversal)
@@ -500,7 +504,7 @@
             (get inference-traversal :forward))))))
 
 (deftest concatenate-traversal-2
-  (let [network (-> (network/build-network [(layers/input 10 10 10)
+  (let [network (-> (network/linear-network [(layers/input 10 10 10)
                                             (layers/linear 500 :id :right)
                                             (layers/input 500 1 1 :parents [] :id :left)
                                             ;;Switch the left and right nodes.  Attempting to
@@ -513,7 +517,7 @@
         stream->size-map {:data-1 (* 25 25 10)
                           :data-2 500
                           :labels 10}
-        train-network (traverse/network->training-traversal network stream->size-map)
+        train-network (traverse/add-training-traversal network stream->size-map)
         train-traversal (-> (get train-network :traversal)
                             realize-traversals)]
     (is (= [nil nil]
@@ -547,7 +551,7 @@
 
 
 (deftest split-traversal
-  (let [network (-> (network/build-network [(layers/input 50)
+  (let [network (-> (network/linear-network [(layers/input 50)
                                             (layers/split :id :split)
                                             (layers/linear 10)
                                             (layers/linear 20 :parents [:split])])
@@ -556,7 +560,7 @@
                           :labels-1 10
                           :labels-2 20}
 
-        train-network (traverse/network->training-traversal network stream->size-map)
+        train-network (traverse/add-training-traversal network stream->size-map)
         train-traversal (-> (get train-network :traversal)
                             realize-traversals)]
     (is (= [nil nil]
@@ -591,3 +595,24 @@
               :loss {:type :mse-loss},
               :dimension {:channels 1, :height 1, :width 20}}}
             (get train-traversal :buffers))))))
+
+
+(deftest concat-nil-streams
+  (testing "This just tests that we can bind specific input streams to the left and right nodes."
+    (let [item-count 5
+          network (network/linear-network [(layers/input item-count 1 1 :id :right)
+                                           (layers/input item-count 1 1 :parents [] :id :left)
+                                           (layers/concatenate :parents [:left :right]
+                                                               :id :test)])
+          stream->size-map {:data-1 5, :data-2 5, :labels 10}
+          bindings {:right :data-2
+                    :left :data-1}
+          traversal (-> network
+                        (traverse/auto-bind-io :input-bindings bindings)
+                        (traverse/add-training-traversal stream->size-map)
+                        :traversal)]
+      (is (= {:stream :data-2} (get-in traversal [:input-bindings :right])))
+      (is (= {:stream :data-1} (get-in traversal [:input-bindings :left])))
+      (is (not (nil? (get-in traversal [:buffers {:stream :data-2}]))))
+      (is (not (nil? (get-in traversal [:buffers {:stream :data-1}]))))))
+  )

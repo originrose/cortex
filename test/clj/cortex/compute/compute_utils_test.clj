@@ -1,6 +1,6 @@
 (ns cortex.compute.compute-utils-test
   (:require [clojure.test :refer :all]
-            [cortex.compute.cpu-driver :as cpu-drv]
+            [cortex.compute.cpu.driver :as cpu-drv]
             [cortex.compute.driver :as drv]
             [cortex.compute.math :as math]
             [cortex.compute.compute-utils :as cu]
@@ -11,7 +11,7 @@
   (let [data-size 50
         result-seq
         (cu/compute-map (fn []
-                          (let [driver (cpu-drv/create-driver)
+                          (let [driver (cpu-drv/driver)
                                 stream (drv/create-stream driver)
                                 upload-buffer (drv/allocate-host-buffer driver data-size :double)
                                 process-buffer (drv/allocate-device-buffer driver

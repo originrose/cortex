@@ -1,36 +1,40 @@
-(ns cortex.compute.nn.cpu-backend
-  (:require [cortex.compute.nn.backend :as nn-backend]
-            [cortex.compute.driver :as drv]
-            [cortex.compute.math :as math]
-            [cortex.compute.cpu-driver :as cpu-drv]
-            [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
-            [cortex.compute.nn.layers :as compute-layers]
-            [cortex.compute.nn.protocols :as compute-protocols]
-            [cortex.nn.layers :as layers]
-            [clojure.core.matrix :as m]
-            [clojure.core.matrix.protocols :as mp]
-            [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.nn.impl :as impl]
-            [cortex.graph :as graph])
-  (:import [cortex.compute.cpu_driver CPUDriver CPUStream]
-           [java.nio DoubleBuffer FloatBuffer]
-           [cortex.compute.math DeviceArray Tensor]
-           [java.util Arrays]
-           [java.util.concurrent ForkJoinPool Callable Future]
-           [think.datatype ArrayView DoubleArrayView FloatArrayView]))
+(ns cortex.compute.cpu.backend
+  (:require
+    [clojure.core.matrix :as m]
+    [clojure.core.matrix.protocols :as mp]
+    [clojure.core.matrix.macros :refer [c-for]]
+    [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
+    [cortex.graph :as graph]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.impl :as impl]
+    [cortex.compute.driver :as drv]
+    [cortex.compute.math :as math]
+    [cortex.compute.cpu.driver :as cpu-drv]
+    [cortex.compute.nn.layers :as compute-layers]
+    [cortex.compute.nn.protocols :as compute-protocols]
+    [cortex.compute.nn.backend :as nn-backend])
+  (:import
+    [java.util Arrays]
+    [java.util.concurrent ForkJoinPool Callable Future]
+    [java.nio DoubleBuffer FloatBuffer]
+    [think.datatype ArrayView DoubleArrayView FloatArrayView]
+    [cortex.compute.cpu.driver CPUDriver CPUStream]
+    [cortex.compute.math DeviceArray Tensor]))
+
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-(defrecord CPUBackend [type ^CPUDriver driver ^CPUStream stream datatype])
 
-(defn create-backend
-  (^CPUDriver [datatype]
-   (let [driver (cpu-drv/create-driver)
+(defrecord CPUBackend [type driver stream datatype])
+
+(defn backend
+  ([datatype]
+   (let [driver (cpu-drv/driver)
          stream (drv/create-stream driver)]
      (->CPUBackend :cpu driver stream datatype)))
-  (^CPUBackend []
-   (create-backend :double)))
+  ([]
+   (backend :double)))
 
 
 (defprotocol PCPUNetworkImpl
@@ -57,6 +61,7 @@
                     output-gradient batch-size batch-stride])
   (cpu-lrn-forward [input output input-tensor n k alpha beta])
   (cpu-lrn-backward [input output-gradient input-gradient input-tensor n k alpha beta]))
+
 
 (defn launch-parallel-for
   [^long num-iters parallel-for-fn]
@@ -102,7 +107,6 @@
                                     (< ~idx-var group-end#)
                                     (inc ~idx-var)]
                                    ~@body)))))
-
 
 (defmacro cpu-act-forward-impl
   [act-type input output cast-fn]
@@ -871,21 +875,21 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                (first-gradient output)
                                (first-gradient input)))))
 
-(defmulti create-cpu-layer
-  "Create a implementation layer for the cpu backend."
-  (fn [backend layer batch-size]
+(defmulti cpu-layer
+          "Create a implementation layer for the cpu backend."
+          (fn [backend layer batch-size]
     (get layer :type)))
 
 
-(defmethod create-cpu-layer :logistic
+(defmethod cpu-layer :logistic
   [backend layer batch-size]
   (->ActivationLayer layer (drv/get-stream backend)))
 
-(defmethod create-cpu-layer :relu
+(defmethod cpu-layer :relu
   [backend layer batch-size]
   (->ActivationLayer layer (drv/get-stream backend)))
 
-(defmethod create-cpu-layer :tanh
+(defmethod cpu-layer :tanh
   [backend layer batch-size]
   (->ActivationLayer layer (drv/get-stream backend)))
 
@@ -902,7 +906,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                       (compute-layers/first-gradient output))))
 
 
-(defmethod create-cpu-layer :softmax
+(defmethod cpu-layer :softmax
   [backend layer batch-size]
   (->SoftmaxLayer layer (drv/get-stream backend)))
 
@@ -924,7 +928,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (defrecord ConvolutionalLayer [backend conv-config input-convolved ones])
 
-(defn create-convolution-matrix
+(defn convolution-matrix
   [config backend batch-size]
   (let [output-width (long (:output-width config))
         output-height (long (:output-height config))
@@ -935,12 +939,12 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (nn-backend/new-array backend [n-rows n-cols] batch-size)))
 
 
-(defn create-conv-layer [backend conv-config ^long batch-size]
+(defn conv-layer [backend conv-config ^long batch-size]
   (let [conv-config (conv-type-layer->conv-config conv-config)
         num-out-pixels (* (long (:output-width conv-config))
                           (long (:output-height conv-config)))]
     (->ConvolutionalLayer backend conv-config
-                          (create-convolution-matrix conv-config backend batch-size)
+                          (convolution-matrix conv-config backend batch-size)
                           (math/allocate-ones (drv/get-driver backend) (drv/get-stream backend)
                                               (dtype/get-datatype backend) num-out-pixels))))
 
@@ -953,7 +957,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
           num-out-pixels (* output-width output-height)
           num-out-channels (long num-kernels)
           cpu-stream (drv/get-stream (.backend layer))
-          current-thread-stream (cpu-drv/create-main-thread-cpu-stream)
+          current-thread-stream (cpu-drv/main-thread-cpu-stream)
           input (compute-layers/first-buffer input-buffers)
           output (compute-layers/first-buffer output-buffers)
           weights (get-in parameter-buffers [:weights :buffer])
@@ -964,8 +968,9 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
       (cpu-drv/with-stream-dispatch cpu-stream
         (doall (pmap (fn [[input output input-convolved]]
                       ;;Redefine output to be the correct shape
-                      (let [output (math/with-tensor output
-                                     (math/create-tensor num-out-channels num-out-pixels))]
+                      (let [output (math/with-tensor
+                                     output
+                                     (math/tensor num-out-channels num-out-pixels))]
                         (cpu-planar-input->convolution! (device-array->view input)
                                                         (device-array->view input-convolved)
                                                         (.conv-config layer))
@@ -979,6 +984,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                     (math/batched-data-to-per-input-data
                      (drv/get-driver (.backend layer))
                      [input output (.input-convolved layer)]))))))
+
   (backward [layer parameter-buffers output-buffers input-buffers]
     (let [{:keys [num-kernels] :as conv-config} (.conv-config layer)
           output-width (long (:output-width conv-config))
@@ -998,13 +1004,13 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
           batched-data [input output input-gradient output-gradient input-convolved]
           io-data (math/batched-data-to-per-input-data batch-driver batched-data)
           cpu-stream (drv/get-stream (.backend layer))
-          current-thread-stream (cpu-drv/create-main-thread-cpu-stream)]
+          current-thread-stream (cpu-drv/main-thread-cpu-stream)]
       (cpu-drv/with-stream-dispatch cpu-stream
         ;;compute the weights gradient.  These aren't too expensive but we cannot easily
         ;;parallelize this because it is an accumulation.
         (doseq [[input output input-gradient output-gradient input-convolved] io-data]
           (let [output-gradient (math/with-tensor output-gradient
-                                  (math/create-tensor num-out-channels num-out-pixels))]
+                                  (math/tensor num-out-channels num-out-pixels))]
             (math/gemm current-thread-stream false true
                        1.0 (.ones layer) output-gradient
                        1.0 bias-gradient)
@@ -1018,8 +1024,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
         ;;it *after* the above step.
         (doall (pmap (fn [[input output input-gradient output-gradient input-convolved]]
                        (let [output-gradient (math/with-tensor output-gradient
-                                               (math/create-tensor num-out-channels
-                                                                   num-out-pixels))]
+                                               (math/tensor num-out-channels
+                                                            num-out-pixels))]
                          ;;set input gradient at this batch location to empty
                          (cpu-fill (device-array->view input-gradient) 0)
                          (math/gemm current-thread-stream true false
@@ -1031,9 +1037,9 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                      io-data))))))
 
 
-(defmethod create-cpu-layer :convolutional
+(defmethod cpu-layer :convolutional
   [backend layer batch-size]
-  (create-conv-layer backend layer (long batch-size)))
+  (conv-layer backend layer (long batch-size)))
 
 
 (defrecord MaxPooling [backend conv-config]
@@ -1067,7 +1073,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                       [input output input-gradient output-gradient])))))))
 
 
-(defmethod create-cpu-layer :max-pooling
+(defmethod cpu-layer :max-pooling
   [backend layer batch-size]
   (->MaxPooling backend (conv-type-layer->conv-config layer)))
 
@@ -1075,10 +1081,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 (defn- layer-output->tensor
   [layer batch-size]
   (let [{:keys [channels width height]} (first (graph/node->output-dimensions layer))]
-   (math/create-tensor batch-size
-                       channels
-                       height
-                       width)))
+    (math/tensor batch-size channels height width)))
+
 
 (defrecord BatchNormalization [backend]
   nn-backend/PBatchNormalization
@@ -1125,7 +1129,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                          batch-size batch-stride)))))
 
 
-(defmethod create-cpu-layer :batch-normalization
+(defmethod cpu-layer :batch-normalization
   [backend layer batch-size]
   (->BatchNormalization backend))
 
@@ -1149,7 +1153,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                           n k alpha beta)))))
 
 
-(defmethod create-cpu-layer :local-response-normalization
+(defmethod cpu-layer :local-response-normalization
   [backend layer batch-size]
   (->LocalResponseNormalization backend layer batch-size))
 
@@ -1163,7 +1167,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (get-stream [backend] (.stream backend))
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
-    (create-cpu-layer backend layer batch-size))
+    (cpu-layer backend layer batch-size))
   nn-backend/PDropout
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]
     (cpu-drv/with-stream-dispatch (.stream backend)

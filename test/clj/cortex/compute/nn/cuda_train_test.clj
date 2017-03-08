@@ -2,15 +2,15 @@
   (:require [clojure.test :refer :all]
             [cortex.verify.nn.train :as verify-train]
             [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
-            [cortex.compute.nn.cuda-backend :as cuda-backend]
-            [cortex.compute.nn.compute-execute :as ce]))
+            [cortex.compute.cuda.backend :as cuda-backend]
+            [cortex.nn.execute :as ce]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
 (defn create-context
   []
-  (ce/create-context
-   #(cuda-backend/create-backend verify-utils/*datatype*)))
+  (ce/compute-context :datatype verify-utils/*datatype*
+                      :backend :cuda))
 
 (deftest corn
   (verify-train/test-corn (create-context)))

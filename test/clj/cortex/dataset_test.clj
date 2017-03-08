@@ -4,11 +4,11 @@
 
 
 (deftest in-memory-dataset
-  (let [test-ds (ds/create-in-memory-dataset {:data {:data (vec (repeat 1000 [1 2 3 4 5]))
+  (let [test-ds (ds/in-memory-dataset {:data         {:data (vec (repeat 1000 [1 2 3 4 5]))
                                                      :shape 5}
                                               :label {:data (vec (repeat 1000 [1 2]))
                                                       :shape 2}}
-                                             {:training (vec (shuffle (range 500)))
+                                      {:training (vec (shuffle (range 500)))
                                               :cross-validation (vec (range 500 1000))
                                               :holdout (vec (range 500 1000))})
         epoch (ds/get-batches test-ds 10 :training [:data :data :label])]
@@ -34,10 +34,10 @@
 
 (deftest inifinite-dataset
   (let [data-epoch-seq (repeat (repeat [[1 2 3 4 5] [1 2]]))
-        test-ds (ds/create-infinite-dataset [[:data 5] [:label 2]]
-                                            data-epoch-seq
-                                            data-epoch-seq
-                                            data-epoch-seq)
+        test-ds (ds/infinite-dataset [[:data 5] [:label 2]]
+                                     data-epoch-seq
+                                     data-epoch-seq
+                                     data-epoch-seq)
         epoch (take 50 (ds/get-batches test-ds 10 :training [:data :data :label]))]
     (is (= 50
            (count epoch)))

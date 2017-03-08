@@ -1,11 +1,11 @@
 (ns cortex.nn.network
   "Translation from cortex layer vectors into actual network graphs."
-  (:require [cortex.nn.layers :as layers]
-            [clojure.core.matrix :as m]
-            [cortex.core-matrix-backends :as b]
-            [cortex.graph :as graph]
-            [clojure.pprint :as pprint]
-            [clojure.set :as c-set])
+  (:require
+    [clojure.set :as c-set]
+    [clojure.pprint :as pprint]
+    [clojure.core.matrix :as m]
+    [cortex.graph :as graph]
+    [cortex.nn.layers :as layers])
   (:import [java.util UUID]))
 
 
@@ -20,6 +20,7 @@
                      (assoc desc param-name {:buffer node-param})
                      desc)))
                desc)))
+
 
 (defn- add-node-to-graph
   [[graph last-id] desc]
@@ -46,18 +47,24 @@
          (-> graph
              (graph/update-node id #(assoc-in % [:input :stream] id))
              (graph/add-stream id
-                               (graph/create-stream-descriptor
+                               (graph/stream-descriptor
                                  output-channels
                                  output-height
                                  output-width))))
        graph)
      id]))
 
-(defn build-network
+
+(defn network
+  ([]
+   {:compute-graph (graph/empty-graph)}))
+
+
+(defn linear-network
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
   ([network network-desc]
-   (update network :layer-graph
+   (update network :compute-graph
      (fn [graph]
        (-> (first
              (reduce add-node-to-graph
@@ -66,48 +73,52 @@
            graph/build-graph
            graph/generate-parameters))))
   ([network-desc]
-   (build-network {:layer-graph (graph/empty-graph)} network-desc)))
-
-(defn add-property-to-layer
-  "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id
-  To get a list of node-id -> (keys (get-in network [:layer-graph :id->node-map)))
-  ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0 :regularization )"
-  [network node-id key value]
-  (update network :layer-graph
-          (fn [graph]
-           (graph/update-node graph node-id #(assoc % key value)))))
+   (linear-network {:compute-graph (graph/empty-graph)} network-desc)))
 
 
 ;; When using these functions, make sure to call traverse/auto-bind-io
 ;; and traverse/network->training-traversal on the resulting network
 (defn assoc-layers-to-network
-  "Appends a list of layers to the end of the layer-graph"
+  "Appends a list of layers to the end of the compute-graph"
   [network layer-list]
-  (let [leaves (graph/leaves (get network :layer-graph))
+  (let [leaves (graph/leaves (get network :compute-graph))
         layer-list (vec (flatten layer-list))]
     (when-not (= 1 (count leaves))
       (throw (ex-info "cannot auto-append to graphs with either zero or multiple leaves"
                       {:leaves leaves})))
-    (build-network network (update layer-list 0 #(assoc % :parents leaves)))))
+    (linear-network network (update layer-list 0 #(assoc % :parents leaves)))))
 
 
 (defn dissoc-layers-from-network
   "Removes layers (nodes, edges, buffers) from the given parent node till the last leaf node"
   [network parent-node-id]
-  (update network :layer-graph graph/remove-node parent-node-id))
+  (update network :compute-graph graph/remove-node parent-node-id))
+
+
+
+(defn add-property-to-layer
+  "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id
+  To get a list of node-id -> (keys (get-in network [:compute-graph :nodes)))
+  ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0 :regularization )"
+  [network node-id key value]
+  (update network :compute-graph
+          (fn [graph]
+           (graph/update-node graph node-id #(assoc % key value)))))
 
 
 (defn network->graph
   [network]
-  (if-let [retval (get network :layer-graph)]
+  (if-let [retval (get network :compute-graph)]
     retval
-    (throw (ex-info "Network does not appear to contain a graph; keys should contain :layer-graph"
+    (throw (ex-info "Network does not appear to contain a graph; keys should contain :compute-graph"
                     {:network-keys (keys network)}))))
+
 
 (defn network->node
   [network node-id]
   (-> (network->graph network)
       (graph/get-node node-id)))
+
 
 (defn network->node-parameters
   ([network node-id]
@@ -128,8 +139,8 @@
 (defn- network->parameter-keys
   [network]
   (->> network
-       :layer-graph
-       :id->node-map
+       :compute-graph
+       :nodes
        vals
        (mapcat graph/get-node-arguments)
        (filter #(= :parameter (get % :type)))
@@ -159,7 +170,7 @@
 (defn- layer->buffer-shape
   [network layer k]
   (-> network
-      (get-in [:layer-graph :buffers (get-in layer [k :buffer-id]) :buffer])
+      (get-in [:compute-graph :buffers (get-in layer [k :buffer-id]) :buffer])
       m/shape))
 
 
@@ -169,7 +180,7 @@ as parameter buffer shapes. This function does not work with descriptions (as
 opposed to networks), but consider:
 
     (->> description
-         network/build-network
+         network/linear-network
          traverse/auto-bind-io
          traverse/network->training-traversal
          network/print-layer-summary)"
@@ -185,7 +196,8 @@ opposed to networks), but consider:
                          (for [k parameter-keys]
                                    [k (layer->buffer-shape network layer k)])))))
          (pprint/print-table (concat ["type" "input" "output"] parameter-keys))))
-  (println "\nParameter count:" (graph/parameter-count (network->graph network))))
+  ;(println "\nParameter count:" (graph/parameter-count (network->graph network)))
+  )
 
 
 (defn- node-id-is-in-pass?
