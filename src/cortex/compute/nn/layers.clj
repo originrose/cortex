@@ -258,13 +258,16 @@ and then forward many times for every parameter of the network."
                                         input-stride :dest-stride num-output)
                       :gradient
                       ;;Copy from output to input buffer.
-                      (drv/indexed-copy stream
-                                        target-buf batch-indexes
-                                        (math/device-buffer input-buffer) batch-indexes
-                                        input-stride :src-stride num-output))
+                      (do
+                       (drv/indexed-copy stream
+                                         target-buf batch-indexes
+                                         (math/device-buffer input-buffer) batch-indexes
+                                         input-stride :src-stride num-output)))
+
                     (+ offset (long input-stride))))
                 0
                 (map buffer-key input-buffers))]
+
     ;;Ensure the result adds up to the correct amount.
     (when-not (- (long final-offset) (long num-output))
       (throw (ex-info "Output size and input buffer count mismatch"

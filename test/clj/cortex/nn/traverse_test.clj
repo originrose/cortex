@@ -596,3 +596,23 @@
               :dimension {:channels 1, :height 1, :width 20}}}
             (get train-traversal :buffers))))))
 
+
+(deftest concat-nil-streams
+  (testing "This just tests that we can bind specific input streams to the left and right nodes."
+    (let [item-count 5
+          network (network/linear-network [(layers/input item-count 1 1 :id :right)
+                                           (layers/input item-count 1 1 :parents [] :id :left)
+                                           (layers/concatenate :parents [:left :right]
+                                                               :id :test)])
+          stream->size-map {:data-1 5, :data-2 5, :labels 10}
+          bindings {:right :data-2
+                    :left :data-1}
+          traversal (-> network
+                        (traverse/auto-bind-io :input-bindings bindings)
+                        (traverse/add-training-traversal stream->size-map)
+                        :traversal)]
+      (is (= {:stream :data-2} (get-in traversal [:input-bindings :right])))
+      (is (= {:stream :data-1} (get-in traversal [:input-bindings :left])))
+      (is (not (nil? (get-in traversal [:buffers {:stream :data-2}]))))
+      (is (not (nil? (get-in traversal [:buffers {:stream :data-1}]))))))
+  )

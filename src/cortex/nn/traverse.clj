@@ -46,7 +46,7 @@
 
 (defn bind-input-bindings
   [network input-bindings]
-  (reduce (fn [network [node-id {:keys [stream]}]]
+  (reduce (fn [network [node-id stream]]
             (bind-input-to-stream network node-id stream))
           network
           input-bindings))

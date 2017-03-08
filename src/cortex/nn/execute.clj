@@ -360,6 +360,11 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                       ;;Assoc the input buffers into
                                       ;;the appropriate spots if they
                                       ;;are passed in.
+                                      (when (and (contains? map-key input-key)
+                                                 (nil? (get map-key input-key)))
+                                        (throw (ex-info "Invalid buffer id:"
+                                                        {:map-key map-key
+                                                         :input-key input-key})))
                                       (let [input-buffer (get id->input-buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
@@ -1195,4 +1200,3 @@ call cortex-dataset/batches->columns"
           ; deallocated when leaving the current resource context!!!
           results (doall (infer-batch-sequence context network batches {}))]
       results)))
-

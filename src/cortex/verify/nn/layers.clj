@@ -124,7 +124,6 @@
   (let [size-map (io-vec->stream->size-map input-vec
                                   output-grad-vec
                                   batch-size)
-        _ (println "size-map: " size-map)
         network (bind-test-network context network batch-size size-map
                                    :input-bindings input-bindings)]
     (forward-backward-bound-network context network
@@ -681,29 +680,29 @@
                   (mapv :gradient incoming-buffers)))
     (is (m/equals outputs
                   (get-in outgoing-buffers [0 :buffer])))
-
-    (let [network-rl [(layers/input item-count 1 1 :id :right)
-                      (layers/input item-count 1 1 :parents [] :id :left)
-                      (layers/concatenate :parents [:right :left]
-                                          :id :test)]
-          {:keys [incoming-buffers outgoing-buffers]}
-          (forward-backward-test-multiple context network-rl batch-size
-                                          inputs [output-gradients]
-                                          :input-bindings {:right :data-2
-                                                           :left :data-1})
-          swapped-outputs (->> (partition (* item-count batch-size)
-                                          (range (* batch-size item-count
-                                                    num-inputs)))
-                               (map #(partition item-count %))
-                               (apply interleave)
-                               (partition num-inputs)
-                               (mapv #(vec (->> %
-                                                reverse
-                                                (apply concat)))))]
-      (is (m/equals input-gradients
-                    (mapv :gradient incoming-buffers)))
-      (is (m/equals swapped-outputs
-                    (get-in outgoing-buffers [0 :buffer]))))))
+    (comment
+     (let [network-rl [(layers/input item-count 1 1 :id :right)
+                       (layers/input item-count 1 1 :parents [] :id :left)
+                       (layers/concatenate :parents [:right :left]
+                                           :id :test)]
+           {:keys [incoming-buffers outgoing-buffers]}
+           (forward-backward-test-multiple context network-rl batch-size
+                                           inputs [output-gradients]
+                                           :input-bindings {:right :data-2
+                                                            :left :data-1})
+           swapped-outputs (->> (partition (* item-count batch-size)
+                                           (range (* batch-size item-count
+                                                     num-inputs)))
+                                (map #(partition item-count %))
+                                (apply interleave)
+                                (partition num-inputs)
+                                (mapv #(vec (->> %
+                                                 reverse
+                                                 (apply concat)))))]
+       (is (m/equals input-gradients
+                     (mapv :gradient incoming-buffers)))
+       (is (m/equals swapped-outputs
+                     (get-in outgoing-buffers [0 :buffer])))))))
 
 
 (defn split
