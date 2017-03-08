@@ -335,7 +335,8 @@ no change to the input."
 
 ;; Convolutional Layers
 
-(defn- convolutional-type-layer
+(defn convolutional-type-layer
+  "This function is used in the importers so it cannot be private."
   [layer-type kernel-width kernel-height pad-x pad-y
    stride-x stride-y num-kernels dimension-op
    & args]
@@ -607,5 +608,3 @@ input dimensions."
 (defmethod graph/get-node-metadata :split
   [desc]
   {:passes #{:training :inference}})
-
-

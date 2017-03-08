@@ -334,7 +334,7 @@ whitespace = #'\\s*'")
       (when-let [failures (seq (get network :verification-failures))]
         (let [ordered-nodes (->> network
                                  traverse/auto-bind-io
-                                 (#(traverse/network->inference-traversal % {}))
+                                 (#(traverse/add-forward-traversal % {}))
                                  (#(get-in % [:traversal :forward]))
                                  (mapv (fn [{:keys [incoming id outgoing]}]
                                            (get-in network [:compute-graph :nodes id]))))]
