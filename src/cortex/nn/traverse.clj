@@ -18,7 +18,7 @@
 (defn input-binding
   "Create a stand-alone input binding"
   [node-id stream-name]
-  [node-id {:stream stream-name}])
+  [node-id stream-name])
 
 
 (defn output-binding

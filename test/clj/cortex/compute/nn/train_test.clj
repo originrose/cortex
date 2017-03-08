@@ -23,4 +23,3 @@
 
 (def-double-float-test mnist
   (verify-train/train-mnist (create-context)))
-

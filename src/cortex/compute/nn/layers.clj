@@ -263,7 +263,6 @@ and then forward many times for every parameter of the network."
                                          target-buf batch-indexes
                                          (math/device-buffer input-buffer) batch-indexes
                                          input-stride :src-stride num-output)))
-
                     (+ offset (long input-stride))))
                 0
                 (map buffer-key input-buffers))]

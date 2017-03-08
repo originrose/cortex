@@ -50,39 +50,40 @@
 (defrecord DatasetBatchingSystem [backend ^long batch-size stream->batch-info-map]
   PBatchingSystem
   (add-streams [bs batch-map]
-    (assoc bs :stream->batch-info-map
-      (merge stream->batch-info-map
-        (->> batch-map
-             (map (fn [[k v]]
-                    (let [v (if (map? v)
-                              v
-                              {:data v})
-                          data-size (long (m/ecount (get v :data)))
-                          item-size (quot data-size batch-size)]
-                      (when-not (= 0 (rem data-size (long batch-size)))
-                        (throw (ex-info "Data coming from batch is not multiple of batch-size"
-                                        {:data-size data-size
-                                         :batch-size batch-size
-                                         :stream k})))
-                      (if-let [existing (get stream->batch-info-map k)]
-                        (do
-                          (let [incoming-size
-                                (quot (-> (get-in existing [:batch-buffers :host-buffer])
-                                          (m/ecount))
-                                      batch-size)]
-                            (when-not (= incoming-size
-                                         item-size)
-                              (throw (ex-info "Incoming data size mismatch from expected size"
-                                              {:incoming-size item-size
-                                               :expected-size incoming-size
-                                               :stream k}))))
-                          [k existing])
-                        [k
-                         (assoc (dissoc v :data)
-                                :batch-buffers (batch-buffers backend
-                                                              (assoc v :size item-size)
-                                                              batch-size))]))))
-             (into {})))))
+    (assoc bs
+           :stream->batch-info-map
+           (merge stream->batch-info-map
+                  (->> batch-map
+                       (map (fn [[k v]]
+                              (let [v (if (map? v)
+                                        v
+                                        {:data v})
+                                    data-size (long (m/ecount (get v :data)))
+                                    item-size (quot data-size batch-size)]
+                                (when-not (= 0 (rem data-size (long batch-size)))
+                                  (throw (ex-info "Data coming from batch is not multiple of batch-size"
+                                                  {:data-size data-size
+                                                   :batch-size batch-size
+                                                   :stream k})))
+                                (if-let [existing (get stream->batch-info-map k)]
+                                  (do
+                                    (let [incoming-size
+                                          (quot (-> (get-in existing [:batch-buffers :host-buffer])
+                                                    (m/ecount))
+                                                batch-size)]
+                                      (when-not (= incoming-size
+                                                   item-size)
+                                        (throw (ex-info "Incoming data size mismatch from expected size"
+                                                        {:incoming-size item-size
+                                                         :expected-size incoming-size
+                                                         :stream k}))))
+                                    [k existing])
+                                  [k
+                                   (assoc (dissoc v :data)
+                                          :batch-buffers (batch-buffers backend
+                                                                        (assoc v :size item-size)
+                                                                        batch-size))]))))
+                       (into {})))))
 
   (get-batches [bs batch-map-sequence required-keys]
     (when (= 0 (count required-keys))
@@ -135,4 +136,3 @@
                 [k (assoc v :batch-buffers
                             (batch-buffers backend v batch-size))]))
          (into {}))))
-
