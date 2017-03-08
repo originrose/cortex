@@ -142,7 +142,8 @@ we continue to train forever.
                                  ds/batches->columns)
           cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
           best-network-atom (atom network)
-          context (execute/compute-context :force-gpu? force-gpu?)
+          context (execute/compute-context :backend (when force-gpu?
+                                                      :cuda))
           train-sequence (execute/train context network dataset [] []
                                         :batch-size batch-size
                                         :optimizer optimizer

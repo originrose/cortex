@@ -1123,32 +1123,29 @@ This does not need to be wrapped in a resource context; that is done for you."
     (->> (apply infer context network dataset input-bindings output-bindings args)
          ds/batches->columnsv)))
 
-(defn- try-cuda-backend
+(defn- cuda-backend-fn
   [datatype force-cuda?]
-  (try
-    (require 'cortex.compute.cuda.backend)
-    #((resolve 'cortex.compute.cuda.backend/backend) datatype)
-    (catch Exception e
-      (if force-cuda?
-        (throw (ex-info "Unable to initialize CUDA back-end for GPU support."
-                        {:error e}))
-        false))))
+  (fn []
+    (try
+      (require 'cortex.compute.cuda.backend)
+      ((resolve 'cortex.compute.cuda.backend/backend) datatype)
+      (catch Throwable e
+        (if force-cuda?
+          (throw (ex-info "Unable to initialize CUDA back-end for GPU support."
+                          {:error e}))
+          (do
+            (println "CUDA backend creation failed, reverting to CPU")
+            (cpu/backend datatype)))))))
+
 
 (defn compute-context
   "Attempt to create a cuda context, and then only if that fails create a cpu context."
   [& {:keys [datatype backend]
       :or {datatype :float}}]
-  (let [datatype (or datatype :float)
-        cuda-fn (if (= backend :cpu)
-                  false
-                  (try-cuda-backend datatype (= backend :cuda)))
-        context (if cuda-fn
-                 {:backend :cuda
-                  :backend-fn cuda-fn}
-                 {:backend    :cpu
-                  :backend-fn #(cpu/backend datatype)})
-        context (assoc context :datatype datatype)]
-    context))
+  (let [cuda-fn (when-not (= backend :cpu)
+                  (cuda-backend-fn datatype (= backend :cuda)))]
+    {:backend-fn (or cuda-fn #(cpu/backend datatype))
+     :datatype datatype}))
 
 (defn run
   "Run a network on a dataset.  data is returned as a sequence of maps of:

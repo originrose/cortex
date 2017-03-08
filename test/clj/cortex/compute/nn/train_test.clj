@@ -13,7 +13,7 @@
 
 (defn create-context
   []
-  (execute/compute-context :backend :cuda
+  (execute/compute-context :backend :cpu
                            :datatype test-utils/*datatype*))
 
 
