@@ -20,6 +20,9 @@
            [cortex.compute.math DeviceArray]))
 
 
+(set! *warn-on-reflection* true)
+
+
 (defmacro error
   [msg]
   `(throw (Exception. ~msg)))
@@ -241,18 +244,18 @@
 
 
 (defn layer->flat-tensor
-  [layer batch-size datatype]
+  ^cudnn$cudnnTensorStruct [layer batch-size datatype]
   (tensor datatype 1 1 1 (* (long batch-size) (long (graph/node->output-size layer)))))
 
 
 (defn layer-input->image-tensor
-  [layer batch-size datatype]
+  ^cudnn$cudnnTensorStruct [layer batch-size datatype]
   (let [{:keys [channels width height]} (first (graph/node->input-dimensions layer))]
     (tensor datatype batch-size channels height width)))
 
 
 (defn layer-output->image-tensor
-  [layer batch-size datatype]
+  ^cudnn$cudnnTensorStruct [layer batch-size datatype]
   (let [{:keys [channels width height]} (first (graph/node->output-dimensions layer))]
     (tensor datatype batch-size channels height width)))
 
@@ -377,7 +380,7 @@
   (let [layer (cpu-backend/conv-type-layer->conv-config layer)
         ^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
         ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
-        input-tensor (layer-input->image-tensor layer batch-size)
+        ^cudnn$cudnnTensorStruct input-tensor (layer-input->image-tensor layer batch-size)
         ^cudnn$cudnnContext cudnn-context (get-cudnn backend)
         datatype (dtype/get-datatype backend)
         tensor-datatype (dtype->cudnn datatype)

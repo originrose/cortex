@@ -9,7 +9,10 @@
     [cortex.compute.cuda.driver :as cuda-drv]
     [cortex.util :as util])
   (:import
-    [cortex.compute.optimize AdadeltaOptimizer]))
+   [cortex.compute.optimize AdadeltaOptimizer]
+   [think.datatype FloatArrayView DoubleArrayView]))
+
+(set! *warn-on-reflection* true)
 
 (defrecord Adadelta [backend optimizer step-fn param-count grad-accum dx-accum]
   PGradientOptimizer
@@ -30,18 +33,18 @@
    (->Adadelta backend optimizer step-fn param-count m v)))
 
 (defn cpu-adadelta-step-float!
-  [gradient parameters gradient-alpha
-   param-offset decay epsilon grad-accum dx-accum]
+  [^FloatArrayView gradient ^FloatArrayView parameters gradient-alpha
+   param-offset decay epsilon ^FloatArrayView grad-accum ^FloatArrayView dx-accum]
   (AdadeltaOptimizer/step_f
-    (float gradient-alpha) (.data gradient) (.data parameters)
+    (float gradient-alpha)  (.data gradient) (.data parameters)
     (int param-offset) (float decay) (float epsilon)
     (.data grad-accum) (.data dx-accum)))
 
 (defn cpu-adadelta-step-double!
-  [gradient parameters gradient-alpha
-   param-offset decay epsilon grad-accum dx-accum]
+  [^DoubleArrayView gradient ^DoubleArrayView parameters gradient-alpha
+   param-offset decay epsilon ^DoubleArrayView grad-accum ^DoubleArrayView dx-accum]
   (AdadeltaOptimizer/step_d
-    (double gradient-alpha) (.data gradient) (.data parameters)
+    (double gradient-alpha)  (.data gradient) (.data parameters)
     (int param-offset) (double decay) (double epsilon)
     (.data grad-accum) (.data dx-accum)))
 
@@ -59,8 +62,9 @@
           (let [gradient-view (cpu-backend/device-array->view gradient)
                 param-view (cpu-backend/device-array->view parameters)
                 grad-sq-accum-view (cpu-backend/device-array->view grad-sq-accum)
-                dx-sq-accum-view (cpu-backend/device-array->view dx-sq-accum)]
-            (cpu-drv/with-stream-dispatch (.stream backend)
+                dx-sq-accum-view (cpu-backend/device-array->view dx-sq-accum)
+                stream (:stream backend)]
+            (cpu-drv/with-stream-dispatch stream
               (typed-step-fn gradient-view param-view gradient-alpha param-offset
                              decay epsilon grad-sq-accum-view dx-sq-accum-view))))]
     (setup-optimizer backend optimizer step-fn param-count)))
@@ -115,4 +119,3 @@
      :decay 0.05
      :epsilon 1e-6}
     args))
-

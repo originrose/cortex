@@ -17,7 +17,7 @@
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
 
                  ;;The dataset abstraction uses parallel and optionally resource management.
-                 [thinktopic/think.parallel "0.3.4"]
+                 [thinktopic/think.parallel "0.3.5"]
                  [thinktopic/think.datatype "0.3.10"]
 
                  [thinktopic/resource "1.1.0"]

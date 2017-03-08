@@ -4,9 +4,11 @@
             [cortex.nn.traverse :as traverse]
             [cortex.nn.network :as network]
             [cortex.loss :as loss]
-            [cortex.suite.train :as suite-train]
             [cortex.graph :as graph]
             [cortex.util :as util]))
+
+
+(set! *warn-on-reflection* true)
 
 
 (defn infer-n-observations
@@ -14,7 +16,7 @@
   [network observations observation-dataset-shape & {:keys [datatype batch-size force-cpu?]
                                                      :or {datatype :float
                                                           batch-size 1}}]
-  (let [context (execute/compute-context)
+  (let [context (execute/compute-context :datatype datatype :backend (when force-cpu? :cpu))
         ;;Creating an in-memory dataset with exactly 1 set of indexes causes it to use
         ;;that set of indexes without a shuffle or anything for all the different batch types.
         dataset (ds/->InMemoryDataset {:data {:data observations

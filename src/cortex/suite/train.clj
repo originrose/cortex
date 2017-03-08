@@ -11,10 +11,13 @@
     [cortex.nn.execute :as execute]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.network :as network]
-    [cortex.compute.batching-system :as bs]))
+    [cortex.compute.batching-system :as bs])
+  (:import [java.io File]))
 
 (def default-network-filestem "trained-network")
 (def trained-networks-folder "trained-networks/")
+
+(set! *warn-on-reflection* true)
 
 (defn load-network
   "Loads a map of {:cv-loss :network-description :initial-description} if the
@@ -192,11 +195,12 @@ existing traversal bindings."
     (->> trained-networks-folder
          io/file
          file-seq
-         (filter #(let [n (.getPath %)]
-                    (and (.contains n (.concat trained-networks-folder network-filestem))
-                         (.endsWith n ".nippy"))))
+         (filter #(let [n (.getPath ^File %)]
+                    (and (.contains ^String n (.concat ^String trained-networks-folder
+                                                       ^String network-filestem))
+                         (.endsWith ^String n ".nippy"))))
          (map (fn [f] [f (util/read-nippy-file f)]))
-         (map (fn [[f network]] (assoc network :filename (.getName f))))
+         (map (fn [[f network]] (assoc network :filename (.getName ^File f))))
          (map (fn [network] (update network :cv-loss cv-loss->number)))
          (sort-by :cv-loss)
          (map (fn [network] (update network :cv-loss #(format cv-loss-format-string %))))

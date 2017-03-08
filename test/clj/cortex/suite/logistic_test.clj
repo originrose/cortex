@@ -23,7 +23,7 @@
       (s/split-lines)
       (rest)                                     ;; ignore the header row
       (map (fn [l] (drop 2 (s/split l #"," ))))  ;; ignore id, student cols
-      (mapv (fn [[default balance income]]
+      (mapv (fn [[^String default ^String balance ^String income]]
              {:data [(Double. balance) (Double. income)]
               :labels (if (= default "\"Yes\"") [1.0] [0.0])}))))
 
@@ -46,4 +46,3 @@
                                                                       2 :batch-size 2)]
     (is (> should-def 0.97))
     (is (< shouldnt-def 0.02))))
-

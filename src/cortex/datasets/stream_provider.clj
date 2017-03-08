@@ -3,6 +3,8 @@
   (:import [java.io InputStream OutputStream]
            [java.util.zip GZIPInputStream]))
 
+(set! *warn-on-reflection* true)
+
 
 (defprotocol PStreamProvider
   (input-stream [this path])
@@ -47,7 +49,7 @@
 (defn download-stream
   [dataset item url stream-transform-fn item-path]
   (println "downloading" url)
-  (with-open [input (stream-transform-fn (io/input-stream url))
+  (with-open [^InputStream input (stream-transform-fn (io/input-stream url))
               ^OutputStream output (output-stream (provider) (dataset-item->path dataset item))]
     (io/copy input output))
   (println "Finished downloading" url))
