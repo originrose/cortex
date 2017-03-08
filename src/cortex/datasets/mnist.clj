@@ -37,8 +37,8 @@
 
 
 (defn download-dataset-item [name]
-  (stream/download-gzip-stream "mnist" name
-                               (str "http://yann.lecun.com/exdb/mnist/" name ".gz")))
+  (stream/download-gzip-stream
+   "mnist" name (str "https://s3-us-west-2.amazonaws.com/thinktopic.datasets/mnist/" name ".gz")))
 
 
 (defn ^DataInputStream get-data-stream [name]

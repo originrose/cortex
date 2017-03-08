@@ -24,4 +24,4 @@ trained-network.nippy
 trained-networks
 .idea/
 *.iml
-
+examples/suite-classification/mnist-dataset.nippy
