@@ -1,9 +1,8 @@
 FROM ubuntu:16.10
 
-RUN apt-get update && apt-get install -y openjdk-8-jdk libhdf5-dev curl
+RUN apt-get update && apt-get install -y --no-install-recommends openjdk-8-jdk libhdf5-dev curl wget zip g++
 
 
-RUN apt-get install -y wget zip g++
 RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && \
     cp lein /usr/local/bin && chmod a+rx /usr/local/bin/lein && lein upgrade
 
