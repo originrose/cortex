@@ -1187,3 +1187,52 @@ call cortex-dataset/batches->columns"
           ; deallocated when leaving the current resource context!!!
           results (doall (infer-batch-sequence context network batches {}))]
       results)))
+
+(defn dataset-column-shapes
+  [dataset]
+  (->> (first dataset)
+       (map (fn [[k v]] [k (m/ecount v)]))
+       (into {})))
+
+(defn dataset-batches
+  [dataset batch-size]
+  (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
+    (->> dataset
+         (partition batch-size)
+         (map #(apply merge-with conj initial-map %)))))
+
+(defn train-one-batch-from-dataset
+  [network dataset & {:keys [batch-size context optimizer]
+                      :or {batch-size 10}}]
+  (resource/with-resource-context
+    (let [optimizer (or optimizer (adam/adam))
+          context (compute-context)
+          stream-desc (dataset-column-shapes dataset)
+          network (-> network
+                      (assoc :batch-size batch-size)
+                      (traverse/bind-vars-to-network)
+                      (traverse/add-training-traversal stream-desc :optimizer optimizer))
+          network (bind-context-to-network context network {})
+          batch-map-sequence (->> (dataset-batches dataset batch-size)
+                                  (map (partial graph/augment-streams (network/network->graph network))))
+          initial-keys (keys (first batch-map-sequence))
+          bs (-> (get-in network [:compute-binding :batching-system])
+                 ;;In a late binding way, ensure the stream sizes match with the actual streams.
+                 (batching-system/add-streams (first batch-map-sequence)))
+          ;;The buffers do not change going backward so we can pre-map this pass.
+          [network backward-mapped-pass] (map-pass-to-buffers network {} :backward)
+          required-keys (->> (traverse/get-io-bindings network)
+                             (map :stream)
+                             (concat initial-keys)
+                             (distinct))
+          network (assoc-in network [:compute-binding :batching-system] bs)
+          batches (batching-system/get-batches bs batch-map-sequence required-keys)
+          backend (get-in network [:compute-binding :backend])
+          stream (drv/get-stream backend)
+          stream->buffer-map (first batches)]
+      (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
+          (do-traverse stream->buffer-map :forward)
+          (zero-traverse-gradients)
+          (compute-loss-term-gradients)
+          (do-traverse {} :backward)
+          (optimize-network)))))

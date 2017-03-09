@@ -37,6 +37,9 @@
 (def CORN-LABELS
   [[40] [44] [46] [48] [52] [58] [60] [68] [74] [80]])
 
+(def corn-dataset
+  (mapv (fn [d l] {:data d :labels l})
+        CORN-DATA CORN-LABELS))
 
 (def mnist-network
   [(layers/input 28 28 1 :id :input)
@@ -145,6 +148,13 @@
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))
 
+(defn train-next-corn
+  []
+  (let [network [(layers/input 2 1 1 :id :data)
+                 (layers/linear 1 :id :labels)]])
+  (cortex.nn.execute/train-one-batch-from-dataset
+   (network/linear-network network)
+   corn-dataset :batch-size 2))
 
 (defn train-mnist
   [context]
