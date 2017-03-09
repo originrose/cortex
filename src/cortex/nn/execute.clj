@@ -351,7 +351,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 (defn- map-pass-to-buffers
   "Create a new pass with items mapped to buffers."
-  [network id->input-buffer-map pass-direction]
+  [network stream->buffer-map pass-direction]
   (let [{:keys [traversal-key buffer-type input-key]} (get pass-metadata pass-direction)
         traversal-pass (get-in network [:traversal traversal-key])
         backend (get-in network [:compute-binding :backend])
@@ -365,7 +365,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                         (throw (ex-info "Invalid buffer id:"
                                                         {:map-key map-key
                                                          :input-key input-key})))
-                                      (let [input-buffer (get id->input-buffer-map
+                                      (let [input-buffer (get stream->buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
                                           [map-key (assoc buffer-entry buffer-type input-buffer)]
@@ -519,9 +519,9 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn- do-traverse
-  [network id->buffer-map pass-direction]
+  [network stream->buffer-map pass-direction]
   (let [[network mapped-pass] (map-pass-to-buffers network
-                                                   id->buffer-map
+                                                   stream->buffer-map
                                                    pass-direction)
         node-pass-map (group-by :id mapped-pass)
         network (assoc-in network [:compute-binding :node-pass-map] node-pass-map)]
@@ -732,8 +732,7 @@ any loss-specific parameter buffers."
         initial-keys (keys (first batch-map-sequence))
         bs (-> (get-in network [:compute-binding :batching-system])
                ;;In a late binding way, ensure the stream sizes match with the actual streams.
-               (batching-system/add-streams (->> batch-map-sequence
-                                                 first)))
+               (batching-system/add-streams (first batch-map-sequence)))
         ;;The buffers do not change going backward so we can pre-map this pass.
         [network backward-mapped-pass] (map-pass-to-buffers network
                                                             {}
