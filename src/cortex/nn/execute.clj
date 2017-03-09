@@ -639,41 +639,37 @@ and anything that has a loss term attached to it's output becomes an output bind
                      (math/device-buffer buffer) num-w-cols))))
 
 (defn- optimize-network
-  [network parameters optimize?]
-  (if optimize?
-    (let [backend (get-in network [:compute-binding :backend])
-          stream (drv/get-stream backend)
-          driver (drv/get-driver backend)
-
-          ; Call batch-update so the optimizer can do batch level computations
-          optimizer (optimize/batch-update (get-in network [:compute-binding :optimizer]))
-          buffer-alpha (/ 1.0 (double (get network :batch-size)))]
-
-      ; Call compute-parameters! on all of the paramter buffers
-      (reduce (fn [offset {:keys [buffer gradient
-                                  learning-attenuation non-trainable?] :as parameter}]
-                (let [elem-count (long (m/ecount buffer))
-                      l2-max-constraint (double (get parameter :l2-max-constraint 0))
-                      ;;For some things it is easier to just
-                      ;;work at the flat buffer level and
-                      ;;not at the device array level.
-                      gradient-buf (math/device-buffer gradient)
-                      param-buf (math/device-buffer buffer)]
-                  (when-not non-trainable?
-                    (optimize/compute-parameters! optimizer
-                                             (* buffer-alpha learning-attenuation)
-                                             offset gradient buffer)
-                    (when (is-l2-max-constraint-valid? parameter)
-                      (apply-l2-max-constraint backend parameter)))
-                  (when gradient
-                    (drv/memset stream gradient-buf 0 0 elem-count))
-                  (+ offset elem-count)))
-              0
-              parameters)
-      (assoc-in network
-                [:compute-binding :optimizer]
-                optimizer))
-    network))
+  [network]
+  (let [parameters (get-in network [:compute-binding :trainable-parameters])
+        backend (get-in network [:compute-binding :backend])
+        stream (drv/get-stream backend)
+        ;; Call batch-update so the optimizer can do batch level computations
+        optimizer (optimize/batch-update (get-in network [:compute-binding :optimizer]))
+        buffer-alpha (/ 1.0 (double (get network :batch-size)))]
+    ;; Call compute-parameters! on all of the paramter buffers
+    (reduce (fn [offset {:keys [buffer gradient
+                                learning-attenuation non-trainable?] :as parameter}]
+              (let [elem-count (long (m/ecount buffer))
+                    l2-max-constraint (double (get parameter :l2-max-constraint 0))
+                    ;;For some things it is easier to just
+                    ;;work at the flat buffer level and
+                    ;;not at the device array level.
+                    gradient-buf (math/device-buffer gradient)
+                    param-buf (math/device-buffer buffer)]
+                (when-not non-trainable?
+                  (optimize/compute-parameters! optimizer
+                                                (* buffer-alpha learning-attenuation)
+                                                offset gradient buffer)
+                  (when (is-l2-max-constraint-valid? parameter)
+                    (apply-l2-max-constraint backend parameter)))
+                (when gradient
+                  (drv/memset stream gradient-buf 0 0 elem-count))
+                (+ offset elem-count)))
+            0
+            parameters)
+    (assoc-in network
+              [:compute-binding :optimizer]
+              optimizer)))
 
 
 (defn- zero-traverse-gradients
@@ -711,21 +707,20 @@ any loss-specific parameter buffers."
 
 (defn- recur-train-sequence
   "Training is a lazy sequence of these operations."
-  [network parameters optimize? batch-seq]
+  [network optimize? batch-seq]
   (when-let [stream->buffer-map (first batch-seq)]
     ;;Sometimes you have to print the entire batch out to see what is going on.
     (let [backend (get-in network [:compute-binding :backend])
-          stream (drv/get-stream backend)
-          driver (drv/get-driver backend)]
+          stream (drv/get-stream backend)]
       (let [network
             (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
                 (do-traverse stream->buffer-map :forward)
                 (zero-traverse-gradients)
                 (compute-loss-term-gradients)
-                (do-traverse {} :backward)
-                (optimize-network parameters optimize?))]
+                (do-traverse {} :backward))
+            network (if optimize? (optimize-network network) network)]
         (cons network
-              (lazy-seq (recur-train-sequence network parameters optimize?
+              (lazy-seq (recur-train-sequence network optimize?
                                               (rest batch-seq))))))))
 
 
@@ -739,9 +734,6 @@ any loss-specific parameter buffers."
                ;;In a late binding way, ensure the stream sizes match with the actual streams.
                (batching-system/add-streams (->> batch-map-sequence
                                                  first)))
-        backend (get-in network [:compute-binding :backend])
-        ;;These are the things we are ultimately optimizing
-        parameters (get-in network [:compute-binding :trainable-parameters])
         ;;The buffers do not change going backward so we can pre-map this pass.
         [network backward-mapped-pass] (map-pass-to-buffers network
                                                             {}
@@ -752,7 +744,7 @@ any loss-specific parameter buffers."
                            distinct)
         network (assoc-in network [:compute-binding :batching-system] bs)]
     (->> (batching-system/get-batches bs batch-map-sequence required-keys)
-         (recur-train-sequence network parameters true))))
+         (recur-train-sequence network true))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -918,7 +910,6 @@ any loss-specific parameter buffers."
         ;;This calls prepare-forward exactly once and does one forward
         ;;plus backward and loss gradient to generate calculated gradients
         network (first (recur-train-sequence network
-                                             parameters
                                              false
                                              [stream->data-map]))
         ;;generate a sequence of buffers in order to generate the numeric gradients.
