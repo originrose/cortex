@@ -29,7 +29,7 @@
         centers (vec (repeat n-classes (vec (repeat n-features center-val))))
         features (vec (repeatedly batch-size #(vec (repeat n-features feature-val))))
         gradients (mapv #(m/sub % 1) features)
-        network (network/build-network [(layers/input n-features 1 1)
+        network (network/linear-network [(layers/input n-features 1 1)
                                         (layers/linear n-features :id :feature)])
 
         graph (-> (graph/add-node (network/network->graph network)
@@ -43,7 +43,7 @@
                                                            :id :center-loss-1)
                                   [:feature])
                   first
-                  (graph/add-stream :labels (graph/create-stream-descriptor 5))
+                  (graph/add-stream :labels (graph/stream-descriptor 5))
                   graph/build-graph
                   graph/generate-parameters)
         driver (drv/get-driver backend)
@@ -66,7 +66,7 @@
                                               {:feature {:buffer (backend/array backend features batch-size)
                                                          :gradient (backend/new-array backend [n-features]
                                                                                       batch-size)}})
-        loss-term (compute-loss/create-compute-loss-term backend {:layer-graph graph} loss-term batch-size)
+        loss-term (compute-loss/create-compute-loss-term backend {:compute-graph graph} loss-term batch-size)
         nonzero-classes [1 0 1 1 0]
         adjusted-centers (mapv #(if (zero? %)
                                   (vec (repeat n-features 1.0))

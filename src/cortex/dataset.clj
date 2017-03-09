@@ -22,7 +22,7 @@
    :all])             ;; used to get entire dataset.
 
 
-(defn create-image-shape
+(defn image-shape
   [^long num-channels ^long height ^long width]
   {:layout planar-image-layout
    :channel-count num-channels
@@ -38,7 +38,7 @@
       (* channel-count width height))))
 
 
-(defn create-split-ranges
+(defn split-ranges
   "Given a training split and a cv-split create the training,cv,and holdout splits."
   [training-split cv-split]
   (let [training-split (double (max 0.0 (min 1.0 (or training-split 1.0))))
@@ -59,6 +59,7 @@
      :cross-validation-range cv-range
      :holdout-range holdout-range}))
 
+
 (defn rel-range->absolute-range
   [[rel-start rel-end :as range] ^long item-count]
   [(long (Math/round (* item-count (double rel-start))))
@@ -71,12 +72,13 @@
        (take (- abs-end abs-start))
        vec))
 
+
 (defn takev-rel-range
   [item-range item-count coll]
   (takev-range (rel-range->absolute-range item-range item-count) coll))
 
 
-(defn create-index-sets
+(defn index-sets
   "Create a training/testing split of indexes.  Returns a map with three keys,
   :training, :cross-validation, :holdout where the testing indexes are withheld
   from the training set.  The running indexes are the same as the testing
@@ -90,7 +92,7 @@
   ;;The code below uses both item count and max items so that we can a random subset
   ;;of the total index count in the case where max-items < item-count
   (let [max-items (or max-items item-count)
-        {:keys [training-range cross-validation-range holdout-range]} (create-split-ranges training-split cv-split)
+        {:keys [training-range cross-validation-range holdout-range]} (split-ranges training-split cv-split)
         all-indexes (vec (take max-items (if randomize?
                                            (shuffle (range item-count))
                                            (range item-count))))
@@ -128,10 +130,10 @@
    ({:image (image image image) :label (label label label) :histogram (hist hist hist)}
     {:image (image image image) :label (label label label) :histogram (hist hist hist)})
 
-  Put another way, within each batch the data is columnar labled by stream (shape) name"))
+  Put another way, within each batch the data is columnar labeled by stream (shape) name"))
 
 
-(defn dataset->stream->size-map
+(defn stream-descriptions
   "Given a dataset produce a stream->size mapping for the dataset."
   [dataset]
   (->> (shapes dataset)
@@ -243,8 +245,7 @@
            batches))))
 
 
-
-(defn create-in-memory-dataset
+(defn in-memory-dataset
   [data-shape-map index-sets]
   ;;Small bit of basic error checking.
   (doseq [[k v] data-shape-map]
@@ -253,8 +254,11 @@
         (throw (Exception. (format "Either data or shape missing for key: %s" k))))
       (when-not (= (m/ecount (first data))
                    (shape-ecount shape))
-        (throw (Exception. (format "shape ecount (%s) doesn't match (first data) ecount (%s) for key %s."
-                                   (shape-ecount shape) (m/ecount (first data)) k))))))
+        (throw (Exception.
+                 (format "shape ecount (%s) doesn't match (first data) ecount (%s) for key %s."
+                         (shape-ecount shape)
+                         (m/ecount (first data))
+                         k))))))
   (->InMemoryDataset data-shape-map index-sets))
 
 
@@ -310,7 +314,7 @@
 
 
 
-(defn create-infinite-dataset
+(defn infinite-dataset
   "Create an infinite dataset.  Note that the shape-pair-seq is expected to be
   pairs that are in the same order as elements in the dataset.
 
@@ -401,3 +405,4 @@ data."
                        (parallel/create-next-item-fn (repeat holdout-map-seq)))
           train-fn (parallel/create-next-item-fn (partition num-epoch-elements infinite-map-seq))]
       (->InfiniteDataset shape-map cv-fn holdout-fn train-fn seq-of-map->map-of-seq shutdown-fn))))
+

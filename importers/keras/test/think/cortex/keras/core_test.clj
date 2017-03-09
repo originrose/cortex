@@ -4,7 +4,6 @@
             [cortex.nn.network :as network]
             [clojure.core.matrix :as m]
             [cortex.verify.nn.import :as import]
-            [cortex.compute.nn.compute-execute :as ce]
             [cortex.graph :as graph]))
 
 
@@ -42,7 +41,7 @@
   "Ensure that the model we read in from Keras can actually be built, and
   that built result is correct."
   (let [model-desc (keras/keras-json->cortex-desc simple_archf)
-        built-net   (network/build-network model-desc)]
+        built-net   (network/linear-network model-desc)]
     (is (= 422154 (graph/parameter-count (network/network->graph built-net))))))
 
 

@@ -17,7 +17,7 @@ Then run `lein run live-updates`
 
 ```
 13:02 $ lein run
-checking that we have produced all images
+Ensuring image data is built...
 building dataset
 Figwheel: Starting server at http://0.0.0.0:8091
 Figwheel: Watching build - dev
@@ -27,7 +27,7 @@ Successfully compiled "resources/public/js/app.js" in 3.552 seconds.
 ```
 
 You will see output about building the image sets, then you will see figwheel starting and compiling some ClojureScript files. This is for the confusion matrix visualization. After you see `Successfully compiled`, go ahead and open a web page at [http://localhost:8091/](http://localhost:8091/).  This will load the confusion matrix visualization.
-  
+
 Notice the log in the console
 
 ```
@@ -52,7 +52,7 @@ Saving network
 Each time it saves the network, it exports it to an external nippy file. `trained-network.nippy`
 
 When you think it's run long enough, go ahead a stop the process.
-Get a new REPL up in the core namespace 
+Get a new REPL up in the core namespace
 Run the `label-one` function
 
 ```

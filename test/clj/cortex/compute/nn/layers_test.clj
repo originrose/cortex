@@ -1,8 +1,8 @@
 (ns cortex.compute.nn.layers-test
   (:require [clojure.test :refer :all]
             [cortex.verify.nn.layers :as verify-layers]
-            [cortex.compute.nn.cpu-backend :as cpu-backend]
-            [cortex.compute.nn.compute-execute :as compute-execute]
+            [cortex.compute.cpu.backend :as cpu-backend]
+            [cortex.nn.execute :as execute]
             [cortex.compute.verify.utils
              :refer [def-double-float-test]
              :as test-utils]))
@@ -12,8 +12,8 @@
 
 (defn create-context
   []
-  (compute-execute/create-context
-   #(cpu-backend/create-backend test-utils/*datatype*)))
+  (execute/compute-context :backend :cpu
+                           :datatype test-utils/*datatype*))
 
 (def-double-float-test relu-activation
   (verify-layers/relu-activation (create-context)))

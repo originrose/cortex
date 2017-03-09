@@ -7,7 +7,7 @@
 ;;and it is much faster.
 
 
-(defn create-cache-loader
+(defn cache-loader
   ^CacheLoader [loader-fn]
   (reify CacheLoader
     (load [this key]
@@ -20,7 +20,7 @@
   (let [builder (Caffeine/newBuilder)]
     (doto builder
       (.maximumSize maximum-size))
-    (.build builder (create-cache-loader loader-fn))))
+    (.build builder (cache-loader loader-fn))))
 
 
 (defn lookup-value

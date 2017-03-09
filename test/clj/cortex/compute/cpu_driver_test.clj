@@ -1,5 +1,5 @@
 (ns cortex.compute.cpu-driver-test
-  (:require [cortex.compute.cpu-driver :as cpu]
+  (:require [cortex.compute.cpu.driver :as cpu]
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
             [think.resource.core :as resource]
@@ -11,7 +11,7 @@
 
 (use-fixtures :each test-utils/test-wrapper)
 
-(def static-device (cpu/create-driver))
+(def static-device (cpu/driver))
 
 (def-double-float-test simple-stream
   (verify-driver/simple-stream static-device test-utils/*datatype*))

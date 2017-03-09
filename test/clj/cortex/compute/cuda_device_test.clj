@@ -3,14 +3,14 @@
             [cortex.compute.verify.driver :as verify-driver]
             [cortex.compute.verify.utils :refer [def-double-float-test]
              :as verify-utils]
-            [cortex.compute.cuda-driver :as cuda-driver]))
+            [cortex.compute.cuda.driver :as cuda-driver]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
 
 (defn create-driver
   []
-  (cuda-driver/create-cuda-driver))
+  (cuda-driver/cuda-driver))
 
 (verify-utils/def-all-dtype-test simple-stream
   (verify-driver/simple-stream (create-driver) verify-utils/*datatype*))

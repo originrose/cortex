@@ -1,4 +1,4 @@
-(ns cortex.compute.cpu-driver
+(ns cortex.compute.cpu.driver
   (:require [cortex.compute.driver :as drv]
             [cortex.compute.math :as c-math]
             [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
@@ -27,7 +27,7 @@
   (release-resource [impl]
     (async/close! (.input-chan impl))))
 
-(defn create-cpu-stream
+(defn cpu-stream
   ([error-atom]
    (let [^CPUStream retval (->CPUStream (async/chan 16) (async/chan) error-atom)]
      (async/go
@@ -40,10 +40,10 @@
            (recur (async/<! (:input-chan retval)))))
        (async/close! (:exit-chan retval)))
      (resource/track retval)))
-  ([] (create-cpu-stream (atom nil))))
+  ([] (cpu-stream (atom nil))))
 
 
-(defn create-main-thread-cpu-stream
+(defn main-thread-cpu-stream
   "Create a cpu stream that will execute everything immediately inline.
 Use with care; the synchonization primitives will just hang with this stream."
   ^CPUStream []
@@ -152,7 +152,7 @@ Use with care; the synchonization primitives will just hang with this stream."
 
 (defrecord CPUDriver [^long dev-count ^long current-device error-atom])
 
-(defn create-driver [] (->CPUDriver 1 1 (atom nil)))
+(defn driver [] (->CPUDriver 1 1 (atom nil)))
 
 (extend-type CPUDriver
   drv/PDriver
@@ -161,7 +161,7 @@ Use with care; the synchonization primitives will just hang with this stream."
   (get-current-device [impl] (:current-device impl))
   (create-stream [impl]
     (check-stream-error impl)
-    (create-cpu-stream (:error-atom impl)))
+    (cpu-stream (:error-atom impl)))
   (allocate-host-buffer [impl elem-count elem-type]
     (check-stream-error impl)
     (dtype/make-view elem-type elem-count))

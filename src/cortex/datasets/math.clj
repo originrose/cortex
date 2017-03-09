@@ -1,12 +1,14 @@
 (ns cortex.datasets.math
   (:require [clojure.core.matrix :as m]))
 
+(set! *warn-on-reflection* true)
+
 (def epsilon 1e-6)
 
 (defn very-near-epsilon?
   [epsilon x y]
-  (< (Math/abs (- x y)) epsilon))
-  
+  (< (Math/abs (- (double x) (double y))) (double epsilon)))
+
 (def very-near? (partial very-near-epsilon? epsilon))
 
 (defn matrix-col-totals

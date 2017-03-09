@@ -3,7 +3,6 @@
 /checkouts
 pom.xml
 pom.xml.asc
-cuda
 *.jar
 *.class
 /.lein-*
@@ -25,4 +24,4 @@ trained-network.nippy
 trained-networks
 .idea/
 *.iml
-
+examples/suite-classification/mnist-dataset.nippy

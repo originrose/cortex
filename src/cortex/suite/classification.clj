@@ -1,10 +1,8 @@
 (ns cortex.suite.classification
   (:require [cortex.dataset :as ds]
-            [cortex.suite.io :as suite-io]
             [clojure.java.io :as io]
             [think.parallel.core :as parallel]
-            [taoensso.nippy :as nippy]
-            [cortex.compute.nn.cpu-backend :as cpu-backend]
+            [cortex.compute.cpu.backend :as cpu-backend]
             [cortex.optimize :as opt]
             [think.resource.core :as resource]
             [cortex.util :as util]
@@ -60,7 +58,7 @@ is infinite."
      :shutdown-fn shutdown-fn}))
 
 
-(defn create-label->vec-fn
+(defn label->vec-fn
   [class-names]
   (let [num-classes (count class-names)
         src-vec (vec (repeat num-classes 0))
@@ -69,20 +67,20 @@ is infinite."
       (assoc src-vec (class-name->index label) 1))))
 
 
-(defn create-vec->label-fn
+(defn vec->label-fn
   [class-names]
   (let [index->class-name (into {} (map-indexed vector class-names))]
     (fn [label-vec]
       (get index->class-name (util/max-index label-vec)))))
 
 
-(defn create-classification-dataset
+(defn classification-dataset
   ([class-names data-shape
     cv-epoch-seq
     holdout-epoch-seq
     training-epoch-seq
     & {:keys [shutdown-fn]}]
-   (let [label->vec (create-label->vec-fn class-names)
+   (let [label->vec (label->vec-fn class-names)
          seq-transform-fn #(map (fn [[data label]]
                                   [data (label->vec label)])
                                 %)
@@ -91,13 +89,13 @@ is infinite."
                              cv-epoch-seq
                              (map seq-transform-fn holdout-epoch-seq))
          training-epoch-seq (map seq-transform-fn training-epoch-seq)
-         dataset (ds/create-infinite-dataset [[:data data-shape]
+         dataset (ds/infinite-dataset [[:data data-shape]
                                               [:labels (count class-names)]]
-                                             cv-epoch-seq
-                                             holdout-epoch-seq
-                                             training-epoch-seq
-                                             :shutdown-fn
-                                             shutdown-fn)]
+                                      cv-epoch-seq
+                                      holdout-epoch-seq
+                                      training-epoch-seq
+                                      :shutdown-fn
+                                      shutdown-fn)]
      (assoc dataset :class-names class-names))))
 
 
@@ -118,7 +116,7 @@ Returns map of {:observations :shutdown-fn}."
       (src-seq->obs-seq file-label->obs-label-seq-fn :queue-size queue-size)))
 
 
-(defn create-classification-dataset-from-labeled-data-subdirs
+(defn classification-dataset-from-labeled-data-subdirs
   "Given a directory name and a function that can transform
 a single [^File file ^String sub-dir-name] into a sequence of
 [observation label] pairs produce a classification dataset.
@@ -169,12 +167,12 @@ as it is training)."
                                 (map (if shuffle-training-epochs?
                                        shuffle
                                        identity)))]
-    (create-classification-dataset class-names data-shape
-                                   cv-epoch-seq
-                                   holdout-epoch-seq
-                                   training-epoch-seq
-                                   :shutdown-fn
-                                   shutdown-fn)))
+    (classification-dataset class-names data-shape
+                            cv-epoch-seq
+                            holdout-epoch-seq
+                            training-epoch-seq
+                            :shutdown-fn
+                            shutdown-fn)))
 
 (defonce last-network-eval (atom nil))
 
@@ -303,7 +301,7 @@ observations in each cell instead of just a count."
 
 (defn reset-dataset-display
   [dataset-display-atom dataset observation->img-fn]
-  (let [vec->label (create-vec->label-fn (:class-names dataset))
+  (let [vec->label (vec->label-fn (:class-names dataset))
         batch-defs [{:batch-type :holdout
                      :postprocess shuffle}
                     {:batch-type :cross-validation
@@ -338,7 +336,7 @@ observations in each cell instead of just a count."
     img))
 
 
-(defn create-routing-map
+(defn routing-map
   [confusion-matrix-atom dataset-display-atom]
   {"confusion-matrix" (partial get-confusion-matrix confusion-matrix-atom)
    "confusion-detail" (partial get-confusion-detail confusion-matrix-atom)
@@ -347,7 +345,7 @@ observations in each cell instead of just a count."
    "dataset-image" (partial get-dataset-image dataset-display-atom)})
 
 
-(defn best-network-function
+(defn best-network-fn
   [confusion-matrix-atom observation->img-fn dataset network-eval]
   (reset-confusion-matrix confusion-matrix-atom observation->img-fn
                           dataset network-eval))
@@ -362,11 +360,11 @@ training will continue from there."
       :or {batch-size 128
            force-gpu? false
            confusion-matrix-atom (atom {})}}]
-  (let [network (-> (network/build-network initial-description)
+  (let [network (-> (network/linear-network initial-description)
                     traverse/auto-bind-io)]
    (doseq [_ (repeatedly
               #(suite-train/train-n dataset initial-description network
-                                    :best-network-fn (partial best-network-function
+                                    :best-network-fn (partial best-network-fn
                                                               confusion-matrix-atom
                                                               observation->image-fn
                                                               dataset)

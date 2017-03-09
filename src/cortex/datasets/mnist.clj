@@ -37,8 +37,8 @@
 
 
 (defn download-dataset-item [name]
-  (stream/download-gzip-stream "mnist" name
-                               (str "http://yann.lecun.com/exdb/mnist/" name ".gz")))
+  (stream/download-gzip-stream
+   "mnist" name (str "https://s3-us-west-2.amazonaws.com/thinktopic.datasets/mnist/" name ".gz")))
 
 
 (defn ^DataInputStream get-data-stream [name]
@@ -94,7 +94,6 @@
         data-shape (mat/shape all-rows)
         num-cols (long (second data-shape))
         num-rows (long (first data-shape))
-        _ (println "normalizing mnist data")
         normalized (math/global-whiten! all-rows)
         norm-mat (get normalized :data)
         num-train-d (count train-d)

@@ -1,23 +1,26 @@
-(ns cortex.compute.nn.cuda-backend
-  (:require [cortex.compute.cuda-driver :refer [->ptr value->ptr] :as cuda-drv]
+(ns cortex.compute.cuda.backend
+  (:require [cortex.compute.cuda.driver :refer [->ptr value->ptr] :as cuda-drv]
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
-            [think.datatype.core :as dtype]
-            [cortex.compute.driver :as drv]
-            [cortex.optimize :as opt]
             [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.compute.nn.layers :as compute-layers]
-            [cortex.graph :as graph]
-            [cortex.compute.nn.cpu-backend :as cpu-backend]
             [cortex.compute.math :as math]
+            [cortex.compute.driver :as drv]
+            [cortex.graph :as graph]
+            [cortex.compute.cpu.backend :as cpu-backend]
+            [cortex.optimize :as opt]
+            [think.datatype.core :as dtype]
             [think.resource.core :as resource])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
             cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
             cudnn$cudnnPoolingStruct cudnn$cudnnLRNStruct
             BytePointer IntPointer LongPointer DoublePointer Pointer PointerPointer
             SizeTPointer FloatPointer ShortPointer]
-           [cortex.compute.cuda_driver CudaDriver CudaStream]
+           [cortex.compute.cuda.driver CudaDriver CudaStream]
            [cortex.compute.math DeviceArray]))
+
+
+(set! *warn-on-reflection* true)
 
 
 (defmacro error
@@ -102,7 +105,7 @@
     (cudnn-call (cudnn/cudnnDestroyLRNDescriptor item))))
 
 
-(defn create-cudnn-context
+(defn cudnn-context
   []
   (let [retval (cudnn$cudnnContext.)]
     (cudnn-call (cudnn/cudnnCreate retval))
@@ -150,16 +153,16 @@
   (get cudnn->datatype-map cudnn-datatype))
 
 
-(defn create-tensor
+(defn tensor
   (^cudnn$cudnnTensorStruct [dtype tensor-format n c h w]
    (let [retval (cudnn$cudnnTensorStruct.)]
      (cudnn-call (cudnn/cudnnCreateTensorDescriptor retval))
      (set-tensor retval tensor-format (dtype->cudnn dtype) n c h w)
      (resource/track retval)))
   (^cudnn$cudnnTensorStruct [dtype n c h w]
-   (create-tensor dtype cudnn/CUDNN_TENSOR_NCHW n c h w))
+   (tensor dtype cudnn/CUDNN_TENSOR_NCHW n c h w))
   (^cudnn$cudnnTensorStruct [n c h w]
-   (create-tensor :double cudnn/CUDNN_TENSOR_NCHW n c h w)))
+   (tensor :double cudnn/CUDNN_TENSOR_NCHW n c h w)))
 
 
 (extend-type cudnn$cudnnTensorStruct
@@ -170,20 +173,20 @@
       (cudnn->dtype tensor-dtype))))
 
 
-(defn create-activation-desc
+(defn activation-description
   "example args: cudnn/CUDNN_ACTIVATION_RELU, cudnn/CUDNN_PROPAGATE_NAN, 0.0"
   (^cudnn$cudnnActivationStruct [mode relu-nan-opt relu-ceiling]
     (let [retval (cudnn$cudnnActivationStruct.)]
       (do (cudnn-call (cudnn/cudnnCreateActivationDescriptor retval))
           (cudnn-call (cudnn/cudnnSetActivationDescriptor retval mode relu-nan-opt relu-ceiling)))
       (resource/track retval)))
-  (^cudnn$cudnnActivationStruct [mode] (create-activation-desc mode cudnn/CUDNN_PROPAGATE_NAN 0.0)))
+  (^cudnn$cudnnActivationStruct [mode] (activation-description mode cudnn/CUDNN_PROPAGATE_NAN 0.0)))
 
 
-(defrecord CudaBackend [type ^CudaDriver driver ^CudaStream stream ^cudnn$cudnnContext cudnn-context datatype network-functions])
+(defrecord CudaBackend [type driver stream cudnn-context datatype network-functions])
 
-(defn create-backend
-  ([^CudaDriver driver ^CudaStream stream datatype]
+(defn backend
+  ([driver stream datatype]
    (let [network-functions {:prepare-bernoulli-dropout
                             (cuda-drv/load-float-double-function
                               "prepare_bernoulli_dropout.fatbin"
@@ -192,11 +195,11 @@
                             (cuda-drv/load-float-double-function
                               "prepare_gaussian_dropout.fatbin"
                               "prepare_gaussian_dropout")}]
-     (->CudaBackend :cuda driver stream (create-cudnn-context) datatype network-functions)))
-  ([datatype] (let [driver (cuda-drv/create-cuda-driver)
+     (->CudaBackend :cuda driver stream (cudnn-context) datatype network-functions)))
+  ([datatype] (let [driver (cuda-drv/cuda-driver)
                     stream (drv/create-stream driver)]
-                (create-backend driver stream datatype)))
-  ([] (create-backend :double)))
+                (backend driver stream datatype)))
+  ([] (backend :double)))
 
 (defn get-cudnn
   ^cudnn$cudnnContext [^CudaBackend network]
@@ -241,21 +244,20 @@
 
 
 (defn layer->flat-tensor
-  [layer batch-size datatype]
-  (create-tensor datatype 1 1 1 (* (long batch-size)
-                                   (long (graph/node->output-size layer)))))
+  ^cudnn$cudnnTensorStruct [layer batch-size datatype]
+  (tensor datatype 1 1 1 (* (long batch-size) (long (graph/node->output-size layer)))))
 
 
 (defn layer-input->image-tensor
-  [layer batch-size datatype]
+  ^cudnn$cudnnTensorStruct [layer batch-size datatype]
   (let [{:keys [channels width height]} (first (graph/node->input-dimensions layer))]
-   (create-tensor datatype batch-size channels height width)))
+    (tensor datatype batch-size channels height width)))
 
 
 (defn layer-output->image-tensor
-  [layer batch-size datatype]
-  (let [{:keys [channels height width]} (first (graph/node->output-dimensions layer))]
-   (create-tensor datatype batch-size channels height width)))
+  ^cudnn$cudnnTensorStruct [layer batch-size datatype]
+  (let [{:keys [channels width height]} (first (graph/node->output-dimensions layer))]
+    (tensor datatype batch-size channels height width)))
 
 
 (defn first-buffer
@@ -276,7 +278,7 @@
 
 (defn- act-type->cudnn
   [act-type]
-  (create-activation-desc (get act-type->cudnn-activation-map act-type)))
+  (activation-description (get act-type->cudnn-activation-map act-type)))
 
 
 (defrecord ActivationLayer [backend layer batch-size activation-desc tensor]
@@ -303,32 +305,32 @@
                                                   (first-gradient input-buffers)))))))
 
 
-(defn- create-activation-layer
+(defn- activation-layer
   [backend layer batch-size]
   (->ActivationLayer backend layer batch-size
                      (act-type->cudnn (get layer :type))
                      (layer->flat-tensor layer batch-size (dtype/get-datatype backend))))
 
 
-(defmulti create-cuda-layer
-  "General function to create a layer implemented completely by the cuda backend"
-  (fn [backend layer batch-size]
+(defmulti cuda-layer
+          "General function to create a layer implemented completely by the cuda backend"
+          (fn [backend layer batch-size]
     (get layer :type)))
 
 
-(defmethod create-cuda-layer :relu
+(defmethod cuda-layer :relu
   [& args]
-  (apply create-activation-layer args))
+  (apply activation-layer args))
 
 
-(defmethod create-cuda-layer :logistic
+(defmethod cuda-layer :logistic
   [& args]
-  (apply create-activation-layer args))
+  (apply activation-layer args))
 
 
-(defmethod create-cuda-layer :tanh
+(defmethod cuda-layer :tanh
   [& args]
-  (apply create-activation-layer args))
+  (apply activation-layer args))
 
 
 (defrecord SoftmaxLayer [backend layer tensor]
@@ -353,22 +355,22 @@
                                       (compute-layers/first-gradient output-buffers))))
 
 
-(defmethod create-cuda-layer :softmax
+(defmethod cuda-layer :softmax
   [backend layer batch-size]
   (let [n-channels (long (get layer :output-channels))
         output-size (long (get layer :output-size))
         tensor (if-not (= n-channels 1)
-                 (create-tensor (dtype/get-datatype backend)
-                                cudnn/CUDNN_TENSOR_NHWC
-                                batch-size
-                                n-channels
-                                1
-                                (quot output-size n-channels))
-                 (create-tensor (dtype/get-datatype backend)
-                                batch-size
-                                output-size
-                                1
-                                1))]
+                 (tensor (dtype/get-datatype backend)
+                         cudnn/CUDNN_TENSOR_NHWC
+                         batch-size
+                         n-channels
+                         1
+                         (quot output-size n-channels))
+                 (tensor (dtype/get-datatype backend)
+                         batch-size
+                         output-size
+                         1
+                         1))]
     (->SoftmaxLayer backend layer tensor)))
 
 
@@ -378,7 +380,7 @@
   (let [layer (cpu-backend/conv-type-layer->conv-config layer)
         ^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
         ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
-        input-tensor (layer-input->image-tensor layer batch-size)
+        ^cudnn$cudnnTensorStruct input-tensor (layer-input->image-tensor layer batch-size)
         ^cudnn$cudnnContext cudnn-context (get-cudnn backend)
         datatype (dtype/get-datatype backend)
         tensor-datatype (dtype->cudnn datatype)
@@ -405,7 +407,7 @@
                                                              output-size-check))
     (cudnn-call (cudnn/cudnnDestroyConvolutionDescriptor conv-desc))
     (cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-desc))
-    (apply math/create-tensor (vec output-size-check))))
+    (apply math/tensor (vec output-size-check))))
 
 
 (defrecord ConvolutionLayer [backend
@@ -504,7 +506,7 @@
                    (->ptr input-gradient)))))))
 
 
-(defmethod create-cuda-layer :convolutional
+(defmethod cuda-layer :convolutional
   [backend layer ^long batch-size]
   (let [layer (cpu-backend/conv-type-layer->conv-config layer)
         ^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
@@ -514,11 +516,11 @@
         datatype (dtype/get-datatype backend)
         input-tensor (layer-input->image-tensor layer batch-size datatype)
         output-tensor (layer-output->image-tensor layer batch-size datatype)
-        bias-tensor (create-tensor datatype
-                                   1
-                                   (:output-channels layer)
-                                   1
-                                   1)
+        bias-tensor (tensor datatype
+                            1
+                            (:output-channels layer)
+                            1
+                            1)
         ^cudnn$cudnnContext cudnn-context (get-cudnn backend)
         forward-algo (IntPointer. 1)
         forward-workspace-size (SizeTPointer. 1)
@@ -678,7 +680,7 @@ Backward Data: %s %d"
          (first-gradient input-buffers)))))))
 
 
-(defmethod create-cuda-layer :max-pooling
+(defmethod cuda-layer :max-pooling
   [backend layer ^long batch-size]
   (let [layer (cpu-backend/conv-type-layer->conv-config layer)
         pooling-desc (cudnn$cudnnPoolingStruct.)
@@ -798,14 +800,14 @@ Backward Data: %s %d"
                     (->ptr saved-variances)))))))
 
 
-(defmethod create-cuda-layer :batch-normalization
+(defmethod cuda-layer :batch-normalization
   [backend layer batch-size]
   (let [n-input (long (graph/node->input-size layer))
-        io-tensor (create-tensor (dtype/get-datatype backend) batch-size 1 1 n-input)
-        var-tensor (create-tensor (dtype/get-datatype backend) 1 1 1 n-input)]
+        io-tensor (tensor (dtype/get-datatype backend) batch-size 1 1 n-input)
+        var-tensor (tensor (dtype/get-datatype backend) 1 1 1 n-input)]
     (->BatchNormalization backend io-tensor var-tensor)))
 
-(defn- create-lrn-descriptor
+(defn- lrn-descriptor
     [backend n k alpha beta]
     (let [desc (cudnn$cudnnLRNStruct.)]
       (cudnn-call (cudnn/cudnnCreateLRNDescriptor desc))
@@ -860,11 +862,11 @@ Backward Data: %s %d"
                     (first-gradient input-buffers))))))
 
 
-(defmethod create-cuda-layer :local-response-normalization
+(defmethod cuda-layer :local-response-normalization
   [backend layer batch-size]
   (let [{:keys [input-width input-height input-channels n k alpha beta]} layer
         data-tensor (layer-output->image-tensor layer batch-size (dtype/get-datatype backend))
-        lrn-desc (create-lrn-descriptor backend n k alpha beta)]
+        lrn-desc (lrn-descriptor backend n k alpha beta)]
     (->LocalResponseNormalization backend lrn-desc data-tensor
                                   (dtype/get-datatype backend))))
 
@@ -879,7 +881,7 @@ Backward Data: %s %d"
   (get-datatype [impl] (.datatype impl))
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
-    (create-cuda-layer backend layer batch-size))
+    (cuda-layer backend layer batch-size))
 
   nn-backend/PDropout
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]

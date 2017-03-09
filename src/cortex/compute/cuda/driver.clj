@@ -1,4 +1,4 @@
-(ns cortex.compute.cuda-driver
+(ns cortex.compute.cuda.driver
   (:require [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
             [clojure.java.io :as io]
@@ -6,7 +6,7 @@
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
             [clojure.core.matrix.protocols :as mp]
             [cortex.compute.math :as math]
-            [cortex.compute.cpu-driver :as cpu-drv]
+            [cortex.compute.cpu.driver :as cpu-drv]
             [cortex.compute.math-util :as mu]
             [clojure.core.matrix :as m])
   (:import [org.bytedeco.javacpp cuda
@@ -168,7 +168,7 @@
       (cuda-call (cuda/cuCtxCreate retval 0 device-id))
       retval)))
 
-(defn create-context
+(defn context
   "Call is ignored if the context has been created.  There can only possibly
 be (at the driver level) one context per device per process:
 https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
@@ -184,7 +184,7 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 
 
 (defn get-ctx []
-  (create-context))
+  (context))
 
 (defn load-module
   [data-stream]
@@ -226,8 +226,7 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 
 (defn load-multiple-datatype-function
   ([module-name fn-name dtype-seq]
-   (comment
-    (println "loading function" fn-name))
+   ;(println "loading function" fn-name)
    (try
     (let [module (load-module (io/input-stream (io/resource module-name)))]
       (into {} (map (fn [dt]
@@ -255,13 +254,13 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
   ([fn-name]
    (load-multiple-datatype-function fn-name [:double :float])))
 
-(defn create-blas-context
+(defn blas-context
   ^cublas$cublasContext []
   (let [blas-context (cublas$cublasContext.)]
     (cublas-call (cublas/cublasCreate_v2 blas-context))
     (resource/track blas-context)))
 
-(defn create-rand-context
+(defn rand-context
   ^curand$curandGenerator_st []
   (let [rand-context (curand$curandGenerator_st.)]
     (curand-call (curand/curandCreateGenerator rand-context curand/CURAND_RNG_PSEUDO_DEFAULT))
@@ -291,9 +290,9 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
     (jcpp-dtype/release-pointer item)))
 
 
-(defn create-cuda-driver
+(defn cuda-driver
   []
-  (create-context)
+  (context)
   (let [device-functions {:memset (load-all-datatype-function "memset")
                           :elementwise-multiply (load-float-double-function
                                                  "elementwise_multiply")
@@ -301,8 +300,8 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
                                                 "l2_constraint_scale")
                           :select (load-float-double-function "select")}]
     (->CudaDriver (atom device-functions)
-                  (create-blas-context)
-                  (create-rand-context))))
+                  (blas-context)
+                  (rand-context))))
 
 
 (defn get-blas
@@ -515,7 +514,7 @@ relies only on blockDim.x block.x and thread.x"
                            ^long copy-type (.stream stream)))))
 
 
-(defn create-cuda-event
+(defn cuda-event
   []
   (let [retval (cuda$CUevent_st. )]
     (cuda-call (cuda/cudaEventCreate retval))
@@ -826,7 +825,7 @@ relies only on blockDim.x block.x and thread.x"
                                  (->ptr device-buffer device-offset)
                                  (dtype/cast-to elem-val buf-dtype) (long elem-count)))))))
   (create-event [stream]
-    (let [retval (create-cuda-event)]
+    (let [retval (cuda-event)]
       (cuda-call (cuda/cudaEventRecord retval (.stream stream)))
       (resource/track retval)))
   ;;Ensure this stream cannot proceed until this event is triggered.

@@ -1,11 +1,14 @@
 (ns cortex.tree
   (:require [clojure.core.matrix :as mat]
-            [clojure.zip :as zip]))
+            [clojure.zip :as zip])
+  (:import [java.util ArrayList Collection]))
+
+(set! *warn-on-reflection* true)
 
 (defn shuffle-with-seed
   "Return a random permutation of coll with a seed."
   [coll seed]
-  (let [al (java.util.ArrayList. coll)
+  (let [al (java.util.ArrayList. ^Collection coll)
         rnd (java.util.Random. seed)]
     (java.util.Collections/shuffle al rnd)
     (clojure.lang.RT/vector (.toArray al))))

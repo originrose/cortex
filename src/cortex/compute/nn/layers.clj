@@ -34,6 +34,7 @@ implementation as possible."
   (math/assign! stream input-gradient output-gradient))
 
 
+;; TODO: rename me, and/or merge these into cortex.nn.layers
 (defmulti create
   "Create a compute layer"
   (fn [backend node batch-size]
@@ -119,7 +120,7 @@ and then forward many times for every parameter of the network."
                                          (drv/get-driver backend)
                                          (math/ensure-factor-of-2
                                           (* n-items (long batch-size))))
-                                        (math/create-tensor batch-size 1 1 n-items))]
+                                        (math/tensor batch-size 1 1 n-items))]
     (->Dropout backend node batch-size mult-buffer rand-buffer)))
 
 
@@ -257,13 +258,15 @@ and then forward many times for every parameter of the network."
                                         input-stride :dest-stride num-output)
                       :gradient
                       ;;Copy from output to input buffer.
-                      (drv/indexed-copy stream
-                                        target-buf batch-indexes
-                                        (math/device-buffer input-buffer) batch-indexes
-                                        input-stride :src-stride num-output))
+                      (do
+                       (drv/indexed-copy stream
+                                         target-buf batch-indexes
+                                         (math/device-buffer input-buffer) batch-indexes
+                                         input-stride :src-stride num-output)))
                     (+ offset (long input-stride))))
                 0
                 (map buffer-key input-buffers))]
+
     ;;Ensure the result adds up to the correct amount.
     (when-not (- (long final-offset) (long num-output))
       (throw (ex-info "Output size and input buffer count mismatch"
@@ -356,9 +359,9 @@ and then forward many times for every parameter of the network."
                (let [n-elems (if (= operation :+)
                                (long (min output-n-elems (dtype/ecount input-array)))
                                min-input-count)
-                     input-array (fixed-with-tensor input-array (math/create-tensor n-elems)
+                     input-array (fixed-with-tensor input-array (math/tensor n-elems)
                                                     driver)
-                     output-array (fixed-with-tensor output-array (math/create-tensor n-elems)
+                     output-array (fixed-with-tensor output-array (math/tensor n-elems)
                                                      driver)]
                  (condp = operation
                    :+
@@ -398,9 +401,9 @@ and then forward many times for every parameter of the network."
                                (min output-n-elems (dtype/ecount input-gradient))
                                min-elem-count)
                      input-gradient (fixed-with-tensor input-gradient
-                                                       (math/create-tensor n-elems) driver)
+                                                       (math/tensor n-elems) driver)
                      output-gradient (fixed-with-tensor output-gradient
-                                                        (math/create-tensor n-elems) driver)]
+                                                        (math/tensor n-elems) driver)]
                  (math/assign! stream input-gradient output-gradient)
                  (when (= operation :*)
                    ;;Multiply the gradient by every other input.
@@ -408,7 +411,7 @@ and then forward many times for every parameter of the network."
                         (mapv (fn [^long other-idx]
                                 (let [other-array (-> (get input-buffers other-idx)
                                                       (fixed-with-tensor
-                                                       (math/create-tensor n-elems)
+                                                       (math/tensor n-elems)
                                                        driver))]
                                   (math/elem-mul stream
                                                  1.0 other-array 1

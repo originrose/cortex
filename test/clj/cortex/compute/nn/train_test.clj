@@ -1,8 +1,8 @@
 (ns cortex.compute.nn.train-test
   (:require [clojure.test :refer :all]
             [cortex.verify.nn.train :as verify-train]
-            [cortex.compute.nn.cpu-backend :as cpu-backend]
-            [cortex.compute.nn.compute-execute :as ce]
+            [cortex.compute.cpu.backend :as cpu-backend]
+            [cortex.nn.execute :as execute]
             [cortex.compute.verify.utils
              :refer [def-double-float-test]
              :as test-utils]))
@@ -13,8 +13,8 @@
 
 (defn create-context
   []
-  (ce/create-context
-   #(cpu-backend/create-backend test-utils/*datatype*)))
+  (execute/compute-context :backend :cpu
+                           :datatype test-utils/*datatype*))
 
 
 (def-double-float-test corn

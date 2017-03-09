@@ -10,7 +10,7 @@
             [cortex.verify.nn.import :as verify-import]
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
-            [cortex.compute.nn.compute-execute :as compute-execute]
+            [cortex.nn.execute :as execute]
             [taoensso.nippy :as nippy]
             [cortex.nn.traverse :as traverse])
   (:import [java.io StringReader FileOutputStream]))
@@ -330,14 +330,14 @@ whitespace = #'\\s*'")
                           (assoc desc :caffe-output-size (count output-vec))
                           desc))
                       model)
-          network (network/build-network model)]
+          network (network/linear-network model)]
       (when-let [failures (seq (get network :verification-failures))]
         (let [ordered-nodes (->> network
                                  traverse/auto-bind-io
-                                 (#(traverse/network->inference-traversal % {}))
+                                 (#(traverse/add-forward-traversal % {}))
                                  (#(get-in % [:traversal :forward]))
                                  (mapv (fn [{:keys [incoming id outgoing]}]
-                                         (get-in network [:layer-graph :id->node-map id]))))]
+                                           (get-in network [:compute-graph :nodes id]))))]
          (throw (ex-info "Verification failures detected:"
                          {:verification-failures (vec failures)
                           :layers ordered-nodes}))))
@@ -349,15 +349,15 @@ whitespace = #'\\s*'")
 (defn test-caffe-file
   [fname & args]
   (let [import-result (apply caffe-h5->model fname args)]
-    (println (format "Verifying %d layers" (count (get-in import-result [:model :layer-graph
-                                                                         :id->node-map]))))
-    (verify-import/verify-model (compute-execute/create-context) import-result)))
+    (println (format "Verifying %d layers" (count (get-in import-result [:model :compute-graph
+                                                                         :nodes]))))
+    (verify-import/verify-model (execute/compute-context) import-result)))
 
 
 (defn import-and-write
   [^String fname & args]
   (let [import-result (apply caffe-h5->model fname args)]
-    (if-let [failures (seq (verify-import/verify-model (compute-execute/create-context)
+    (if-let [failures (seq (verify-import/verify-model (execute/compute-context)
                                                        import-result))]
       (throw (ex-info "import verification failures: " (vec failures)))
       (let [f-stem (.substring fname 0 (.lastIndexOf fname "."))

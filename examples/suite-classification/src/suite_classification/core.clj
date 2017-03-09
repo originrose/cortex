@@ -12,7 +12,6 @@
             [cortex.dataset :as ds]
             [cortex.suite.classification :as classification]
             [cortex.suite.inference :as infer]
-            [cortex.suite.io :as suite-io]
             [cortex.suite.train :as suite-train]
             [cortex.loss :as loss]
             [think.gate.core :as gate]
@@ -173,7 +172,7 @@
 (defonce ensure-dataset-is-created
   (memoize
    (fn []
-     (println "checking that we have produced all images")
+     (println "Ensuring image data is built...")
      (build-image-data))))
 
 
@@ -246,14 +245,14 @@
   []
   (ensure-dataset-is-created)
   (when-not (.exists (io/file "mnist-dataset.nippy"))
-    (suite-io/write-nippy-file "mnist-dataset.nippy"
-                               {:testing (vec (shuffle
-                                               (walk-directory-and-create-path-label-pairs
-                                                "mnist/testing")))
-                                :training (vec
+    (util/write-nippy-file "mnist-dataset.nippy"
+                           {:testing (vec (shuffle
                                            (walk-directory-and-create-path-label-pairs
-                                            "mnist/training"))}))
-  (let [{:keys [testing training]} (suite-io/read-nippy-file "mnist-dataset.nippy")
+                                            "mnist/testing")))
+                            :training (vec
+                                       (walk-directory-and-create-path-label-pairs
+                                        "mnist/training"))}))
+  (let [{:keys [testing training]} (util/read-nippy-file "mnist-dataset.nippy")
         classes (classification/get-class-names-from-directory "mnist/training")
         label->vec (classification/create-label->vec-fn classes)
         train-load-fn (create-map-load-fn
@@ -271,7 +270,7 @@
 
 (defn load-trained-network
   []
-  (suite-io/read-nippy-file "trained-network.nippy"))
+  (util/read-nippy-file "trained-network.nippy"))
 
 
 (defn display-dataset-and-model
@@ -333,7 +332,7 @@
         test-img (imagez/load-image test-file)
         observation (mnist-png->observation datatype false test-img)]
     (imagez/show test-img)
-    (infer/classify-one-observation (suite-io/read-nippy-file "trained-network.nippy")
+    (infer/classify-one-observation (util/read-nippy-file "trained-network.nippy")
                                     observation (ds/create-image-shape num-channels
                                                                        image-size
                                                                        image-size)
@@ -347,8 +346,8 @@
         mnist-network (load-trained-network)
         initial-description (:initial-description mnist-network)
         ;; To figure out at which point you'd like to split the network,
-        ;; you can use (get-in mnist-net [:layer-graph :edges]) or
-        ;; (get-in mnist-net [:layer-graph :id->node-map])
+        ;; you can use (get-in mnist-net [:compute-graph :edges]) or
+        ;; (get-in mnist-net [:compute-graph :id->node-map])
         ;; to guide your decision.
         ;;
         ;; Removing the fully connected layers and beyond.
@@ -361,7 +360,7 @@
         modified-description (vec (concat (drop-last 3 initial-description) layers-to-add))
         modified-network (network/assoc-layers-to-network network-bottleneck layers-to-add)
         modified-network (dissoc modified-network :traversal)
-        modified-network (-> (network/build-network modified-network)
+        modified-network (-> (network/linear-network modified-network)
                              (traverse/auto-bind-io))]
     (suite-train/train-n mnist-dataset modified-description modified-network
                          :batch-size 128 :epoch-count 1)))
