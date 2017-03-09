@@ -1,4 +1,3 @@
-
 (ns cortex.buffer-initialization
   "Various routines for initializing buffers.  Buffer initializers are passed as
 maps with {:type :shape} and then whatever extra information is required to perform
@@ -101,3 +100,4 @@ the initialization."
 (defmethod initialize-buffer :bengio-glorot
   [init-item]
   (do-weight-initialization init-item))
+

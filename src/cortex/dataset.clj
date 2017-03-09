@@ -114,8 +114,10 @@
   before moving to the next item."
 
   (shapes [ds]
-    "Return a map of name to shape where shape is either an integer or a more
-    complex shape definition a layout, num-channels, width and height")
+    "Return a map of name to shape where shape is either an integer or a map
+   of {:num-channels <int>
+       :width <int>
+       :height <int>}")
 
 
   (get-batches [ds batch-size batch-type shape-name-seq]
