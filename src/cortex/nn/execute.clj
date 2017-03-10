@@ -1113,6 +1113,49 @@ This does not need to be wrapped in a resource context; that is done for you."
     (->> (apply infer context network dataset input-bindings output-bindings args)
          ds/batches->columnsv)))
 
+(defn dataset-column-shapes
+  [dataset]
+  (->> (first dataset)
+       (map (fn [[k v]] [k (m/ecount v)]))
+       (into {})))
+
+(defn dataset-batches
+  [dataset batch-size]
+  (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
+    (->> dataset
+         (partition batch-size)
+         (map #(apply merge-with conj initial-map %)))))
+
+;; TODO: can we get rid of required keys here by pre-filtering the dataset (from the traversal leaves)?
+(defn batch-buffers
+  [network required-keys batch]
+  (let [backend (get-in network [:compute-binding :backend])
+        driver (drv/get-driver backend)
+        datatype (:datatype backend)
+        batch-size (:batch-size network)]
+    (->> (for [k required-keys]
+           (let [size (m/ecount (first (get batch k)))
+                 device-array (math/new-array driver
+                                              (drv/get-stream backend)
+                                              datatype
+                                              [size]
+                                              batch-size)
+                 host-buffer (drv/allocate-host-buffer driver (* size batch-size) datatype)]
+             [k {:device-array device-array
+                 :host-buffer host-buffer}]))
+         (into {}))))
+
+
+(defn load-batch!
+  [network batch batch-buffers]
+  (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
+    (dtype/copy-raw->item! (get batch k) host-buffer 0)
+    (drv/copy-host->device (drv/get-stream (get-in network [:compute-binding :backend]))
+                           host-buffer 0
+                           (math/device-buffer device-array) 0
+                           (m/ecount host-buffer))))
+
+
 (defn- cuda-backend-fn
   [datatype force-cuda?]
   (fn []
@@ -1136,6 +1179,7 @@ This does not need to be wrapped in a resource context; that is done for you."
                   (cuda-backend-fn datatype (= backend :cuda)))]
     {:backend-fn (or cuda-fn #(cpu/backend datatype))
      :datatype datatype}))
+
 
 (defn run
   "Run a network on a dataset.  data is returned as a sequence of maps of:
@@ -1188,51 +1232,37 @@ call cortex-dataset/batches->columns"
           results (doall (infer-batch-sequence context network batches {}))]
       results)))
 
-(defn dataset-column-shapes
-  [dataset]
-  (->> (first dataset)
-       (map (fn [[k v]] [k (m/ecount v)]))
-       (into {})))
-
-(defn dataset-batches
-  [dataset batch-size]
-  (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
-    (->> dataset
-         (partition batch-size)
-         (map #(apply merge-with conj initial-map %)))))
-
-(defn train-one-batch-from-dataset
+(defn train
   [network dataset & {:keys [batch-size context optimizer]
                       :or {batch-size 10}}]
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
           context (compute-context)
-          stream-desc (dataset-column-shapes dataset)
+          column-shapes (dataset-column-shapes dataset)
           network (-> network
                       (assoc :batch-size batch-size)
                       (traverse/bind-vars-to-network)
-                      (traverse/add-training-traversal stream-desc :optimizer optimizer))
+                      (traverse/add-training-traversal column-shapes :optimizer optimizer))
           network (bind-context-to-network context network {})
-          batch-map-sequence (->> (dataset-batches dataset batch-size)
-                                  (map (partial graph/augment-streams (network/network->graph network))))
-          initial-keys (keys (first batch-map-sequence))
-          bs (-> (get-in network [:compute-binding :batching-system])
-                 ;;In a late binding way, ensure the stream sizes match with the actual streams.
-                 (batching-system/add-streams (first batch-map-sequence)))
+          batches (->> (dataset-batches dataset batch-size)
+                       (map (partial graph/augment-streams (network/network->graph network))))
           ;;The buffers do not change going backward so we can pre-map this pass.
-          [network backward-mapped-pass] (map-pass-to-buffers network {} :backward)
+          [network _] (map-pass-to-buffers network {} :backward)
           required-keys (->> (traverse/get-io-bindings network)
                              (map :stream)
-                             (concat initial-keys)
+                             (concat (keys (first batches)))
                              (distinct))
-          network (assoc-in network [:compute-binding :batching-system] bs)
-          batches (batching-system/get-batches bs batch-map-sequence required-keys)
+          batch-buffers (batch-buffers network required-keys (first batches))
           backend (get-in network [:compute-binding :backend])
           stream (drv/get-stream backend)
-          stream->buffer-map (first batches)]
-      (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
-          (do-traverse stream->buffer-map :forward)
-          (zero-traverse-gradients)
-          (compute-loss-term-gradients)
-          (do-traverse {} :backward)
-          (optimize-network)))))
+          stream->buffer-map (zipmap (keys batch-buffers)
+                                     (map :device-array (vals batch-buffers)))]
+      (doseq [batch batches]
+        (load-batch! network batch batch-buffers)
+        (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
+            (do-traverse stream->buffer-map :forward)
+            (zero-traverse-gradients)
+            (compute-loss-term-gradients)
+            (do-traverse {} :backward)
+            (optimize-network)))
+      (save-to-network context network {}))))
