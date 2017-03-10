@@ -150,11 +150,14 @@
 
 (defn train-next-corn
   []
-  (let [network [(layers/input 2 1 1 :id :data)
-                 (layers/linear 1 :id :labels)]])
-  (cortex.nn.execute/train-one-batch-from-dataset
-   (network/linear-network network)
-   corn-dataset :batch-size 2))
+  (let [big-dataset (apply concat (repeat 5000 corn-dataset))]
+    (loop [network (network/linear-network
+                    [(layers/input 2 1 1 :id :data)
+                     (layers/linear 1 :id :labels)])
+           epoch 0]
+      (if (> 20 epoch)
+        (recur (cortex.nn.execute/train network big-dataset :batch-size 50) (inc epoch))
+        network))))
 
 (defn train-mnist
   [context]

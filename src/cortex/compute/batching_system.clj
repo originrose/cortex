@@ -38,10 +38,10 @@
         item-size (get size-entry :size)
         size item-size
         device-array (math/new-array driver
-                                   (drv/get-stream backend)
-                                   datatype
-                                   [size]
-                                   batch-size)
+                                     (drv/get-stream backend)
+                                     datatype
+                                     [size]
+                                     batch-size)
         host-buffer (drv/allocate-host-buffer driver (* size batch-size) datatype)]
     {:device-array device-array
      :host-buffer host-buffer}))
