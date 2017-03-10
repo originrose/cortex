@@ -21,6 +21,10 @@
 
 ;; Predict corn yield from fertilizer and insecticide inputs
 ;; [corn, fertilizer, insecticide]
+
+;; The text solves the model exactly using matrix techniques and determines
+;; that corn = 31.98 + 0.65 * fertilizer + 1.11 * insecticides
+
 (def CORN-DATA
   [[6  4]
    [10  4]
@@ -148,12 +152,16 @@
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))
 
-(defn train-next-corn
+(defn corn-network
   []
   (let [network [(layers/input 2 1 1 :id :data)
-                 (layers/linear 1 :id :labels)]])
+                 (layers/linear 1 :id :labels)]]
+    (network/linear-network network)))
+
+(defn train-next-corn
+  []
   (cortex.nn.execute/train-one-batch-from-dataset
-   (network/linear-network network)
+   (corn-network)
    corn-dataset :batch-size 2))
 
 (defn train-mnist
