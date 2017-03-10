@@ -257,3 +257,22 @@ elements-per-idx - update the elements per index."
     :monotonically-increasing (system->index-length index-system)
     :monotonically-decreasing (system->index-length index-system)
     :indexed (dtype/ecount (get-in index-system [:strategy :indexes]))))
+
+
+(defn index-system->address
+  [index-system elem-idx]
+  (elem-idx->address
+   elem-idx (get index-system :elements-per-idx 1) (get index-system :strategy)
+   (get index-system :idx-numerator 1)
+   (get index-system :idx-denominator 1)
+   (get index-system :num-columns)
+   (get index-system :column-stride)))
+
+
+(defn index-strategy-length
+  ^long [strategy]
+  (condp = (get strategy :type)
+    :constant 1
+    :monotonically-increasing (get strategy :length)
+    :monotonically-decreasing (get strategy :length)
+    :indexed (dtype/ecount (get strategy :indexes))))
