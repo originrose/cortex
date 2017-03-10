@@ -44,7 +44,6 @@ For indirect operations element count is num-indexes * num-columns.  After that 
 if the element counts of various things do not match meaning the smaller should evenly divide the larger and
 if a separate result is provided it must be the size of the larger."
   (:require [cortex.compute.driver :as compute-drv]
-            [cortex.compute.math :as compute-math]
             [think.datatype.core :as dtype]
             [clojure.core.matrix.protocols :as mp]
             [mikera.vectorz.matrix-api]
@@ -52,7 +51,8 @@ if a separate result is provided it must be the size of the larger."
             [clojure.core.matrix :as m]
             [think.resource.core :as resource]
             [clojure.math.combinatorics :as combo]
-            [cortex.tensor.index-system :as is]))
+            [cortex.tensor.index-system :as is]
+            [cortex.tensor.math :as tm]))
 
 
 (set! *warn-on-reflection* true)
@@ -96,6 +96,11 @@ if a separate result is provided it must be the size of the larger."
     (when-not-error (nil? wrong-driver)
       "Tensor arguments must have same driver."
       {})))
+
+
+(defn same-device?
+  [& args]
+  (apply ensure-same-driver args))
 
 
 (defn- ensure-same-device
@@ -295,6 +300,11 @@ that rerequires the items to have the same element count."
     (last (get dimensions :shape))))
 
 
+(defn tensor->index-system
+  [^Tensor tensor]
+  (.index-system tensor))
+
+
 (defn- dimensions->num-columns
   ^long [dimensions index-system]
   (if-let [num-columns (get index-system :num-columns)]
@@ -304,12 +314,21 @@ that rerequires the items to have the same element count."
 
 (defn- tensor->column-stride
   ^long [^Tensor tensor]
-  (dimensions->column-stride (.dimensions tensor) (.index-system tensor)))
+  (dimensions->column-stride
+   (tensor->dimensions tensor)
+   (tensor->index-system tensor)))
 
 
 (defn- tensor->num-columns
   ^long [^Tensor tensor]
-  (dimensions->column-stride (.dimensions tensor) (.index-system tensor)))
+  (dimensions->num-columns
+   (tensor->dimensions tensor)
+   (tensor->index-system tensor)))
+
+
+(defn- tensor->driver
+  [^Tensor tensor]
+  (compute-drv/get-driver tensor))
 
 
 (defn tensor->buffer
@@ -317,9 +336,24 @@ that rerequires the items to have the same element count."
   (.buffer tensor))
 
 
+(defn- tensor->dimensions
+  [^Tensor tensor]
+  (.dimensions tensor))
+
+
+(defn tensor->2d-shape
+  [^Tensor tensor]
+  (dimensions->2d-shape (tensor->dimensions tensor)))
+
+
+(defn tensor->batch-shape
+  [^Tensor tensor]
+  (dimensions->batch-shape (tensor->dimensions tensor)))
+
+
 (defn tensor->index-system
   [^Tensor tensor]
-  (.index-system tensor))
+  (tensor->index-system tensor))
 
 
 (defn- ensure-assignment-matches
@@ -337,7 +371,7 @@ that rerequires the items to have the same element count."
 (defn- check-partial-alias
   [driver & args]
   (let [partially-overlapping-args (->> args
-                                        (map #(.buffer ^Tensor %))
+                                        (map #(tensor->buffer ^Tensor %))
                                         (combo/combinations args 2)
                                         (filter #(apply compute-drv/partially-alias? %))
                                         seq)]
@@ -380,7 +414,7 @@ that rerequires the items to have the same element count."
   data."
   ^Tensor [^Tensor tensor new-dimensions]
   (tensor (.driver tensor) new-dimensions
-          (.index-system tensor)
+          (tensor->index-system tensor)
           (:buffer tensor)))
 
 
@@ -424,75 +458,30 @@ that rerequires the items to have the same element count."
      (datatype->keyword src)]))
 
 
-(defmethod typed-assign! [:tensor :number]
-  [^Tensor dest src]
-  (compute-math/assign-constant! (check-stream)
-                                 (.buffer dest) (tensor->num-columns dest) (tensor->column-stride dest)
-                                 src (m/ecount dest)))
-
-
-(defmethod typed-assign! [:tensor :tensor]
-  [^Tensor dest ^Tensor src]
-  (let [dest-ecount (ecount dest)
-        src-ecount (ecount src)]
-   (when-not-error (>= dest-ecount
-                       src-ecount)
-     "destination element count must be >= src element count"
-     {:dest-ecount dest-ecount
-      :src-count src-ecount})
-   (when-not-error (element-counts-commensurate? dest-ecount src-ecount)
-     "Src element count must evenly divide dest ecount:"
-     {:dest-ecount dest-ecount
-      :src-ecount src-ecount})
-   (ensure-assignment-matches dest src)
-   (when-not (compute-drv/alias? (.driver dest) (.buffer dest) (.buffer src))
-     (check-partial-alias dest src)
-     (compute-math/assign!-impl (check-stream)
-                                (.buffer dest) (tensor->num-columns dest)
-                                (tensor->column-stride dest) dest-ecount
-                                (.buffer src) (tensor->num-columns src)
-                                (tensor->column-stride src) src-ecount))))
-
-
-(extend-type Tensor
-  mp/PVectorView
-  (as-vector [m]
-    (reinterpret-tensor m (create-dimensions :width (ecount m))))
-
-  mp/PVectorisable
-  (to-vector [m]
-    (mp/as-vector m))
-
-  mp/PAssignment
-  (assign! [dest src]
-    (typed-assign! dest src)))
-
-
-
 (defn dense?
   [^Tensor tensor]
-  (is/dense? (.index-system tensor)))
+  (is/dense? (tensor->index-system tensor)))
 
 (def strided? (complement dense?))
 
 
 (defn tensor->batch-size
-  ^long [^Tensor tensor] (dimensions->least-rapidly-changing (.dimensions tensor)))
+  ^long [^Tensor tensor] (dimensions->least-rapidly-changing (tensor->dimensions tensor)))
 
 
 (defn tensor->channels
   ^long [^Tensor tensor]
-  (get (dimensions->map (.dimensions tensor)) :channels))
+  (get (dimensions->map (tensor->dimensions tensor)) :channels))
 
 
 (defn tensor->height
   ^long [^Tensor tensor]
-  (get (dimensions->map (.dimensions tensor)) :height))
+  (get (dimensions->map (tensor->dimensions tensor)) :height))
 
 
 (defn tensor->width
   ^long [^Tensor tensor]
-  (get (dimensions->most-rapidly-changing (.dimensions tensor))))
+  (get (dimensions->most-rapidly-changing (tensor->dimensions tensor))))
 
 
 (defn as-batch-matrix
@@ -509,7 +498,7 @@ that rerequires the items to have the same element count."
 (defn as-2d-matrix
   "As a 2d matrix of shape [everything-else width]"
   ^Tensor [^Tensor tensor]
-  (let [[n-rows n-cols] (dimensions->2d-shape (.dimensions tensor))]
+  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
     (reinterpret-tensor (:driver tensor)
                         (create-dimensions :height n-rows
                                            :width n-cols))))
@@ -526,17 +515,17 @@ that rerequires the items to have the same element count."
   (or (as-dense tensor)
       (let [^Tensor retval (new-tensor [(ecount tensor)] :datatype (dtype/get-datatype tensor))]
         (mp/assign! retval tensor)
-        (tensor (.driver retval) (.dimensions tensor) (.buffer retval)))))
+        (tensor (tensor->driver retval) (tensor->dimensions tensor) (tensor->buffer retval)))))
 
 (defn copy-to-java-type
   [dest ^Tensor src]
   (resource/with-resource-context
    (let [tensor (make-dense src)
          n-elems (ecount tensor)
-         driver (.driver tensor)
+         driver (tensor->driver tensor)
          stream (check-stream)
          host-buffer (compute-drv/allocate-host-buffer driver n-elems (dtype/get-datatype tensor))]
-     (compute-drv/copy-device->host stream (.buffer tensor) 0 host-buffer 0 n-elems)
+     (compute-drv/copy-device->host stream (tensor->buffer tensor) 0 host-buffer 0 n-elems)
      (compute-drv/wait-for-event (compute-drv/create-event stream))
      (dtype/copy! host-buffer 0 dest 0 n-elems)
      dest)))
@@ -554,7 +543,7 @@ that rerequires the items to have the same element count."
 
 (defn to-core-matrix
   [^Tensor tensor]
-  (let [[n-rows n-cols] (dimensions->2d-shape (.dimensions tensor))
+  (let [[n-rows n-cols] (dimensions->2d-shape (tensor->dimensions tensor))
         retval (m/new-array [n-rows n-cols] :vectorz)
         double-data (mp/as-double-array retval)]
     (copy-to-java-type double-data tensor)))
@@ -613,8 +602,8 @@ will determine the shape of the outgoing tensor."
                       {:tensor-ecount tens-ecount
                        :offset offset
                        :new-length new-len})))
-    (let [new-buf (compute-drv/sub-buffer (.driver tensor) (.buffer tensor) offset new-len)]
-      (tensor (.driver tensor) (create-dimensions :width new-len) new-buf))))
+    (let [new-buf (compute-drv/sub-buffer (tensor->driver tensor) (tensor->buffer tensor) offset new-len)]
+      (tensor (tensor->driver tensor) (create-dimensions :width new-len) new-buf))))
 
 
 (defn submatrix
@@ -625,11 +614,11 @@ and the rest of the dimensions being squashed into n-rows."
         row-length (long row-length)
         col-start (long col-start)
         col-length (long col-length)
-        [n-rows n-cols] (dimensions->2d-shape (.dimensions tensor))
+        [n-rows n-cols] (dimensions->2d-shape (tensor->dimensions tensor))
         n-rows (long n-rows)
         n-cols (long n-cols)
         column-stride (tensor->column-stride tensor)
-        driver (.driver tensor)]
+        driver (tensor->driver tensor)]
     (when (< row-start 0)
       (throw (ex-info "Row start less than 0" {})))
     (when (< col-start 0)
@@ -646,9 +635,9 @@ and the rest of the dimensions being squashed into n-rows."
                        :col-length col-length})))
     (let [start-offset (+ (* column-stride row-start) col-start)
           required-length (* row-length column-stride)
-          sub-buffer (compute-drv/sub-buffer driver (.buffer tensor)
+          sub-buffer (compute-drv/sub-buffer driver (tensor->buffer tensor)
                                              start-offset required-length)]
-      (tensor (.driver tensor)
+      (tensor (tensor->driver tensor)
               (create-dimensions :width col-length
                                  :height row-length)
               (assoc (tensor->index-system tensor)
@@ -657,13 +646,129 @@ and the rest of the dimensions being squashed into n-rows."
               sub-buffer))))
 
 
+(defn- ensure-indexes
+  "Index tensors must be integers and they must all be dense and the same length."
+  [& args]
+  (apply ensure-datatypes :int args)
+  (when-not-error (every? dense? args)
+    "Index tensors must be dense; some passed in are not." {})
+  (let [first-len (ecount (first args))]
+    (when-not-error (every? #(= first-len (ecount %)) (rest args))
+      "Index tensors must all have matching element-counts"
+      {:element-counts (map ecount args)}))
+  (when-not-error (every? #(is/simple-monotonically-increasing? (tensor->index-system %))
+                          args)
+    "Indexes must be simply indexed which means simple monotonically increasing with no repetition."
+    {:index-strategies (map tensor->index-system args)}))
+
+(defn ensure-indexable-tensor
+  [tensor]
+  (when-not-error (is/simple-monotonically-increasing? (tensor->index-system tensor))
+    "Cannot index members of non-monotonically increasing tensors."
+    {:index-system (tensor->index-system tensor)}))
+
+
+(defn index-columns
+  "This returns a new tensor with the columns indexed by indexes.  Operations are restricted
+to non-gemm operations."
+  ^Tensor [^Tensor tensor ^Tensor indexes]
+  (ensure-indexes indexes)
+  (ensure-indexable-tensor tensor)
+  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
+    (when-not-error (= n-cols (ecount indexes))
+      "Index-ecount and num-columns mismatch"
+      {:index-ecount (ecount indexes)
+       :num-columns n-cols})
+    (update tensor
+            :index-system
+            (fn [old-index-system]
+              (is/update-index-system
+               :strategy (is/indexed-strategy (tensor->buffer indexes))
+               :elements-per-idx 1)))))
+
+
+(defn indexed-columns?
+  "Return true if this tensor has indexed columns"
+  [tensor]
+  (let [index-system (tensor->index-system tensor)
+        [n-rows n-cols] (tensor->2d-shape tensor)
+        n-rows (long n-rows)
+        n-cols (long n-cols)]
+    (and (is/indexed? index-system)
+         (= 1 (is/elements-per-index index-system))
+         (= n-cols
+            (is/index-count index-system)))))
+
+
+(defn index-rows
+  "This returns a new tensor with the rows indexed by indexes.  Operations are restricted
+to non-gemm operations."
+  ^Tensor [^Tensor tensor ^Tensor indexes]
+  (ensure-indexes indexes)
+  (ensure-indexable-tensor tensor)
+  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
+    (when-not-error (= n-rows (ecount indexes))
+      "Index-ecount and num-rows mismatch"
+      {:index-ecount (ecount indexes)
+       :num-rows n-rows})
+    (update tensor
+            :index-system
+            (fn [old-index-system]
+              (is/update-index-system
+               :strategy (is/indexed-strategy (tensor->buffer indexes))
+               :elements-per-idx n-cols)))))
+
+
+(defn indexed-rows?
+  "Return true if this tensor has indexed rows"
+  [tensor]
+  (let [index-system (tensor->index-system tensor)
+        [n-rows n-cols] (tensor->2d-shape tensor)
+        n-rows (long n-rows)
+        n-cols (long n-cols)]
+    (and (is/indexed? index-system)
+         (= n-cols (is/elements-per-index index-system))
+         (= n-rows
+            (is/index-count index-system)))))
+
+
+(defn index-elements
+  "This returns a new tensor with the elements indexed by indexes.  Operations are restricted
+to non-gemm operations."
+  ^Tensor [^Tensor tensor ^Tensor indexes]
+  (ensure-indexes indexes)
+  (ensure-indexable-tensor tensor)
+  (let [n-elems (count tensor)]
+    (when-not-error (= n-elems (ecount indexes))
+      "Index-ecount and num-rows mismatch"
+      {:index-ecount (ecount indexes)
+       :num-elements n-elems})
+    (update tensor
+            :index-system
+            (fn [old-index-system]
+              (is/update-index-system
+               :strategy (is/indexed-strategy (tensor->buffer indexes))
+               :elements-per-idx 1)))))
+
+
+(defn indexed-elements?
+  "Return true if this tensor has indexed rows"
+  [tensor]
+  (let [index-system (tensor->index-system tensor)
+        n-elems (ecount tensor)]
+    (and (is/indexed? index-system)
+         (= 1 (is/elements-per-index index-system))
+         (= n-elems
+            (is/index-count index-system)))))
+
+
 (defn rows
   "Returns a vector rows of dense vectors."
   [^Tensor tensor]
   (let [[n-rows n-cols] (as-2d-matrix tensor)
         column-stride (tensor->column-stride tensor)
-        driver (.driver tensor)
-        buffer (.buffer tensor)]
+        driver (tensor->driver tensor)
+        buffer (tensor->buffer tensor)]
     (mapv (fn [^long idx]
             (let [offset (* idx column-stride)
                   new-buf (compute-drv/sub-buffer driver buffer offset n-cols)]
@@ -676,8 +781,8 @@ and the rest of the dimensions being squashed into n-rows."
   [^Tensor tensor]
   (let [[n-rows n-cols] (as-2d-matrix tensor)
         column-stride (tensor->column-stride tensor)
-        driver (.driver tensor)
-        buffer (.buffer tensor)
+        driver (tensor->driver tensor)
+        buffer (tensor->buffer tensor)
         col-required-mem (* (- (long n-rows) 1) column-stride)
         buf-ecount (ecount buffer)]
     (mapv (fn [^long offset]
@@ -688,23 +793,11 @@ and the rest of the dimensions being squashed into n-rows."
           (range n-cols))))
 
 
-(defn- ensure-indexes
-  "Index tensors must be integers and they must all be dense and the same length."
-  [& args]
-  (apply ensure-datatypes :int args)
-  (when-not-error (every? dense? args)
-    "Index tensors must be dense; some passed in are not." {})
-  (let [first-len (ecount (first args))]
-    (when-not-error (every? #(= first-len (ecount %)) (rest args))
-      "Index tensors must all have matching element-counts"
-      {:element-counts (map ecount args)})))
-
-
 (defn- ensure-indexed-op
   [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
   (ensure-indexes dest-indexes src-indexes)
-  (let [[dest-rows dest-cols] (dimensions->2d-shape (.dimensions dest))
-        [src-rows src-cols] (dimensions->2d-shape (.dimensions src))
+  (let [[dest-rows dest-cols] (dimensions->2d-shape (tensor->dimensions dest))
+        [src-rows src-cols] (dimensions->2d-shape (tensor->dimensions src))
         n-dest-elems (* (long dest-cols) (ecount dest-indexes))
         n-src-elems (* (long src-cols) (ecount src-indexes))
         min-n-elems (long (min n-dest-elems n-src-elems))
@@ -719,30 +812,89 @@ and the rest of the dimensions being squashed into n-rows."
     (ensure-same-device dest dest-indexes src src-indexes)))
 
 
-(defn gemm
-  "Generalized matrix multiply:
-  C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C"
-  [^Tensor C trans-a? trans-b? alpha ^Tensor A ^Tensor B beta]
-  (ensure-datatypes (get-datatype A) B C)
-  (let [[a-row-count a-col-count :as a-shape] (dimensions->2d-shape (.dimensions A))
-        [b-row-count b-col-count :as b-shape] (dimensions->2d-shape (.dimensions B))
-        [c-row-count c-col-count :as c-shape] (dimensions->2d-shape (.dimensions C))]
-    (when-not-error (= a-col-count b-row-count)
-      "A col count doesn't match B row count"
-      {:a-shape a-shape
-       :b-shape b-shape
-       :c-shape c-shape})
-    (when-not-error (= a-row-count c-row-count)
-      "C row count doesn't match A row count"
-      {:a-shape a-shape
-       :b-shape b-shape
-       :c-shape c-shape})
-    (when-not-error (= b-col-count c-col-count)
-      "C col count doesn't match B col count"
-      {:a-shape a-shape
-       :b-shape b-shape
-       :c-shape c-shape})
-    (compute-math/gemm-impl (check-stream) trans-a? trans-b? a-row-count a-col-count b-col-count
-                            alpha (.buffer A) (tensor->column-stride A)
-                            (.buffer B) (tensor->column-stride B)
-                            beta (.buffer C) (tensor->column-stride C))))
+(defn simple-tensor?
+  "A simple tensor is one that can be copied or assigned to with memset or memcpy (not memmove)
+  semantics."
+  [tensor]
+  (and (dense? tensor)
+       (= :monotonically-increasing
+          (is/system->strategy-type (tensor->index-system tensor)))
+       (= (ecount tensor)
+          (is/system->index-length (tensor->index-system tensor)))))
+
+
+(defmethod typed-assign! [:tensor :number]
+  [^Tensor dest src]
+  (if (simple-tensor? dest)
+    (compute-drv/memset (check-stream) (tensor->buffer tensor) 0 src (ecount tensor))
+    (ts/assign-constant! (check-stream)
+                         (tensor->buffer tensor) (tensor->index-system tensor) (ecount tensor)
+                         src)))
+
+
+(defn- memcpy-semantics?
+  [dest src]
+  (and (= (ecount dest) (ecount src))
+       (simple-tensor? dest)
+       (simple-tensor? src)
+       (= (get-datatype dest)
+          (get-datatype src))))
+
+
+(defn- ensure-memcpy-semantics
+  [dest src]
+  (when-not-error (= (ecount dest) (ecount src))
+    "inter-device operations must have simple memory semants"
+    {:dest-ecount (ecount dest)
+     :src-ecount (ecount src)})
+  (when-not-error (and (simple-tensor? dest)
+                       (simple-tensor? src))
+    "Inter-device operations must have simple (mono-increasing and dense) address strategies"
+    {:simple-dest? (simple-tensor? dest)
+     :simple-src? (simple-tensor? src)})
+  (when-not-error (= (get-datatype src)
+                     (get-datatype dest))
+    "Inter-device operations must match datatypes."
+    {:dest-datatype (get-datatype dest)
+     :src-datatype (get-datatype src)}))
+
+
+(defmethod typed-assign! [:tensor :tensor]
+  [^Tensor dest ^Tensor src]
+  (let [dest-ecount (ecount dest)
+        src-ecount (ecount src)]
+    (when-not-error (>= dest-ecount
+                        src-ecount)
+      "destination element count must be >= src element count"
+      {:dest-ecount dest-ecount
+       :src-count src-ecount})
+    (when-not-error (element-counts-commensurate? dest-ecount src-ecount)
+      "Src element count must evenly divide dest ecount."
+      {:dest-ecount dest-ecount
+       :src-ecount src-ecount})
+    (ensure-same-driver dest src)
+    (check-partial-alias dest src)
+    (if (memcpy-semantics? dest src)
+      (compute-drv/copy-device->device (check-stream)
+                                       (tensor->buffer src) 0
+                                       (tensor->buffer dest) 0
+                                       (ecount src))
+      (do
+        (ensure-same-device dest src)
+        (tm/assign! (check-stream)
+                    (tensor->buffer dest) (tensor->index-system dest) (ecount dest)
+                    (tensor->buffer src) (tensor->index-system src) (ecount src))))))
+
+
+(extend-type Tensor
+  mp/PVectorView
+  (as-vector [m]
+    (reinterpret-tensor m (create-dimensions :width (ecount m))))
+
+  mp/PVectorisable
+  (to-vector [m]
+    (mp/as-vector m))
+
+  mp/PAssignment
+  (assign! [dest src]
+    (typed-assign! dest src)))

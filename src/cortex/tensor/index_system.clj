@@ -31,8 +31,7 @@
   "Monotonically increasing indexes modulo length.
 idx = (rem elem-idx len)"
   [length]
-  {:type :monotonically-increasing
-   :length length})
+  {:type :monotonically-increasing :length length})
 
 
 (defn monotonically-decreasing-strategy
@@ -42,37 +41,34 @@ idx = (- length
                     length)
          1))"
   [length]
-  {:type :monotonically-decreasing
-   :length length})
+  {:type :monotonically-decreasing :length length})
 
 
 (defn indexed-strategy
   "Draw indexes from provided container of indexes."
-  [idx-data & {:keys [elements-per-index]
-               :or {elements-per-index 1}}]
+  [idx-data]
   {:type :indexed
-   :indexes idx-data
-   :elements-per-index elements-per-index})
+   :indexes idx-data})
 
 
-(defmulti elem-idx->index
+(defmulti index-idx->index
   "Reference implementations of going from element index -> index."
-  (fn [^long elem-idx idx-strategy]
+  (fn [^long index-idx idx-strategy]
     (get idx-strategy :type)))
 
 
-(defmethod elem-idx->index :constant
+(defmethod index-idx->index :constant
   [_ {:keys [value]}]
   value)
 
 
-(defmethod elem-idx->index :monotonically-increasing
+(defmethod index-idx->index :monotonically-increasing
   [^long elem-idx {:keys [length]}]
   (rem (long elem-idx)
        (long length)))
 
 
-(defmethod elem-idx->index :monotonically-decreasing
+(defmethod index-idx->index :monotonically-decreasing
   [^long elem-idx {:keys [length]}]
   (- (long length)
      (rem (long elem-idx)
@@ -80,16 +76,22 @@ idx = (- length
      1))
 
 
-(defmethod elem-idx->index :indexed
-  [^long elem-idx {:keys [indexes elements-per-index]
-                   :or {elements-per-index 1}}]
-  (let [elements-per-index (long elements-per-index)
-        index-idx (quot elem-idx
-                        elements-per-index)
-        index-offset (rem elem-idx
-                          elements-per-index)]
-    (+ (* (long (dtype/get-value indexes index-idx))
-          elements-per-index)
+(defmethod index-idx->index :indexed
+  [^long elem-idx {:keys [indexes]}]
+  (dtype/get-value indexes
+                   (rem elem-idx
+                        (dtype/ecount indexes))))
+
+
+(defn elem-idx->index
+  ^long [^long elem-idx elements-per-idx idx-strategy]
+  (let [elements-per-idx (long (if elements-per-idx
+                              elements-per-idx
+                              1))
+        index-idx (quot elem-idx elements-per-idx)
+        index-offset (rem elem-idx elements-per-idx)]
+    (+ (* (long (index-idx->index index-idx idx-strategy))
+          elements-per-idx)
        index-offset)))
 
 
@@ -115,7 +117,8 @@ idx = (- length
 
 (defn elem-idx->address
   "Reference implementation of the combination of indexes."
-  [elem-idx idx-strategy idx-numerator idx-denominator num-cols col-stride]
+  [elem-idx elements-per-idx idx-strategy idx-numerator
+   idx-denominator num-cols col-stride]
   (long (-> (elem-idx->index elem-idx idx-strategy)
             (adjust-idx-val idx-numerator idx-denominator)
             (index->address num-cols col-stride))))
@@ -123,8 +126,11 @@ idx = (- length
 
 (defn elem-sequence->address-sequence
   "Reference implementation to see the effect of manipulating the various numbers."
-  [elem-count idx-strategy idx-numerator idx-denominator num-cols col-stride]
-  (mapv #(elem-idx->address % idx-strategy idx-numerator idx-denominator num-cols col-stride)
+  [elem-count
+   elements-per-idx idx-strategy idx-numerator
+   idx-denominator num-cols col-stride]
+  (mapv #(elem-idx->address % elements-per-idx idx-strategy
+                            idx-numerator idx-denominator num-cols col-stride)
         (range elem-count)))
 
 
@@ -177,10 +183,16 @@ idx = (- length
    args))
 
 
+(defn system->strategy-type
+  "Get the index strategy used for this index system."
+  [index-system]
+  (get-in index-system [:strategy :type]))
+
+
 (defmulti update-length
   "If the system has length, update it and return the system."
   (fn [index-system length]
-    (get-in index-system [:strategy :type])))
+    (system->strategy-type index-system)))
 
 
 (defmethod update-length :default
@@ -202,3 +214,46 @@ idx = (- length
   [index-system]
   (= (get index-system :column-stride 1)
      (get index-system :num-columns 1)))
+
+
+(defn indexed?
+  "Return true if the index system is using opaque index buffers"
+  [index-system]
+  (= :indexed (system->strategy-type index-system)))
+
+(defn system->index-length
+  "Fails with exception if strategy isn't monotonic."
+  ^long [index-system]
+  (get-in index-system [:strategy :length]))
+
+(defn elements-per-index
+  ^long [index-system]
+  (get index-system :elements-per-idx 1))
+
+(defn simple-monotonically-increasing?
+  [index-system]
+  (and
+   (= :monotonically-increasing (system->strategy-type index-system))
+   (= 1 (get index-system :elements-per-idx 1))
+   (= 1 (quot (long (get index-system :idx-numerator 1))
+              (long (get index-system :idx-denominator 1))))
+   (= 1 (elements-per-index index-system))))
+
+(defn update-index-system
+  "Update the index system with provided values:
+strategy - update the index strategy to use.
+elements-per-idx - update the elements per index."
+  [index-system & {:keys [strategy elements-per-idx]}]
+  (cond-> index-system
+    elements-per-idx
+    (assoc :elements-per-idx elements-per-idx)
+    strategy
+    (assoc :strategy strategy)))
+
+
+(defn index-count
+  ^long [index-system]
+  (condp = (get-in index-system [:strategy :type])
+    :monotonically-increasing (system->index-length index-system)
+    :monotonically-decreasing (system->index-length index-system)
+    :indexed (dtype/ecount (get-in index-system [:strategy :indexes]))))
