@@ -71,10 +71,10 @@ and installing cudnn available from here: https://developer.nvidia.com/cudnn pub
 
 The .zip contains some libraries that you will need to make available to the loader. I simply copied the library files to /usr/lib, though I'm sure there's a better way of doing this.
 
-Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 7.5, if you're running 8.0 you will need to use the following branch (basically specifies a different dep for the jni bindings -- o/w code is identical):
+Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 8.0, if you're running 8.0 you will need to use change the javacpp dependency in your project file.
 
-https://github.com/thinktopic/cortex/tree/cuda-8.0
 
+[MNist Example](https://github.com/thinktopic/cortex/blob/master/examples/suite-classification/project.clj)
 
 #### Mac OS
 These instructions follow the gpu setup from [Tensor Flow](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#optional-setup-gpu-for-mac), i.e.:
