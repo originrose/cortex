@@ -192,8 +192,7 @@ channel 2 with n-outputs"
   [& {:keys [output-channels]
       :or {output-channels 1}
       :as arg-map}]
-  [(merge {:type :softmax :output-channels 1}
-          arg-map)])
+  [(merge-args {:type :softmax} arg-map)])
 
 
 (defmethod graph/build-node :softmax

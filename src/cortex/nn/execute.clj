@@ -1222,12 +1222,17 @@ call cortex-dataset/batches->columns"
 
 (defn load-batch!
   [network batch batch-buffers]
-  (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
-    (dtype/copy-raw->item! (get batch k) host-buffer 0)
-    (drv/copy-host->device (drv/get-stream (get-in network [:compute-binding :backend]))
-                           host-buffer 0
-                           (math/device-buffer device-array) 0
-                           (m/ecount host-buffer))))
+  (try
+    (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
+      (dtype/copy-raw->item! (get batch k) host-buffer 0)
+      (drv/copy-host->device (drv/get-stream (get-in network [:compute-binding :backend]))
+                             host-buffer 0
+                             (math/device-buffer device-array) 0
+                             (m/ecount host-buffer)))
+    (catch Exception e
+      (println "Error loading batch:")
+      (println batch)
+      (.printStackTrace e))))
 
 (defn train
   [network dataset & {:keys [batch-size context optimizer]
