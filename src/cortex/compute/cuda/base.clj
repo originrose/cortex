@@ -329,6 +329,48 @@ before we set it, do the operation, and unlock the object after."
   (get-datatype [item] (dtype/get-datatype ptr)))
 
 
+(defprotocol PToJavaCPPPointer
+  (->ptr-impl [item]))
+
+(extend-protocol PToJavaCPPPointer
+  Pointer
+  (->ptr-impl [item] item)
+  DevicePointer
+  (->ptr-impl [item] (.ptr ^DevicePointer item))
+  DeviceArray
+  (->ptr-impl [item] (->ptr-impl (math/device-buffer item)))
+  nil
+  (->ptr-impl [item] nil))
+
+(defn ->ptr
+  (^Pointer [item] (->ptr-impl item))
+  (^Pointer [item offset] (jcpp-dtype/offset-pointer (->ptr-impl item) offset)))
+
+
+(defn- in-range?
+  [^long x ^long y ^long num-y]
+  (and (<= y x)
+       (> (+ y num-y) x)))
+
+
+(defn- alias?
+  [lhs rhs]
+  (= (.address ^Pointer (->ptr lhs))
+     (.address ^Pointer (->ptr rhs))))
+
+
+(defn- partially-alias?
+  [lhs rhs]
+  (let [lhs-start (.address ^Pointer (->ptr lhs))
+        rhs-start (.address ^Pointer (->ptr rhs))
+        lhs-byte-count (* (long (m/ecount lhs))
+                          (dtype/datatype->byte-size (dtype/get-datatype lhs)))
+        rhs-byte-count (* (long (m/ecount rhs))
+                          (dtype/datatype->byte-size (dtype/get-datatype rhs)))]
+    (or (in-range? lhs-start rhs-start rhs-byte-count)
+        (in-range? rhs-start lhs-start lhs-byte-count))))
+
+
 (extend-type CudaDriver
   drv/PDriver
   (get-devices [impl] (list-devices))
@@ -353,7 +395,11 @@ before we set it, do the operation, and unlock the object after."
           new-size (* byte-size length)]
       (->DevicePointer new-size (jcpp-dtype/offset-pointer (.ptr buffer) offset))))
   (allocate-rand-buffer [impl elem-count]
-    (drv/allocate-device-buffer impl elem-count :float)))
+    (drv/allocate-device-buffer impl elem-count :float))
+  (alias? [impl lhs rhs]
+    (alias? lhs rhs))
+  (partially-alias? [impl lhs rhs]
+    (partially-alias? lhs rhs)))
 
 
 (defn check-copy-buffer-types-and-sizes
@@ -374,23 +420,6 @@ before we set it, do the operation, and unlock the object after."
                   dest-len)
       (throw (Exception. "Attempt to copy past extents of buffer.")))))
 
-
-(defprotocol PToJavaCPPPointer
-  (->ptr-impl [item]))
-
-(extend-protocol PToJavaCPPPointer
-  Pointer
-  (->ptr-impl [item] item)
-  DevicePointer
-  (->ptr-impl [item] (.ptr ^DevicePointer item))
-  DeviceArray
-  (->ptr-impl [item] (->ptr-impl (math/device-buffer item)))
-  nil
-  (->ptr-impl [item] nil))
-
-(defn ->ptr
-  (^Pointer [item] (->ptr-impl item))
-  (^Pointer [item offset] (jcpp-dtype/offset-pointer (->ptr-impl item) offset)))
 
 (defprotocol PLongConversion
   (to-long [item]))
@@ -760,30 +789,6 @@ relies only on blockDim.x block.x and thread.x"
 (defmethod dtype-cast :byte
   [elem dtype]
   (byte elem))
-
-
-(defn- alias?
-  [lhs rhs]
-  (= (.address ^Pointer (->ptr lhs))
-     (.address ^Pointer (->ptr rhs))))
-
-
-(defn- in-range?
-  [^long x ^long y ^long num-y]
-  (and (<= y x)
-       (> (+ y num-y) x)))
-
-
-(defn- partially-alias?
-  [lhs rhs]
-  (let [lhs-start (.address ^Pointer (->ptr lhs))
-        rhs-start (.address ^Pointer (->ptr rhs))
-        lhs-byte-count (* (long (m/ecount lhs))
-                          (dtype/datatype->byte-size (dtype/get-datatype lhs)))
-        rhs-byte-count (* (long (m/ecount rhs))
-                          (dtype/datatype->byte-size (dtype/get-datatype rhs)))]
-    (or (in-range? lhs-start rhs-start rhs-byte-count)
-        (in-range? rhs-start lhs-start lhs-byte-count))))
 
 
 (extend-type CudaStream

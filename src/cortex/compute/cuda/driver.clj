@@ -1,7 +1,8 @@
 (ns cortex.compute.cuda.driver
-  (:require [cortex.compute.cuda.base :as base]))
+  (:require [cortex.compute.cuda.base :as base]
+            [cortex.compute.cuda.tensor-math]))
 
-(defn cuda-driver
+(defn driver
   []
   (base/context)
   (let [device-functions {:memset (base/load-all-datatype-function "memset")
@@ -13,3 +14,9 @@
     (base/->CudaDriver (atom device-functions)
                        (base/blas-context)
                        (base/rand-context))))
+
+
+(defn cuda-driver
+  "DEPRECATED"
+  []
+  (driver))

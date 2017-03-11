@@ -24,6 +24,7 @@
      (ct/assign! tensor 1)
      (is (m/equals (repeat 9 1)
                    (ct/to-double-array tensor)))
+
      (let [rows (ct/rows tensor)
            columns (ct/columns tensor)]
        (doseq [row rows]

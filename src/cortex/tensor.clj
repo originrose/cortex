@@ -506,19 +506,19 @@ that rerequires the items to have the same element count."
 will determine the shape of the outgoing tensor."
   [data & {:keys [datatype]
            :or {datatype *datatype*}}]
-  (resource/with-resource-context
-   (let [stream (check-stream)
-         data-shape (m/shape data)
-         n-elems (long (apply * data-shape))
-         driver (compute-drv/get-driver stream)
-         host-buffer (compute-drv/allocate-host-buffer driver n-elems datatype)
-         dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
-         dimensions (dimensions data-shape)]
-     (dtype/copy-raw->item! data host-buffer 0)
-     (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
-     ;;The wait here is so that we can clean up the host buffer.
-     (compute-drv/wait-for-event (compute-drv/create-event stream))
-     (construct-tensor driver dimensions dev-buffer))))
+  (let [stream (check-stream)
+        data-shape (m/shape data)
+        n-elems (long (apply * data-shape))
+        driver (compute-drv/get-driver stream)
+        host-buffer (compute-drv/allocate-host-buffer driver n-elems datatype)
+        dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
+        dimensions (dimensions data-shape)]
+    (dtype/copy-raw->item! data host-buffer 0)
+    (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
+    ;;The wait here is so that we can clean up the host buffer.
+    (compute-drv/wait-for-event (compute-drv/create-event stream))
+    (resource/release host-buffer)
+    (construct-tensor driver dimensions dev-buffer)))
 
 
 (defn new-tensor
