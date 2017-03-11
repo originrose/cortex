@@ -72,6 +72,13 @@ if a separate result is provided it must be the size of the larger."
 ;;the variable themselves.
 (def ^:dynamic *datatype* :double)
 
+
+(defmacro with-stream
+  [stream & body]
+  (with-bindings {#'*stream* stream}
+    ~@body))
+
+
 (defn- check-stream
   []
   (let [retval *stream*]
@@ -110,34 +117,15 @@ types is guaranteed to work across devices."
   (apply ensure-same-driver args))
 
 
-(defn default-dimension-order
-  []
-  [:batch-size :channels :height :width])
-
-
-(defn get-dimension-order
-  [dims]
-  (get dims :order (default-dimension-order)))
-
-
-(defn create-dimensions
-  "Dimensions are defined the same as the graph dimensions with the exception of the inclusion
-  of batch size to the map as the slowest-changing dimension."
-  [& {:keys [width height channels batch-size]
-      :or {width 1 height 1 channels 1 batch-size 1} :as args}]
-  {:shape [batch-size channels height width]})
-
-
-(defn dimensions->map
-  "Convert dimensions into a map containing {batch-size channels height width}"
-  [{:keys [shape order]
-    :or {order (default-dimension-order)}}]
-  (let [[batch-size channels height width] shape]
-    {:batch-size batch-size
-     :channels channels
-     :height height
-     :width width
-     :order order}))
+(defn dimensions
+  "A dimension is a map with at least a shape (vector of integers) and potentially another
+vector of dimension names.  By convention the first member of the shape is the slowest changing
+and the last member of the shape is the most rapidly changing.  There can also be optionally a
+companion vector of names which name each dimension.  Names are used when doing things that are
+dimension aware such as a 2d convolution.  Shape is the same as a core-matrix shape."
+  [shape & {:keys [names]}]
+  {:shape shape
+   :names names})
 
 
 (defn map->dimensions
@@ -145,34 +133,9 @@ types is guaranteed to work across devices."
     :or {batch-size 1
          channels 1
          height 1
-         width 1
-         order (default-dimension-order)}}]
+         width 1}}]
   {:shape [batch-size channels height width]
-   :order order})
-
-
-(defn core-mat-shape->dimensions
-  "Given a core-matrix shape produce a dimension map."
-  ([shape ^long batch-size]
-   ;;Divide the highest dimension of shape by batch size.
-   (case (count shape)
-     1 (create-dimensions :batch-size batch-size
-                          :width (quot ^long (first shape)
-                                       batch-size))
-     2 (create-dimensions :batch-size batch-size
-                          :height (quot ^long (first shape)
-                                        batch-size)
-                          :width (second shape))
-     3 (create-dimensions :batch-size batch-size
-                          :channels (quot ^long (first shape)
-                                          batch-size)
-                          :height (second shape)
-                          :width (nth shape 2))
-     (throw (ex-info "Unexpected shape"
-                     {:shape shape
-                      :batch-size batch-size}))))
-  ([shape]
-   (core-mat-shape->dimensions shape 1)))
+   :names [:batch-size :channels :height :width]})
 
 
 (defn dimension-ecount
@@ -270,6 +233,11 @@ that rerequires the items to have the same element count."
   ^long [tensor]
   (long (mp/element-count tensor)))
 
+(defn assign!
+  [dest src]
+  (mp/assign! dest src)
+  dest)
+
 ;;Tensors are a tuple of device (driver for now) dimensions and index system and buffer.
 (defrecord Tensor [driver dimensions index-system buffer]
   dtype/PDatatype
@@ -341,9 +309,6 @@ that rerequires the items to have the same element count."
   (.buffer tensor))
 
 
-
-
-
 (defn tensor->2d-shape
   [^Tensor tensor]
   (dimensions->2d-shape (tensor->dimensions tensor)))
@@ -375,7 +340,7 @@ that rerequires the items to have the same element count."
   [driver & args]
   (let [partially-overlapping-args (->> args
                                         (map #(tensor->buffer ^Tensor %))
-                                        (combo/combinations args 2)
+                                        (#(combo/combinations % 2))
                                         (filter #(apply compute-drv/partially-alias? %))
                                         seq)]
     (when-not-error (nil? partially-overlapping-args)
@@ -383,7 +348,7 @@ that rerequires the items to have the same element count."
       {})))
 
 
-(defn tensor
+(defn construct-tensor
   (^Tensor [driver dimensions index-system buffer]
    (let [buffer-ecount (ecount buffer)
          shape (dimensions->shape dimensions)
@@ -415,10 +380,10 @@ that rerequires the items to have the same element count."
 (defn reinterpret-tensor
   "Create a new tensor with new dimensions.  This is like an in place reinterpretation of the
   data."
-  ^Tensor [^Tensor tensor new-dimensions]
-  (tensor (.driver tensor) new-dimensions
-          (tensor->index-system tensor)
-          (:buffer tensor)))
+  ^Tensor [^Tensor old-tensor new-dimensions]
+  (construct-tensor (.driver old-tensor) new-dimensions
+                    (tensor->index-system old-tensor)
+                    (:buffer old-tensor)))
 
 
 (defn as-column-vector
@@ -428,8 +393,7 @@ that rerequires the items to have the same element count."
     "Column vectors must either be dense or have num-columns = 1"
     {:dense? (dense? tensor)
      :num-columns (tensor->num-columns tensor)})
-  (reinterpret-tensor tensor (create-dimensions :height (ecount tensor)
-                                                :width 1)))
+  (reinterpret-tensor tensor (dimensions [(ecount tensor) 1])))
 
 (defn as-row-vector
   [^Tensor tensor]
@@ -438,7 +402,7 @@ that rerequires the items to have the same element count."
     "Row vectors must either be dense or have num-columns = 1"
     {:dense? (dense? tensor)
      :num-columns (tensor->num-columns tensor)})
-  (reinterpret-tensor tensor (create-dimensions :width (ecount tensor))))
+  (reinterpret-tensor tensor (dimensions [(ecount tensor)])))
 
 
 (defn- datatype->keyword
@@ -472,39 +436,16 @@ that rerequires the items to have the same element count."
   ^long [^Tensor tensor] (dimensions->least-rapidly-changing (tensor->dimensions tensor)))
 
 
-(defn tensor->channels
-  ^long [^Tensor tensor]
-  (get (dimensions->map (tensor->dimensions tensor)) :channels))
-
-
-(defn tensor->height
-  ^long [^Tensor tensor]
-  (get (dimensions->map (tensor->dimensions tensor)) :height))
-
-
-(defn tensor->width
-  ^long [^Tensor tensor]
-  (get (dimensions->most-rapidly-changing (tensor->dimensions tensor))))
-
-
 (defn as-batch-matrix
-  "As a 2d matrix of shape [batch-size everything-else]"
+  "As a 2d matrix of shape [least-rapidly-changing-dimension everything-else]"
   ^Tensor [^Tensor tensor]
-  (let [n-elems (ecount tensor)
-        batch-size (tensor->batch-size tensor)]
-    (reinterpret-tensor (:driver tensor)
-                        (create-dimensions :height batch-size
-                                           :width (quot n-elems
-                                                        (long batch-size))))))
+  (reinterpret-tensor tensor (tensor->batch-shape tensor)))
 
 
 (defn as-2d-matrix
-  "As a 2d matrix of shape [everything-else width]"
+  "As a 2d matrix of shape [everything-else most-rapidly-changin-dimension]"
   ^Tensor [^Tensor tensor]
-  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
-    (reinterpret-tensor (:driver tensor)
-                        (create-dimensions :height n-rows
-                                           :width n-cols))))
+  (reinterpret-tensor tensor (dimensions (tensor->2d-shape tensor))))
 
 (defn as-dense
   ^Tensor [tensor]
@@ -516,9 +457,12 @@ that rerequires the items to have the same element count."
 (defn make-dense
   ^Tensor [^Tensor tensor]
   (or (as-dense tensor)
-      (let [^Tensor retval (new-tensor [(ecount tensor)] :datatype (dtype/get-datatype tensor))]
+      (let [^Tensor retval (new-tensor [(ecount tensor)]
+                                       :datatype (dtype/get-datatype tensor)
+                                       :init-value nil)]
         (mp/assign! retval tensor)
-        (tensor (tensor->driver retval) (tensor->dimensions tensor) (tensor->buffer retval)))))
+        (construct-tensor (tensor->driver retval) (tensor->dimensions tensor)
+                          (tensor->buffer retval)))))
 
 (defn copy-to-java-type
   [dest ^Tensor src]
@@ -560,9 +504,8 @@ that rerequires the items to have the same element count."
 (defn ->tensor
   "Create a tensor from the data.  The shape of the data combined with the batch size
 will determine the shape of the outgoing tensor."
-  [data & {:keys [datatype batch-size]
-           :or {datatype *datatype*
-                batch-size 1}}]
+  [data & {:keys [datatype]
+           :or {datatype *datatype*}}]
   (resource/with-resource-context
    (let [stream (check-stream)
          data-shape (m/shape data)
@@ -570,26 +513,27 @@ will determine the shape of the outgoing tensor."
          driver (compute-drv/get-driver stream)
          host-buffer (compute-drv/allocate-host-buffer driver n-elems datatype)
          dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
-         dimensions (core-mat-shape->dimensions data-shape batch-size)]
+         dimensions (dimensions data-shape)]
      (dtype/copy-raw->item! data host-buffer 0)
      (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
      ;;The wait here is so that we can clean up the host buffer.
      (compute-drv/wait-for-event (compute-drv/create-event stream))
-     (tensor driver dimensions dev-buffer))))
+     (construct-tensor driver dimensions dev-buffer))))
 
 
 (defn new-tensor
-  [core-mshape & {:keys [datatype batch-size]
-                  :or {datatype *datatype*
-                       batch-size 1}}]
-  (let [dimensions (core-mat-shape->dimensions shape batch-size)
+  [shape & {:keys [datatype init-value]
+                   :or {datatype *datatype*
+                        init-value 0}}]
+  (let [dimensions (dimensions shape)
         n-elems (long (apply * shape))
         stream (check-stream)
         driver (compute-drv/get-driver stream)
         dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
         driver (compute-drv/get-driver stream)]
-    (compute-drv/memset stream dev-buffer 0 0 n-elems)
-    (tensor driver dimensions dev-buffer)))
+    (when init-value
+      (compute-drv/memset stream dev-buffer 0 0 n-elems))
+    (construct-tensor driver dimensions dev-buffer)))
 
 
 (defn subvector
@@ -608,7 +552,7 @@ will determine the shape of the outgoing tensor."
                        :offset offset
                        :new-length new-len})))
     (let [new-buf (compute-drv/sub-buffer (tensor->driver tensor) (tensor->buffer tensor) offset new-len)]
-      (tensor (tensor->driver tensor) (create-dimensions :width new-len) new-buf))))
+      (construct-tensor (tensor->driver tensor) (dimensions [new-len]) new-buf))))
 
 
 (defn submatrix
@@ -619,7 +563,7 @@ and the rest of the dimensions being squashed into n-rows."
         row-length (long row-length)
         col-start (long col-start)
         col-length (long col-length)
-        [n-rows n-cols] (dimensions->2d-shape (tensor->dimensions tensor))
+        [n-rows n-cols] (tensor->2d-shape tensor)
         n-rows (long n-rows)
         n-cols (long n-cols)
         column-stride (tensor->column-stride tensor)
@@ -642,9 +586,8 @@ and the rest of the dimensions being squashed into n-rows."
           required-length (* row-length column-stride)
           sub-buffer (compute-drv/sub-buffer driver (tensor->buffer tensor)
                                              start-offset required-length)]
-      (tensor (tensor->driver tensor)
-              (create-dimensions :width col-length
-                                 :height row-length)
+      (construct-tensor (tensor->driver tensor)
+              (dimensions [row-length col-length])
               (assoc (tensor->index-system tensor)
                      :num-columns col-length
                      :column-stride column-stride)
@@ -766,58 +709,7 @@ to non-gemm operations."
          (= n-elems
             (is/index-count index-system)))))
 
-
-(defn rows
-  "Returns a vector rows of dense vectors."
-  [^Tensor tensor]
-  (let [[n-rows n-cols] (as-2d-matrix tensor)
-        column-stride (tensor->column-stride tensor)
-        driver (tensor->driver tensor)
-        buffer (tensor->buffer tensor)]
-    (mapv (fn [^long idx]
-            (let [offset (* idx column-stride)
-                  new-buf (compute-drv/sub-buffer driver buffer offset n-cols)]
-              (tensor driver (create-dimensions :width n-cols) new-buf)))
-          (range n-rows))))
-
-
-(defn columns
-  "Returns a vector of matrixes with width of 1 but large column strides."
-  [^Tensor tensor]
-  (let [[n-rows n-cols] (as-2d-matrix tensor)
-        column-stride (tensor->column-stride tensor)
-        driver (tensor->driver tensor)
-        buffer (tensor->buffer tensor)
-        col-required-mem (* (- (long n-rows) 1) column-stride)
-        buf-ecount (ecount buffer)]
-    (mapv (fn [^long offset]
-            (let [new-buf (compute-drv/sub-buffer driver buffer offset (- buf-ecount offset))]
-              (tensor driver (create-dimensions :width n-rows)
-                             1
-                             column-stride new-buf)))
-          (range n-cols))))
-
-
-(defn- ensure-indexed-op
-  [^Tensor dest ^Tensor dest-indexes ^Tensor src ^Tensor src-indexes]
-  (ensure-indexes dest-indexes src-indexes)
-  (let [[dest-rows dest-cols] (dimensions->2d-shape (tensor->dimensions dest))
-        [src-rows src-cols] (dimensions->2d-shape (tensor->dimensions src))
-        n-dest-elems (* (long dest-cols) (ecount dest-indexes))
-        n-src-elems (* (long src-cols) (ecount src-indexes))
-        min-n-elems (long (min n-dest-elems n-src-elems))
-        max-n-elems (long (max n-dest-elems n-src-elems))]
-    (when-not-error (or (= 0 min-n-elems)
-                        (= 0 (rem max-n-elems
-                                  min-n-elems)))
-      "Indexed operations must be commensurate"
-      {:min-n-elems min-n-elems
-       :max-n-elems max-n-elems
-       :remainder (rem max-n-elems min-n-elems)})
-    (ensure-same-device dest dest-indexes src src-indexes)))
-
-
-(defn simple-tensor?
+(defn- simple-tensor?
   "A simple tensor is one that can be copied or assigned to with memset or memcpy (not memmove)
   semantics."
   [tensor]
@@ -828,12 +720,56 @@ to non-gemm operations."
           (is/system->index-length (tensor->index-system tensor)))))
 
 
+(defn- ensure-basic-indexing
+  "Basic indexing means monotonically increasing without indexed rows or any of the more
+  advanced indexing system features"
+  [tensor]
+  (when-not-error (is/simple-monotonically-increasing? (tensor->index-system tensor))
+    "Cannot get rows from tensors unless they have basic indexing system"
+    {:index-system (tensor->index-system)}))
+
+
+(defn rows
+  "Returns a vector rows of dense vectors."
+  [^Tensor tensor]
+  (let [[n-rows n-cols] (tensor->2d-shape tensor)
+        column-stride (tensor->column-stride tensor)
+        driver (tensor->driver tensor)
+        buffer (tensor->buffer tensor)]
+    (ensure-basic-indexing tensor)
+    (mapv (fn [^long idx]
+            (let [offset (* idx column-stride)
+                  new-buf (compute-drv/sub-buffer driver buffer offset n-cols)]
+              (construct-tensor driver (dimensions [n-cols]) new-buf)))
+          (range n-rows))))
+
+
+(defn columns
+  "Returns a vector of matrixes with width of 1 but large column strides."
+  [^Tensor tensor]
+  (let [[n-rows n-cols] (tensor->2d-shape tensor)
+        column-stride (tensor->column-stride tensor)
+        driver (tensor->driver tensor)
+        buffer (tensor->buffer tensor)
+        col-required-mem (* (- (long n-rows) 1) column-stride)
+        buf-ecount (ecount buffer)]
+    (ensure-basic-indexing tensor)
+    (mapv (fn [^long offset]
+            (let [new-buf (compute-drv/sub-buffer driver buffer offset (- buf-ecount offset))]
+              (construct-tensor driver (dimensions [n-rows])
+                                (assoc (tensor->index-system tensor)
+                                       :num-columns 1
+                                       :column-stride column-stride)
+                                new-buf)))
+          (range n-cols))))
+
+
 (defmethod typed-assign! [:tensor :number]
   [^Tensor dest src]
   (if (simple-tensor? dest)
-    (compute-drv/memset (check-stream) (tensor->buffer tensor) 0 src (ecount tensor))
+    (compute-drv/memset (check-stream) (tensor->buffer dest) 0 src (ecount dest))
     (tm/assign-constant! (check-stream)
-                         (tensor->buffer tensor) (tensor->index-system tensor) (ecount tensor)
+                         (tensor->buffer dest) (tensor->index-system dest) (ecount dest)
                          src)))
 
 
@@ -894,11 +830,12 @@ to non-gemm operations."
 (extend-type Tensor
   mp/PVectorView
   (as-vector [m]
-    (reinterpret-tensor m (create-dimensions :width (ecount m))))
+    (when (dense? m)
+      (reinterpret-tensor m (dimensions [(ecount m)]))))
 
   mp/PVectorisable
   (to-vector [m]
-    (mp/as-vector m))
+    (reinterpret-tensor (make-dense m) (dimensions [(ecount m)])))
 
   mp/PAssignment
   (assign! [dest src]

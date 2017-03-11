@@ -10,6 +10,7 @@
     [cortex.compute.driver :as drv]
     [cortex.compute.math :as math]
     [cortex.compute.cpu.driver :as cpu-drv]
+    [cortex.compute.cpu.stream :as cpu-stream]
     [cortex.compute.nn.layers :as compute-layers]
     [cortex.compute.nn.protocols :as compute-protocols]
     [cortex.compute.nn.backend :as nn-backend])
@@ -18,7 +19,8 @@
     [java.util.concurrent ForkJoinPool Callable Future]
     [java.nio DoubleBuffer FloatBuffer]
     [think.datatype ArrayView DoubleArrayView FloatArrayView]
-    [cortex.compute.cpu.driver CPUDriver CPUStream]
+    [cortex.compute.cpu.driver CPUDriver]
+    [cortex.compute.cpu.stream CPUStream]
     [cortex.compute.math DeviceArray Tensor]))
 
 
@@ -864,12 +866,12 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 (defrecord ActivationLayer [layer cpu-stream]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input output]
-    (cpu-drv/with-stream-dispatch cpu-stream
+    (cpu-stream/with-stream-dispatch cpu-stream
       (cpu-activation-forward (first-buffer input)
                               (:type layer)
                               (first-buffer output))))
   (backward [this parameter-buffers output input]
-    (cpu-drv/with-stream-dispatch cpu-stream
+    (cpu-stream/with-stream-dispatch cpu-stream
       (cpu-activation-backward (first-buffer input) (:type layer)
                                (first-buffer output)
                                (first-gradient output)
@@ -897,7 +899,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 (defrecord SoftmaxLayer [layer cpu-stream]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input output]
-    (cpu-drv/with-stream-dispatch cpu-stream
+    (cpu-stream/with-stream-dispatch cpu-stream
       (cpu-softmax-forward (first-buffer input) (first-buffer output)
                            (graph/node->input-size layer) (:output-channels layer))))
   (backward [this parameter-buffers output input]
@@ -957,7 +959,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
           num-out-pixels (* output-width output-height)
           num-out-channels (long num-kernels)
           cpu-stream (drv/get-stream (.backend layer))
-          current-thread-stream (cpu-drv/main-thread-cpu-stream)
+          current-thread-stream (cpu-stream/main-thread-cpu-stream)
           input (compute-layers/first-buffer input-buffers)
           output (compute-layers/first-buffer output-buffers)
           weights (get-in parameter-buffers [:weights :buffer])
@@ -965,7 +967,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
       ;;In parallel process each item of the batch.
       ;;This allows us to take advantage of at least
       ;;*some* multithreading without having to explicity program much of it.
-      (cpu-drv/with-stream-dispatch cpu-stream
+      (cpu-stream/with-stream-dispatch cpu-stream
         (doall (pmap (fn [[input output input-convolved]]
                       ;;Redefine output to be the correct shape
                       (let [output (math/with-tensor
@@ -1004,8 +1006,8 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
           batched-data [input output input-gradient output-gradient input-convolved]
           io-data (math/batched-data-to-per-input-data batch-driver batched-data)
           cpu-stream (drv/get-stream (.backend layer))
-          current-thread-stream (cpu-drv/main-thread-cpu-stream)]
-      (cpu-drv/with-stream-dispatch cpu-stream
+          current-thread-stream (cpu-stream/main-thread-cpu-stream)]
+      (cpu-stream/with-stream-dispatch cpu-stream
         ;;compute the weights gradient.  These aren't too expensive but we cannot easily
         ;;parallelize this because it is an accumulation.
         (doseq [[input output input-gradient output-gradient input-convolved] io-data]
@@ -1047,7 +1049,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (forward [layer parameters input-buffers output-buffers]
     (let [input (compute-layers/first-buffer input-buffers)
           output (compute-layers/first-buffer output-buffers)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
+      (cpu-stream/with-stream-dispatch (drv/get-stream (.backend layer))
         (doall (pmap (fn [[input output]]
                        (cpu-max-pooling-forward (device-array->view input)
                                                 (device-array->view output)
@@ -1060,7 +1062,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
           output (compute-layers/first-buffer output-buffers)
           input-gradient (compute-layers/first-gradient input-buffers)
           output-gradient (compute-layers/first-gradient output-buffers)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
+      (cpu-stream/with-stream-dispatch (drv/get-stream (.backend layer))
         (doall (pmap (fn [[input output input-gradient output-gradient]]
                        (cpu-fill (device-array->view input-gradient) 0)
                        (cpu-max-pooling-backward (device-array->view input)
@@ -1088,7 +1090,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   nn-backend/PBatchNormalization
   (batch-norm-inference! [this input running-means running-variances scale bias output epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+      (cpu-stream/with-stream-dispatch (drv/get-stream backend)
         (cpu-bn-calc (device-array->view input)
                      (device-array->view running-means)
                      (device-array->view running-variances)
@@ -1101,7 +1103,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                         saved-means saved-variances
                         scale bias output average-factor epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+      (cpu-stream/with-stream-dispatch (drv/get-stream backend)
         (cpu-update-means-variances (device-array->view input)
                                     (device-array->view running-means)
                                     (device-array->view running-variances)
@@ -1115,7 +1117,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                          scale-gradient bias-gradient input-gradient output-gradient
                          epsilon]
     (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+      (cpu-stream/with-stream-dispatch (drv/get-stream backend)
         (cpu-bn-backward (device-array->view input)
                          (device-array->view saved-means)
                          (device-array->view saved-variances)
@@ -1138,14 +1140,14 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   compute-protocols/ComputeLayer
   (forward [this parameters input-buffers output-buffers]
     (let [{:keys [n k alpha beta]} layer]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+      (cpu-stream/with-stream-dispatch (drv/get-stream backend)
         (cpu-lrn-forward (first-buffer input-buffers)
                          (first-buffer output-buffers)
                          (layer-output->tensor layer batch-size)
                          n k alpha beta))))
   (backward [this parameters output-buffers input-buffers]
     (let [{:keys [n k alpha beta]} layer]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
+      (cpu-stream/with-stream-dispatch (drv/get-stream backend)
         (cpu-lrn-backward (first-buffer input-buffers)
                           (first-gradient output-buffers)
                           (first-gradient input-buffers)
@@ -1170,11 +1172,11 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (cpu-layer backend layer batch-size))
   nn-backend/PDropout
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]
-    (cpu-drv/with-stream-dispatch (.stream backend)
+    (cpu-stream/with-stream-dispatch (.stream backend)
       (cpu-prepare-bernoulli-dropout (device-array->view mult-buffer)
                                      (device-array->view rand-buffer) probability)))
   ;;Gaussian distribution copied to mult buffer.
   (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]
-    (cpu-drv/with-stream-dispatch (.stream backend)
+    (cpu-stream/with-stream-dispatch (.stream backend)
       (cpu-prepare-gaussian-dropout (device-array->view mult-buffer)
                                     (device-array->view rand-buffer)))))

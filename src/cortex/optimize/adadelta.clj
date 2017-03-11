@@ -6,6 +6,7 @@
     [cortex.compute.driver :as drv]
     [cortex.compute.cpu.backend :as cpu-backend]
     [cortex.compute.cpu.driver :as cpu-drv]
+    [cortex.compute.cpu.stream :as cpu-stream]
     [cortex.compute.cuda.driver :as cuda-drv]
     [cortex.util :as util])
   (:import
@@ -64,7 +65,7 @@
                 grad-sq-accum-view (cpu-backend/device-array->view grad-sq-accum)
                 dx-sq-accum-view (cpu-backend/device-array->view dx-sq-accum)
                 stream (:stream backend)]
-            (cpu-drv/with-stream-dispatch stream
+            (cpu-stream/with-stream-dispatch stream
               (typed-step-fn gradient-view param-view gradient-alpha param-offset
                              decay epsilon grad-sq-accum-view dx-sq-accum-view))))]
     (setup-optimizer backend optimizer step-fn param-count)))

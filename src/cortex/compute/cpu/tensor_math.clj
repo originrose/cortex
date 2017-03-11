@@ -4,9 +4,9 @@
             [cortex.tensor.math :as tm]
             [cortex.tensor.index-system :as is]
             [clojure.math.combinatorics :as combo]
-            [cortex.compute.cpu.driver :as cpu-driver]
+            [cortex.compute.cpu.stream :as cpu-stream]
             [think.parallel.core :as parallel])
-  (:import [cortex.compute.cpu.driver CPUStream]))
+  (:import [cortex.compute.cpu.stream CPUStream]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -104,19 +104,19 @@
 (defmacro generate-address-function-generator
   [elems-per-idx system-type adjustment address]
   `(fn [index-system#]
-    (let [~'constant (long (get-in index-system# [:strategy :constant] 1))
-          ~'elements-per-idx (long (or (get index-system# :elements-per-idx) 1))
-          ~'length (long (is/index-strategy-length (get index-system# :strategy)))
-          ~'indexes (marshal/as-int-array-view (get-in index-system# [:strategy :indexes]))
-          ~'idx-numerator (long (or (get index-system# :idx-numerator) 1))
-          ~'idx-denominator (long (or (get index-system# :idx-denominator) 1))
-          ~'num-columns (long (or (get index-system# :num-columns) 1))
-          ~'column-stride (long (or (get index-system# :column-stride) 1))]
-      ;;General case
-      (proxy [ElemIdxToAddressFunction] []
-        (idx_to_address [~'elem-idx]
-          (let [~'elem-idx (long ~'elem-idx)]
-           (combine-calculations ~elems-per-idx ~system-type ~adjustment ~address)))))))
+     (let [~'constant (long (get-in index-system# [:strategy :constant] 1))
+           ~'elements-per-idx (long (or (get index-system# :elements-per-idx) 1))
+           ~'length (long (is/index-strategy-length (get index-system# :strategy)))
+           ~'indexes (marshal/as-int-array-view (get-in index-system# [:strategy :indexes]))
+           ~'idx-numerator (long (or (get index-system# :idx-numerator) 1))
+           ~'idx-denominator (long (or (get index-system# :idx-denominator) 1))
+           ~'num-columns (long (or (get index-system# :num-columns) 1))
+           ~'column-stride (long (or (get index-system# :column-stride) 1))]
+       ;;General case
+       (reify
+         ElemIdxToAddressFunction
+         (idx_to_address [_ ~'elem-idx]
+           (combine-calculations ~elems-per-idx ~system-type ~adjustment ~address))))))
 
 
 (defn- generate-combinations
@@ -135,7 +135,7 @@
           (generate-combinations)))
 
 
-(defonce combination-map
+(def combination-map
   (memoize
    (fn []
      (->> (generate-all-address-functions)
@@ -161,7 +161,7 @@
          (dtype/v-aset buffer# (.idx_to_address idx->address# idx#) value#))))))
 
 
-(defonce assign-constant-map
+(def assign-constant-map
   (memoize
    (fn []
      (->> (marshal/array-view-iterator assign-constant-impl)
@@ -209,10 +209,10 @@
            n-elems# (long n-elems#)]
        (parallel/parallel-for
         idx# n-elems#
-        (dtype/v-aset dest# (dest-idx->address# idx#)
+        (dtype/v-aset dest# (.idx_to_address dest-idx->address# idx#)
                       (datatype->cast-fn
                        ~lhs-dtype
-                       (dtype/v-aget src# (src-idx->address# idx#))))))))
+                       (dtype/v-aget src# (.idx_to_address src-idx->address# idx#))))))))
 
 
 (defmacro generate-all-marshalling-assign-fns
@@ -222,7 +222,7 @@
           (generate-datatype-combinations)))
 
 
-(defonce assign!-map
+(def assign!-map
   (memoize
    (fn []
      (->> (generate-all-marshalling-assign-fns)
@@ -232,14 +232,14 @@
 (extend-type CPUStream
   tm/TensorMath
   (assign-constant! [stream buffer index-system value n-elems]
-    (cpu-driver/with-stream-dispatch stream
-      ((get (assign-constant-map (dtype/get-datatype buffer)))
+    (cpu-stream/with-stream-dispatch stream
+      ((get (assign-constant-map) (dtype/get-datatype buffer))
        buffer index-system value n-elems)))
   (assign! [stream
             dest dest-idx-sys dest-ecount
             src src-idx-sys src-ecount]
-    (cpu-driver/with-stream-dispatch stream
-      ((get (assign!-map [(dtype/get-datatype dest) (dtype/get-datatype src)]))
+    (cpu-stream/with-stream-dispatch stream
+      ((get (assign!-map) [(dtype/get-datatype dest) (dtype/get-datatype src)])
        dest dest-idx-sys
        src src-idx-sys
        (max (long dest-ecount) (long src-ecount))))))

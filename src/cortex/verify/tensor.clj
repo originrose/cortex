@@ -6,12 +6,31 @@
             [clojure.core.matrix :as m]))
 
 
-(deftest assign-constant!
-  []
-  (let [driver (cpu-driver/driver)
-        stream (drv/create-stream driver)]
-    (with-bindings {#'ct/*stream* stream}
-      (let [tensor (ct/->tensor (partition 3 (range 9)))]
-        (is (= (ct/ecount tensor) 9))
-        (is (m/equals (range 9)
-                      (ct/to-double-array tensor)))))))
+(defmacro tensor-context
+  [driver datatype & body]
+  `(with-bindings {#'ct/*stream* (drv/create-stream ~driver)
+                   #'ct/*datatype* ~datatype}
+     ~@body))
+
+
+(defn assign-constant!
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [tensor (ct/->tensor (partition 3 (range 9)))]
+     (is (= (ct/ecount tensor) 9))
+     (is (m/equals (range 9)
+                   (ct/to-double-array tensor)))
+     (ct/assign! tensor 1)
+     (is (m/equals (repeat 9 1)
+                   (ct/to-double-array tensor)))
+     (let [rows (ct/rows tensor)
+           columns (ct/columns tensor)]
+       (doseq [row rows]
+         (ct/assign! row 2))
+       (is (m/equals (repeat 9 2)
+                     (ct/to-double-array tensor)))
+       (doseq [col columns]
+         (ct/assign! col 3))
+       (is (m/equals (repeat 9 3)
+                     (ct/to-double-array tensor)))))))

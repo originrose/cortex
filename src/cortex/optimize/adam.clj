@@ -6,6 +6,7 @@
    [cortex.compute.driver :as drv]
    [cortex.compute.cpu.backend :as cpu-backend]
    [cortex.compute.cpu.driver :as cpu-drv]
+   [cortex.compute.cpu.stream :as cpu-stream]
    [cortex.compute.cuda.driver :as cuda-drv]
    [cortex.util :as util]
    [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
@@ -39,7 +40,7 @@
 
 (defn- dispatch-to-cpu
   [stream dispatch-fn item-count & args]
-  (cpu-drv/with-stream-dispatch stream
+  (cpu-stream/with-stream-dispatch stream
     (apply dispatch-fn args)))
 
 
