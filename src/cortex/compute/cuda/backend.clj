@@ -1,5 +1,5 @@
 (ns cortex.compute.cuda.backend
-  (:require [cortex.compute.cuda.driver :refer [->ptr value->ptr] :as cuda-drv]
+  (:require [cortex.compute.cuda.base :refer [->ptr value->ptr] :as cuda-base]
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
             [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.nn.protocols :as compute-protocols]
@@ -10,13 +10,14 @@
             [cortex.compute.cpu.backend :as cpu-backend]
             [cortex.optimize :as opt]
             [think.datatype.core :as dtype]
-            [think.resource.core :as resource])
+            [think.resource.core :as resource]
+            [cortex.compute.cuda.driver :as cuda-drv])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
             cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
             cudnn$cudnnPoolingStruct cudnn$cudnnLRNStruct
             BytePointer IntPointer LongPointer DoublePointer Pointer PointerPointer
             SizeTPointer FloatPointer ShortPointer]
-           [cortex.compute.cuda.driver CudaDriver CudaStream]
+           [cortex.compute.cuda.base CudaDriver CudaStream]
            [cortex.compute.math DeviceArray]))
 
 
@@ -53,7 +54,7 @@
      retval#))
 
 (defonce forward-algorithms
-  (cuda-drv/reverse-hash-map
+  (cuda-base/reverse-hash-map
    {"CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM"         0
     "CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM" 1
     "CUDNN_CONVOLUTION_FWD_ALGO_GEMM"                  2
@@ -63,7 +64,7 @@
 
 
 (defonce backward-filter-algorithms
-  (cuda-drv/reverse-hash-map
+  (cuda-base/reverse-hash-map
    {
     "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0"         0
     "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1"         1
@@ -73,7 +74,7 @@
 
 
 (defonce backward-data-algorithms
-  (cuda-drv/reverse-hash-map
+  (cuda-base/reverse-hash-map
    {
     "CUDNN_CONVOLUTION_BWD_DATA_ALGO_0"          0
     "CUDNN_CONVOLUTION_BWD_DATA_ALGO_1"          1
@@ -188,11 +189,11 @@
 (defn backend
   ([driver stream datatype]
    (let [network-functions {:prepare-bernoulli-dropout
-                            (cuda-drv/load-float-double-function
+                            (cuda-base/load-float-double-function
                               "prepare_bernoulli_dropout.fatbin"
                               "prepare_bernoulli_dropout")
                             :prepare-gaussian-dropout
-                            (cuda-drv/load-float-double-function
+                            (cuda-base/load-float-double-function
                               "prepare_gaussian_dropout.fatbin"
                               "prepare_gaussian_dropout")}]
      (->CudaBackend :cuda driver stream (cudnn-context) datatype network-functions)))
@@ -226,20 +227,20 @@
 (extend-type DoublePointer
   PCUDAOptimizeMethod
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
+    (cuda-base/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
                                    mult-buffer rand-buffer (double probability) elem-count))
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :double) elem-count 0
+    (cuda-base/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :double) elem-count 0
                                    mult-buffer rand-buffer elem-count)))
 
 
 (extend-type FloatPointer
   PCUDAOptimizeMethod
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :float) elem-count 0
+    (cuda-base/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :float) elem-count 0
                                    mult-buffer rand-buffer (float probability) elem-count))
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :float) elem-count 0
+    (cuda-base/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :float) elem-count 0
                                    mult-buffer rand-buffer elem-count)))
 
 

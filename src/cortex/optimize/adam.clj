@@ -11,7 +11,8 @@
    [cortex.util :as util]
    [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
    [think.datatype.marshal :as marshal]
-   [think.parallel.core :as parallel])
+   [think.parallel.core :as parallel]
+   [cortex.compute.cuda.base :as cuda-base])
   (:import
    [think.datatype ArrayView IntArrayView]))
 
@@ -46,7 +47,7 @@
 
 (defn- dispatch-to-gpu
   [stream dispatch-fn item-count & args]
-  (apply cuda-drv/launch-linear-kernel
+  (apply cuda-base/launch-linear-kernel
          stream dispatch-fn item-count 0
          args))
 
@@ -123,7 +124,7 @@
   (let [datatype (dtype/get-datatype backend)
         stream (drv/get-stream backend)
         item-count (dtype/ecount gradient)
-        ->d #(cuda-drv/dtype-cast % datatype)]
+        ->d #(cuda-base/dtype-cast % datatype)]
     (ensure-datatype datatype gradient parameters m v)
     (dev-dispatch-fn stream (get-in fn-map [datatype :fn]) item-count
                      (->d alpha) (->d beta1) (->d beta2) (->d epsilon)
@@ -181,7 +182,7 @@
 (defmethod create-optimizer [:cuda :adam]
   [backend optimizer param-count]
   ;; Load the compiled GPU kernel for floats and doubles
-  (let [cuda-fns (cuda-drv/load-float-double-function "adam.fatbin" "adam_step")]
+  (let [cuda-fns (cuda-base/load-float-double-function "adam.fatbin" "adam_step")]
     (setup-optimizer backend optimizer
                      (adam-step-fn backend cuda-fns dispatch-to-gpu)
                      param-count)))

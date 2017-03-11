@@ -7,7 +7,7 @@
     [cortex.compute.cpu.backend :as cpu-backend]
     [cortex.compute.cpu.driver :as cpu-drv]
     [cortex.compute.cpu.stream :as cpu-stream]
-    [cortex.compute.cuda.driver :as cuda-drv]
+    [cortex.compute.cuda.base :as cuda-base]
     [cortex.util :as util])
   (:import
    [cortex.compute.optimize AdadeltaOptimizer]
@@ -73,7 +73,7 @@
 (defn cuda-adadelta-step-float!
   [backend typed-cuda-fn gradient parameters gradient-alpha
    decay epsilon grad-accum dx-accum item-count]
-  (cuda-drv/launch-linear-kernel
+  (cuda-base/launch-linear-kernel
     (drv/get-stream backend) typed-cuda-fn item-count 0
     (float decay) (float epsilon)
     grad-accum dx-accum
@@ -83,7 +83,7 @@
 (defn cuda-adadelta-step-double!
   [backend typed-cuda-fn gradient parameters gradient-alpha
    decay epsilon grad-accum dx-accum item-count]
-  (cuda-drv/launch-linear-kernel
+  (cuda-base/launch-linear-kernel
     (drv/get-stream backend) typed-cuda-fn item-count 0
     (double decay) (double epsilon)
     grad-accum dx-accum
@@ -93,7 +93,7 @@
 (defmethod create-optimizer [:cuda :adadelta]
   [backend optimizer param-count]
   (let [datatype (dtype/get-datatype backend)
-        cuda-fns (cuda-drv/load-float-double-function "adadelta.fatbin" "adadelta_step")
+        cuda-fns (cuda-base/load-float-double-function "adadelta.fatbin" "adadelta_step")
         typed-cuda-fn (:fn (get cuda-fns datatype))
         typed-step-fn
         (cond
@@ -102,10 +102,10 @@
         step-fn
         (fn [backend gradient parameters gradient-alpha param-offset decay
              epsilon grad-sq-accum dx-sq-accum]
-          (let [gradient-view (cuda-drv/->ptr gradient)
-                param-view (cuda-drv/->ptr parameters)
-                grad-sq-accum-view (cuda-drv/->ptr grad-sq-accum param-offset)
-                dx-sq-accum-view (cuda-drv/->ptr dx-sq-accum param-offset)
+          (let [gradient-view (cuda-base/->ptr gradient)
+                param-view (cuda-base/->ptr parameters)
+                grad-sq-accum-view (cuda-base/->ptr grad-sq-accum param-offset)
+                dx-sq-accum-view (cuda-base/->ptr dx-sq-accum param-offset)
                 item-count (dtype/ecount gradient)]
             (typed-step-fn backend typed-cuda-fn
                            gradient-view param-view
