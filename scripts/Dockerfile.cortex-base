@@ -1,0 +1,35 @@
+FROM nvidia/cuda:8.0-cudnn5-devel-ubuntu16.04
+MAINTAINER ThinkTopic
+
+# For some reason this is required for the keyboard-configuration install (?)
+ENV TERM xterm
+ENV DEBIAN_FRONTEND noninteractive
+
+# System requirements
+RUN apt-get update                                && \
+    apt-get install -y -q                            \
+    python-software-properties software-properties-common \
+    nmap wget curl htop unzip
+
+# Install CUDA for cortex gpu support
+RUN apt-get install -y nvidia-367 cuda-cublas-8-0 && \
+    mv /usr/local/cuda/lib64 /usr/lib/ && ldconfig
+
+# java 8
+RUN add-apt-repository ppa:webupd8team/java -y
+RUN apt-get update
+RUN echo oracle-java8-installer shared/accepted-oracle-license-v1-1 select true | /usr/bin/debconf-set-selections
+RUN apt-get install -y oracle-java8-installer
+
+# fix any issues
+RUN apt-get -f install -y && apt-get upgrade -y
+
+# Lein
+RUN wget https://raw.githubusercontent.com/technomancy/leiningen/stable/bin/lein && \
+    mv lein /usr/bin && chmod a+x /usr/bin/lein && lein
+
+# upgrade to ubuntu 16.10
+# exit 0 at the end because it tries to restart which fails
+RUN apt-get install -y ubuntu-release-upgrader-core && \
+    sed -i 's/Prompt=lts/Prompt=normal/' /etc/update-manager/release-upgrades && \
+    do-release-upgrade -d -f DistUpgradeViewNonInteractive ; exit 0
