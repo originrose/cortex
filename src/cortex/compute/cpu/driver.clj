@@ -20,7 +20,7 @@
 (set! *unchecked-math* true)
 
 
-(defrecord CPUStream [input-chan exit-chan error-atom])
+(defrecord CPUStream [driver input-chan exit-chan error-atom])
 
 (extend-type CPUStream
   resource/PResource
@@ -28,8 +28,8 @@
     (async/close! (.input-chan impl))))
 
 (defn cpu-stream
-  ([error-atom]
-   (let [^CPUStream retval (->CPUStream (async/chan 16) (async/chan) error-atom)]
+  ([driver error-atom]
+   (let [^CPUStream retval (->CPUStream driver (async/chan 16) (async/chan) error-atom)]
      (async/go
        (loop [next-val (async/<! (:input-chan retval))]
          (when next-val
@@ -40,7 +40,7 @@
            (recur (async/<! (:input-chan retval)))))
        (async/close! (:exit-chan retval)))
      (resource/track retval)))
-  ([] (cpu-stream (atom nil))))
+  ([driver] (cpu-stream driver (atom nil))))
 
 
 (defn main-thread-cpu-stream
@@ -194,7 +194,7 @@ Use with care; the synchonization primitives will just hang with this stream."
   (get-current-device [impl] (:current-device impl))
   (create-stream [impl]
     (check-stream-error impl)
-    (cpu-stream (:error-atom impl)))
+    (cpu-stream impl (:error-atom impl)))
   (allocate-host-buffer [impl elem-count elem-type]
     (check-stream-error impl)
     (dtype/make-view elem-type elem-count))
@@ -219,6 +219,8 @@ Use with care; the synchonization primitives will just hang with this stream."
 
 
 (extend-type CPUStream
+  drv/PDriverProvider
+  (get-driver [stream] (.driver stream))
   c-math/PMath
   (gemm-impl [stream trans-a? trans-b? a-row-count a-col-count b-col-count alpha A a-colstride
               B b-colstride

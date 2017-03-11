@@ -159,7 +159,7 @@ types is guaranteed to work across devices."
      1 (create-dimensions :batch-size batch-size
                           :width (quot ^long (first shape)
                                        batch-size))
-     2 (create-dimensions :batch-size batch-size 1
+     2 (create-dimensions :batch-size batch-size
                           :height (quot ^long (first shape)
                                         batch-size)
                           :width (second shape))
@@ -312,6 +312,11 @@ that rerequires the items to have the same element count."
     (last (get dimensions :shape))))
 
 
+(defn- tensor->dimensions
+  [^Tensor tensor]
+  (.dimensions tensor))
+
+
 (defn- tensor->column-stride
   ^long [^Tensor tensor]
   (dimensions->column-stride
@@ -336,9 +341,7 @@ that rerequires the items to have the same element count."
   (.buffer tensor))
 
 
-(defn- tensor->dimensions
-  [^Tensor tensor]
-  (.dimensions tensor))
+
 
 
 (defn tensor->2d-shape
@@ -353,7 +356,7 @@ that rerequires the items to have the same element count."
 
 (defn tensor->index-system
   [^Tensor tensor]
-  (tensor->index-system tensor))
+  (.index-system tensor))
 
 
 (defn- ensure-assignment-matches
@@ -524,7 +527,8 @@ that rerequires the items to have the same element count."
          n-elems (ecount tensor)
          driver (tensor->driver tensor)
          stream (check-stream)
-         host-buffer (compute-drv/allocate-host-buffer driver n-elems (dtype/get-datatype tensor))]
+         host-buffer (compute-drv/allocate-host-buffer driver n-elems
+                                                       (dtype/get-datatype tensor))]
      (compute-drv/copy-device->host stream (tensor->buffer tensor) 0 host-buffer 0 n-elems)
      (compute-drv/wait-for-event (compute-drv/create-event stream))
      (dtype/copy! host-buffer 0 dest 0 n-elems)
@@ -533,7 +537,8 @@ that rerequires the items to have the same element count."
 
 (defn to-array-of-type
   [^Tensor tensor datatype]
-  (copy-to-java-type (dtype/make-array-of-type datatype (ecount tensor))))
+  (copy-to-java-type (dtype/make-array-of-type datatype (ecount tensor))
+                     tensor))
 
 
 (defn to-double-array
@@ -543,10 +548,10 @@ that rerequires the items to have the same element count."
 
 (defn to-core-matrix
   [^Tensor tensor]
-  (let [[n-rows n-cols] (dimensions->2d-shape (tensor->dimensions tensor))
-        retval (m/new-array [n-rows n-cols] :vectorz)
+  (let [retval (m/new-array :vectorz (get (tensor->dimensions tensor) :shape))
         double-data (mp/as-double-array retval)]
-    (copy-to-java-type double-data tensor)))
+    (copy-to-java-type double-data tensor)
+    retval))
 
 (defn to-core-matrix-vector
   [tensor]
@@ -827,7 +832,7 @@ to non-gemm operations."
   [^Tensor dest src]
   (if (simple-tensor? dest)
     (compute-drv/memset (check-stream) (tensor->buffer tensor) 0 src (ecount tensor))
-    (ts/assign-constant! (check-stream)
+    (tm/assign-constant! (check-stream)
                          (tensor->buffer tensor) (tensor->index-system tensor) (ecount tensor)
                          src)))
 
