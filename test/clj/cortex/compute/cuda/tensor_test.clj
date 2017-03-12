@@ -11,5 +11,5 @@
 (use-fixtures :each test-wrapper)
 
 
-(deftest assign-constant!
+(def-all-dtype-test assign-constant!
   (verify-tensor/assign-constant! (driver) *datatype*))

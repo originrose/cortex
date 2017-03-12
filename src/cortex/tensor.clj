@@ -79,7 +79,7 @@ if a separate result is provided it must be the size of the larger."
     ~@body))
 
 
-(defn- check-stream
+(defn check-stream
   []
   (let [retval *stream*]
     (when-not-error retval "Tensor stream is nil" {})
@@ -769,8 +769,8 @@ to non-gemm operations."
   (if (simple-tensor? dest)
     (compute-drv/memset (check-stream) (tensor->buffer dest) 0 src (ecount dest))
     (tm/assign-constant! (check-stream)
-                         (tensor->buffer dest) (tensor->index-system dest) (ecount dest)
-                         src)))
+                         (tensor->buffer dest) (tensor->index-system dest)
+                         src (ecount dest))))
 
 
 (defn- memcpy-semantics?

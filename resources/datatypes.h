@@ -25,7 +25,7 @@ namespace think { namespace datatype {
 
     typedef char int8_t;
     typedef short int16_t;
-    typedef long int32_t;
+    typedef int int32_t;
     typedef long long int64_t;
     typedef float f32_t;
     typedef double f64_t;

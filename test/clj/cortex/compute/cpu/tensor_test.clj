@@ -13,3 +13,7 @@
 
 (def-all-dtype-test assign-constant!
   (verify-tensor/assign-constant! (driver) *datatype*))
+
+
+(def-all-dtype-test assign-marshal
+  (verify-tensor/assign-marshal (driver) *datatype*))
