@@ -1,4 +1,4 @@
-(ns cortex.compute.cuda.tensor-test
+(ns ^:gpu cortex.compute.cuda.tensor-test
   (:require [cortex.verify.tensor :as verify-tensor]
             [cortex.compute.verify.utils
              :refer [def-double-float-test
