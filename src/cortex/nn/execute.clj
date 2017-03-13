@@ -26,7 +26,6 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [cortex.nn.layers :as layers]
     [cortex.compute.driver :as drv]
     [cortex.compute.math :as math]
-    [cortex.compute.batching-system :as batching-system]
     [cortex.compute.loss :as compute-loss]
     [cortex.compute.cpu.backend :as cpu]
     [cortex.compute.nn.layers :as compute-layers]
@@ -83,34 +82,6 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                                                       :e e}))))))))))
             compute-buffers
             (network/network->node-parameters network (get node :id)))))
-
-
-(defn- batching-system
-  [backend built-network stream-map batch-size]
-  ;;we have to ensure the batching system knows if the data is used for input or output.
-  (let [all-bindings (traverse/get-io-bindings built-network)
-        ;;Update the stream map to include the network directions :input,:output
-        ;;that each stream is used in, and make it a proper map per entry if it isn't
-        stream-map (reduce (fn [stream-map {:keys [stream direction]}]
-                             (if-let [stream-entry (get stream-map stream)]
-                               (let [stream-entry (if (number? stream-entry)
-                                                    {:size stream-entry}
-                                                    stream-entry)
-                                     dir-set (get stream-entry :direction #{})]
-                                 (assoc stream-map stream
-                                                   (assoc stream-entry :direction
-                                                                       (conj dir-set direction))))
-                               stream-map))
-                           (->> stream-map
-                                (map (fn [[k v]]
-                                       [k (if (number? v)
-                                            {:size v}
-                                            v)]))
-                                (into {}))
-                           (traverse/get-io-bindings built-network))]
-    (batching-system/batching-system backend
-                                     stream-map
-                                     batch-size)))
 
 
 (defn- get-node-parameters
@@ -245,11 +216,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
          (keys (get traversal :buffers)))
         network (assoc built-network
                        :compute-binding
-                       (assoc compute-binding
-                              :backend backend
-                              :batching-system (batching-system backend built-network
-                                                                stream-map
-                                                                batch-size)))
+                       (assoc compute-binding :backend backend))
         trainable-parameters (load-training-parameters network)
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
@@ -674,23 +641,6 @@ any loss-specific parameter buffers."
                                             (rest batch-seq)))))))
 
 
-(defn train-batch-sequence
-  "Return a sequence of progressively better trained built-networks, one for each batch."
-  [context network batch-map-sequence options]
-  (let [batch-map-sequence (->> batch-map-sequence
-                                (map (partial graph/augment-streams (network/network->graph network))))
-        initial-keys (keys (first batch-map-sequence))
-        bs (-> (get-in network [:compute-binding :batching-system])
-               ;;In a late binding way, ensure the stream sizes match with the actual streams.
-               (batching-system/add-streams (first batch-map-sequence)))
-        ;;The buffers do not change going backward so we can pre-map this pass.
-        network (add-pass-to-network network {} :backward)
-        required-keys (traverse/required-io-keys network)
-        network (assoc-in network [:compute-binding :batching-system] bs)]
-    (->> (batching-system/get-batches bs batch-map-sequence required-keys)
-         (recur-train-sequence network true))))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  Inference
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -747,19 +697,6 @@ any loss-specific parameter buffers."
                            [node-id double-buffers])))
                   (into {}))))
          batches)))
-
-
-(defn infer-batch-sequence
-  "Return a sequence of maps of node-id->double-array-seq.
-  Use dataset/batch-sequence-columnar in order to transform sequence into
-  specific sequences."
-  [context network batch-map-sequence options]
-  (let [bs (get-in network [:compute-binding :batching-system])
-        support-data (infer-seq-support-data network)
-        required-keys (traverse/required-io-keys network)
-        batches (batching-system/get-batches bs batch-map-sequence required-keys)]
-    (do-infer-seq network support-data :inference batches)))
-
 
 (defn- normalize-argument-buffer
   [arg-buf]
@@ -1075,8 +1012,13 @@ This does not need to be wrapped in a resource context; that is done for you."
                         (traverse/required-io-keys network)
                         (traverse/required-input-keys network))
         batch-size (:batch-size network)]
+    (when (zero? (count required-keys))
+      (throw (ex-info "Zero required keys in batch-buffers" {})))
     (->> (for [k required-keys]
-           (let [size (m/ecount (first (get batch k)))
+           (let [data (first (get batch k))
+                 _ (when (nil? data)
+                     (throw (ex-info "Dataset batch missing key" {:key k})))
+                 size (m/ecount data)
                  device-array (math/new-array driver stream
                                               datatype [size] batch-size)
                  host-buffer (drv/allocate-host-buffer driver (* size batch-size)
@@ -1089,7 +1031,11 @@ This does not need to be wrapped in a resource context; that is done for you."
 (defn load-batch!
   [network batch batch-buffers]
   (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
-    (dtype/copy-raw->item! (get batch k) host-buffer 0)
+    (let [item-count (dtype/copy-raw->item! (get batch k) host-buffer 0)]
+      (when-not (= item-count (m/ecount host-buffer))
+        (throw (ex-info "Failed to load-batch!"
+                        {:item-count item-count
+                         :buffer-size (m/ecount host-buffer)}))))
     (drv/copy-host->device (network/stream network)
                            host-buffer 0
                            (math/device-buffer device-array) 0

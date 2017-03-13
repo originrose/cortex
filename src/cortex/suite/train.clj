@@ -10,8 +10,7 @@
     [cortex.optimize.adam :as adam]
     [cortex.nn.execute :as execute]
     [cortex.nn.traverse :as traverse]
-    [cortex.nn.network :as network]
-    [cortex.compute.batching-system :as bs])
+    [cortex.nn.network :as network])
   (:import [java.io File]))
 
 (def default-network-filestem "trained-network")
