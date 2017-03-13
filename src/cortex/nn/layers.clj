@@ -192,7 +192,7 @@ constructors are all variable args with the extra arguments expected to be
   [& {:keys [output-channels]
       :or {output-channels 1}
       :as arg-map}]
-  [(merge-args {:type :softmax} arg-map)])
+  [(merge {:type :softmax} arg-map)])
 
 
 (defmethod graph/build-node :softmax

@@ -408,7 +408,9 @@ before we set it, do the operation, and unlock the object after."
         dest-dtype (dtype/get-datatype dest-buffer)
         elem-count (long elem-count)]
     (when-not (= dest-dtype src-dtype)
-      (throw (Exception. "Copy datatypes do not match")))
+      (throw (ex-info "Copy datatypes do not match"
+                      {:src-dtype src-dtype
+                       :dest-dtype dest-dtype})))
     (when-not (<= (+ src-offset elem-count)
                   src-len)
       (throw (Exception. "Attempt to copy past extents of buffer.")))
