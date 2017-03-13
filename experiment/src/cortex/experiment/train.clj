@@ -1,4 +1,4 @@
-(ns cortex.suite.train
+(ns cortex.experiment.train
   (:require
     [clojure.java.io :as io]
     [think.resource.core :as resource]
@@ -106,7 +106,7 @@ initial description saved with the network matches the provided description."
 
   If epoch-count is provided then we stop training after that many epochs else
   we continue to train forever."
-  [dataset initial-description network
+  [dataset initial-description
    & {:keys [batch-size epoch-count
              network-filestem best-network-fn
              optimizer
@@ -127,9 +127,8 @@ initial description saved with the network matches the provided description."
                       loaded-network)
                     (do
                       (backup-trained-network network-filestem)
-                      (merge network
-                             {:initial-description initial-description
-                              :cv-loss {}})))
+                      {:initial-description initial-description
+                              :cv-loss {}}))
 
           input-streams (traverse/get-input-streams network)
           output-streams (traverse/get-output-streams network)
@@ -160,8 +159,7 @@ initial description saved with the network matches the provided description."
 (defn evaluate-network
   "Given a single-output network description and a dataset with the keys
 :data and :labels produced set of inferences, answers, and the observations
-used for both along with the original dataset.  This expects a network with
-existing traversal bindings."
+used for both along with the original dataset."
   [dataset network
    & {:keys [batch-size batch-type force-gpu?]
       :or {batch-size 128

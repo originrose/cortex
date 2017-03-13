@@ -1,13 +1,9 @@
-(ns cortex.suite.logistic-test
+(ns cortex.experiment.logistic-test
   (:require [clojure.java.io :as io]
             [clojure.string :as s]
             [clojure.test :refer :all]
-            [cortex.dataset :as dataset]
             [cortex.nn.layers :as layers]
-            [cortex.nn.network :as network]
-            [cortex.nn.traverse :as traverse]
-            [cortex.suite.train :as train]
-            [cortex.suite.inference :as inference]))
+            [cortex.experiment.train :as train]))
 
 ;; This test namespace uses the logistic classifier to learn to predict whether
 ;; people will default based on their balance and income.
@@ -35,12 +31,8 @@
 
 (deftest logistic-test
   (io/delete-file "trained-network.nippy" true)
-  (let [default-data (default-dataset)
-        inf-data (repeatedly #(rand-nth default-data))
-        dataset (dataset/map-sequence->dataset inf-data (/ (count default-data) 20))
-        network (-> description network/linear-network traverse/bind-vars-to-network)
-        _ (with-out-str
-            (train/train-n dataset description network :batch-size 50 :epoch-count 300 :simple-loss-print? false))
+  (let [_ (with-out-str
+            (train/train-n (default-dataset) description :batch-size 50 :epoch-count 300 :simple-loss-print? false))
         trained-network (train/load-network "trained-network.nippy" description)
         [[should-def] [shouldnt-def]] (inference/infer-n-observations trained-network [[5000.0 10.0] [5.0 100000.0]]
                                                                       2 :batch-size 2)]
