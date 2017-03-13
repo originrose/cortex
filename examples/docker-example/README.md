@@ -18,7 +18,7 @@ the latest network from a CDN. For the purposes of this example, the network
 is trained on the fly.
 
 Once the network has been trained, you will create a `-main` function and
-specify that this is the function to run in your (project.clj)[project.clj].
+specify that this is the function to run in your [project.clj](./project.clj).
 Additionally, it is convenient to specify the jar name with the `:uberjar-name`
 key. In this example we have chosen `docker-example.jar`. Ensure that your
 network runs locally with `lein run`.
@@ -30,7 +30,7 @@ provided by ThinkTopic that has all of the required Cuda/CudNN and necessary
 libraries to run your container. Simply add the appropriate `.jar` file
 and specify how to run it.
 
-A very small example (Dockerfile)[Dockerfile] can be found in this project.
+A very small example [Dockerfile](./Dockerfile) can be found in this project.
 
 Next, build your project with the `docker build`  command (Remember to change
 the tag to something appropriate for your project).
