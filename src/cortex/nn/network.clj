@@ -14,6 +14,8 @@
     [cortex.nn.traverse :as traverse])
   (:import [java.util UUID]))
 
+(def MAX-RESULT-VECTOR-SIZE 100)
+
 
 (defn embed-param-args
   [desc]
@@ -223,30 +225,29 @@ and anything that has a loss term attached to it's output becomes an output bind
 
 
 (defn output-values
-  [{:keys [batch-size]} network]
-  (->> output-bindings
-       (map (fn [{:keys [buffers node-id output-size host-buffer elem-count]}]
-              (let [buffer (get buffers :buffer)
-                    double-buffers (->> (repeatedly batch-size
-                                                    #(double-array output-size))
-                                        vec)
-                    copy-fn (fn [^long idx ^long output-size host-buffer double-buffers]
-                              )]
-                (drv/copy-device->host stream
-                                       (math/device-buffer buffer) 0
-                                       host-buffer 0
-                                       elem-count)
-                (drv/wait-for-event (drv/create-event stream))
-                (if (< batch-size (.availableProcessors (Runtime/getRuntime)))
-                  (c-for [idx 0 (< idx batch-size) (inc idx)]
-                         (dtype/copy! host-buffer (long (* idx output-size))
-                                      (get double-buffers idx) 0
-                                      output-size))
-                  (->> (pmap #(copy-fn % output-size host-buffer double-buffers)
-                             (range batch-size))
-                       dorun))
-                [node-id double-buffers])))
-       (into {})))
+  [{:keys [batch-size] :as network} output-buffers]
+  (let [stream (stream network)]
+    (->> output-buffers
+         (mapv (fn [{:keys [buffers node-id output-size host-buffer elem-count]}]
+                 (let [buffer (get buffers :buffer)
+                       double-buffers (->> (repeatedly batch-size
+                                                       #(double-array output-size))
+                                           vec)]
+                   (drv/copy-device->host stream
+                                          (math/device-buffer buffer) 0
+                                          host-buffer 0
+                                          elem-count)
+                   (drv/wait-for-event (drv/create-event stream))
+                   (c-for [idx 0 (< idx batch-size) (inc idx)]
+                          (dtype/copy! host-buffer (long (* idx output-size))
+                                       (get double-buffers idx) 0
+                                       output-size))
+                   (mapv (fn [buffer]
+                           {node-id (if (< output-size MAX-RESULT-VECTOR-SIZE)
+                                      (vec buffer)
+                                      buffer)})
+                         double-buffers))))
+         (apply map merge))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Print Layer Summary
@@ -339,5 +340,3 @@ opposed to networks), but consider:
         parent-set (keep-inference-nodes (graph/parent->child-map graph))
         child-set (keep-inference-nodes (graph/child->parent-map graph))]
     (c-set/difference child-set parent-set)))
-
-

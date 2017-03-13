@@ -150,23 +150,33 @@
                                        dataset
                                        (adadelta/adadelta) true nil 5000 identity)
         mse (loss/average-loss loss-fn results CORN-LABELS)]
+    ;; TODO: Use actual values for slope/intercept.
     (is (< mse 25))))
 
 (defn corn-network
   []
-  (let [network [(layers/input 2 1 1 :id :data)
-                 (layers/linear 1 :id :labels)]]
-    (network/linear-network network)))
+  (->> [(layers/input 2 1 1 :id :data)
+        (layers/linear 1 :id :labels)]
+       (network/linear-network)))
 
 (defn train-corn
   []
-  (let [big-dataset (apply concat (repeat 1000 corn-dataset))]
-    (loop [network (network/linear-network
-                     [(layers/input 2 1 1 :id :data)
-                      (layers/linear 1 :id :labels)])
+  (let [big-dataset (apply concat (repeat 1000 corn-dataset))
+        optimizer (adam/adam :alpha 0.01)
+        validation-dataset (map #(select-keys % [:data]) corn-dataset)]
+    (loop [network (corn-network)
            epoch 0]
-      (if (> 2 epoch)
-        (recur (cortex.nn.execute/train network big-dataset :batch-size 10) (inc epoch))
+      (if (> 40 epoch)
+        (let [network (cortex.nn.execute/train-new network big-dataset
+                                                   :batch-size 1
+                                                   :optimizer optimizer)
+              results (map :labels (cortex.nn.execute/run network validation-dataset))
+              err (reduce + (map (fn [[a] [b]]
+                                   (* (- a b) (- a b)))
+                                 results
+                                 CORN-LABELS))]
+          (println "err:" err)
+          (recur network (inc epoch)))
         network))))
 
 (defn train-mnist
