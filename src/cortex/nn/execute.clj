@@ -1117,7 +1117,7 @@ This does not need to be wrapped in a resource context; that is done for you."
                       :or {batch-size 10}}]
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
-          context (compute-context)
+          context (or context (compute-context))
           column-shapes (dataset-column-shapes dataset)
           network (-> network
                       (assoc :batch-size batch-size)
