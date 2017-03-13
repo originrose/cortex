@@ -69,7 +69,6 @@ Use with care; the synchonization primitives will just hang with this stream."
   (not (is-main-thread-cpu-stream? stream)))
 
 
-
 (defn check-stream-error
   [stream]
   (when-let [error-atom (:error-atom stream)]
@@ -77,7 +76,6 @@ Use with care; the synchonization primitives will just hang with this stream."
      (when error
        (compare-and-set! (:error-atom stream) error nil)
        (throw error)))))
-
 
 
 (defmacro with-stream-dispatch
@@ -206,31 +204,39 @@ Use with care; the synchonization primitives will just hang with this stream."
                 trans-a? trans-b? a-row-count a-col-count b-col-count alpha
                 (dtype/->view B) b-colstride
                 beta (dtype/->view C) c-colstride)))
+
   (sum-impl [stream alpha x beta y result]
     (with-stream-dispatch stream
       (avm/sum (dtype/->view x) alpha beta (dtype/->view y) (dtype/->view result))))
+
   (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
     (with-stream-dispatch stream
       (avm/gemv (dtype/->view A) a-colstride trans-a? a-row-count a-col-count alpha
                 (dtype/->view x) inc-x beta (dtype/->view y) inc-y)))
+
   (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride]
     (with-stream-dispatch stream
       (avm/mul-rows (dtype/->view A) a-colstride a-row-count a-col-count
                     (dtype/->view x) inc-x (dtype/->view C) c-colstride)))
+
   (elem-mul [stream alpha a inc-a b inc-b res inc-res]
     (with-stream-dispatch stream
       (avm/elem-mul (dtype/->view a) inc-a alpha (dtype/->view b) inc-b (dtype/->view res)
                     inc-res)))
+
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     (with-stream-dispatch stream
       (avm/l2-constraint-scale (dtype/->view a) inc-a l2-max-constraint)))
+
   (generate-rands [stream rand-buffer distribution]
     (with-stream-dispatch stream
       (avm/generate-rands (dtype/->view rand-buffer) distribution)))
+
   (select [stream src-buf buffer less-zero-value equal-or-greater-val]
     (with-stream-dispatch stream
       (avm/select (dtype/->view src-buf) (dtype/->view buffer)
                   less-zero-value equal-or-greater-val)))
+
   (indirect-add [stream alpha x x-indexes beta y y-indexes result res-indexes n-elems-per-idx]
     (when-not (and (= (m/ecount x-indexes)
                       (m/ecount y-indexes))
@@ -250,3 +256,4 @@ Use with care; the synchonization primitives will just hang with this stream."
 (extend-type Buffer
   resource/PResource
   (release-resource [buf]))
+
