@@ -1,4 +1,4 @@
-(ns cortex.suite.classification
+(ns cortex.experiment.classification
   (:require [cortex.dataset :as ds]
             [clojure.java.io :as io]
             [think.parallel.core :as parallel]
