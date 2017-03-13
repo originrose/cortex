@@ -30,7 +30,7 @@
            (as-> (traverse/auto-bind-io network) network
              (traverse/add-forward-traversal network {:data (m/ecount input)})
              (assoc network :batch-size 1)
-             (execute/bind-context-to-network context network {})
+             (execute/bind-context-to-network network context {})
              (execute/traverse context network {:data input} :inference)
              ;;save gradients at this point implies save io buffers
              (execute/save-to-network context network {:save-gradients? true}))

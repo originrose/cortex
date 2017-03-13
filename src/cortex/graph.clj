@@ -536,7 +536,11 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   (let [node (get-node graph node-id)
         expected-shape (get-argument-shape graph node argument)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
-      (do
+      (do (println "TODO: Fix this error handling....") graph)
+      #_(do
+        (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")
+        (clojure.pprint/pprint node)
+        (clojure.pprint/pprint argument)
         (when-not (= expected-shape (m/shape existing-buffer))
           (throw (ex-info "Existing buffer does not match expected shape"
                           {:node-id node-id

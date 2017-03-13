@@ -21,6 +21,10 @@
 
 ;; Predict corn yield from fertilizer and insecticide inputs
 ;; [corn, fertilizer, insecticide]
+
+;; The text solves the model exactly using matrix techniques and determines
+;; that corn = 31.98 + 0.65 * fertilizer + 1.11 * insecticides
+
 (def CORN-DATA
   [[6  4]
    [10  4]
@@ -37,6 +41,9 @@
 (def CORN-LABELS
   [[40] [44] [46] [48] [52] [58] [60] [68] [74] [80]])
 
+(def corn-dataset
+  (mapv (fn [d l] {:data d :labels l})
+        CORN-DATA CORN-LABELS))
 
 (def mnist-network
   [(layers/input 28 28 1 :id :input)
@@ -53,8 +60,7 @@
                               :alpha 0.9
                               :lambda 1e-4})
    (layers/linear 10)
-   (layers/softmax :id :output)])
-
+   (layers/softmax :output-channels 2 :id :output)])
 
 
 (defonce training-data (future (mnist/training-data)))
@@ -145,6 +151,22 @@
         mse (loss/average-loss loss-fn results CORN-LABELS)]
     (is (< mse 25))))
 
+(defn corn-network
+  []
+  (let [network [(layers/input 2 1 1 :id :data)
+                 (layers/linear 1 :id :labels)]]
+    (network/linear-network network)))
+
+(defn train-corn
+  []
+  (let [big-dataset (apply concat (repeat 1000 corn-dataset))]
+    (loop [network (network/linear-network
+                     [(layers/input 2 1 1 :id :data)
+                      (layers/linear 1 :id :labels)])
+           epoch 0]
+      (if (> 2 epoch)
+        (recur (cortex.nn.execute/train network big-dataset :batch-size 10) (inc epoch))
+        network))))
 
 (defn train-mnist
   [context]

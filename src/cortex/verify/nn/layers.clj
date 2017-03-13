@@ -22,7 +22,7 @@
     (traverse/add-training-traversal network stream->size-map
                                      :keep-non-trainable? true)
     (assoc network :batch-size batch-size)
-    (execute/bind-context-to-network context network bind-opts)))
+    (execute/bind-context-to-network network context bind-opts)))
 
 
 (defn set-id-and-bind-test-network
