@@ -6,34 +6,33 @@
             [mikera.vectorz.matrix-api])
   (:import [java.io DataInputStream]))
 
-(mat/set-current-implementation :vectorz)  ;; use Vectorz as default matrix implementation
+(mat/set-current-implementation :vectorz)
 
 (set! *unchecked-math* true)
 (set! *warn-on-reflection* true)
-
 
 (def N-SAMPLES 60000)
 (def WIDTH 28)
 (def HEIGHT 28)
 (def TEST-N-SAMPLES 10000)
 
-;;Given mnist pixel ensure mean of zero
 (defmacro ub-to-double
+  "Convert an unsigned byte to a double, inline."
   [item]
   `(- (* ~item (double (/ 1.0 255.0)))
       0.5))
 
-(def dataset [["train-images-idx3-ubyte" N-SAMPLES]
+(def DATASET [["train-images-idx3-ubyte" N-SAMPLES]
               ["train-labels-idx1-ubyte" N-SAMPLES]
               ["t10k-images-idx3-ubyte" TEST-N-SAMPLES]
               ["t10k-labels-idx1-ubyte" TEST-N-SAMPLES]])
 
-(def dataset-names (mapv first dataset))
+(def DATASET-NAMES (mapv first DATASET))
 
 
 (defn stream-name->item-count
   [stream-name]
-  (second (first (filter #(= (first %) stream-name) dataset))))
+  (second (first (filter #(= (first %) stream-name) DATASET))))
 
 
 (defn download-dataset-item [name]
@@ -45,7 +44,7 @@
   (DataInputStream. (stream/get-data-stream "mnist" name download-dataset-item)))
 
 
-(defn when-not=-error
+(defn assert=
   [lhs rhs ^String msg]
   (when-not (= lhs rhs)
     (throw (Error. msg))))
@@ -55,10 +54,10 @@
   [stream-name]
   (let [item-count (stream-name->item-count stream-name)]
    (with-open [^DataInputStream data-input-stream (get-data-stream stream-name)]
-     (when-not=-error (.readInt data-input-stream) 2051 "Wrong magic number")
-     (when-not=-error (.readInt data-input-stream) item-count "Unexpected image count")
-     (when-not=-error (.readInt data-input-stream) WIDTH "Unexpected row count")
-     (when-not=-error (.readInt data-input-stream) HEIGHT "Unexpected column count")
+     (assert= (.readInt data-input-stream) 2051 "Wrong magic number")
+     (assert= (.readInt data-input-stream) item-count "Unexpected image count")
+     (assert= (.readInt data-input-stream) WIDTH "Unexpected row count")
+     (assert= (.readInt data-input-stream) HEIGHT "Unexpected column count")
      (mapv (fn [i]
              (let [darray (double-array (* WIDTH HEIGHT))]
                (dotimes [y HEIGHT]
@@ -76,17 +75,25 @@
   (let [item-count (stream-name->item-count stream-name)]
    (with-open [^DataInputStream data-input-stream (get-data-stream stream-name)]
      (let [label-vector (vec (repeat 10 0))]
-       (when-not=-error (.readInt data-input-stream) 2049 "Wrong magic number")
-       (when-not=-error (.readInt data-input-stream) item-count "Unexpected image count")
+       (assert= (.readInt data-input-stream) 2049 "Wrong magic number")
+       (assert= (.readInt data-input-stream) item-count "Unexpected image count")
        (mapv (fn [i]
                (assoc label-vector (.readUnsignedByte data-input-stream) 1))
              (range item-count))))))
 
 
-(defn training-data [] (load-data "train-images-idx3-ubyte"))
-(defn training-labels [] (load-labels "train-labels-idx1-ubyte"))
-(defn test-data [] (load-data "t10k-images-idx3-ubyte"))
-(defn test-labels [] (load-labels "t10k-labels-idx1-ubyte"))
+(defn training-data []
+  (load-data "train-images-idx3-ubyte"))
+
+(defn training-labels []
+  (load-labels "train-labels-idx1-ubyte"))
+
+(defn test-data []
+  (load-data "t10k-images-idx3-ubyte"))
+
+(defn test-labels []
+  (load-labels "t10k-labels-idx1-ubyte"))
+
 (defn normalized-data []
   (let [train-d (training-data)
         test-d (test-data)
@@ -101,3 +108,4 @@
         return-test-d (mat/submatrix norm-mat num-train-d (- num-rows num-train-d) 0 num-cols)]
     {:training-data return-train-d
      :test-data return-test-d}))
+

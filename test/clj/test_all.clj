@@ -1,5 +1,6 @@
 (ns test-all
   (:require
+    [clojure.test :as test]
     [cortex.compute.compute-loss-test]
     [cortex.compute.compute-utils-test]
     [cortex.compute.cpu-driver-test]
@@ -22,3 +23,5 @@
     [cortex.metrics-test]
     [cortex.tree-test]
     [cortex.util-test]))
+
+(def go test/run-all-tests)

@@ -271,7 +271,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   process.  Options is map that may contain:
    * save-gradients? - save the gradients *and* the io buffers."
   [context network {:keys [save-gradients?] :as options}]
-  (let [backend (get-in network [:compute-binding :backend])
+  (let [backend (network/backend network)
         core-m (fn [data]
                  (when data
                    (backend/to-core-matrix backend data)))

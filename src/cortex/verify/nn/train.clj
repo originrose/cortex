@@ -63,7 +63,6 @@
    (layers/softmax :id :output)])
 
 
-
 (defonce training-data (future (mnist/training-data)))
 (defonce training-labels (future (mnist/training-labels)))
 (defonce test-data (future (mnist/test-data)))
