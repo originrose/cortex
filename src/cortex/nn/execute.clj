@@ -1148,25 +1148,97 @@ This does not need to be wrapped in a resource context; that is done for you."
           stream-shapes (dataset-column-shapes dataset)
           network (-> (assoc network :batch-size batch-size)
                       traverse/bind-vars-to-network
-                      (traverse/add-forward-traversal stream-shapes)
-                      (bind-context-to-network context {}))
-          network (add-pass-to-network network {} :backward)
-          batches (->> (dataset-batches dataset batch-size)
-                       (map (partial graph/augment-streams (network/network->graph network))))
-          batch-buffers (batch-buffers network (first batches))
-          stream->buffer-map (zipmap (keys batch-buffers)
-                                     (map :device-array (vals batch-buffers)))
-          network (assoc-in network
-                            [:compute-binding :stream->buffer-map]
-                            stream->buffer-map)
-          output-bindings (output-binding-buffers network batch-size datatype)]
-      (reduce
-        (fn [results next-batch]
-          (load-batch! network next-batch batch-buffers)
-          (do-traverse network stream->buffer-map :inference)
-          (concat results (network/output-values network)))
-        []
-        batches))))
+;<<<<<<< HEAD
+;                      (traverse/add-forward-traversal stream-shapes)
+;                      (bind-context-to-network context {}))
+;          network (add-pass-to-network network {} :backward)
+;          batches (->> (dataset-batches dataset batch-size)
+;                       (map (partial graph/augment-streams (network/network->graph network))))
+;          batch-buffers (batch-buffers network (first batches))
+;          stream->buffer-map (zipmap (keys batch-buffers)
+;                                     (map :device-array (vals batch-buffers)))
+;          network (assoc-in network
+;                            [:compute-binding :stream->buffer-map]
+;                            stream->buffer-map)
+;          output-bindings (output-binding-buffers network batch-size datatype)]
+;      (reduce
+;        (fn [results next-batch]
+;          (load-batch! network next-batch batch-buffers)
+;          (do-traverse network stream->buffer-map :inference)
+;          (concat results (network/output-values network)))
+;        []
+;        batches))))
+;=======
+
+                      ; Adds a :traversal map to the network with :forward and
+                      ; :backward lists, :buffers, :type, :optimizer, and
+                      ; :loss-function keys.
+                      (traverse/add-forward-traversal stream-map))
+          ; Connect the execution context to the network so it can setup any
+          ; backend specific data structures or initialization.
+          network (bind-context-to-network context network {})
+
+          ; Get the list of input streams required for the network
+          input-streams (traverse/get-input-streams network)
+
+          ; Get a lazy seq of batches
+          batches (ds/get-batches dataset
+                                  batch-size
+                                  infer-batch-type
+                                  input-streams)
+
+          ; Plug the data through the model.
+          ; NOTE: the doall must be here otherwise everything will get
+          ; deallocated when leaving the current resource context!!!
+          results (doall (infer-batch-sequence context network batches {}))]
+      results)))
+
+(defn dataset-column-shapes
+  [dataset]
+  (->> (first dataset)
+       (map (fn [[k v]] [k (m/ecount v)]))
+       (into {})))
+
+(defn dataset-batches
+  [dataset batch-size]
+  (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
+    (->> dataset
+         (partition batch-size)
+         (map #(apply merge-with conj initial-map %)))))
+
+;; TODO: can we get rid of required keys here by pre-filtering the dataset (from the traversal leaves)?
+(defn batch-buffers
+  [network required-keys batch]
+  (let [backend (get-in network [:compute-binding :backend])
+        driver (drv/get-driver backend)
+        datatype (:datatype backend)
+        batch-size (:batch-size network)]
+    (->> (for [k required-keys]
+           (let [size (m/ecount (first (get batch k)))
+                 device-array (math/new-array driver
+                                              (drv/get-stream backend)
+                                              datatype
+                                              [size]
+                                              batch-size)
+                 host-buffer (drv/allocate-host-buffer driver (* size batch-size) datatype)]
+             [k {:device-array device-array
+                 :host-buffer host-buffer}]))
+         (into {}))))
+
+(defn load-batch!
+  [network batch batch-buffers]
+  (try
+    (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
+      (dtype/copy-raw->item! (get batch k) host-buffer 0)
+      (drv/copy-host->device (drv/get-stream (get-in network [:compute-binding :backend]))
+                             host-buffer 0
+                             (math/device-buffer device-array) 0
+                             (m/ecount host-buffer)))
+    (catch Exception e
+      (println "Error loading batch:")
+      (println batch)
+      (.printStackTrace e))))
+
 
 (defn train
   [network dataset & {:keys [batch-size context optimizer]

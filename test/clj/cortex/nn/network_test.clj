@@ -9,6 +9,11 @@
     [cortex.nn.execute :as execute]
     [cortex.nn.network :as network]))
 
+(defn- corn-dataset
+  []
+  (mapv (fn [d l] {:data d :labels l})
+        CORN-DATA CORN-LABELS))
+
 
 (deftest specify-weights-bias
   (let [weight-data [[1 2][3 4]]
@@ -95,3 +100,18 @@
                   (layers/linear 1 :id :yield)]
                  dataset
                  :batch-size 1)))
+
+(deftest classify-corn
+  (testing "Ensure that we can run a simple classifier."
+    (let [big-dataset (apply concat (repeatedly 5000 (fn []
+                                                       (mapv (fn [{:keys [data labels]}]
+                                                               {:labels (if (> (first labels) 50) 1 0)
+                                                                :data data}) (corn-dataset))) ))]
+      (loop [network (network/linear-network
+                       [(layers/input 2 1 1 :id :data)
+                        (layers/linear 2)
+                        (layers/softmax :output-channels 2 :id :labels)])
+             epoch 0]
+        (if (> 20 epoch)
+          (recur (cortex.nn.execute/train network big-dataset :batch-size 50) (inc epoch))
+          network)))))
