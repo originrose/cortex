@@ -1,6 +1,7 @@
 #ifndef TENSOR_INDEX_SYSTEM_H
 #define TENSOR_INDEX_SYSTEM_H
 
+
 namespace tensor { namespace index_system {
     struct strategy_type
     {
@@ -184,8 +185,58 @@ namespace tensor { namespace index_system {
       with_index_strategy(sys, strategy_combiner<operator_t>(op, sys));
     }
 
+    template<typename operator_t, typename lhs_strat_type>
+    struct index_2_rhs_sys
+    {
+      operator_t m_op;
+      lhs_strat_type m_lhs_sys;
+      __device__ index_2_rhs_sys(lhs_strat_type lhs_sys, operator_t op )
+	: m_op ( op )
+	, m_lhs_sys( lhs_sys ) {
+      }
+      template<typename rhs_strat_type>
+      void __device__ operator()( rhs_strat_type rhs_sys ) {
+	m_op( m_lhs_sys, rhs_sys );
+      }
+    };
+
+    template<typename operator_t>
+    struct index_2_lhs_sys
+    {
+      operator_t m_op;
+      const general_index_system& m_rhs;
+      __device__ index_2_lhs_sys( const general_index_system& rhs,
+				  operator_t op)
+	: m_rhs( rhs )
+	, m_op( op ){
+      }
+      template<typename strategy_type>
+      __device__ void operator() (strategy_type lhs) {
+	with_index_system( m_rhs, index_2_rhs_sys<operator_t, strategy_type>( lhs, m_op ) );
+      }
+    };
+
+
+    template<typename operator_t>
+    __device__
+    void with_2_index_systems( const general_index_system& lhs_sys,
+			       const general_index_system& rhs_sys,
+			       operator_t op)
+    {
+      with_index_system(lhs_sys, index_2_lhs_sys<operator_t>(rhs_sys, op));
+    }
 
   }}
+
+
+#define EXPLODE_IDX_SYSTEM(varname)					\
+  int type##varname, int c_or_len##varname, const int* ptr##varname,	\
+    int num_cols##varname, int column_stride##varname
+
+#define ENCAPSULATE_IDX_SYSTEM(varname)					\
+  general_index_system(type##varname, c_or_len##varname, ptr##varname,	\
+		       num_cols##varname, column_stride##varname)
+
 
 
 #endif

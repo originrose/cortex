@@ -42,14 +42,6 @@ void assign_constant(
 		    assign_constant_wrapper<dtype>(dest, val, n_elems));
 };
 
-#define EXPLODE_IDX_SYSTEM(varname)					\
-  int type##varname, int c_or_len##varname, const int* ptr##varname,	\
-    int num_cols##varname, int column_stride##varname
-
-#define ENCAPSULATE_IDX_SYSTEM(varname)					\
-  general_index_system(type##varname, c_or_len##varname, ptr##varname,	\
-		       num_cols##varname, column_stride##varname)
-
 
  #define DATATYPE_ITERATOR(dtype,export_sym)				\
 extern "C"								\

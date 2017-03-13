@@ -42,12 +42,32 @@
    (int (or (get index-system :column-stride) 1))])
 
 
+(defonce cuda_typename_expansion
+  [["int8_t" "_b"]
+   ["int16_t" "_s"]
+   ["int32_t" "_i"]
+   ["int64_t" "_l"]
+   ["f32_t" "_f"]
+   ["f64_t" "_d"]])
+
+
+(defn- print-datatypes-h-2-dtype-expansion
+  []
+  (with-out-str
+    (println "#define ITERATE_2_DATATYPES\\")
+    (doall
+     (for [lhs cuda_typename_expansion
+           rhs cuda_typename_expansion]
+       (println (apply format "  DATATYPE_2_ITERATOR(%s,%s,%s,%s)\\"
+                       (flatten [lhs rhs])))))))
+
+
 (extend-type CudaStream
   tm/TensorMath
   (assign-constant! [stream buffer index-system value n-elems]
     (let [datatype (dtype/get-datatype buffer)
           value (cuda-base/dtype-cast value datatype)
-          assign-fn (cuda-base/get-or-create-fn stream :assign-constant datatype
+          assign-fn (cuda-base/get-or-create-fn stream :tensor-assign-constant datatype
                                                 #(cuda-base/load-all-datatype-function
                                                   "tensor_assign_constant"))
           n-elems (long n-elems)]
@@ -59,4 +79,16 @@
   (assign! [stream
             dest dest-idx-sys dest-ecount
             src src-idx-sys src-ecount]
-    (throw (ex-info "Unimplemented" {}))))
+    (let [lhs-dtype (dtype/get-datatype dest)
+          rhs-dtype (dtype/get-datatype src)
+          assign-fn (cuda-base/get-or-create-fn stream :tensor-assign [lhs-dtype rhs-dtype]
+                                                #(cuda-base/load-2-datatype-function
+                                                  "tensor_assign"))
+          n-elems (long (max dest-ecount src-ecount))]
+      (apply cuda-base/launch-linear-kernel
+             (concat [stream assign-fn n-elems 0]
+                     [(cuda-base/->ptr dest)]
+                     (index-system->cuda dest-idx-sys)
+                     [(cuda-base/->ptr src)]
+                     (index-system->cuda src-idx-sys)
+                     [n-elems])))))

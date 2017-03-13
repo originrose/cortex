@@ -226,21 +226,44 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 
 (defn load-multiple-datatype-function
   ([module-name fn-name dtype-seq]
-   ;(println "loading function" fn-name)
+                                        ;(println "loading function" fn-name)
    (try
-    (let [module (load-module (io/input-stream (io/resource module-name)))]
-      (into {} (map (fn [dt]
-                      [dt {:fn (get-function module (fn-name-datatype->fn-name fn-name dt))
-                           :fn-name (fn-name-datatype->fn-name fn-name dt)}])
-                    dtype-seq)))
-    (catch Throwable e
-      (throw (ex-info "Failed to load multiple datatype function:"
-                      {:module-name module-name
-                       :fn-name fn-name
-                       :datatypes (vec dtype-seq)
-                       :error e})))))
+     (let [module (with-open [io-stream (io/input-stream (io/resource module-name))]
+                    (load-module io-stream))]
+       (into {} (map (fn [dt]
+                       [dt {:fn (get-function module (fn-name-datatype->fn-name fn-name dt))
+                            :fn-name (fn-name-datatype->fn-name fn-name dt)}])
+                     dtype-seq)))
+     (catch Throwable e
+       (throw (ex-info "Failed to load multiple datatype function:"
+                       {:module-name module-name
+                        :fn-name fn-name
+                        :datatypes (vec dtype-seq)
+                        :error e})))))
   ([fn-name dtype-seq]
    (load-multiple-datatype-function (str fn-name ".fatbin") fn-name dtype-seq)))
+
+
+(defn load-2-datatype-function
+  [fn-name]
+  (try
+    (let [module (with-open [io-stream (io/input-stream (io/resource (format "%s.fatbin" fn-name)))]
+                   (load-module io-stream))]
+
+      (->> (for [lhs-dtype dtype/datatypes
+                 rhs-dtype dtype/datatypes]
+             (let [fn-name (format "%s%s%s"
+                                   fn-name
+                                   (get datatype->suffixes-map lhs-dtype)
+                                   (get datatype->suffixes-map rhs-dtype))]
+               [[lhs-dtype rhs-dtype] {:fn (get-function module fn-name)
+                                       :fn-name fn-name}]))
+           (into {})))
+    (catch Throwable e
+      (throw (ex-info "Failed to load function"
+                      {:fn-name fn-name
+                       :error e})))))
+
 
 (defn load-all-datatype-function
   ([module-name fn-name]
@@ -580,12 +603,20 @@ relies only on blockDim.x block.x and thread.x"
 
 (defn dev-fn-from-stream
   [stream fn-name dtype]
-  (if-let [retval
-           (get-in @(:device-functions (drv/get-driver stream)) [fn-name dtype :fn])]
-    retval
-    (throw (ex-info "Failed to find cuda function"
-                    {:fn-name fn-name
-                     :datatype dtype}))))
+  (let [fn-map @(:device-functions (drv/get-driver stream))]
+    (if-let [fn-entry (get fn-map fn-name)]
+      (if-let [retval (get fn-entry dtype)]
+        (get retval :fn)
+        (throw (ex-info "Failed to find datatype for fn"
+                        {:fn-name fn-name
+                         :dtype dtype
+                         :available-datatypes (keys fn-entry)
+                         :fn-entry fn-entry
+                         :fn-mape fn-map})))
+      (throw (ex-info "Failed to find cuda function"
+                      {:fn-name fn-name
+                       :datatype dtype
+                       :available-functions (keys fn-map)})))))
 
 
 (defn get-or-create-fn
