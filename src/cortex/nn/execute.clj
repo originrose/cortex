@@ -322,7 +322,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Specific traversal implementation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(def pass-metadata
+(def PASS-METADATA
   {:inference {:pass-functions [compute-protocols/infer]
                :buffer-type :buffer
                :input-key :stream
@@ -351,9 +351,9 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn- add-pass-to-network
   "Create a new pass with items mapped to buffers."
   [network stream->buffer-map pass-direction]
-  (let [{:keys [traversal-key buffer-type input-key]} (get pass-metadata pass-direction)
+  (let [{:keys [traversal-key buffer-type input-key]} (get PASS-METADATA pass-direction)
         traversal-pass (get-in network [:traversal traversal-key])
-        backend (get-in network [:compute-binding :backend])
+        backend (network/backend network)
         traversal-buffers (->> (get-in network [:compute-binding :traversal-buffers])
                                (map (fn [[map-key buffer-entry]]
                                       ;;Assoc the input buffers into
@@ -534,7 +534,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
              dorun)
         network)
       network
-      (get-in pass-metadata [pass-direction :pass-functions]))))
+      (get-in PASS-METADATA [pass-direction :pass-functions]))))
 
 
 (defn- load-id->input-map

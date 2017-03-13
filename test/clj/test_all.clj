@@ -4,7 +4,7 @@
     [cortex.compute.compute-utils-test]
     [cortex.compute.cpu-driver-test]
     [cortex.compute.cpu-optimize-test]
-    [cortex.compute.cuda-device-test]
+    [cortex.compute.cuda-driver-test]
     [cortex.compute.cuda-optimize-test]
     [cortex.compute.nn.cuda-gradient-test]
     [cortex.compute.nn.cuda-layers-test]

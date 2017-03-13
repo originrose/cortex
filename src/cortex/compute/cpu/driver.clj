@@ -27,6 +27,13 @@
   (release-resource [impl]
     (async/close! (.input-chan impl))))
 
+
+(defn get-memory-info
+  []
+  {:free (.freeMemory (Runtime/getRuntime))
+   :total (.totalMemory (Runtime/getRuntime))})
+
+
 (defn cpu-stream
   ([error-atom]
    (let [^CPUStream retval (->CPUStream (async/chan 16) (async/chan) error-atom)]
@@ -152,25 +159,39 @@ Use with care; the synchonization primitives will just hang with this stream."
 
 (defrecord CPUDriver [^long dev-count ^long current-device error-atom])
 
-(defn driver [] (->CPUDriver 1 1 (atom nil)))
+(defn driver []
+  (->CPUDriver 1 1 :no-selected-device))
 
 (extend-type CPUDriver
   drv/PDriver
-  (get-devices [impl] (mapv #(+ 1 %) (range (.dev-count impl))))
-  (set-current-device [impl ^long device] (assoc impl :current-device device))
-  (get-current-device [impl] (:current-device impl))
+  (get-devices [impl]
+    (mapv #(+ 1 %) (range (.dev-count impl))))
+
+  (set-current-device [impl ^long device]
+    (assoc impl :current-device device))
+
+  (get-current-device [impl]
+    (:current-device impl))
+
+  (memory-info [impl]
+    (get-memory-info))
+
   (create-stream [impl]
     (check-stream-error impl)
     (cpu-stream (:error-atom impl)))
+
   (allocate-host-buffer [impl elem-count elem-type]
     (check-stream-error impl)
     (dtype/make-view elem-type elem-count))
+
   (allocate-device-buffer [impl elem-count elem-type]
     (check-stream-error impl)
     (dtype/make-view elem-type elem-count))
+
   (allocate-rand-buffer [impl elem-count]
     (check-stream-error impl)
     (dtype/make-view :float elem-count))
+
   (sub-buffer-impl [impl buffer offset length]
     (dtype/->view buffer offset length)))
 
