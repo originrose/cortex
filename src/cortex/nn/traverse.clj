@@ -179,6 +179,11 @@ root and labels-x where labels are a 1-based index of the leaf."
           (get-output-bindings network)))
 
 
+(defn required-io-keys
+  [network]
+  (set (map :stream (get-io-bindings network))))
+
+
 (defn get-input-streams
   "Get all dataset streams used for input."
   [network]

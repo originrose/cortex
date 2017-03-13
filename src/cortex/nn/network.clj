@@ -4,8 +4,14 @@
     [clojure.set :as c-set]
     [clojure.pprint :as pprint]
     [clojure.core.matrix :as m]
+    [clojure.core.matrix.macros :refer [c-for]]
+    [think.datatype.core :as dtype]
     [cortex.graph :as graph]
-    [cortex.nn.layers :as layers])
+    [cortex.loss :as loss]
+    [cortex.compute.driver :as drv]
+    [cortex.compute.math :as math]
+    [cortex.nn.layers :as layers]
+    [cortex.nn.traverse :as traverse])
   (:import [java.util UUID]))
 
 
@@ -75,6 +81,33 @@
   ([network-desc]
    (linear-network {:compute-graph (graph/empty-graph)} network-desc)))
 
+(defn backend
+  [network]
+  (get-in network [:compute-binding :backend]))
+
+(defn driver
+  [network]
+  (get-in network [:compute-binding :backend :driver]))
+
+(defn stream
+  [network]
+  (get-in network [:compute-binding :backend :stream]))
+
+(defn datatype
+  [network]
+  (get-in network [:compute-binding :backend :datatype]))
+
+(defn parameters
+  [network]
+  (get-in network [:compute-binding :trainable-parameters]))
+
+(defn optimizers
+  [network]
+  (get-in network [:compute-binding :optimizer]))
+
+(defn loss-fn
+  [network]
+  (get-in network [:compute-binding :loss-function]))
 
 ;; When using these functions, make sure to call traverse/auto-bind-io
 ;; and traverse/network->training-traversal on the resulting network
@@ -133,6 +166,87 @@
    (->> (network->graph network)
         graph/dfs-seq
         (mapcat (partial network->node-parameters network)))))
+
+
+(defn loss-output-bindings
+  [network]
+  (->> (get-in network [:traversal :loss-function])
+       (mapcat loss/get-loss-term-node-outputs)))
+
+
+(defn output-bindings
+  "Return the outputs of the network.  Anything explicity marked with an output binding
+and anything that has a loss term attached to it's output becomes an output binding."
+  [network]
+  (let [forward-pass (get-in network [:traversal :forward])
+        id->pass (->> (group-by :id forward-pass)
+                      (map (fn [[k v]]
+                             (when-not (= 1 (count v))
+                               (throw (ex-info "Node mapped to multiple pass operations"
+                                               {:node-id k
+                                                :passes v})))
+                             [k (first v)]))
+                      (into {}))
+        graph (network->graph network)]
+    (->> (concat (traverse/get-output-bindings network)
+                 (loss-output-bindings network))
+         (map :node-id)
+         distinct
+         (map (fn [node-id]
+                (when-not (= 1 (count (get-in id->pass [node-id :outgoing])))
+                  (throw (ex-info "Output nodes must have a single output."
+                                  {:node-id node-id
+                                   :pass (get id->pass node-id)})))
+                (let [output-id (first (get-in id->pass [node-id :outgoing]))]
+                  {:node-id node-id
+                   :buffers (get-in network [:compute-binding
+                                             :traversal-buffers
+                                             output-id])
+                   :output-size (graph/node->output-size
+                                 (graph/get-node graph node-id))}))))))
+
+
+(defn input-bindings
+  [network]
+  (->> (traverse/get-input-bindings network)
+       (filter #(get % :stream))
+       (map (fn [{:keys [stream node-id] :as entry}]
+              (assoc entry
+                :buffers
+                (get-in network [:compute-binding
+                                 :traversal-buffers
+                                 {:stream stream}])
+                :size (get-in network [:compute-graph
+                                       :nodes
+                                       node-id
+                                       :input-size]))))))
+
+
+(defn output-values
+  [{:keys [batch-size]} network]
+  (->> output-bindings
+       (map (fn [{:keys [buffers node-id output-size host-buffer elem-count]}]
+              (let [buffer (get buffers :buffer)
+                    double-buffers (->> (repeatedly batch-size
+                                                    #(double-array output-size))
+                                        vec)
+                    copy-fn (fn [^long idx ^long output-size host-buffer double-buffers]
+                              )]
+                (drv/copy-device->host stream
+                                       (math/device-buffer buffer) 0
+                                       host-buffer 0
+                                       elem-count)
+                (drv/wait-for-event (drv/create-event stream))
+                (if (< batch-size (.availableProcessors (Runtime/getRuntime)))
+                  (c-for [idx 0 (< idx batch-size) (inc idx)]
+                         (dtype/copy! host-buffer (long (* idx output-size))
+                                      (get double-buffers idx) 0
+                                      output-size))
+                  (->> (pmap #(copy-fn % output-size host-buffer double-buffers)
+                             (range batch-size))
+                       dorun))
+                [node-id double-buffers])))
+       (into {})))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Print Layer Summary
@@ -225,3 +339,5 @@ opposed to networks), but consider:
         parent-set (keep-inference-nodes (graph/parent->child-map graph))
         child-set (keep-inference-nodes (graph/child->parent-map graph))]
     (c-set/difference child-set parent-set)))
+
+

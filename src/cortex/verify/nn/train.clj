@@ -165,7 +165,7 @@
                      [(layers/input 2 1 1 :id :data)
                       (layers/linear 1 :id :labels)])
            epoch 0]
-      (if (> 4 epoch)
+      (if (> 2 epoch)
         (recur (cortex.nn.execute/train network big-dataset :batch-size 10) (inc epoch))
         network))))
 
