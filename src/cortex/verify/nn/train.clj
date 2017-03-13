@@ -60,8 +60,7 @@
                               :alpha 0.9
                               :lambda 1e-4})
    (layers/linear 10)
-   (layers/softmax :id :output)])
-
+   (layers/softmax :output-channels 2 :id :output)])
 
 
 (defonce training-data (future (mnist/training-data)))
