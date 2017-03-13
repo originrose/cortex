@@ -161,21 +161,22 @@
 
 (defn train-corn
   []
-  (let [big-dataset (apply concat (repeat 1000 corn-dataset))
+  (let [big-dataset (apply concat (repeat 2000 corn-dataset))
         optimizer (adam/adam :alpha 0.01)
         validation-dataset (map #(select-keys % [:data]) corn-dataset)]
     (loop [network (corn-network)
            epoch 0]
-      (if (> 40 epoch)
-        (let [network (cortex.nn.execute/train-new network big-dataset
+      (if (> 3 epoch)
+        (let [network (execute/train-new network big-dataset
                                                    :batch-size 1
                                                    :optimizer optimizer)
-              results (map :labels (cortex.nn.execute/run network validation-dataset))
+              results (map :labels (execute/run network validation-dataset))
               err (reduce + (map (fn [[a] [b]]
                                    (* (- a b) (- a b)))
                                  results
                                  CORN-LABELS))]
-          (println "err:" err)
+          (clojure.pprint/pprint {:results results
+                                  :err err})
           (recur network (inc epoch)))
         network))))
 
