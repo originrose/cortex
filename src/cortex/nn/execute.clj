@@ -1005,15 +1005,52 @@ any loss-specific parameter buffers."
                                          datatype)))
       (network/output-bindings network))))
 
+
+(defn train
+  [network dataset &
+   {:keys [batch-size context optimizer datatype]
+    :or {batch-size 10
+         datatype :double}}]
+  (resource/with-resource-context
+    (let [optimizer (or optimizer (adam/adam))
+          context (or context (compute-context :datatype datatype))
+          column-shapes (ds/column-shapes dataset)
+          network (-> network
+                      (assoc :batch-size batch-size)
+                      (traverse/bind-vars-to-network)
+                      (traverse/add-training-traversal column-shapes
+                                                       :optimizer optimizer)
+                      (bind-context-to-network context {}))
+          batches (map
+                    (partial graph/augment-streams (network/network->graph network))
+                    (dataset-batches dataset batch-size))
+          network (add-pass-to-network network {} :backward)
+          batch-buffers (batch-buffers network (first batches) true)
+          stream (network/stream network)
+          stream->buffer-map (zipmap (keys batch-buffers)
+                                     (map :device-array (vals batch-buffers)))
+          network (assoc-in network [:compute-binding :stream->buffer-map]
+                            stream->buffer-map)]
+      (doseq [batch batches]
+        (load-batch! network batch batch-buffers)
+        (-> network
+            (do-traverse stream->buffer-map :forward)
+            (zero-traverse-gradients)
+            (compute-loss-term-gradients)
+            (do-traverse {} :backward)
+            (optimize-network)))
+      (save-to-network context network {}))))
+
+
 (defn run
   "Run a network on a dataset.  The results are returned as a sequence of
   maps where the node :id is the key for each output value."
-  [network dataset & {:keys [batch-size datatype]
+  [network dataset & {:keys [batch-size context datatype]
                       :or {batch-size 1
                            datatype :double}
                       :as options}]
   (resource/with-resource-context
-    (let [context (compute-context :datatype datatype)
+    (let [context (or context (compute-context :datatype datatype))
           stream-shapes (ds/column-shapes dataset)
           network (-> (assoc network :batch-size batch-size)
                       (traverse/bind-vars-to-network)
@@ -1035,34 +1072,3 @@ any loss-specific parameter buffers."
          (concat results (network/output-values network output-buffers)))
        []
        batches))))
-
-(defn train-new
-  [network dataset & {:keys [batch-size context optimizer]
-                      :or {batch-size 10}}]
-  (resource/with-resource-context
-    (let [optimizer (or optimizer (adam/adam))
-          context (or context (compute-context))
-          column-shapes (ds/column-shapes dataset)
-          network (-> network
-                      (assoc :batch-size batch-size)
-                      (traverse/bind-vars-to-network)
-                      (traverse/add-training-traversal column-shapes :optimizer optimizer)
-                      (bind-context-to-network context {}))
-          batches (->> (dataset-batches dataset batch-size)
-                       (map (partial graph/augment-streams (network/network->graph network))))
-          network (add-pass-to-network network {} :backward)
-          batch-buffers (batch-buffers network (first batches) true)
-          stream (network/stream network)
-          stream->buffer-map (zipmap (keys batch-buffers)
-                                     (map :device-array (vals batch-buffers)))
-          network (assoc-in network [:compute-binding :stream->buffer-map]
-                            stream->buffer-map)]
-      (doseq [batch batches]
-        (load-batch! network batch batch-buffers)
-        (-> network
-            (do-traverse stream->buffer-map :forward)
-            (zero-traverse-gradients)
-            (compute-loss-term-gradients)
-            (do-traverse {} :backward)
-            (optimize-network)))
-      (save-to-network context network {}))))

@@ -129,10 +129,10 @@
              epoch 0]
         (if (and epoch-count (> epoch epoch-count))
           network
-          (-> (execute/train-new network train-ds
-                                 :batch-size batch-size
-                                 :optimizer optimizer
-                                 :context context)
+          (-> (execute/train network train-ds
+                             :batch-size batch-size
+                             :optimizer optimizer
+                             :context context)
               (assoc :epoch-count epoch)
               (per-epoch-fn network test-ds network-filename best-network-fn simple-loss-print?
                             context)

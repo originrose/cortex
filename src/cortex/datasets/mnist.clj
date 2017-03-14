@@ -12,30 +12,36 @@
 (def WIDTH 28)
 (def HEIGHT 28)
 
+(def DATASET
+  {:train {:data
+           {:name "train-images-idx3-ubyte"
+            :shape [28 28]
+            :size 60000}
+           :labels
+           {:name "train-labels-idx1-ubyte"
+            :shape [10]
+            :size 60000}}
+   :test {:data
+           {:name "t10k-images-idx3-ubyte"
+            :shape [28 28]
+            :size 10000}
+           :labels
+           {:name "t10k-labels-idx1-ubyte"
+            :shape [10]
+            :size 10000}}})
+
+
 (defmacro ub-to-double
   "Convert an unsigned byte to a double, inline."
   [item]
   `(- (* ~item (double (/ 1.0 255.0)))
       0.5))
 
+
 (defn assert=
   [lhs rhs ^String msg]
   (when-not (= lhs rhs)
     (throw (Error. msg))))
-
-(def DATASET
-  {:train {:data
-           {:name "train-images-idx3-ubyte"
-            :size 60000}
-           :labels
-           {:name "train-labels-idx1-ubyte"
-            :size 60000}}
-   :test {:data
-           {:name "t10k-images-idx3-ubyte"
-            :size 10000}
-           :labels
-           {:name "t10k-labels-idx1-ubyte"
-            :size 10000}}})
 
 
 (defn mnist-data-stream

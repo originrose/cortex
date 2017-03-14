@@ -536,7 +536,8 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   (let [node (get-node graph node-id)
         expected-shape (get-argument-shape graph node argument)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
-      (do (println "TODO: Fix this error handling....") graph)
+      ; TODO: fix the incorrect error handling below, and remove this do form...
+      (do graph)
       #_(do
         (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")
         (clojure.pprint/pprint node)
@@ -593,10 +594,12 @@ that do not already exist.  Returns a new graph."
 (defn augment-streams
   "Augment the streams in the map and return a new map of data."
   [graph stream-map]
+  (println "stream-map: " stream-map)
   (->> (dfs-seq graph)
        (map #(get-node graph %))
        (mapcat get-node-arguments)
        (filter #(= :stream-augmentation (get % :type)))
+       #(do (println "stream-augmentation: " %) %)
        (map (fn [{:keys [stream augmentation] :as arg}]
               (when-not (contains? stream-map stream)
                 (throw (ex-info "Failed to find stream for augmentation"
@@ -616,6 +619,7 @@ that do not already exist.  Returns a new graph."
                                    :error e}))))))
        (into {})
        (merge stream-map)))
+
 
 (defmulti resolve-argument
   "Resolve a particular argument returning a map containing
