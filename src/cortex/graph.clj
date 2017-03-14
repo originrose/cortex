@@ -661,15 +661,6 @@ at least :buffer if not both :buffer and :gradient."
 
 (defmethod resolve-argument :stream-augmentation
   [graph node argument stream-map node-id->output-map]
-  (println "!!!!!!!!!!!!!!!!!!!!")
-  (println "argument:")
-  (clojure.pprint/pprint argument)
-  (println "####################")
-  (println "stream-map:")
-  (clojure.pprint/pprint stream-map)
-  (println "$$$$$$$$$$$$$$$$$$$$")
-  (println "id: ")
-  (clojure.pprint/pprint (arg/augmented-stream-arg->id argument))
   (if-let [buffer (get stream-map (arg/augmented-stream-arg->id argument))]
     buffer
     (throw (ex-info "Failed to resolve argument"

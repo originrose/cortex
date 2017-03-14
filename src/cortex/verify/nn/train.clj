@@ -161,9 +161,7 @@
 
 (defn percent=
   [a b]
-  (get
-    (frequencies (map #(= %1 %2) a b))
-    true))
+  (loss/evaluate-softmax a b))
 
 
 (defn train-mnist
@@ -172,17 +170,18 @@
         batch-size 10
         dataset (take 1000 @training-dataset*)
         test-dataset @test-dataset*
-        test-labels (map :stream test-dataset)
+        test-labels (map :label test-dataset)
         network (network/linear-network MNIST-NETWORK)
         _ (println (format "Training MNIST network for %s epochs..." n-epochs))
         network (reduce
                   (fn [network epoch]
-                    (let [new-network (execute/train network dataset
-                                                     :context context
-                                                     :batch-size batch-size)
+                    (let [;; new-network (execute/train network dataset
+                          ;;                            :context context
+                          ;;                            :batch-size batch-size)
                           results (execute/run network (take 100 test-dataset)
-                                               :batch-size 100)
-                          score (percent= results test-labels)]
+                                    :batch-size 100)
+                          _ (println (first results))
+                          score (percent= results (take 100 test-labels))]
                       (println (format "Score for epoch %s: %s\n\n" epoch score))
                       network))
                   network
@@ -191,5 +190,3 @@
         results (execute/run network test-dataset :batch-size 100)
         results (map vec->label results)]
     (is (> (percent= results test-labels) 0.6))))
-
-

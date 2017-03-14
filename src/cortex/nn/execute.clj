@@ -378,10 +378,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn- print-traversal-buffers
   [network]
   (let [backend (get-in network [:compute-binding :backend])
-        to-double #(vec (backend/to-double-array backend %))]
+        to-double #(when %
+                     (vec (take 20 (backend/to-double-array backend %))))]
     (clojure.pprint/pprint (mapv (fn [[k v]]
                                    [k {:buffer (to-double (get v :buffer))
-                                       :gradient (to-double (get v :gradient))}])
+                                       :gradient (to-double (get v :gradient))
+                                       :buffer-ptr (math/device-buffer (get v :buffer))}])
                                  (get-in network [:compute-binding :traversal-buffers])))
     network))
 
@@ -592,7 +594,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
         buffer-alpha (/ 1.0 (double (get network :batch-size)))]
     ;; Call compute-parameters! on all of the paramter buffers
     (reduce (fn [offset {:keys [buffer gradient
-                                learning-attenuation non-trainable?] :as parameter}]
+                                learning-attenuation non-trainable?]
+                         :or {learning-attenuation 1.0} :as parameter}]
               (let [elem-count (long (m/ecount buffer))
                     l2-max-constraint (double (get parameter :l2-max-constraint 0))
                     ;;For some things it is easier to just
@@ -919,9 +922,6 @@ any loss-specific parameter buffers."
   map-of-seqs transformation."
   [dataset batch-size]
   (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
-    (println "********************************************************************************")
-    (println "initial-map:")
-    (clojure.pprint/pprint initial-map)
     (->> dataset
          (partition batch-size)
          (map #(apply merge-with conj initial-map %)))))
@@ -941,7 +941,7 @@ any loss-specific parameter buffers."
                          (traverse/required-io-keys network)
                          (traverse/required-input-keys network))
                        (set (filter augmented-stream-key? (keys batch))))
-        batch-size (:batch-size network)]
+        batch-size (long (:batch-size network))]
     (when (zero? (count required-keys))
       (throw (ex-info "Zero required keys in batch-buffers" {})))
     (->> (for [k required-keys]
@@ -950,17 +950,23 @@ any loss-specific parameter buffers."
                                      (if (map? augmented-stream-val)
                                        [(:data augmented-stream-val) (:datatype augmented-stream-val)]
                                        [augmented-stream-val datatype]))
-                                   [(first (get batch k)) datatype])
+                                   [(get batch k) datatype])
                  _ (when (nil? data)
                      (throw (ex-info "Dataset batch missing key" {:key k})))
-                 size (m/ecount data)
+                 data-size (long (m/ecount data))
+                 item-size (quot data-size batch-size)
+                 _ (when-not (= 0 (rem data-size (long batch-size)))
+                     (throw (ex-info "Data coming from batch is not multiple of batch-size"
+                                     {:data-size data-size
+                                      :batch-size batch-size
+                                      :stream k})))
                  device-array (math/new-array driver
                                               stream
                                               datatype
-                                              [size]
+                                              [item-size]
                                               batch-size)
                  host-buffer (drv/allocate-host-buffer driver
-                                                       (* size batch-size)
+                                                       (* item-size batch-size)
                                                        datatype)]
              [k {:device-array device-array
                  :host-buffer host-buffer}]))
@@ -980,7 +986,8 @@ any loss-specific parameter buffers."
     (drv/copy-host->device (network/stream network)
                            host-buffer 0
                            (math/device-buffer device-array) 0
-                           (m/ecount host-buffer))))
+                           (m/ecount host-buffer))
+    (println "load-batch-device!" k (math/device-buffer device-array))))
 
 
 (defn- cuda-backend-fn
@@ -1088,6 +1095,8 @@ any loss-specific parameter buffers."
       (reduce
        (fn [results next-batch]
          (load-batch! network next-batch batch-buffers)
+         (println (get-in network [:traversal :forward]))
+         (clojure.pprint/pprint stream->buffer-map)
          (do-traverse network stream->buffer-map :inference)
          (concat results (network/output-values network output-buffers)))
        []
