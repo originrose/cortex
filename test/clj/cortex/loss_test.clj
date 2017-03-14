@@ -27,3 +27,11 @@
                         :augmentation)]
     (is (= [0.5 1.0 0.5 1.0]
            (keyword-fn/call-keyword-fn augment-fn labels)))))
+
+
+(deftest mse-loss-not-nan
+  (let [mse-loss (loss/mse-loss)
+        buffer-map {:output 0.0
+                    :labels 0.2}
+        loss-value (loss/loss mse-loss buffer-map)]
+    (is (not (Double/isNaN loss-value)))))
