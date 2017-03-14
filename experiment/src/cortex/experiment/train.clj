@@ -39,7 +39,6 @@
   (let [batch-size (:batch-size new-network)
         labels (execute/run new-network test-ds :batch-size batch-size)
         loss-fn (execute/network->applied-loss-fn context new-network test-ds labels)
-        _ (clojure.pprint/pprint loss-fn)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get old-network :cv-loss)]
                             ;; TODO: Is there a bug here? What if the best-loss isn't sequential?

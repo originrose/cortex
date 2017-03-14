@@ -129,34 +129,34 @@
 (defn regression-error
   [as bs]
   (reduce +
-    (map (fn [a b]
+    (map (fn [[a] [b]]
            (* (- a b) (- a b)))
         as bs)))
 
 (defn test-corn
-  []
-  (let [dataset CORN-DATASET
-        labels (map :label dataset)
-        big-dataset (apply concat (repeat 2000 dataset))
-        optimizer (adam/adam :alpha 0.01)
-        ;validation-dataset (map #(select-keys % [:data]) dataset)
-        network (corn-network)
-        ;_ (network/print-layer-summary network)
-        network (loop [network network
-                       epoch 0]
-                  (if (> 3 epoch)
-                    (let [network (execute/train network big-dataset
-                                                 :batch-size 1
-                                                 :optimizer optimizer)
-                          results (map :label (execute/run network dataset))
-                          err (regression-error results labels)]
-                      (clojure.pprint/pprint {:results results
-                                              :err err})
-                      (recur network (inc epoch)))
-                    network))
-        results (execute/run network dataset :batch-size 100)
-        err (regression-error results labels)]
-    (is (> err 0.2))))
+  ([] (test-corn nil))
+  ([context]
+   (let [dataset CORN-DATASET
+         labels (map :label dataset)
+         big-dataset (apply concat (repeat 2000 dataset))
+         optimizer (adam/adam :alpha 0.01)
+         ;validation-dataset (map #(select-keys % [:data]) dataset)
+         network (corn-network)
+         ;_ (network/print-layer-summary network)
+         network (loop [network network
+                        epoch 0]
+                   (if (> 3 epoch)
+                     (let [network (execute/train network big-dataset
+                                                  :batch-size 1
+                                                  :context context
+                                                  :optimizer optimizer)
+                           results (map :label (execute/run network dataset :context context))
+                           err (regression-error results labels)]
+                       (recur network (inc epoch)))
+                     network))
+         results (map :label (execute/run network dataset :batch-size 10 :context context))
+         err (regression-error results labels)]
+     (is (> err 0.2)))))
 
 
 (defn percent=

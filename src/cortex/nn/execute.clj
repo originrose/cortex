@@ -896,8 +896,6 @@ any loss-specific parameter buffers."
                                    (network/network->graph network)
                                    %))
                            batches->columns)]
-    (clojure.pprint/pprint {:dataset (take 10 dataset-columns)
-                            :inference (take 10 inference-columns)})
     (->> (get-in network [:traversal :loss-function])
          (mapv (fn [loss-term]
                  (->> (execute-live-loss-term context network loss-term
@@ -1055,6 +1053,8 @@ any loss-specific parameter buffers."
                       (bind-context-to-network context {}))
           batches (map (partial graph/augment-streams (network/network->graph network))
                        (dataset-batches dataset batch-size))
+          _ (when (empty? batches)
+              (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?")))
           batch-buffers (batch-buffers network (first batches) false)
           stream->buffer-map (zipmap (keys batch-buffers)
                                      (map :device-array (vals batch-buffers)))
