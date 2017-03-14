@@ -40,7 +40,8 @@
 
 
 (defn assign-marshal
-  "Assignment must be capable of marshalling data."
+  "Assignment must be capable of marshalling data.  This is an somewhat difficult challenge
+for the cuda backend."
   [driver datatype]
   (tensor-context
    driver datatype
