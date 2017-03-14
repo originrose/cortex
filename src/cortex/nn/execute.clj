@@ -409,9 +409,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
                          (map (fn [[k v]]
                                 [k {:buffer v}]))
                          (into {}))
-         retval (graph/resolve-arguments special-graph (graph/get-node special-graph id)
-                                         stream-map id->output-map)]
-     retval))
+         node (graph/get-node special-graph id)]
+     (graph/resolve-arguments special-graph node stream-map id->output-map)))
   ([network id]
    (resolve-node-arguments network id (generate-node-id->output-map network))))
 
@@ -915,8 +914,6 @@ any loss-specific parameter buffers."
         (traverse/bind-output-bindings output-bindings)
         (traverse-fn)
         (bind-context-to-network context {})))
-
-
 
 
 (defn dataset-batches

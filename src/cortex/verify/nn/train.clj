@@ -58,11 +58,14 @@
    (layers/max-pooling 2 0 2)
    (layers/batch-normalization :l1-regularization 1e-4)
    (layers/linear 500 :l2-max-constraint 4.0)
-   (layers/relu :center-loss {:labels {:stream :label}
+   (layers/relu :center-loss {:label-indexes {:stream :label}
+                              :foo :bar
+                              :label-inverse-counts {:stream :label}
+                              :labels {:stream :label}
                               :alpha 0.9
                               :lambda 1e-4})
    (layers/linear 10)
-   (layers/softmax :output-channels 2 :id :output)])
+   (layers/softmax :output-channels 2 :id :label)])
 
 
 (defonce training-dataset* (future (mnist/training-dataset)))

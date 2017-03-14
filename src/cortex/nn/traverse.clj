@@ -65,6 +65,7 @@ while training no stream or loss is necessary"
   associated with it."
   [network node-id stream & [loss]]
   (check-node-id network node-id)
+  (println (format "node: %s binding to %s - loss = %s" node-id stream loss))
   (assoc-in network [:traversal :output-bindings node-id]
             {:stream stream
              :loss (or loss

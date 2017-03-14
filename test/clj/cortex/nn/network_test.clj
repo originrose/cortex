@@ -4,7 +4,6 @@
     [clojure.core.matrix :as m]
     [cortex.graph :as graph]
     [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]]
-    [cortex.dataset :as ds]
     [cortex.nn.layers :as layers]
     [cortex.nn.execute :as execute]
     [cortex.nn.network :as network]))
@@ -88,14 +87,7 @@
 
 (defn test-run
   []
-  (let [dataset (ds/in-memory-dataset
-                  {:data {:data CORN-DATA
-                          :shape 2}
-                   :yield {:data CORN-LABELS
-                            :shape 1}}
-                  (ds/index-sets (count CORN-DATA)
-                                        :training-split 1.0
-                                        :randomize? false))]
+  (let [dataset (corn-dataset)]
     (execute/run [(layers/input 2 1 1 :id :data)
                   (layers/linear 1 :id :yield)]
                  dataset

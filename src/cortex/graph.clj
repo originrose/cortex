@@ -44,25 +44,24 @@
 
 (defmethod get-node-metadata :default [node] {})
 
+
 (defn get-node-argument
   [node arg-key]
   (let [learn-atten (get node :learning-attenuation 1.0)
         non-trainable? (get node :non-trainable? false)
-        retval (->> (get-node-metadata node)
-                    :arguments
-                    (#(get % arg-key)))]
-    (when-not retval
-      (throw (ex-info "Failed to find node argument"
+        node-defaults (:arguments (get-node-metadata node))
+        default-arg (get node-defaults arg-key)
+        default-arg (assoc default-arg :key arg-key)
+        arg (util/deep-merge default-arg (get node arg-key))]
+    (when-not default-arg
+      (throw (ex-info (str "Invalid node argument: " arg-key)
                       {:node node
-                       :argument-name arg-key
-                       :arguments (get (get-node-metadata node) :arguments)})))
-    (let [retval (->> (assoc retval :key arg-key)
-                      (util/deep-merge retval (get node arg-key)))
-          param-learn-atten (get retval :learning-attenuation learn-atten)]
-      (if (or (zero? param-learn-atten)
-              non-trainable?)
-        (assoc retval :gradients? false)
-        (assoc retval :learning-attenuation param-learn-atten)))))
+                       :arg arg-key
+                       :accepted-args (get (get-node-metadata node) :arguments)})))
+    (if (or (zero? (get arg :learning-attenuation learn-atten))
+            non-trainable?)
+      (assoc arg :gradients? false)
+      arg)))
 
 
 (defn get-node-arguments
@@ -663,6 +662,8 @@ at least :buffer if not both :buffer and :gradient."
 
 (defmethod resolve-argument :stream-augmentation
   [graph node argument stream-map node-id->output-map]
+  (println "stream-map: " stream-map)
+  (println "id: " (arg/augmented-stream-arg->id argument))
   (if-let [buffer (get stream-map (arg/augmented-stream-arg->id argument))]
     buffer
     (throw (ex-info "Failed to resolve argument"
@@ -681,7 +682,7 @@ when simply doing execution because when doing back propagation the entries must
 link to both {:buffer :gradient}."
   [graph node stream-map node-id->output-map]
   (->> (get-node-arguments node)
-       (map (fn [{:keys [key type] :as argument}]
+       (mapv (fn [{:keys [key type] :as argument}]
               [key (resolve-argument graph node argument
                                      stream-map node-id->output-map)]))
        (into {})))

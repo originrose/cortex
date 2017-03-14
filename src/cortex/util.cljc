@@ -151,7 +151,9 @@ patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
   [& maps]
   (if (every? map? maps)
     (apply merge-with deep-merge maps)
-    (last maps)))
+    (if (nil? (last maps))
+      (apply deep-merge (butlast maps))
+      (last maps))))
 
 
 (defn map-keys
