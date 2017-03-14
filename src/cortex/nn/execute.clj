@@ -941,6 +941,7 @@ any loss-specific parameter buffers."
     (->> (for [k required-keys]
            (let [data (first (get batch k))
                  _ (when (nil? data)
+                     (println "batch: " batch " looking for: " k)
                      (throw (ex-info "Dataset batch missing key" {:key k})))
                  size (m/ecount data)
                  device-array (math/new-array driver stream
@@ -1058,6 +1059,8 @@ any loss-specific parameter buffers."
                       (bind-context-to-network context {}))
           batches (map (partial graph/augment-streams (network/network->graph network))
                        (dataset-batches dataset batch-size))
+          _ (when (empty? batches)
+              (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?")))
           batch-buffers (batch-buffers network (first batches) false)
           stream->buffer-map (zipmap (keys batch-buffers)
                                      (map :device-array (vals batch-buffers)))
