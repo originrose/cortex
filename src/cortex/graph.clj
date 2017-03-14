@@ -593,7 +593,6 @@ that do not already exist.  Returns a new graph."
 (defn augment-streams
   "Augment the streams in the map and return a new map of data."
   [graph stream-map]
-  ;(println "stream-map: " stream-map)
   (->> (dfs-seq graph)
        (map #(get-node graph %))
        (mapcat get-node-arguments)
@@ -662,8 +661,15 @@ at least :buffer if not both :buffer and :gradient."
 
 (defmethod resolve-argument :stream-augmentation
   [graph node argument stream-map node-id->output-map]
-  (println "stream-map: " stream-map)
-  (println "id: " (arg/augmented-stream-arg->id argument))
+  (println "!!!!!!!!!!!!!!!!!!!!")
+  (println "argument:")
+  (clojure.pprint/pprint argument)
+  (println "####################")
+  (println "stream-map:")
+  (clojure.pprint/pprint stream-map)
+  (println "$$$$$$$$$$$$$$$$$$$$")
+  (println "id: ")
+  (clojure.pprint/pprint (arg/augmented-stream-arg->id argument))
   (if-let [buffer (get stream-map (arg/augmented-stream-arg->id argument))]
     buffer
     (throw (ex-info "Failed to resolve argument"
@@ -672,14 +678,15 @@ at least :buffer if not both :buffer and :gradient."
 
 
 (defn resolve-arguments
-  "Resolve the arguments to a particular node.
-It is expected the stream map contains the augmented data if necessary.
-Note that for uniformity the values are returned without modification.  This
-means the the format of the stream map and the node->output-map must be
-entries of the form of at least {:buffer data} instead of linking key directly
-to data.  This allows a uniform system both when doing auto-differentiation and
-when simply doing execution because when doing back propagation the entries must
-link to both {:buffer :gradient}."
+  "Resolve the arguments to a particular node.  It is expected the
+  stream map contains the augmented data if necessary.  Note that for
+  uniformity the values are returned without modification.  This means
+  the the format of the stream map and the node->output-map must be
+  entries of the form of at least {:buffer data} instead of linking
+  key directly to data.  This allows a uniform system both when doing
+  auto-differentiation and when simply doing execution because when
+  doing back propagation the entries must link to both {:buffer
+  :gradient}."
   [graph node stream-map node-id->output-map]
   (->> (get-node-arguments node)
        (mapv (fn [{:keys [key type] :as argument}]

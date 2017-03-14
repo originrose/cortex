@@ -915,11 +915,20 @@ any loss-specific parameter buffers."
 
 
 (defn dataset-batches
+  "Paritions the dataset into batches and does the seq-of-maps ->
+  map-of-seqs transformation."
   [dataset batch-size]
   (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
+    (println "********************************************************************************")
+    (println "initial-map:")
+    (clojure.pprint/pprint initial-map)
     (->> dataset
          (partition batch-size)
          (map #(apply merge-with conj initial-map %)))))
+
+(defn- augmented-stream-key?
+  [k]
+  (and (map? k) (:stream k) (:augmentation k)))
 
 ;; TODO: can we get rid of required keys here by pre-filtering the dataset (from the traversal leaves)?
 (defn batch-buffers
@@ -927,20 +936,31 @@ any loss-specific parameter buffers."
   (let [driver (network/driver network)
         stream (network/stream network)
         datatype (network/datatype network)
-        required-keys (if training?
-                        (traverse/required-io-keys network)
-                        (traverse/required-input-keys network))
+        required-keys (clojure.set/union
+                       (if training?
+                         (traverse/required-io-keys network)
+                         (traverse/required-input-keys network))
+                       (set (filter augmented-stream-key? (keys batch))))
         batch-size (:batch-size network)]
     (when (zero? (count required-keys))
       (throw (ex-info "Zero required keys in batch-buffers" {})))
     (->> (for [k required-keys]
-           (let [data (first (get batch k))
+           (let [[data datatype] (if (map? k)
+                                   (let [augmented-stream-val (get batch k)]
+                                     (if (map? augmented-stream-val)
+                                       [(:data augmented-stream-val) (:datatype augmented-stream-val)]
+                                       [augmented-stream-val datatype]))
+                                   [(first (get batch k)) datatype])
                  _ (when (nil? data)
                      (throw (ex-info "Dataset batch missing key" {:key k})))
                  size (m/ecount data)
-                 device-array (math/new-array driver stream
-                                              datatype [size] batch-size)
-                 host-buffer (drv/allocate-host-buffer driver (* size batch-size)
+                 device-array (math/new-array driver
+                                              stream
+                                              datatype
+                                              [size]
+                                              batch-size)
+                 host-buffer (drv/allocate-host-buffer driver
+                                                       (* size batch-size)
                                                        datatype)]
              [k {:device-array device-array
                  :host-buffer host-buffer}]))
@@ -950,7 +970,9 @@ any loss-specific parameter buffers."
 (defn load-batch!
   [network batch batch-buffers]
   (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
-    (let [item-count (second (dtype/copy-raw->item! (get batch k) host-buffer 0))]
+    (let [data (get batch k)
+          data (if (map? data) (:data data) data)
+          item-count (second (dtype/copy-raw->item! data host-buffer 0))]
       (when-not (= item-count (m/ecount host-buffer))
         (throw (ex-info "Failed to load-batch!"
                         {:item-count item-count
@@ -1016,9 +1038,10 @@ any loss-specific parameter buffers."
                       (traverse/add-training-traversal column-shapes
                                                        :optimizer optimizer)
                       (bind-context-to-network context {}))
-          batches (map (partial graph/augment-streams
-                                (network/network->graph network))
-                       (dataset-batches dataset batch-size))
+          batches (->> (dataset-batches dataset batch-size)
+                       (map (partial graph/augment-streams (network/network->graph network))))
+          _ (println "((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((")
+          _ (println (keys (first batches)))
           network (add-pass-to-network network {} :backward)
           batch-buffers (batch-buffers network (first batches) true)
           stream (network/stream network)
@@ -1051,8 +1074,8 @@ any loss-specific parameter buffers."
                       (traverse/bind-vars-to-network)
                       (traverse/add-forward-traversal stream-shapes)
                       (bind-context-to-network context {}))
-          batches (map (partial graph/augment-streams (network/network->graph network))
-                       (dataset-batches dataset batch-size))
+          batches (->> (dataset-batches dataset batch-size)
+                       (map (partial graph/augment-streams (network/network->graph network))))
           _ (when (empty? batches)
               (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?")))
           batch-buffers (batch-buffers network (first batches) false)
