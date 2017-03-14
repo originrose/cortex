@@ -535,8 +535,8 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   (let [node (get-node graph node-id)
         expected-shape (get-argument-shape graph node argument)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
-      ; TODO: fix the incorrect error handling below, and remove this do form...
-      (do graph)
+      (do (println "TODO: fix the incorrect error handling below, and remove this do form...")
+          graph)
       #_(do
         (println ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")
         (clojure.pprint/pprint node)

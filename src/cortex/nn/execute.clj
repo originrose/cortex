@@ -1047,8 +1047,6 @@ any loss-specific parameter buffers."
                       (bind-context-to-network context {}))
           batches (->> (dataset-batches dataset batch-size)
                        (map (partial graph/augment-streams (network/network->graph network))))
-          _ (println "((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((")
-          _ (println (keys (first batches)))
           network (add-pass-to-network network {} :backward)
           batch-buffers (batch-buffers network (first batches) true)
           stream (network/stream network)

@@ -140,9 +140,7 @@
          labels (map :label dataset)
          big-dataset (apply concat (repeat 2000 dataset))
          optimizer (adam/adam :alpha 0.01)
-         ;validation-dataset (map #(select-keys % [:data]) dataset)
          network (corn-network)
-         ;_ (network/print-layer-summary network)
          network (loop [network network
                         epoch 0]
                    (if (> 3 epoch)

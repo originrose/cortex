@@ -236,7 +236,6 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 
 (defn load-multiple-datatype-function
   ([module-name fn-name dtype-seq]
-   ;(println "loading function" fn-name)
    (try
     (let [module (load-module (io/input-stream (io/resource module-name)))]
       (into {} (map (fn [dt]

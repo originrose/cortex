@@ -3,7 +3,6 @@
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.random :as rand-matrix]
             [clojure.string :as str]
-            [clojure.pprint :as pp]
             [clojure.java.io :as io]
             #?(:cljs [goog.string :refer [format]])
             [taoensso.nippy :as nippy]
