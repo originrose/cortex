@@ -3,6 +3,7 @@
             [clojure.string :as s]
             [clojure.test :refer :all]
             [cortex.nn.layers :as layers]
+            [cortex.nn.execute :as execute]
             [cortex.experiment.train :as train]))
 
 ;; This test namespace uses the logistic classifier to learn to predict whether
@@ -31,10 +32,18 @@
 
 (deftest logistic-test
   (io/delete-file "trained-network.nippy" true)
-  (let [_ (with-out-str
-            (train/train-n (default-dataset) description :batch-size 50 :epoch-count 300 :simple-loss-print? false))
-        trained-network (train/load-network "trained-network.nippy" description)
-        [[should-def] [shouldnt-def]] (inference/infer-n-observations trained-network [[5000.0 10.0] [5.0 100000.0]]
-                                                                      2 :batch-size 2)]
+  (let [ds (shuffle (default-dataset))
+        ds-count (count ds)
+        train-ds (take (int (* 0.9 ds-count)) ds)
+        test-ds (drop (int (* 0.9 ds-count)) ds)
+        ;_ (with-out-str
+        ;
+        ;    )
+        _ (train/train-n description train-ds test-ds :batch-size 50 :epoch-count 3)
+        trained-network (train/load-network "trained-network.nippy")
+        input-data [{:data [5000.0 10.0]} {:data [5.0 100000.0]}]
+        [[should-def] [shouldnt-def]] (->> (execute/run trained-network input-data)
+                                           (map :labels))]
+    (println "should: " should-def " shouldn't: " shouldnt-def)
     (is (> should-def 0.97))
     (is (< shouldnt-def 0.02))))

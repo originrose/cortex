@@ -79,7 +79,7 @@
                                   total-data))
         cv-split (- 1.0 training-split)]
     (ds/in-memory-dataset {:data          {:data  data
-                                           :shape (ds/image-shape 1 28 28)}
+                                           :shape (comment "to be removed " (ds/image-shape 1 28 28))}
                                   :labels {:data  labels
                                            :shape 10}}
                           (ds/index-sets total-data

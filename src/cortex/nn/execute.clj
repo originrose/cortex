@@ -32,6 +32,32 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [cortex.compute.nn.backend :as backend]
     [cortex.compute.nn.protocols :as compute-protocols]))
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Utility Functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn batches->columns
+  "Given a batch sequence transform it so that it is a vector of columnar data,
+  one column for each item requested from the batch."
+  [batch-sequence]
+  (when (and (not (empty? batch-sequence))
+             (not (empty? (first batch-sequence))))
+    (->> (map (fn [stream-name]
+                [stream-name
+                 (mapcat #(get % stream-name) batch-sequence)])
+              (keys (first batch-sequence)))
+         (into {}))))
+
+
+(defn batches->columnsv
+  "See batches->columns.  Forces realization of each column"
+  [batch-sequence]
+  (->> batch-sequence
+       batches->columns
+       (map (fn [[k v]] [k (vec v)]))
+       (into {})))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  Bind/save functionality
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -733,8 +759,7 @@ any loss-specific parameter buffers."
         distinct-count (->> arguments
                             (map (comp :count second))
                             distinct)
-        _ (when-not (< (count distinct-count)
-                       3)
+        _ (when (> (count distinct-count) 2)
             (throw (ex-info "There should be at most 2 distinct argument buffer counts"
                             {:buffer-counts (map (fn [[k v]]
                                                    [k
@@ -850,44 +875,6 @@ any loss-specific parameter buffers."
     (inc num-or-nil)))
 
 
-(defn- train-seq
-  "Infinite sequence of networks, one for each epoch.
-The context is expected to already be bound to the network."
-  [context {:keys [batch-size] :as built-network} dataset]
-  (let [streams (->> (map :stream (traverse/get-io-bindings built-network))
-                             (remove nil?)
-                             set)
-        dataset-epoch (ds/get-batches dataset batch-size :training streams)
-        trained-network (-> (train-batch-sequence context built-network dataset-epoch {})
-                            last
-                            (update :epoch-count safe-inc))]
-    (cons {:network trained-network}
-          (lazy-seq (train-seq context trained-network dataset)))))
-
-
-(defn- train-infer-seq
-  "train and infer against the trained network.  This is useful for doing things like
-  calculating per-epoch loss.  For this to work correctly the dataset needs to return the exact
-  same data per batch type.
-  Returns map of:
-  {:network trained-network
-  :inferences inferences from this run
-  :label-fn function to call to get labels
-  :dataset-bindings io bindings from the dataset to this network."
-  [context network dataset & {:keys [infer-batch-type]
-                              :or {infer-batch-type
-                                   :cross-validation}}]
-  (let [batch-size (long (get network :batch-size))
-        input-streams (traverse/get-input-streams network)]
-    (->> (train-seq context network dataset)
-         (map (fn [{:keys [network] :as entry}]
-                (assoc entry
-                       :inferences (infer-batch-sequence context network
-                                      (ds/get-batches dataset batch-size
-                                                      infer-batch-type input-streams)
-                                      {})))))))
-
-
 (defn- augment-and-normalize-streams
   [graph batch-data]
   (->> (graph/augment-streams graph batch-data)
@@ -899,37 +886,24 @@ The context is expected to already be bound to the network."
 
 
 (defn network->applied-loss-fn
-  "Given the set of inferences from an inference run of the network
-and the set of labels along with the bindings (traverse/get-io-bindings built-network)
-return the loss function from the traverse where each term has a :value member with it's
-post-lambda-multiplied value."
-  [context network inferences dataset-outputs]
-  (let [inference-columns (ds/batches->columns inferences)
-        label-columns (->> dataset-outputs
+  "Given the set of inferences from an inference run of the network and the set
+  of labels along with the bindings (traverse/get-io-bindings built-network)
+  return the loss function from the traverse where each term has a :value
+  member with it's post-lambda-multiplied value."
+  [context network inferences dataset]
+  (let [inference-columns (batches->columns inferences)
+        dataset-columns (->> dataset
                            (map #(augment-and-normalize-streams
-                                  (network/network->graph network)
-                                  %))
-                           ds/batches->columns)
-        output-bindings (traverse/get-output-training-bindings network)
-        node-id->output-streams (->> output-bindings
-                                     (map (fn [{:keys [node-id stream]}]
-                                            [node-id stream]))
-                                     (into {}))
-        ;;inferences are organized by node id
-        ;;dataset-outputs are organized by dataset stream
-        inference-label-pairs (->> (keys inference-columns)
-                                   (map (fn [node-id]
-                                          [node-id [(get inference-columns node-id)
-                                                    (get label-columns
-                                                         (get node-id->output-streams
-                                                              node-id))]]))
-                                   (into {}))]
+                                   (network/network->graph network)
+                                   %))
+                           batches->columns)]
+    (clojure.pprint/pprint {:dataset (take 10 dataset-columns)
+                            :inference (take 10 inference-columns)})
     (->> (get-in network [:traversal :loss-function])
          (mapv (fn [loss-term]
-                 (assoc loss-term
-                        :value
-                        (execute-live-loss-term context network loss-term
-                                                inference-columns label-columns)))))))
+                 (->> (execute-live-loss-term context network loss-term
+                                              inference-columns dataset-columns)
+                      (assoc loss-term :value)))))))
 
 
 (defn- setup-network
@@ -943,57 +917,7 @@ post-lambda-multiplied value."
         (bind-context-to-network context {})))
 
 
-(defn train
-  "Create a sequence of training networks.  This call should be wrapped
-in a resource context.  The return value is a lazy sequence of maps with either
-just the network for each epoch or the network along with inferences for each
-epoch. The inferences are a sequence of maps so if you want just all the inferences
-in a single map you still need to call cortex-dataset/batches->columns."
-  [context network dataset input-bindings output-bindings
-   & {:keys [batch-size infer-batch-type optimizer disable-infer?]
-      :or {batch-size 128 infer-batch-type :cross-validation
-           optimizer (adam/adam)}}]
-  (let [train-fn (if disable-infer?
-                   #(train-seq context % dataset)
-                   #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
-    (-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/add-training-traversal
-                         %
-                         (ds/stream-descriptions dataset)
-                         :optimizer optimizer))
-      train-fn)))
 
-
-(defn infer
-  "Given a network and a dataset infer a set of data.  data is returned as a sequence of maps of:
-node-id->data-stream.  If you want a single map (coalescing all the batches into one item) then
-call cortex-dataset/batches->columns"
-  [context network dataset input-bindings output-bindings
-   & {:keys [batch-size infer-batch-type]
-      :or {batch-size 128 infer-batch-type :holdout}}]
-  (as-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/add-forward-traversal
-                          % (ds/stream-descriptions dataset))) network-or-seq
-        (infer-batch-sequence context network-or-seq
-                             (ds/get-batches dataset
-                                             batch-size
-                                             infer-batch-type
-                                             (traverse/get-input-streams network-or-seq))
-                             {})))
-
-(defn infer-columns
-  "Call infer, force realization of everything and return a single map of node-id->output-stream.
-This does not need to be wrapped in a resource context; that is done for you."
-  [context network dataset input-bindings output-bindings & args]
-  (resource/with-resource-context
-    (->> (apply infer context network dataset input-bindings output-bindings args)
-         ds/batches->columnsv)))
-
-(defn dataset-column-shapes
-  [dataset]
-  (->> (first dataset)
-       (map (fn [[k v]] [k (m/ecount v)]))
-       (into {})))
 
 (defn dataset-batches
   [dataset batch-size]
@@ -1031,7 +955,7 @@ This does not need to be wrapped in a resource context; that is done for you."
 (defn load-batch!
   [network batch batch-buffers]
   (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
-    (let [item-count (dtype/copy-raw->item! (get batch k) host-buffer 0)]
+    (let [item-count (second (dtype/copy-raw->item! (get batch k) host-buffer 0))]
       (when-not (= item-count (m/ecount host-buffer))
         (throw (ex-info "Failed to load-batch!"
                         {:item-count item-count
@@ -1090,7 +1014,7 @@ This does not need to be wrapped in a resource context; that is done for you."
                       :as options}]
   (resource/with-resource-context
     (let [context (compute-context :datatype datatype)
-          stream-shapes (dataset-column-shapes dataset)
+          stream-shapes (ds/column-shapes dataset)
           network (-> (assoc network :batch-size batch-size)
                       (traverse/bind-vars-to-network)
                       (traverse/add-forward-traversal stream-shapes)
@@ -1117,8 +1041,8 @@ This does not need to be wrapped in a resource context; that is done for you."
                       :or {batch-size 10}}]
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
-          context (compute-context)
-          column-shapes (dataset-column-shapes dataset)
+          context (or context (compute-context))
+          column-shapes (ds/column-shapes dataset)
           network (-> network
                       (assoc :batch-size batch-size)
                       (traverse/bind-vars-to-network)

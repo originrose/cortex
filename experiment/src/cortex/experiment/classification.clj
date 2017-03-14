@@ -8,7 +8,7 @@
             [cortex.util :as util]
             [clojure.core.matrix :as m]
             [clojure.edn]
-            [cortex.suite.train :as suite-train]
+            [cortex.experiment.train :as experiment-train]
             [cortex.loss :as loss]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.network :as network])
@@ -80,23 +80,25 @@ is infinite."
     holdout-epoch-seq
     training-epoch-seq
     & {:keys [shutdown-fn]}]
-   (let [label->vec (label->vec-fn class-names)
-         seq-transform-fn #(map (fn [[data label]]
-                                  [data (label->vec label)])
-                                %)
-         cv-epoch-seq (map seq-transform-fn cv-epoch-seq)
-         holdout-epoch-seq (if (identical? cv-epoch-seq holdout-epoch-seq)
-                             cv-epoch-seq
-                             (map seq-transform-fn holdout-epoch-seq))
-         training-epoch-seq (map seq-transform-fn training-epoch-seq)
-         dataset (ds/infinite-dataset [[:data data-shape]
-                                              [:labels (count class-names)]]
-                                      cv-epoch-seq
-                                      holdout-epoch-seq
-                                      training-epoch-seq
-                                      :shutdown-fn
-                                      shutdown-fn)]
-     (assoc dataset :class-names class-names))))
+   (throw (ex-info "Dataset is now a sequence of maps. FIXME!" {}))
+  ; (let [label->vec (label->vec-fn class-names)
+  ;         seq-transform-fn #(map (fn [[data label]]
+  ;                                  [data (label->vec label)])
+  ;                                %)
+  ;         cv-epoch-seq (map seq-transform-fn cv-epoch-seq)
+  ;         holdout-epoch-seq (if (identical? cv-epoch-seq holdout-epoch-seq)
+  ;                             cv-epoch-seq
+  ;                             (map seq-transform-fn holdout-epoch-seq))
+  ;         training-epoch-seq (map seq-transform-fn training-epoch-seq)
+  ;         dataset (ds/infinite-dataset [[:data data-shape]
+  ;                                       [:labels (count class-names)]]
+  ;                                      cv-epoch-seq
+  ;                                      holdout-epoch-seq
+  ;                                      training-epoch-seq
+  ;                                      :shutdown-fn
+  ;                                      shutdown-fn)]
+  ;     (assoc dataset :class-names class-names))
+   ))
 
 
 (defn get-class-names-from-directory
@@ -281,13 +283,15 @@ observations in each cell instead of just a count."
   [dataset batch-definitions observation->img-fn vec->label]
   (->> (mapv (fn [{:keys [batch-type postprocess]}]
                (let [image-label-pairs
-                     (->> (ds/get-batches dataset 50 batch-type [:data :labels])
-                          ds/batches->columns
-                          (#(interleave (get % :data)
-                                        (get % :labels)))
-                          (partition 2)
-                          postprocess
-                          (take 100))]
+                     (throw (ex-info "Datasets are now a sequence of maps. FIXME!" {}))
+                     ;(->> (ds/get-batches dataset 50 batch-type [:data :labels])
+                     ;     ds/batches->columns
+                     ;     (#(interleave (get % :data)
+                     ;                   (get % :labels)))
+                     ;     (partition 2)
+                     ;     postprocess
+                     ;     (take 100))
+                     ]
                  [batch-type {:batch-type batch-type
                               :images (pmap (fn [[observation label]]
                                               (observation->img-fn observation))
@@ -363,11 +367,11 @@ training will continue from there."
   (let [network (-> (network/linear-network initial-description)
                     traverse/auto-bind-io)]
    (doseq [_ (repeatedly
-              #(suite-train/train-n dataset initial-description network
-                                    :best-network-fn (partial best-network-fn
-                                                              confusion-matrix-atom
-                                                              observation->image-fn
-                                                              dataset)
-                                    :epoch-count epoch-count
-                                    :force-gpu? force-gpu?
-                                    :batch-size batch-size))])))
+               #(experiment-train/train-n dataset initial-description network
+                                          :best-network-fn (partial best-network-fn
+                                                                    confusion-matrix-atom
+                                                                    observation->image-fn
+                                                                    dataset)
+                                          :epoch-count epoch-count
+                                          :force-gpu? force-gpu?
+                                          :batch-size batch-size))])))

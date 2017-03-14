@@ -19,58 +19,49 @@
 (set! *warn-on-reflection* true)
 
 (defn load-network
-  "Loads a map of {:cv-loss :network-description :initial-description} if the
-initial description saved with the network matches the provided description."
-  [network-filename initial-description]
-  (when (.exists (io/file network-filename))
-    (let [network-data (util/read-nippy-file network-filename)]
-      (when (= initial-description (get network-data :initial-description))
-        network-data))))
+  "Loads a map of {:cv-loss :network-description}."
+  [network-filename]
+  (if (.exists (io/file network-filename))
+    (util/read-nippy-file network-filename)
+    (throw (ex-info "Saved network not found." {:filename network-filename}))))
 
 
 (defn save-network
-  [context network network-loss initial-description network-filename]
-  (let [write-data (-> (execute/save-to-network context network {})
-                       (assoc :cv-loss network-loss
-                              :initial-description initial-description))]
-    (util/write-nippy-file network-filename write-data)
-    write-data))
+  "Saves a trained network out to the filesystem."
+  [network network-loss network-filename]
+  (->> (assoc network :cv-loss network-loss)
+       (util/write-nippy-file network-filename)))
 
 
-(defn- per-epoch-eval-training-network
-  [context best-network-atom network-filename initial-description
-   best-network-fn dataset simple-loss-print?
-   {:keys [network inferences]}]
-  (let [batch-size (:batch-size network)
-        cv-columnar-input (->> (traverse/get-input-streams network)
-                               (ds/get-batches dataset batch-size :cross-validation)
-                               (ds/batches->columns))
-        labels (->> (traverse/get-output-streams network)
-                     (ds/get-batches dataset batch-size :cross-validation))
-        loss-fn (execute/network->applied-loss-fn context network inferences labels)
+(defn- per-epoch-fn
+  [new-network old-network test-ds network-filename
+   best-network-fn simple-loss-print? context]
+  (let [batch-size (:batch-size new-network)
+        labels (execute/run new-network test-ds :batch-size batch-size)
+        loss-fn (execute/network->applied-loss-fn context new-network test-ds labels)
+        _ (clojure.pprint/pprint loss-fn)
         loss-val (apply + (map :value loss-fn))
-        current-best-loss (if-let [best-loss (get @best-network-atom :cv-loss)]
+        current-best-loss (if-let [best-loss (get old-network :cv-loss)]
                             ;; TODO: Is there a bug here? What if the best-loss isn't sequential?
                             (when (sequential? best-loss)
                               (apply + (map :value best-loss))))]
-    (println (format "Loss for epoch %s: %s" (get network :epoch-count) loss-val))
+    (println (format "Loss for epoch %s: %s" (get new-network :epoch-count) loss-val))
     (when-not simple-loss-print?
       (println (loss/loss-fn->table-str loss-fn)))
-    (when (or (nil? current-best-loss)
-              (< (double loss-val) (double current-best-loss)))
-      (println "Saving network")
-      (reset! best-network-atom
-              (save-network context network loss-fn
-                            initial-description network-filename))
-      (when best-network-fn
-        ;;We use the same format here as the output of the evaluate network function below
-        ;;so that clients can use the same network display system.  This is why we have data
-        ;;in columnar formats.
-        (best-network-fn {:labels (ds/batches->columnsv labels)
-                          :inferences (ds/batches->columnsv inferences)
-                          :data cv-columnar-input
-                          :leaves (network/leaf-inference-layers network)}))))
-  true)
+    (if (or (nil? current-best-loss)
+            (< (double loss-val) (double current-best-loss)))
+      (do
+        (println "Saving network")
+        (save-network new-network loss-fn network-filename)
+        (when best-network-fn
+          ;;We use the same format here as the output of the evaluate network function below
+          ;;so that clients can use the same network display system.  This is why we have data
+          ;;in columnar formats.
+          (best-network-fn {:test-dataset test-ds
+                            :labels labels
+                            :network new-network}))
+        new-network)
+      old-network)))
 
 
 (defn backup-trained-network
@@ -84,11 +75,13 @@ initial description saved with the network matches the provided description."
         (io/make-parents backup-filename)
         (io/copy (io/file network-filename) (io/file backup-filename))))))
 
+
 (defn train-n
-  "Generate an ininite sequence of networks where and the best networks to file:
-  {:cv-loss best-loss-so-far
-   :network-description best-network
-   :initial-description initial-description}
+  "Given a network description, start training from scratch or given a trained
+  network continue training. Keeps track of networks that are actually improving
+  against a test-ds.
+
+  Networks are saved with a `:cv-loss` that is set to the best cv loss so far.
 
   This system expects a dataset with online data augmentation so that it is
   effectively infinite although the cross-validation and holdout sets do not
@@ -99,84 +92,52 @@ initial description saved with the network matches the provided description."
 
   When a better network is detected best-network-fn is called with a single
   argument of the form:
-  {:labels     cross-validation dataset outputs in vectors by output-label order
-   :inferences network inferences in vectors by output-label order
-   :data       cross-validation dataset inputs in vectors by input-label order
-   :leaves     network leaf nodes}
+  {:test-dataset  cross-validation dataset
+   :labels        labels inferred by the network on the test dataset
+   :network       network that generated the labels}
 
   If epoch-count is provided then we stop training after that many epochs else
   we continue to train forever."
-  [dataset initial-description
+  [network train-ds test-ds
    & {:keys [batch-size epoch-count
-             network-filestem best-network-fn
+             network-filestem
+             best-network-fn
              optimizer
              reset-score
              force-gpu?
              simple-loss-print?]
       :or {batch-size 128
            network-filestem default-network-filestem
-           optimizer (adam/adam)
-           reset-score false
-           force-gpu? false}}]
+           reset-score false}}]
   (resource/with-resource-context
-    (let [network-filename (str network-filestem ".nippy")
-          ;;Backup the trained network if we haven't already
-          network (if-let [loaded-network (load-network network-filename initial-description)]
-                    (if reset-score
-                      (assoc loaded-network :cv-loss {})
-                      loaded-network)
+    (let [optimizer (or optimizer (adam/adam))
+          context (execute/compute-context)
+          network-filename (str network-filestem ".nippy")
+          network (if (vector? network)
                     (do
                       (backup-trained-network network-filestem)
-                      {:initial-description initial-description
-                              :cv-loss {}}))
-
-          input-streams (traverse/get-input-streams network)
-          output-streams (traverse/get-output-streams network)
-          cv-columnar-input (->> (ds/get-batches dataset batch-size :cross-validation input-streams)
-                                 ds/batches->columns)
-          cv-labels (ds/get-batches dataset batch-size :cross-validation output-streams)
-          best-network-atom (atom network)
-          context (execute/compute-context :backend (when force-gpu?
-                                                      :cuda))
-          train-sequence (execute/train context network dataset [] []
-                                        :batch-size batch-size
-                                        :optimizer optimizer
-                                        :infer-batch-type :cross-validation)
-          epoch-processor (partial per-epoch-eval-training-network context
-                                   (atom network) network-filename initial-description
-                                   best-network-fn dataset simple-loss-print?)]
+                      (network/linear-network network))
+                    (if reset-score
+                      (assoc network :cv-loss {})
+                      network))]
       (println "Training network:")
       (network/print-layer-summary (-> network
                                        traverse/auto-bind-io
                                        (traverse/add-training-traversal
-                                         (ds/stream-descriptions dataset))))
-      (->> (if epoch-count
-             (take epoch-count train-sequence)
-             train-sequence)
-           (map epoch-processor)
-           doall))))
+                                         (ds/column-shapes train-ds))))
+      (loop [network network
+             epoch 0]
+        (if (and epoch-count (> epoch epoch-count))
+          network
+          (-> (execute/train-new network train-ds
+                                 :batch-size batch-size
+                                 :optimizer optimizer
+                                 :context context)
+              (assoc :epoch-count epoch)
+              (per-epoch-fn network test-ds network-filename best-network-fn simple-loss-print?
+                            context)
+              (recur (inc epoch))))))))
 
-(defn evaluate-network
-  "Given a single-output network description and a dataset with the keys
-:data and :labels produced set of inferences, answers, and the observations
-used for both along with the original dataset."
-  [dataset network
-   & {:keys [batch-size batch-type force-gpu?]
-      :or {batch-size 128
-           batch-type :holdout
-           force-gpu? true}}]
-  (let [input-streams (traverse/get-input-streams network)
-        output-streams (traverse/get-output-streams network)
-        inferences (execute/infer-columns (execute/compute-context :force-gpu? force-gpu?) network dataset
-                                          [] []
-                                          :batch-size batch-size
-                                          :infer-batch-type batch-type)
-        [data labels] (ds/batch-sequence->column-groups dataset batch-size batch-type
-                                                        [input-streams output-streams])]
-    {:labels labels
-     :inferences inferences
-     :data data
-     :leaves (network/leaf-inference-layers network)}))
 
 (defn print-trained-networks-summary
   "Prints a summary of the different networks trained so far.
