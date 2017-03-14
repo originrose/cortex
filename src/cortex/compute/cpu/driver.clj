@@ -158,7 +158,7 @@ Use with care; the synchonization primitives will just hang with this stream."
 (defrecord CPUDriver [^long dev-count ^long current-device error-atom])
 
 (defn driver []
-  (->CPUDriver 1 1 :no-selected-device))
+  (->CPUDriver 1 1 (atom nil)))
 
 (extend-type CPUDriver
   drv/PDriver

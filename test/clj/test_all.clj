@@ -14,12 +14,10 @@
     [cortex.compute.nn.layers-test]
     [cortex.compute.nn.optimize-test]
     [cortex.compute.nn.train-test]
-    [cortex.dataset-test]
     [cortex.datasets.math-test]
     [cortex.loss-test]
     [cortex.nn.network-test]
     [cortex.nn.traverse-test]
-    [cortex.suite.logistic-test]
     [cortex.metrics-test]
     [cortex.tree-test]
     [cortex.util-test]))
