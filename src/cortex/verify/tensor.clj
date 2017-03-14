@@ -42,7 +42,6 @@
 (defn assign-marshal
   "Assignment must be capable of marshalling data."
   [driver datatype]
-  (println "marshal" datatype)
   (tensor-context
    driver datatype
    (let [tensor (ct/->tensor (partition 3 (range 9)))
