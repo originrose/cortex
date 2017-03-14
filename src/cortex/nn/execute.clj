@@ -897,8 +897,6 @@ any loss-specific parameter buffers."
                                    (network/network->graph network)
                                    %))
                            batches->columns)]
-    (clojure.pprint/pprint {:dataset (take 10 dataset-columns)
-                            :inference (take 10 inference-columns)})
     (->> (get-in network [:traversal :loss-function])
          (mapv (fn [loss-term]
                  (->> (execute-live-loss-term context network loss-term
@@ -941,7 +939,6 @@ any loss-specific parameter buffers."
     (->> (for [k required-keys]
            (let [data (first (get batch k))
                  _ (when (nil? data)
-                     (println "batch: " batch " looking for: " k)
                      (throw (ex-info "Dataset batch missing key" {:key k})))
                  size (m/ecount data)
                  device-array (math/new-array driver stream
