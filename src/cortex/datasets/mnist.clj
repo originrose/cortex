@@ -48,7 +48,8 @@
   [item-name]
   (let [url (str "https://s3-us-west-2.amazonaws.com/thinktopic.datasets/mnist/"
                  item-name ".gz")]
-    (DataInputStream. (util/dataset-item "mnist" item-name :gzip? true :url url))))
+    (DataInputStream. (util/dataset-input-stream "mnist" item-name
+                                                 :gzip? true :url url))))
 
 
 (defn load-data

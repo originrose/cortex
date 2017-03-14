@@ -1021,9 +1021,9 @@ any loss-specific parameter buffers."
                       (traverse/add-training-traversal column-shapes
                                                        :optimizer optimizer)
                       (bind-context-to-network context {}))
-          batches (map
-                    (partial graph/augment-streams (network/network->graph network))
-                    (dataset-batches dataset batch-size))
+          batches (map (partial graph/augment-streams
+                                (network/network->graph network))
+                       (dataset-batches dataset batch-size))
           network (add-pass-to-network network {} :backward)
           batch-buffers (batch-buffers network (first batches) true)
           stream (network/stream network)
@@ -1056,8 +1056,8 @@ any loss-specific parameter buffers."
                       (traverse/bind-vars-to-network)
                       (traverse/add-forward-traversal stream-shapes)
                       (bind-context-to-network context {}))
-          batches (->> (dataset-batches dataset batch-size)
-                       (map (partial graph/augment-streams (network/network->graph network))))
+          batches (map (partial graph/augment-streams (network/network->graph network))
+                       (dataset-batches dataset batch-size))
           batch-buffers (batch-buffers network (first batches) false)
           stream->buffer-map (zipmap (keys batch-buffers)
                                      (map :device-array (vals batch-buffers)))

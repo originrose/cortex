@@ -594,12 +594,11 @@ that do not already exist.  Returns a new graph."
 (defn augment-streams
   "Augment the streams in the map and return a new map of data."
   [graph stream-map]
-  (println "stream-map: " stream-map)
+  ;(println "stream-map: " stream-map)
   (->> (dfs-seq graph)
        (map #(get-node graph %))
        (mapcat get-node-arguments)
        (filter #(= :stream-augmentation (get % :type)))
-       #(do (println "stream-augmentation: " %) %)
        (map (fn [{:keys [stream augmentation] :as arg}]
               (when-not (contains? stream-map stream)
                 (throw (ex-info "Failed to find stream for augmentation"
