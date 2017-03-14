@@ -39,6 +39,7 @@
   (let [batch-size (:batch-size new-network)
         labels (execute/run new-network test-ds :batch-size batch-size)
         loss-fn (execute/network->applied-loss-fn context new-network test-ds labels)
+        _ (clojure.pprint/pprint loss-fn)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get old-network :cv-loss)]
                             ;; TODO: Is there a bug here? What if the best-loss isn't sequential?
@@ -51,14 +52,14 @@
             (< (double loss-val) (double current-best-loss)))
       (do
         (println "Saving network")
-        (save-network network loss-fn network-filename)
+        (save-network new-network loss-fn network-filename)
         (when best-network-fn
           ;;We use the same format here as the output of the evaluate network function below
           ;;so that clients can use the same network display system.  This is why we have data
           ;;in columnar formats.
           (best-network-fn {:test-dataset test-ds
                             :labels labels
-                            :network network}))
+                            :network new-network}))
         new-network)
       old-network)))
 
@@ -114,7 +115,7 @@
           network-filename (str network-filestem ".nippy")
           network (if (vector? network)
                     (do
-                      (backup-trained-network network-filesystem)
+                      (backup-trained-network network-filestem)
                       (network/linear-network network))
                     (if reset-score
                       (assoc network :cv-loss {})
@@ -123,8 +124,7 @@
       (network/print-layer-summary (-> network
                                        traverse/auto-bind-io
                                        (traverse/add-training-traversal
-                                         (ds/stream-descriptions dataset))))
-
+                                         (ds/column-shapes train-ds))))
       (loop [network network
              epoch 0]
         (if (and epoch-count (> epoch epoch-count))
@@ -133,6 +133,7 @@
                                  :batch-size batch-size
                                  :optimizer optimizer
                                  :context context)
+              (assoc :epoch-count epoch)
               (per-epoch-fn network test-ds network-filename best-network-fn simple-loss-print?
                             context)
               (recur (inc epoch))))))))
