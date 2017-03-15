@@ -2,7 +2,7 @@
 
 set -e
 
-PROJECTS=". experiment"
+PROJECTS=". experiment importers/caffe importers/keras"
 
 for proj in $PROJECTS; do
     pushd $proj
