@@ -26,12 +26,37 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [cortex.nn.layers :as layers]
     [cortex.compute.driver :as drv]
     [cortex.compute.math :as math]
-    [cortex.compute.batching-system :as batching-system]
     [cortex.compute.loss :as compute-loss]
     [cortex.compute.cpu.backend :as cpu]
     [cortex.compute.nn.layers :as compute-layers]
     [cortex.compute.nn.backend :as backend]
     [cortex.compute.nn.protocols :as compute-protocols]))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Utility Functions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn batches->columns
+  "Given a batch sequence transform it so that it is a vector of columnar data,
+  one column for each item requested from the batch."
+  [batch-sequence]
+  (when (and (not (empty? batch-sequence))
+             (not (empty? (first batch-sequence))))
+    (->> (map (fn [stream-name]
+                [stream-name
+                 (mapcat #(get % stream-name) batch-sequence)])
+              (keys (first batch-sequence)))
+         (into {}))))
+
+
+(defn batches->columnsv
+  "See batches->columns.  Forces realization of each column"
+  [batch-sequence]
+  (->> batch-sequence
+       batches->columns
+       (map (fn [[k v]] [k (vec v)]))
+       (into {})))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  Bind/save functionality
@@ -51,9 +76,10 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn- bind-node-parameter-buffers
-  [compute-buffers node network backend gradients? numeric-gradients?]
-  (let [driver (drv/get-driver backend)
-        datatype (dtype/get-datatype backend)
+  [compute-buffers node network gradients? numeric-gradients?]
+  (let [backend (network/backend network)
+        driver (network/driver network)
+        datatype (network/datatype network)
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))]
     (reduce (fn [compute-buffers {:keys [key non-trainable? buffer-id] :as parameter}]
@@ -74,41 +100,14 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                                  :host-buffer (alloc-host (m/ecount graph-buffer)))
                                           (is-l2-max-constraint-valid? parameter)
                                           (merge (allocate-l2-temp-data graph-buffer backend)))
-                                  (catch Exception e (throw (ex-info "graph-buffer is corrupt: "
+                                  (catch Exception e (throw e #_(ex-info "graph-buffer is corrupt: "
                                                                      {:type (type graph-buffer)
                                                                       :buffer-id buffer-id
                                                                       :buffer graph-buffer
-                                                                      :parameter parameter}))))))))))
+                                                                      :parameter parameter
+                                                                      :e e}))))))))))
             compute-buffers
             (network/network->node-parameters network (get node :id)))))
-
-
-(defn- batching-system
-  [backend built-network stream-map batch-size]
-  ;;we have to ensure the batching system knows if the data is used for input or output.
-  (let [all-bindings (traverse/get-io-bindings built-network)
-        ;;Update the stream map to include the network directions :input,:output
-        ;;that each stream is used in, and make it a proper map per entry if it isn't
-        stream-map (reduce (fn [stream-map {:keys [stream direction]}]
-                             (if-let [stream-entry (get stream-map stream)]
-                               (let [stream-entry (if (number? stream-entry)
-                                                    {:size stream-entry}
-                                                    stream-entry)
-                                     dir-set (get stream-entry :direction #{})]
-                                 (assoc stream-map stream
-                                                   (assoc stream-entry :direction
-                                                                       (conj dir-set direction))))
-                               stream-map))
-                           (->> stream-map
-                                (map (fn [[k v]]
-                                       [k (if (number? v)
-                                            {:size v}
-                                            v)]))
-                                (into {}))
-                           (traverse/get-io-bindings built-network))]
-    (batching-system/batching-system backend
-                                     stream-map
-                                     batch-size)))
 
 
 (defn- get-node-parameters
@@ -157,9 +156,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn- load-loss-function
   "Return a map of node-id->loaded loss terms associated with that node."
   [network backend loss-function]
-  (let [stream-map (get-in network [:traversal :stream-map])
-        stream->size stream-map
-        batch-size (get network :batch-size)
+  (let [batch-size (get network :batch-size)
         loss-function
         (->> loss-function
              (mapv (fn [loss-term]
@@ -174,12 +171,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn bind-context-to-network
-"Bind an execution context to a network.  This should return a new network with any specific information the context needs embedded in it.  The network contains at least:
+  "Bind an execution context to a network.  This should return a new network with any specific information the context needs embedded in it.  The network contains at least:
   {:compute-graph ...
    :traversal   ...
    :batch-size  ...}"
-  [{:keys [backend-fn] :as context}
-   {:keys [batch-size compute-graph traversal] :as built-network}
+  [{:keys [batch-size compute-graph traversal] :as built-network}
+   {:keys [backend-fn] :as context}
    {:keys [gradients? numeric-gradients?] :as options}]
   (let [backend (backend-fn)
         stream-map (get traversal :stream-map)
@@ -193,63 +190,59 @@ Furthermore infer should be both wrapped in a resource context and completely re
         backward-buffers (if gradients?
                            (traverse/get-backward-buffers built-network)
                            #{})
-
-        ; Setup the parameter buffers
+        built-network (assoc-in built-network [:compute-binding :backend] backend)
+        ;; Setup the parameter buffers
         compute-binding
         (reduce
-          (fn [compute-binding id]
-            (let [node (graph/get-node compute-graph id)
-                  node-params (network/network->node-parameters built-network id)]
-              (-> (update-in compute-binding [:nodes id]
-                             (fn [compute-node]
-                               (or compute-node
-                                   (when (->> (layers/get-pass-set node)
-                                              (filter #{:training :inference})
-                                              seq)
-                                     (compute-layers/create backend node batch-size)))))
-                  (update-in [:parameter-buffers]
-                             (fn [param-buffers]
-                               (bind-node-parameter-buffers param-buffers node built-network
-                                                            backend gradients?
-                                                            numeric-gradients?))))))
-          (get-in built-network [:compute-binding])
-          (->> (concat (get traversal :forward)
-                       (get traversal :loss-function))
-               (map :id)))
+         (fn [compute-binding id]
+           (let [node (graph/get-node compute-graph id)
+                 node-params (network/network->node-parameters built-network id)]
+             (-> (update-in compute-binding [:nodes id]
+                            (fn [compute-node]
+                              (or compute-node
+                                  (when (->> (layers/get-pass-set node)
+                                             (filter #{:training :inference})
+                                             seq)
+                                    (compute-layers/create backend node batch-size)))))
+                 (update-in [:parameter-buffers]
+                            (fn [param-buffers]
+                              (bind-node-parameter-buffers param-buffers node
+                                                           built-network gradients?
+                                                           numeric-gradients?))))))
+         (get-in built-network [:compute-binding])
+         (->> (concat (get traversal :forward)
+                      (get traversal :loss-function))
+              (map :id)))
 
-        ; Setup the traversal buffers (for passing activations and gradients)
+        ;; Setup the traversal buffers (for passing activations and gradients)
         compute-binding
         (reduce
-          (fn [compute-binding buffer-key]
-            (update-in compute-binding [:traversal-buffers buffer-key]
-              (fn [buffer]
-                (or buffer
-                    (let [buffer-size (-> (get-in traversal
+         (fn [compute-binding buffer-key]
+           (update-in compute-binding [:traversal-buffers buffer-key]
+                      (fn [buffer]
+                        (or buffer
+                            (let [buffer-size (-> (get-in traversal
                                                           [:buffers buffer-key :dimension])
                                                   (graph/dimensions->size))
-                          gradients? (and gradients?
-                                          (contains? backward-buffers buffer-key))
-                          numeric-gradients? (and numeric-gradients?
-                                                  (contains? backward-buffers
-                                                             buffer-key))]
-                      (cond-> {:buffer (backend/new-array backend [buffer-size]
-                                                          batch-size)}
-                        gradients?
-                        (assoc :gradient (backend/new-array backend [buffer-size]
-                                                            batch-size))
-                        numeric-gradients?
-                        (assoc :numeric-gradient (alloc-host (* buffer-size batch-size))
-                               :host-buffer (alloc-host (* buffer-size
-                                                           batch-size)))))))))
-          compute-binding
-          (keys (get traversal :buffers)))
+                                  gradients? (and gradients?
+                                                  (contains? backward-buffers buffer-key))
+                                  numeric-gradients? (and numeric-gradients?
+                                                          (contains? backward-buffers
+                                                                     buffer-key))]
+                              (cond-> {:buffer (backend/new-array backend [buffer-size]
+                                                                  batch-size)}
+                                gradients?
+                                (assoc :gradient (backend/new-array backend [buffer-size]
+                                                                    batch-size))
+                                numeric-gradients?
+                                (assoc :numeric-gradient (alloc-host (* buffer-size batch-size))
+                                       :host-buffer (alloc-host (* buffer-size
+                                                                   batch-size)))))))))
+         compute-binding
+         (keys (get traversal :buffers)))
         network (assoc built-network
-                  :compute-binding
-                  (assoc compute-binding
-                    :backend backend
-                    :batching-system (batching-system backend built-network
-                                                      stream-map
-                                                      batch-size)))
+                       :compute-binding
+                       (assoc compute-binding :backend backend))
         trainable-parameters (load-training-parameters network)
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
@@ -259,8 +252,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
         (assoc-in [:compute-binding :optimizer]
                   (when-let [optimizer (get traversal :optimizer)]
                     (optimize/create-optimizer backend
-                                          optimizer
-                                          trainable-param-count)))
+                                               optimizer
+                                               trainable-param-count)))
         (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
         (assoc-in [:compute-binding :loss-function] loss-function))))
 
@@ -271,7 +264,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   process.  Options is map that may contain:
    * save-gradients? - save the gradients *and* the io buffers."
   [context network {:keys [save-gradients?] :as options}]
-  (let [backend (get-in network [:compute-binding :backend])
+  (let [backend (network/backend network)
         core-m (fn [data]
                  (when data
                    (backend/to-core-matrix backend data)))
@@ -323,7 +316,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Specific traversal implementation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(def pass-metadata
+(def PASS-METADATA
   {:inference {:pass-functions [compute-protocols/infer]
                :buffer-type :buffer
                :input-key :stream
@@ -349,12 +342,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
   (mapv traversal-buffers buffer-ids))
 
 
-(defn- map-pass-to-buffers
+(defn- add-pass-to-network
   "Create a new pass with items mapped to buffers."
-  [network id->input-buffer-map pass-direction]
-  (let [{:keys [traversal-key buffer-type input-key]} (get pass-metadata pass-direction)
+  [network stream->buffer-map pass-direction]
+  (let [{:keys [traversal-key buffer-type input-key]} (get PASS-METADATA pass-direction)
         traversal-pass (get-in network [:traversal traversal-key])
-        backend (get-in network [:compute-binding :backend])
+        backend (network/backend network)
         traversal-buffers (->> (get-in network [:compute-binding :traversal-buffers])
                                (map (fn [[map-key buffer-entry]]
                                       ;;Assoc the input buffers into
@@ -365,28 +358,32 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                         (throw (ex-info "Invalid buffer id:"
                                                         {:map-key map-key
                                                          :input-key input-key})))
-                                      (let [input-buffer (get id->input-buffer-map
+                                      (let [input-buffer (get stream->buffer-map
                                                               (get map-key input-key))]
                                         (if input-buffer
                                           [map-key (assoc buffer-entry buffer-type input-buffer)]
                                           [map-key buffer-entry]))))
                                (into {}))
-        buffer-resolve (partial find-buffers traversal-buffers)]
-    [(assoc-in network [:compute-binding :traversal-buffers] traversal-buffers)
-     (->> traversal-pass
-          (mapv (fn [{:keys [incoming outgoing] :as item}]
-                  (assoc item
-                    :incoming (buffer-resolve incoming)
-                    :outgoing (buffer-resolve outgoing)))))]))
+        buffer-resolve (partial find-buffers traversal-buffers)
+        pass (->> traversal-pass
+                  (mapv (fn [{:keys [incoming outgoing] :as item}]
+                          (assoc item
+                            :incoming (buffer-resolve incoming)
+                            :outgoing (buffer-resolve outgoing)))))]
+    (-> network
+        (assoc-in [:compute-binding :traversal-buffers] traversal-buffers)
+        (assoc-in [:compute-binding :passes pass-direction] pass))))
 
 
 (defn- print-traversal-buffers
   [network]
   (let [backend (get-in network [:compute-binding :backend])
-        to-double #(vec (backend/to-double-array backend %))]
+        to-double #(when %
+                     (vec (take 20 (backend/to-double-array backend %))))]
     (clojure.pprint/pprint (mapv (fn [[k v]]
                                    [k {:buffer (to-double (get v :buffer))
-                                       :gradient (to-double (get v :gradient))}])
+                                       :gradient (to-double (get v :gradient))
+                                       :buffer-ptr (math/device-buffer (get v :buffer))}])
                                  (get-in network [:compute-binding :traversal-buffers])))
     network))
 
@@ -398,11 +395,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 (defn- generate-node-id->output-map
   [network]
-  (->> (map-pass-to-buffers network {} :forward)
-       second
-       (map (fn [{:keys [incoming id outgoing] :as arg}]
-              [id (first outgoing)]))
-       (into {})))
+  (let [network (add-pass-to-network network {} :forward)
+        pass (get-in network [:compute-binding :passes :forward])]
+    (into {}
+          (map (fn [{:keys [incoming id outgoing] :as arg}]
+                 [id (first outgoing)])
+               pass))))
 
 
 (defn- resolve-node-arguments
@@ -413,9 +411,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
                          (map (fn [[k v]]
                                 [k {:buffer v}]))
                          (into {}))
-         retval (graph/resolve-arguments special-graph (graph/get-node special-graph id)
-                                         stream-map id->output-map)]
-     retval))
+         node (graph/get-node special-graph id)]
+     (graph/resolve-arguments special-graph node stream-map id->output-map)))
   ([network id]
    (resolve-node-arguments network id (generate-node-id->output-map network))))
 
@@ -436,7 +433,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 (defn- execute-loss-term
   [network {:keys [compute-term loss-term gradients]}]
-  (let [backend (get-in network [:compute-binding :backend])
+  (let [backend (network/backend network)
         buffer-map (-> (resolve-node-arguments network (get loss-term :id))
                        (util/deep-merge gradients))]
     (compute-loss/compute-loss-gradient compute-term buffer-map)
@@ -458,8 +455,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   [_ network pass-function {:keys [incoming id outgoing] :as entry}]
   (let [loss-terms (get-in network [:compute-binding :loss-function])
         loss-buffer-map {:output (first incoming)}
-        backend (get-in network [:compute-binding :backend])
-        stream (drv/get-stream backend)
+        stream (network/stream network)
         node-params (get-node-parameters network id)
         incoming-buffer (first incoming)
         incoming-gradient (get incoming-buffer :gradient)
@@ -519,19 +515,21 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn- do-traverse
-  [network id->buffer-map pass-direction]
-  (let [[network mapped-pass] (map-pass-to-buffers network
-                                                   id->buffer-map
-                                                   pass-direction)
+  [network stream->buffer-map pass-direction]
+  (let [network (add-pass-to-network network
+                                     stream->buffer-map
+                                     pass-direction)
+        mapped-pass (get-in network [:compute-binding :passes pass-direction])
         node-pass-map (group-by :id mapped-pass)
         network (assoc-in network [:compute-binding :node-pass-map] node-pass-map)]
-    (reduce (fn [network pass-function]
-              (->> mapped-pass
-                   (map (partial perform-pass pass-direction network pass-function))
-                   dorun)
-              network)
-            network
-            (get-in pass-metadata [pass-direction :pass-functions]))))
+    (reduce
+      (fn [network pass-function]
+        (->> mapped-pass
+             (map (partial perform-pass pass-direction network pass-function))
+             dorun)
+        network)
+      network
+      (get-in PASS-METADATA [pass-direction :pass-functions]))))
 
 
 (defn- load-id->input-map
@@ -562,118 +560,63 @@ Furthermore infer should be both wrapped in a resource context and completely re
 ;;Training
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- get-loss-function-output-bindings
-  [network]
-  (->> (get-in network [:traversal :loss-function])
-       (mapcat loss/get-loss-term-node-outputs)))
-
-
-(defn- get-output-bindings
-  "Return the outputs of the network.  Anything explicity marked with an output binding
-and anything that has a loss term attached to it's output becomes an output binding."
-  [network]
-  (let [forward-pass (get-in network [:traversal :forward])
-        id->pass (->> (group-by :id forward-pass)
-                      (map (fn [[k v]]
-                             (when-not (= 1 (count v))
-                               (throw (ex-info "Node mapped to multiple pass operations"
-                                               {:node-id k
-                                                :passes v})))
-                             [k (first v)]))
-                      (into {}))
-        graph (network/network->graph network)]
-    (->> (concat (traverse/get-output-bindings network)
-                 (get-loss-function-output-bindings network))
-         (map :node-id)
-         distinct
-         (map (fn [node-id]
-                (when-not (= 1 (count (get-in id->pass [node-id :outgoing])))
-                  (throw (ex-info "Output nodes must have a single output."
-                                  {:node-id node-id
-                                   :pass (get id->pass node-id)})))
-                (let [output-id (first (get-in id->pass [node-id :outgoing]))]
-                  {:node-id node-id
-                   :buffers (get-in network [:compute-binding
-                                             :traversal-buffers
-                                             output-id])
-                   :output-size (graph/node->output-size
-                                 (graph/get-node graph node-id))}))))))
-
-
-(defn- get-input-bindings
-  [network]
-  (->> (traverse/get-input-bindings network)
-       (filter #(get % :stream))
-       (map (fn [{:keys [stream node-id] :as entry}]
-              (assoc entry
-                :buffers
-                (get-in network [:compute-binding
-                                 :traversal-buffers
-                                 {:stream stream}])
-                :size (get-in network [:compute-graph
-                                       :nodes
-                                       node-id
-                                       :input-size]))))))
-
 
 (defn- apply-l2-max-constraint
-  [backend {:keys [weight-temp weight-magnitude-temp ones-vec buffer l2-max-constraint]}]
+  [network {:keys [weight-temp weight-magnitude-temp ones-vec buffer l2-max-constraint]}]
   (when l2-max-constraint
     (let [weight-ecount (long (math/ecount buffer))
-          [num-w-rows num-w-cols] (math/shape-2d buffer)]
+          [num-w-rows num-w-cols] (math/shape-2d buffer)
+          backend (network/backend network)
+          stream (network/stream network)]
       (backend/assign! backend weight-temp buffer)
-      (math/elem-mul (drv/get-stream backend)
+      (math/elem-mul stream
                      1.0 (math/device-buffer buffer) 1
                      (math/device-buffer weight-temp) 1
                      (math/device-buffer weight-temp) 1)
-      (math/gemv (drv/get-stream backend) false num-w-rows num-w-cols
+      (math/gemv stream false num-w-rows num-w-cols
                  1.0 (math/device-buffer weight-temp) num-w-cols
                  (math/device-buffer ones-vec) 1
                  0.0 (math/device-buffer weight-magnitude-temp) 1)
-      (math/l2-constraint-scale (drv/get-stream backend)
+      (math/l2-constraint-scale stream
                                 (math/device-buffer weight-magnitude-temp) 1
                                 l2-max-constraint)
-      (math/mul-rows (drv/get-stream backend) num-w-rows num-w-cols
+      (math/mul-rows stream num-w-rows num-w-cols
                      (math/device-buffer buffer) num-w-cols
                      (math/device-buffer weight-magnitude-temp) 1
                      (math/device-buffer buffer) num-w-cols))))
 
 (defn- optimize-network
-  [network parameters optimize?]
-  (if optimize?
-    (let [backend (get-in network [:compute-binding :backend])
-          stream (drv/get-stream backend)
-          driver (drv/get-driver backend)
-
-          ; Call batch-update so the optimizer can do batch level computations
-          optimizer (optimize/batch-update (get-in network [:compute-binding :optimizer]))
-          buffer-alpha (/ 1.0 (double (get network :batch-size)))]
-
-      ; Call compute-parameters! on all of the paramter buffers
-      (reduce (fn [offset {:keys [buffer gradient
-                                  learning-attenuation non-trainable?] :as parameter}]
-                (let [elem-count (long (m/ecount buffer))
-                      l2-max-constraint (double (get parameter :l2-max-constraint 0))
-                      ;;For some things it is easier to just
-                      ;;work at the flat buffer level and
-                      ;;not at the device array level.
-                      gradient-buf (math/device-buffer gradient)
-                      param-buf (math/device-buffer buffer)]
-                  (when-not non-trainable?
-                    (optimize/compute-parameters! optimizer
-                                             (* buffer-alpha learning-attenuation)
-                                             offset gradient buffer)
-                    (when (is-l2-max-constraint-valid? parameter)
-                      (apply-l2-max-constraint backend parameter)))
-                  (when gradient
-                    (drv/memset stream gradient-buf 0 0 elem-count))
-                  (+ offset elem-count)))
-              0
-              parameters)
-      (assoc-in network
-                [:compute-binding :optimizer]
-                optimizer))
-    network))
+  [network]
+  (let [parameters (network/parameters network)
+        stream (network/stream network)
+        ;; Call batch-update so the optimizer can do batch level computations
+        optimizer (optimize/batch-update (network/optimizers network))
+        buffer-alpha (/ 1.0 (double (get network :batch-size)))]
+    ;; Call compute-parameters! on all of the paramter buffers
+    (reduce (fn [offset {:keys [buffer gradient
+                                learning-attenuation non-trainable?]
+                         :or {learning-attenuation 1.0} :as parameter}]
+              (let [elem-count (long (m/ecount buffer))
+                    l2-max-constraint (double (get parameter :l2-max-constraint 0))
+                    ;;For some things it is easier to just
+                    ;;work at the flat buffer level and
+                    ;;not at the device array level.
+                    gradient-buf (math/device-buffer gradient)
+                    param-buf (math/device-buffer buffer)]
+                (when-not non-trainable?
+                  (optimize/compute-parameters! optimizer
+                                                (* buffer-alpha learning-attenuation)
+                                                offset gradient buffer)
+                  (when (is-l2-max-constraint-valid? parameter)
+                    (apply-l2-max-constraint network parameter)))
+                (when gradient
+                  (drv/memset stream gradient-buf 0 0 elem-count))
+                (+ offset elem-count)))
+            0
+            parameters)
+    (assoc-in network
+              [:compute-binding :optimizer]
+              optimizer)))
 
 
 (defn- zero-traverse-gradients
@@ -684,8 +627,8 @@ can write into are node-loss buffers.  Node parameter buffers are cleared as par
 process, stream's do not have gradient buffers, and the loss function itself is responsible for managing
 any loss-specific parameter buffers."
   [network]
-  (let [id->input-buffers (->> (map-pass-to-buffers network {} :backward)
-                               second
+  (let [network (add-pass-to-network network {} :backward)
+        id->input-buffers (->> (get-in network [:compute-binding :passes :backward])
                                (group-by :id)
                                (map (fn [[k items]]
                                       [k (mapcat :incoming items)]))
@@ -711,48 +654,19 @@ any loss-specific parameter buffers."
 
 (defn- recur-train-sequence
   "Training is a lazy sequence of these operations."
-  [network parameters optimize? batch-seq]
+  [network optimize? batch-seq]
   (when-let [stream->buffer-map (first batch-seq)]
     ;;Sometimes you have to print the entire batch out to see what is going on.
-    (let [backend (get-in network [:compute-binding :backend])
-          stream (drv/get-stream backend)
-          driver (drv/get-driver backend)]
-      (let [network
-            (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
-                (do-traverse stream->buffer-map :forward)
-                (zero-traverse-gradients)
-                (compute-loss-term-gradients)
-                (do-traverse {} :backward)
-                (optimize-network parameters optimize?))]
-        (cons network
-              (lazy-seq (recur-train-sequence network parameters optimize?
-                                              (rest batch-seq))))))))
-
-
-(defn train-batch-sequence
-  "Return a sequence of progressively better trained built-networks, one for each batch."
-  [context network batch-map-sequence options]
-  (let [batch-map-sequence (->> batch-map-sequence
-                                (map (partial graph/augment-streams (network/network->graph network))))
-        initial-keys (keys (first batch-map-sequence))
-        bs (-> (get-in network [:compute-binding :batching-system])
-               ;;In a late binding way, ensure the stream sizes match with the actual streams.
-               (batching-system/add-streams (->> batch-map-sequence
-                                                 first)))
-        backend (get-in network [:compute-binding :backend])
-        ;;These are the things we are ultimately optimizing
-        parameters (get-in network [:compute-binding :trainable-parameters])
-        ;;The buffers do not change going backward so we can pre-map this pass.
-        [network backward-mapped-pass] (map-pass-to-buffers network
-                                                            {}
-                                                            :backward)
-        required-keys (->> (traverse/get-io-bindings network)
-                           (map :stream)
-                           (concat initial-keys)
-                           distinct)
-        network (assoc-in network [:compute-binding :batching-system] bs)]
-    (->> (batching-system/get-batches bs batch-map-sequence required-keys)
-         (recur-train-sequence network parameters true))))
+    (let [network
+          (-> (assoc-in network [:compute-binding :stream->buffer-map] stream->buffer-map)
+              (do-traverse stream->buffer-map :forward)
+              (zero-traverse-gradients)
+              (compute-loss-term-gradients)
+              (do-traverse {} :backward))
+          network (if optimize? (optimize-network network) network)]
+      (cons network
+            (lazy-seq (recur-train-sequence network optimize?
+                                            (rest batch-seq)))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -761,11 +675,9 @@ any loss-specific parameter buffers."
 (defn- infer-seq-support-data
   [network]
   (let [batch-size (long (get network :batch-size))
-        backend (get-in network [:compute-binding :backend])
-        driver (drv/get-driver backend)
-        stream (drv/get-stream backend)
-        datatype (dtype/get-datatype backend)
-        output-bindings (->> (get-output-bindings network)
+        driver (network/driver network)
+        datatype (network/datatype network)
+        output-bindings (->> (network/output-bindings network)
                              (mapv (fn [{:keys [output-size] :as entry}]
                                      (assoc entry
                                        :elem-count (* batch-size (long output-size))
@@ -785,12 +697,9 @@ any loss-specific parameter buffers."
 (defn- do-infer-seq
   [network {:keys [copy-fn output-bindings] :as support-data} pass-direction batches]
   (let [batch-size (long (get network :batch-size))
-        backend (get-in network [:compute-binding :backend])
-        driver (drv/get-driver backend)
-        stream (drv/get-stream backend)
-        datatype (dtype/get-datatype backend)]
-    (map (fn [stream->buffer-map]
-           (let [network (do-traverse network stream->buffer-map pass-direction)]
+        stream (network/stream network)]
+    (map (fn [batch]
+           (let [network (do-traverse network batch pass-direction)]
              (->> output-bindings
                   (map (fn [{:keys [buffers node-id output-size host-buffer elem-count]}]
                          (let [buffer (get buffers :buffer)
@@ -816,21 +725,6 @@ any loss-specific parameter buffers."
                            [node-id double-buffers])))
                   (into {}))))
          batches)))
-
-
-(defn infer-batch-sequence
-  "Return a sequence of maps of node-id->double-array-seq.
-  Use dataset/batch-sequence-columnar in order to transform sequence into
-  specific sequences."
-  [context network batch-map-sequence options]
-  (let [bs (get-in network [:compute-binding :batching-system])
-        support-data (infer-seq-support-data network)
-        required-keys (->> (traverse/get-input-bindings network)
-                           (map :stream)
-                           distinct)
-        batches (batching-system/get-batches bs batch-map-sequence required-keys)]
-    (do-infer-seq network support-data :inference batches)))
-
 
 (defn- normalize-argument-buffer
   [arg-buf]
@@ -867,8 +761,7 @@ any loss-specific parameter buffers."
         distinct-count (->> arguments
                             (map (comp :count second))
                             distinct)
-        _ (when-not (< (count distinct-count)
-                       3)
+        _ (when (> (count distinct-count) 2)
             (throw (ex-info "There should be at most 2 distinct argument buffer counts"
                             {:buffer-counts (map (fn [[k v]]
                                                    [k
@@ -911,18 +804,17 @@ any loss-specific parameter buffers."
   gradients w/r/t the loss function and the provided answer.  This allows for gradient
   checking.  The data should be saved back to the network after the passes."
   [context network stream->input-map epsilon]
-  (let [output-bindings (get-output-bindings network)
+  (let [output-bindings (network/output-bindings network)
         stream->data-map (load-id->input-map network stream->input-map)
         ;;Generate all of the calculated gradients.
-        parameters (get-in network [:compute-binding :trainable-parameters])
+        parameters (network/parameters network)
         ;;This calls prepare-forward exactly once and does one forward
         ;;plus backward and loss gradient to generate calculated gradients
         network (first (recur-train-sequence network
-                                             parameters
                                              false
                                              [stream->data-map]))
         ;;generate a sequence of buffers in order to generate the numeric gradients.
-        numeric-buffers (concat (->> (get-input-bindings network)
+        numeric-buffers (concat (->> (network/input-bindings network)
                                      (map (fn [{:keys [stream] :as entry}]
                                             (merge (dissoc entry :buffers)
                                                    (get entry :buffers)))))
@@ -933,7 +825,7 @@ any loss-specific parameter buffers."
                                      (map (fn [{:keys [node-id] :as entry}]
                                             [node-id entry]))
                                      (into {}))
-        stream (drv/get-stream (get-in network [:compute-binding :backend]))
+        stream (network/stream network)
         forward-fn (fn [param-value host-buffer device-buffer elem-count idx]
                      (dtype/set-value! host-buffer idx param-value)
                      (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
@@ -985,44 +877,6 @@ any loss-specific parameter buffers."
     (inc num-or-nil)))
 
 
-(defn- train-seq
-  "Infinite sequence of networks, one for each epoch.
-The context is expected to already be bound to the network."
-  [context {:keys [batch-size] :as built-network} dataset]
-  (let [streams (->> (map :stream (traverse/get-io-bindings built-network))
-                             (remove nil?)
-                             set)
-        dataset-epoch (ds/get-batches dataset batch-size :training streams)
-        trained-network (-> (train-batch-sequence context built-network dataset-epoch {})
-                            last
-                            (update :epoch-count safe-inc))]
-    (cons {:network trained-network}
-          (lazy-seq (train-seq context trained-network dataset)))))
-
-
-(defn- train-infer-seq
-  "train and infer against the trained network.  This is useful for doing things like
-  calculating per-epoch loss.  For this to work correctly the dataset needs to return the exact
-  same data per batch type.
-  Returns map of:
-  {:network trained-network
-  :inferences inferences from this run
-  :label-fn function to call to get labels
-  :dataset-bindings io bindings from the dataset to this network."
-  [context network dataset & {:keys [infer-batch-type]
-                              :or {infer-batch-type
-                                   :cross-validation}}]
-  (let [batch-size (long (get network :batch-size))
-        input-streams (traverse/get-input-streams network)]
-    (->> (train-seq context network dataset)
-         (map (fn [{:keys [network] :as entry}]
-                (assoc entry
-                       :inferences (infer-batch-sequence context network
-                                      (ds/get-batches dataset batch-size
-                                                      infer-batch-type input-streams)
-                                      {})))))))
-
-
 (defn- augment-and-normalize-streams
   [graph batch-data]
   (->> (graph/augment-streams graph batch-data)
@@ -1034,94 +888,106 @@ The context is expected to already be bound to the network."
 
 
 (defn network->applied-loss-fn
-  "Given the set of inferences from an inference run of the network
-and the set of labels along with the bindings (traverse/get-io-bindings built-network)
-return the loss function from the traverse where each term has a :value member with it's
-post-lambda-multiplied value."
-  [context network inferences dataset-outputs]
-  (let [inference-columns (ds/batches->columns inferences)
-        label-columns (->> dataset-outputs
+  "Given the set of inferences from an inference run of the network and the set
+  of labels along with the bindings (traverse/get-io-bindings built-network)
+  return the loss function from the traverse where each term has a :value
+  member with it's post-lambda-multiplied value."
+  [context network inferences dataset]
+  (let [inference-columns (batches->columns inferences)
+        dataset-columns (->> dataset
                            (map #(augment-and-normalize-streams
-                                  (network/network->graph network)
-                                  %))
-                           ds/batches->columns)
-        output-bindings (traverse/get-output-training-bindings network)
-        node-id->output-streams (->> output-bindings
-                                     (map (fn [{:keys [node-id stream]}]
-                                            [node-id stream]))
-                                     (into {}))
-        ;;inferences are organized by node id
-        ;;dataset-outputs are organized by dataset stream
-        inference-label-pairs (->> (keys inference-columns)
-                                   (map (fn [node-id]
-                                          [node-id [(get inference-columns node-id)
-                                                    (get label-columns
-                                                         (get node-id->output-streams
-                                                              node-id))]]))
-                                   (into {}))]
+                                   (network/network->graph network)
+                                   %))
+                           batches->columns)]
     (->> (get-in network [:traversal :loss-function])
          (mapv (fn [loss-term]
-                 (assoc loss-term
-                        :value
-                        (execute-live-loss-term context network loss-term
-                                                inference-columns label-columns)))))))
+                 (->> (execute-live-loss-term context network loss-term
+                                              inference-columns dataset-columns)
+                      (assoc loss-term :value)))))))
 
 
 (defn- setup-network
   "Setup a network for either training or inference."
   [context network input-bindings output-bindings batch-size traverse-fn]
-  (as-> (assoc network :batch-size batch-size) network
-        (traverse/bind-input-bindings network input-bindings)
-        (traverse/bind-output-bindings network output-bindings)
-        (traverse-fn network)
-        (bind-context-to-network context network {})))
+  (-> network
+      (assoc  :batch-size batch-size) network
+        (traverse/bind-input-bindings input-bindings)
+        (traverse/bind-output-bindings output-bindings)
+        (traverse-fn)
+        (bind-context-to-network context {})))
 
 
-(defn train
-  "Create a sequence of training networks.  This call should be wrapped
-in a resource context.  The return value is a lazy sequence of maps with either
-just the network for each epoch or the network along with inferences for each
-epoch. The inferences are a sequence of maps so if you want just all the inferences
-in a single map you still need to call cortex-dataset/batches->columns."
-  [context network dataset input-bindings output-bindings
-   & {:keys [batch-size infer-batch-type optimizer disable-infer?]
-      :or {batch-size 128 infer-batch-type :cross-validation
-           optimizer (adam/adam)}}]
-  (let [train-fn (if disable-infer?
-                   #(train-seq context % dataset)
-                   #(train-infer-seq context % dataset :infer-batch-type infer-batch-type))]
-    (-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/add-training-traversal
-                         %
-                         (ds/stream-descriptions dataset)
-                         :optimizer optimizer))
-      train-fn)))
+(defn dataset-batches
+  "Paritions the dataset into batches and does the seq-of-maps ->
+  map-of-seqs transformation."
+  [dataset batch-size]
+  (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
+    (->> dataset
+         (partition batch-size)
+         (map #(apply merge-with conj initial-map %)))))
+
+(defn- augmented-stream-key?
+  [k]
+  (and (map? k) (:stream k) (:augmentation k)))
+
+;; TODO: can we get rid of required keys here by pre-filtering the dataset (from the traversal leaves)?
+(defn batch-buffers
+  [network batch training?]
+  (let [driver (network/driver network)
+        stream (network/stream network)
+        datatype (network/datatype network)
+        required-keys (clojure.set/union
+                       (if training?
+                         (traverse/required-io-keys network)
+                         (traverse/required-input-keys network))
+                       (set (filter augmented-stream-key? (keys batch))))
+        batch-size (long (:batch-size network))]
+    (when (zero? (count required-keys))
+      (throw (ex-info "Zero required keys in batch-buffers" {})))
+    (->> (for [k required-keys]
+           (let [[data datatype] (if (map? k)
+                                   (let [augmented-stream-val (get batch k)]
+                                     (if (map? augmented-stream-val)
+                                       [(:data augmented-stream-val) (:datatype augmented-stream-val)]
+                                       [augmented-stream-val datatype]))
+                                   [(get batch k) datatype])
+                 _ (when (nil? data)
+                     (throw (ex-info "Dataset batch missing key" {:key k})))
+                 data-size (long (m/ecount data))
+                 item-size (quot data-size batch-size)
+                 _ (when-not (= 0 (rem data-size (long batch-size)))
+                     (throw (ex-info "Data coming from batch is not multiple of batch-size"
+                                     {:data-size data-size
+                                      :batch-size batch-size
+                                      :stream k})))
+                 device-array (math/new-array driver
+                                              stream
+                                              datatype
+                                              [item-size]
+                                              batch-size)
+                 host-buffer (drv/allocate-host-buffer driver
+                                                       (* item-size batch-size)
+                                                       datatype)]
+             [k {:device-array device-array
+                 :host-buffer host-buffer}]))
+         (into {}))))
 
 
-(defn infer
-  "Given a network and a dataset infer a set of data.  data is returned as a sequence of maps of:
-node-id->data-stream.  If you want a single map (coalescing all the batches into one item) then
-call cortex-dataset/batches->columns"
-  [context network dataset input-bindings output-bindings
-   & {:keys [batch-size infer-batch-type]
-      :or {batch-size 128 infer-batch-type :holdout}}]
-  (as-> (setup-network context network input-bindings output-bindings batch-size
-                       #(traverse/add-forward-traversal
-                          % (ds/stream-descriptions dataset))) network-or-seq
-        (infer-batch-sequence context network-or-seq
-                             (ds/get-batches dataset
-                                             batch-size
-                                             infer-batch-type
-                                             (traverse/get-input-streams network-or-seq))
-                             {})))
+(defn load-batch!
+  [network batch batch-buffers]
+  (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
+    (let [data (get batch k)
+          data (if (map? data) (:data data) data)
+          item-count (second (dtype/copy-raw->item! data host-buffer 0))]
+      (when-not (= item-count (m/ecount host-buffer))
+        (throw (ex-info "Failed to load-batch!"
+                        {:item-count item-count
+                         :buffer-size (m/ecount host-buffer)}))))
+    (drv/copy-host->device (network/stream network)
+                           host-buffer 0
+                           (math/device-buffer device-array) 0
+                           (m/ecount host-buffer))))
 
-(defn infer-columns
-  "Call infer, force realization of everything and return a single map of node-id->output-stream.
-This does not need to be wrapped in a resource context; that is done for you."
-  [context network dataset input-bindings output-bindings & args]
-  (resource/with-resource-context
-    (->> (apply infer context network dataset input-bindings output-bindings args)
-         ds/batches->columnsv)))
 
 (defn- cuda-backend-fn
   [datatype force-cuda?]
@@ -1147,53 +1013,91 @@ This does not need to be wrapped in a resource context; that is done for you."
     {:backend-fn (or cuda-fn #(cpu/backend datatype))
      :datatype datatype}))
 
-(defn run
-  "Run a network on a dataset.  data is returned as a sequence of maps of:
-node-id->data-stream.  If you want a single map (coalescing all the batches into one item) then
-call cortex-dataset/batches->columns"
-  [network dataset
-   & {:keys [batch-size infer-batch-type datatype]
-      :or {batch-size 128 infer-batch-type :holdout}
-      :as options}]
 
-  ; Wrapping all allocation of GPU device and memory buffers in this
-  ; means we don't need to manually garbage collection anything.
+(defn- output-binding-buffers
+  [network batch-size datatype]
+  (let [driver (network/driver network)]
+    (mapv
+      (fn [{:keys [output-size] :as entry}]
+        (assoc entry
+               :elem-count (* batch-size (long output-size))
+               :host-buffer
+               (drv/allocate-host-buffer driver
+                                         (* batch-size
+                                            (long output-size))
+                                         datatype)))
+      (network/output-bindings network))))
+
+
+(defn train
+  [network dataset &
+   {:keys [batch-size context optimizer datatype]
+    :or {batch-size 10
+         datatype :double}}]
   (resource/with-resource-context
-    (let [context (compute-context)
-          ; Creates a map of {:<stream-name> {:channel-count c :width w :height h}
-          ; TODO: get rid of stream-map
-          stream-map (ds/stream-descriptions dataset)
-
-          ; convert from vector to graph description if needed
-          network (if (and (map? network) (:compute-graph network))
-                    network
-                    (network/linear-network network))
+    (let [optimizer (or optimizer (adam/adam))
+          context (or context (compute-context :datatype datatype))
+          column-shapes (ds/column-shapes dataset)
           network (-> network
-                      ; set the batch-size
                       (assoc :batch-size batch-size)
+                      (traverse/bind-vars-to-network)
+                      (traverse/add-training-traversal column-shapes
+                                                       :optimizer optimizer)
+                      (bind-context-to-network context {}))
+          batches (->> (dataset-batches dataset batch-size)
+                       (map (partial graph/augment-streams (network/network->graph network))))
+          network (add-pass-to-network network {} :backward)
+          batch-buffers (batch-buffers network (first batches) true)
+          stream (network/stream network)
+          stream->buffer-map (zipmap (keys batch-buffers)
+                                     (map :device-array (vals batch-buffers)))
+          network (assoc-in network [:compute-binding :stream->buffer-map]
+                            stream->buffer-map)]
+      (doseq [batch batches]
+        (load-batch! network batch batch-buffers)
+        (-> network
+            (do-traverse stream->buffer-map :forward)
+            (zero-traverse-gradients)
+            (compute-loss-term-gradients)
+            (do-traverse {} :backward)
+            (optimize-network)))
+      (save-to-network context network {}))))
 
-                      ; Bind graph nodes to stream names based on their node-id
-                      traverse/bind-vars-to-network
 
-                      ; Adds a :traversal map to the network with :forward and
-                      ; :backward lists, :buffers, :type, :optimizer, and
-                      ; :loss-function keys.
-                      (traverse/add-forward-traversal stream-map))
-          ; Connect the execution context to the network so it can setup any
-          ; backend specific data structures or initialization.
-          network (bind-context-to-network context network {})
-
-          ; Get the list of input streams required for the network
-          input-streams (traverse/get-input-streams network)
-
-          ; Get a lazy seq of batches
-          batches (ds/get-batches dataset
-                                  batch-size
-                                  infer-batch-type
-                                  input-streams)
-
-          ; Plug the data through the model.
-          ; NOTE: the doall must be here otherwise everything will get
-          ; deallocated when leaving the current resource context!!!
-          results (doall (infer-batch-sequence context network batches {}))]
-      results)))
+(defn run
+  "Run a network on a dataset.  The results are returned as a sequence of
+  maps where the node :id is the key for each output value."
+  [network dataset & {:keys [batch-size context datatype]
+                      :or {batch-size 1
+                           datatype :double}
+                      :as options}]
+  (resource/with-resource-context
+    (let [context (or context (compute-context :datatype datatype))
+          ;;In the case where the context was passed in we ignore the datatype argument
+          ;;else we run into problems pulling data off the gpu.
+          datatype (get context :datatype)
+          stream-shapes (ds/column-shapes dataset)
+          network (-> (assoc network :batch-size batch-size)
+                      (traverse/bind-vars-to-network)
+                      (traverse/add-forward-traversal stream-shapes)
+                      (bind-context-to-network context {}))
+          batches (->> (dataset-batches dataset batch-size)
+                       (map (partial graph/augment-streams (network/network->graph network))))
+          _ (when (empty? batches)
+              (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?")))
+          batch-buffers (batch-buffers network (first batches) false)
+          stream->buffer-map (zipmap (keys batch-buffers)
+                                     (map :device-array (vals batch-buffers)))
+          network (assoc-in network
+                            [:compute-binding :stream->buffer-map]
+                            stream->buffer-map)
+          output-buffers (output-binding-buffers network batch-size datatype)]
+      (reduce
+       (fn [results next-batch]
+         (load-batch! network next-batch batch-buffers)
+         ;; (println "\nTraversal:")
+         ;; (clojure.pprint/pprint (get-in network [:traversal :forward]))
+         (do-traverse network stream->buffer-map :inference)
+         (concat results (network/output-values network output-buffers)))
+       []
+       batches))))

@@ -1,103 +1,123 @@
 (ns cortex.datasets.mnist
   (:require [clojure.java.io :as io]
-            [cortex.datasets.stream-provider :as stream]
-            [cortex.datasets.math :as math]
+            [cortex.datasets.util :as util]
             [clojure.core.matrix :as mat]
+            [clojure.core.matrix.protocols :as mp]
+            [clojure.core.matrix.macros :refer [c-for]]
             [mikera.vectorz.matrix-api])
-  (:import [java.io DataInputStream]))
+  (:import
+    [java.io DataInputStream]))
 
-(mat/set-current-implementation :vectorz)  ;; use Vectorz as default matrix implementation
-
-(set! *unchecked-math* true)
 (set! *warn-on-reflection* true)
 
+(mat/set-current-implementation :vectorz)
 
-(def N-SAMPLES 60000)
 (def WIDTH 28)
 (def HEIGHT 28)
-(def TEST-N-SAMPLES 10000)
 
-;;Given mnist pixel ensure mean of zero
+(def DATASET
+  {:train {:data
+           {:name "train-images-idx3-ubyte"
+            :shape [28 28]
+            :size 60000}
+           :labels
+           {:name "train-labels-idx1-ubyte"
+            :shape [10]
+            :size 60000}}
+   :test {:data
+           {:name "t10k-images-idx3-ubyte"
+            :shape [28 28]
+            :size 10000}
+           :labels
+           {:name "t10k-labels-idx1-ubyte"
+            :shape [10]
+            :size 10000}}})
+
+
 (defmacro ub-to-double
+  "Convert an unsigned byte to a double, inline."
   [item]
   `(- (* ~item (double (/ 1.0 255.0)))
       0.5))
 
-(def dataset [["train-images-idx3-ubyte" N-SAMPLES]
-              ["train-labels-idx1-ubyte" N-SAMPLES]
-              ["t10k-images-idx3-ubyte" TEST-N-SAMPLES]
-              ["t10k-labels-idx1-ubyte" TEST-N-SAMPLES]])
 
-(def dataset-names (mapv first dataset))
-
-
-(defn stream-name->item-count
-  [stream-name]
-  (second (first (filter #(= (first %) stream-name) dataset))))
-
-
-(defn download-dataset-item [name]
-  (stream/download-gzip-stream
-   "mnist" name (str "https://s3-us-west-2.amazonaws.com/thinktopic.datasets/mnist/" name ".gz")))
-
-
-(defn ^DataInputStream get-data-stream [name]
-  (DataInputStream. (stream/get-data-stream "mnist" name download-dataset-item)))
-
-
-(defn when-not=-error
+(defn assert=
   [lhs rhs ^String msg]
   (when-not (= lhs rhs)
     (throw (Error. msg))))
 
 
+(defn mnist-data-stream
+  [item-name]
+  (let [url (str "https://s3-us-west-2.amazonaws.com/thinktopic.datasets/mnist/"
+                 item-name ".gz")]
+    (DataInputStream. (util/dataset-input-stream "mnist" item-name
+                                                 :gzip? true :url url))))
+
+
 (defn load-data
-  [stream-name]
-  (let [item-count (stream-name->item-count stream-name)]
-   (with-open [^DataInputStream data-input-stream (get-data-stream stream-name)]
-     (when-not=-error (.readInt data-input-stream) 2051 "Wrong magic number")
-     (when-not=-error (.readInt data-input-stream) item-count "Unexpected image count")
-     (when-not=-error (.readInt data-input-stream) WIDTH "Unexpected row count")
-     (when-not=-error (.readInt data-input-stream) HEIGHT "Unexpected column count")
-     (mapv (fn [i]
-             (let [darray (double-array (* WIDTH HEIGHT))]
-               (dotimes [y HEIGHT]
-                 (dotimes [x WIDTH]
-                   (aset-double darray
-                                (+ x (* y HEIGHT))
-                                (ub-to-double
-                                 (.readUnsignedByte data-input-stream)))))
-               darray))
-           (range item-count)))))
+  [{:keys [name size] :as item}]
+  (with-open [^DataInputStream input (mnist-data-stream name)]
+    (assert= (.readInt input) 2051 "Wrong magic number")
+    (assert= (.readInt input) size "Unexpected image count")
+    (assert= (.readInt input) WIDTH "Unexpected row count")
+    (assert= (.readInt input) HEIGHT "Unexpected column count")
+    (let [core-m-array (mat/new-array :vectorz [size HEIGHT WIDTH])
+          ^doubles dbl-array (mp/as-double-array core-m-array)]
+      (c-for [img 0 (< img size) (inc img)]
+        (c-for [row 0 (< row HEIGHT) (inc row)]
+          (c-for [col 0 (< col WIDTH) (inc col)]
+                 (aset dbl-array
+                       (+ (* img HEIGHT WIDTH)
+                          (* row WIDTH)
+                          col)
+                       (ub-to-double (.readUnsignedByte input))))))
+      core-m-array)))
 
 
 (defn load-labels
-  [stream-name]
-  (let [item-count (stream-name->item-count stream-name)]
-   (with-open [^DataInputStream data-input-stream (get-data-stream stream-name)]
-     (let [label-vector (vec (repeat 10 0))]
-       (when-not=-error (.readInt data-input-stream) 2049 "Wrong magic number")
-       (when-not=-error (.readInt data-input-stream) item-count "Unexpected image count")
-       (mapv (fn [i]
-               (assoc label-vector (.readUnsignedByte data-input-stream) 1))
-             (range item-count))))))
+  [{:keys [name size] :as item}]
+  (with-open [^DataInputStream input (mnist-data-stream name)]
+    (let [label-vector (vec (repeat 10 0))]
+      (assert= (.readInt input ) 2049 "Wrong magic number")
+      (assert= (.readInt input ) size "Unexpected image count")
+      (mapv (fn [i]
+              (assoc label-vector (.readUnsignedByte input) 1))
+            (range size)))))
 
 
-(defn training-data [] (load-data "train-images-idx3-ubyte"))
-(defn training-labels [] (load-labels "train-labels-idx1-ubyte"))
-(defn test-data [] (load-data "t10k-images-idx3-ubyte"))
-(defn test-labels [] (load-labels "t10k-labels-idx1-ubyte"))
+(defn- dataset-seq
+  [data labels]
+  (reduce
+      (fn [dset [d l]]
+        (conj dset {:data d :label l}))
+      []
+      (map vector data labels)))
+
+
+(defn training-dataset []
+  (let [data (load-data (get-in DATASET [:train :data]))
+        labels (load-labels (get-in DATASET [:train :labels]))]
+    (dataset-seq (mat/slice-views data 0) labels)))
+
+
+(defn test-dataset []
+  (let [data (load-data (get-in DATASET [:test :data]))
+        labels (load-labels (get-in DATASET [:test :labels]))]
+    (dataset-seq (mat/slice-views data 0) labels)))
+
+
 (defn normalized-data []
-  (let [train-d (training-data)
-        test-d (test-data)
+  (let [train-d (training-dataset)
+        test-d (test-dataset)
         all-rows (mat/array :vectorz (vec (concat train-d test-d)))
         data-shape (mat/shape all-rows)
         num-cols (long (second data-shape))
         num-rows (long (first data-shape))
-        normalized (math/global-whiten! all-rows)
+        normalized (util/global-whiten! all-rows)
         norm-mat (get normalized :data)
         num-train-d (count train-d)
         return-train-d (mat/submatrix norm-mat 0 num-train-d 0 num-cols)
         return-test-d (mat/submatrix norm-mat num-train-d (- num-rows num-train-d) 0 num-cols)]
-    {:training-data return-train-d
-     :test-data return-test-d}))
+    {:training return-train-d
+     :test return-test-d}))

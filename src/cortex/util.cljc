@@ -3,7 +3,6 @@
   (:require [clojure.core.matrix :as m]
             [clojure.core.matrix.random :as rand-matrix]
             [clojure.string :as str]
-            [clojure.pprint :as pp]
             [clojure.java.io :as io]
             #?(:cljs [goog.string :refer [format]])
             [taoensso.nippy :as nippy]
@@ -151,7 +150,9 @@ patch to clojure.core: http://dev.clojure.org/jira/browse/CLJ-1468"
   [& maps]
   (if (every? map? maps)
     (apply merge-with deep-merge maps)
-    (last maps)))
+    (if (nil? (last maps))
+      (apply deep-merge (butlast maps))
+      (last maps))))
 
 
 (defn map-keys

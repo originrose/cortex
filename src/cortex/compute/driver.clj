@@ -29,6 +29,8 @@
 this to work in some thread independent way is a bad assumption.")
   (get-current-device [impl]
     "Get the current device from the current thread.")
+  (memory-info [impl]
+    "Get a map of {:free <long> :total <long>} describing the free and total memory in bytes.")
   (create-stream [impl]
     "Create a stream of execution.  Streams are indepenent threads of execution.  They can be synchronized
 with each other and the main thread using events.")

@@ -44,34 +44,46 @@
 
 (defmethod get-node-metadata :default [node] {})
 
+
+(defn get-node-argument-keys
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       keys))
+
+
+(defn get-node-metadata-arguments
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       (map (fn [[k v]]
+              (assoc v :key k)))))
+
+
 (defn get-node-argument
   [node arg-key]
   (let [learn-atten (get node :learning-attenuation 1.0)
         non-trainable? (get node :non-trainable? false)
-        retval (->> (get-node-metadata node)
-                    :arguments
-                    (#(get % arg-key)))]
-    (when-not retval
-      (throw (ex-info "Failed to find node argument"
+        node-defaults (:arguments (get-node-metadata node))
+        default-arg (get node-defaults arg-key)
+        default-arg (assoc default-arg :key arg-key)
+        arg (util/deep-merge default-arg (get node arg-key))]
+    (when-not default-arg
+      (throw (ex-info (str "Invalid node argument: " arg-key)
                       {:node node
-                       :argument-name arg-key
-                       :arguments (get (get-node-metadata node) :arguments)})))
-    (let [retval (->> (assoc retval :key arg-key)
-                      (util/deep-merge retval (get node arg-key)))
-          param-learn-atten (get retval :learning-attenuation learn-atten)]
-      (if (or (zero? param-learn-atten)
-              non-trainable?)
-        (assoc retval :gradients? false)
-        (assoc retval :learning-attenuation param-learn-atten)))))
+                       :arg arg-key
+                       :accepted-args (get (get-node-metadata node) :arguments)})))
+    (if (or (zero? (get arg :learning-attenuation learn-atten))
+            non-trainable?)
+      (assoc arg :gradients? false)
+      arg)))
 
 
 (defn get-node-arguments
   "Get the node arguments 'before' being merged with the node
 buffers."
   [node]
-  (->> (get-node-metadata node)
-       :arguments
-       keys
+  (->> (get-node-argument-keys node)
        (map #(get-node-argument node %))))
 
 
@@ -530,6 +542,11 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   (buf-init/initialize-buffer (assoc initialization :shape shape)))
 
 
+(defn- smart-shape-compare
+  [shape1 shape2]
+  (= (drop-while #(= 1 %) shape1)
+     (drop-while #(= 1 %) shape2)))
+
 (defn- generate-parameter-argument-buffer
   "Given a parameter argument generate it's buffer."
   [node-id graph argument]
@@ -537,7 +554,7 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
         expected-shape (get-argument-shape graph node argument)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
       (do
-        (when-not (= expected-shape (m/shape existing-buffer))
+        (when-not (smart-shape-compare expected-shape (m/shape existing-buffer))
           (throw (ex-info "Existing buffer does not match expected shape"
                           {:node-id node-id
                            :existing-shape (m/shape existing-buffer)
@@ -613,6 +630,7 @@ that do not already exist.  Returns a new graph."
        (into {})
        (merge stream-map)))
 
+
 (defmulti resolve-argument
   "Resolve a particular argument returning a map containing
 at least :buffer if not both :buffer and :gradient."
@@ -664,17 +682,18 @@ at least :buffer if not both :buffer and :gradient."
 
 
 (defn resolve-arguments
-  "Resolve the arguments to a particular node.
-It is expected the stream map contains the augmented data if necessary.
-Note that for uniformity the values are returned without modification.  This
-means the the format of the stream map and the node->output-map must be
-entries of the form of at least {:buffer data} instead of linking key directly
-to data.  This allows a uniform system both when doing auto-differentiation and
-when simply doing execution because when doing back propagation the entries must
-link to both {:buffer :gradient}."
+  "Resolve the arguments to a particular node.  It is expected the
+  stream map contains the augmented data if necessary.  Note that for
+  uniformity the values are returned without modification.  This means
+  the the format of the stream map and the node->output-map must be
+  entries of the form of at least {:buffer data} instead of linking
+  key directly to data.  This allows a uniform system both when doing
+  auto-differentiation and when simply doing execution because when
+  doing back propagation the entries must link to both {:buffer
+  :gradient}."
   [graph node stream-map node-id->output-map]
   (->> (get-node-arguments node)
-       (map (fn [{:keys [key type] :as argument}]
+       (mapv (fn [{:keys [key type] :as argument}]
               [key (resolve-argument graph node argument
                                      stream-map node-id->output-map)]))
        (into {})))

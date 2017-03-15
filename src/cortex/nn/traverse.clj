@@ -179,6 +179,15 @@ root and labels-x where labels are a 1-based index of the leaf."
           (get-output-bindings network)))
 
 
+(defn required-io-keys
+  [network]
+  (set (map :stream (get-io-bindings network))))
+
+(defn required-input-keys
+  [network]
+  (set (map :stream (get-input-bindings network))))
+
+
 (defn get-input-streams
   "Get all dataset streams used for input."
   [network]
@@ -503,14 +512,13 @@ parameters by adding buffer-ids in some cases."
 
 
 (defn add-training-traversal
-  "Given network create master buffer list,
-  two traversals (forward,backward)
+  "Given a network create master buffer list, traversals (forward,backward)
   and input and output buffer lists.
 
-  Each traversal is sequence of maps like in create-forward-traversal
-  exception the incoming and outgoing ids are buffer ids.
-  Input bindings are pairs of node to stream name.  Output bindings
-  for gradient descent are also pairs of node-id to stream name or they can be
+  Each traversal is a sequence of maps like in create-forward-traversal
+  except the incoming and outgoing ids are buffer ids.  Input bindings
+  are pairs of node to stream name.  Output bindings for gradient descent
+  are also pairs of node-id to stream name or they can be
   pairs of node-id to [stream-name loss-function].
 
   You can specify a loss here directly or you can specify loss terms around the graph.
