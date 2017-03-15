@@ -59,13 +59,12 @@
    (layers/batch-normalization :l1-regularization 1e-4)
    (layers/linear 500 :l2-max-constraint 4.0)
    (layers/relu :center-loss {:label-indexes {:stream :label}
-                              :foo :bar
                               :label-inverse-counts {:stream :label}
                               :labels {:stream :label}
                               :alpha 0.9
                               :lambda 1e-4})
    (layers/linear 10)
-   (layers/softmax :output-channels 2 :id :label)])
+   (layers/softmax :id :label)])
 
 
 (defonce training-dataset* (future (mnist/training-dataset)))
@@ -164,13 +163,10 @@
         network (network/linear-network MNIST-NETWORK)
         _ (println (format "Training MNIST network for %s epochs..." n-epochs))
         network (reduce (fn [network epoch]
-                          (let [new-network network
-                                ;; new-network (execute/train network dataset
-                                ;;                            :context context
-                                ;;                            :batch-size batch-size)
+                          (let [new-network (execute/train network dataset
+                                                           :context context
+                                                           :batch-size batch-size)
                                 results (execute/run new-network (take 100 test-dataset) :batch-size batch-size)
-                                _ (println "\nfirst of results:")
-                                _ (println (first results))
                                 score (percent= (map :label results) (take 100 test-labels))]
                             (println (format "Score for epoch %s: %s\n\n" (inc epoch) score))
                             new-network))

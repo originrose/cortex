@@ -978,7 +978,6 @@ any loss-specific parameter buffers."
   (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
     (let [data (get batch k)
           data (if (map? data) (:data data) data)
-          _ (println (format "Shape of %s is %s" k (m/shape data)))
           item-count (second (dtype/copy-raw->item! data host-buffer 0))]
       (when-not (= item-count (m/ecount host-buffer))
         (throw (ex-info "Failed to load-batch!"
@@ -987,8 +986,7 @@ any loss-specific parameter buffers."
     (drv/copy-host->device (network/stream network)
                            host-buffer 0
                            (math/device-buffer device-array) 0
-                           (m/ecount host-buffer))
-    (println "\nload-batch-device!" k (math/device-buffer device-array))))
+                           (m/ecount host-buffer))))
 
 
 (defn- cuda-backend-fn
@@ -1096,8 +1094,6 @@ any loss-specific parameter buffers."
          (load-batch! network next-batch batch-buffers)
          ;; (println "\nTraversal:")
          ;; (clojure.pprint/pprint (get-in network [:traversal :forward]))
-         (println "\nstream->buffer-map:")
-         (clojure.pprint/pprint stream->buffer-map)
          (do-traverse network stream->buffer-map :inference)
          (concat results (network/output-values network output-buffers)))
        []

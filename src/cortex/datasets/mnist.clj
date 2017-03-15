@@ -59,7 +59,7 @@
     (assert= (.readInt input) size "Unexpected image count")
     (assert= (.readInt input) WIDTH "Unexpected row count")
     (assert= (.readInt input) HEIGHT "Unexpected column count")
-    (let [ary (mat/new-array [size HEIGHT WIDTH])]
+    (let [ary (mat/new-array :vectorz [size HEIGHT WIDTH])]
       (c-for [img 0 (< img size) (inc img)]
         (c-for [row 0 (< row HEIGHT) (inc row)]
           (c-for [col 0 (< col WIDTH) (inc col)]
@@ -113,4 +113,3 @@
         return-test-d (mat/submatrix norm-mat num-train-d (- num-rows num-train-d) 0 num-cols)]
     {:training return-train-d
      :test return-test-d}))
-
