@@ -18,10 +18,10 @@
   (let [weight-data [[1 2][3 4]]
         bias-data [0 10]
         built-network (network/linear-network [(layers/input 2)
-                                              (layers/linear
-                                               2
-                                               :weights weight-data
-                                               :bias bias-data)])]
+                                               (layers/linear
+                                                2
+                                                :weights weight-data
+                                                :bias bias-data)])]
     (is (= (vec (m/eseq weight-data))
            (vec (m/eseq (get-in built-network [:compute-graph :buffers
                                                (get-in built-network

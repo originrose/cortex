@@ -45,6 +45,21 @@
 (defmethod get-node-metadata :default [node] {})
 
 
+(defn get-node-argument-keys
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       keys))
+
+
+(defn get-node-metadata-arguments
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       (map (fn [[k v]]
+              (assoc v :key k)))))
+
+
 (defn get-node-argument
   [node arg-key]
   (let [learn-atten (get node :learning-attenuation 1.0)
@@ -68,9 +83,7 @@
   "Get the node arguments 'before' being merged with the node
 buffers."
   [node]
-  (->> (get-node-metadata node)
-       :arguments
-       keys
+  (->> (get-node-argument-keys node)
        (map #(get-node-argument node %))))
 
 

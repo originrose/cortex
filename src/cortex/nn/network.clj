@@ -19,12 +19,13 @@
 
 (defn embed-param-args
   [desc]
-  (->> (graph/get-node-arguments desc)
+  (->> (graph/get-node-metadata-arguments desc)
        (filter #(= :parameter (get % :type)))
        (reduce (fn [desc argument]
                  (let [param-name (get argument :key)
                        node-param (get desc param-name)]
-                   (if-not (map? node-param)
+                   (if (and node-param
+                            (not (map? node-param)))
                      (assoc desc param-name {:buffer node-param})
                      desc)))
                desc)))
