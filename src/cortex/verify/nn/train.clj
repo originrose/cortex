@@ -125,27 +125,26 @@
         as bs)))
 
 (defn test-corn
-  ([] (test-corn nil))
-  ([context]
-   (let [dataset CORN-DATASET
-         labels (map :label dataset)
-         big-dataset (apply concat (repeat 2000 dataset))
-         optimizer (adam/adam :alpha 0.01)
-         network (corn-network)
-         network (loop [network network
-                        epoch 0]
-                   (if (> 3 epoch)
-                     (let [network (execute/train network big-dataset
-                                                  :batch-size 1
-                                                  :context context
-                                                  :optimizer optimizer)
-                           results (map :label (execute/run network dataset :context context))
-                           err (regression-error results labels)]
-                       (recur network (inc epoch)))
-                     network))
-         results (map :label (execute/run network dataset :batch-size 10 :context context))
-         err (regression-error results labels)]
-     (is (> err 0.2)))))
+  [& [context]]
+  (let [dataset CORN-DATASET
+        labels (map :label dataset)
+        big-dataset (apply concat (repeat 2000 dataset))
+        optimizer (adam/adam :alpha 0.01)
+        network (corn-network)
+        network (loop [network network
+                       epoch 0]
+                  (if (> 3 epoch)
+                    (let [network (execute/train network big-dataset
+                                                 :batch-size 1
+                                                 :context context
+                                                 :optimizer optimizer)
+                          results (map :label (execute/run network dataset :context context))
+                          err (regression-error results labels)]
+                      (recur network (inc epoch)))
+                    network))
+        results (map :label (execute/run network dataset :batch-size 10 :context context))
+        err (regression-error results labels)]
+    (is (> err 0.2))))
 
 
 (defn percent=
@@ -166,14 +165,16 @@
                           (let [new-network (execute/train network dataset
                                                            :context context
                                                            :batch-size batch-size)
-                                results (execute/run new-network (take 100 test-dataset) :batch-size batch-size)
-                                score (percent= (map :label results) (take 100 test-labels))]
+                                results (->> (execute/run new-network (take 100 test-dataset) :batch-size batch-size)
+                                             (map :label))
+                                score (percent= results (take 100 test-labels))]
                             (println (format "Score for epoch %s: %s\n\n" (inc epoch) score))
                             new-network))
                   network
                   (range n-epochs))
         _ (println "Training complete")
-        ;; results (map :label (execute/run network test-dataset :batch-size batch-size))
+        results (->> (execute/run network test-dataset :batch-size batch-size)
+                     (map :label))
         ]
-    ;; (is (> (percent= results test-labels) 0.6))
+    (is (> (percent= results test-labels) 0.6))
     ))
