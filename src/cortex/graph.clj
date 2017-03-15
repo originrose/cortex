@@ -529,6 +529,11 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   (buf-init/initialize-buffer (assoc initialization :shape shape)))
 
 
+(defn- smart-shape-compare
+  [shape1 shape2]
+  (= (drop-while #(= 1 %) shape1)
+     (drop-while #(= 1 %) shape2)))
+
 (defn- generate-parameter-argument-buffer
   "Given a parameter argument generate it's buffer."
   [node-id graph argument]
@@ -536,7 +541,7 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
         expected-shape (get-argument-shape graph node argument)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
       (do
-        (when-not (= expected-shape (m/shape existing-buffer))
+        (when-not (smart-shape-compare expected-shape (m/shape existing-buffer))
           (throw (ex-info "Existing buffer does not match expected shape"
                           {:node-id node-id
                            :existing-shape (m/shape existing-buffer)
