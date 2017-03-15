@@ -27,6 +27,7 @@
     (.get dreader retval)
     retval))
 
+
 (defn item-to-double-array
   "Efficient conversion to double arrays"
   ^doubles [item]
@@ -35,7 +36,6 @@
     (when-not retval
       (throw (Exception. "Failed to create a double array from item")))
     retval))
-
 
 
 (defn write-binary-file
@@ -82,3 +82,4 @@ convertable to double arrays."
     (c-for [idx 0 (< idx entry-num-doubles) (inc idx)]
            (aset retval idx (.getDouble buffer (* (+ offset idx) Double/BYTES))))
     retval))
+

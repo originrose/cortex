@@ -196,7 +196,7 @@
                               "prepare_gaussian_dropout.fatbin"
                               "prepare_gaussian_dropout")}]
      (->CudaBackend :cuda driver stream (cudnn-context) datatype network-functions)))
-  ([datatype] (let [driver (cuda-drv/cuda-driver)
+  ([datatype] (let [driver (cuda-drv/driver)
                     stream (drv/create-stream driver)]
                 (backend driver stream datatype)))
   ([] (backend :double)))

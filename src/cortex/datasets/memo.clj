@@ -11,16 +11,16 @@
   ^CacheLoader [loader-fn]
   (reify CacheLoader
     (load [this key]
-      (loader-fn key))))
+      (apply loader-fn key))))
 
 
-(defn make-caffeine-lru-cache
-  [loader-fn & {:keys [maximum-size]
+(defn caffeine-lru-cache
+  [loader & {:keys [maximum-size]
                 :or {maximum-size 32}}]
   (let [builder (Caffeine/newBuilder)]
     (doto builder
       (.maximumSize maximum-size))
-    (.build builder (cache-loader loader-fn))))
+    (.build builder loader)))
 
 
 (defn lookup-value
@@ -28,9 +28,12 @@
   (.get cache value))
 
 
-(defn build-caffeine-memo
+(defn lru-cache
   [data-fn & {:keys [maximum-size]
-              :or {maximum-size 32}}]
-  (let [new-cache (make-caffeine-lru-cache (fn [key] (apply data-fn key)) :maximum-size maximum-size)]
+              :or {maximum-size 1024}}]
+  (let [new-cache (caffeine-lru-cache
+                    (cache-loader #(apply data-fn %))
+                    :maximum-size maximum-size)]
     (fn [& args]
       (lookup-value new-cache args))))
+

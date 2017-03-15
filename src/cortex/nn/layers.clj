@@ -186,14 +186,13 @@ constructors are all variable args with the extra arguments expected to be
 ;; Softmax
 
 (defn softmax
-    "Define a softmax which may be multi-channelled.  The data is expected
+  "Define a softmax which may be multi-channelled.  The data is expected
   to be planar such that channel one has n-outputs followed in memory by
-channel 2 with n-outputs"
+  channel 2 with n-outputs"
   [& {:keys [output-channels]
       :or {output-channels 1}
       :as arg-map}]
-  [(merge {:type :softmax :output-channels 1}
-          arg-map)])
+  [(merge {:type :softmax} arg-map)])
 
 
 (defmethod graph/build-node :softmax

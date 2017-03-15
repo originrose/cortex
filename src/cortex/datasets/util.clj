@@ -1,15 +1,66 @@
-(ns cortex.datasets.math
-  (:require [clojure.core.matrix :as m]))
+(ns cortex.datasets.util
+  (:require
+    [clojure.java.io :as io]
+    [clojure.core.matrix :as m])
+  (:import
+    [java.io InputStream OutputStream]
+    [java.util.zip GZIPInputStream]))
 
-(set! *warn-on-reflection* true)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Utils for downloading and loading to/from disk
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def epsilon 1e-6)
+(defn dataset-item-path
+  [dataset item]
+  (str (System/getProperty "user.home") "/.cortex/" dataset "/" item))
+
+
+(defn download-dataset-item
+  [dataset item url]
+  (println (format "Downloading %s:%s from %s" dataset item url))
+  (let [path (dataset-item-path dataset item)]
+    (io/make-parents path)
+    (with-open [input (io/input-stream url)
+                output (io/output-stream path)]
+      (io/copy input output)))
+  (println (format "Finished downloading %s:%s" dataset item)))
+
+
+(defn dataset-item-exists?
+  [dataset item]
+  (.exists (io/file (dataset-item-path dataset item))))
+
+
+(defn dataset-input-stream
+  "Opens an input stream for one file in a dataset, which can have
+  many files.  If passed a :url option it will download the file from that
+  URL if it isn't already in ~/.cortex/<dataset>/<item> and then return
+  the input-stream.  Also accepts the :gzip? boolean option to open a gzipped
+  file stream."
+  [dataset item
+   & {:keys [gzip? url] :as options}]
+  (when (not (dataset-item-exists? dataset item))
+    (if url
+      (download-dataset-item dataset item url)
+      (throw (format "Cannot find local dataset item, and no url provided: %s:%s"
+                     dataset item))))
+  (let [input (io/input-stream (dataset-item-path dataset item))
+        input (if gzip?
+                (GZIPInputStream. input)
+                input)]
+    input))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Numerical Tools
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def EPSILON 1e-6)
 
 (defn very-near-epsilon?
   [epsilon x y]
   (< (Math/abs (- (double x) (double y))) (double epsilon)))
 
-(def very-near? (partial very-near-epsilon? epsilon))
+(def very-near? (partial very-near-epsilon? EPSILON))
 
 (defn matrix-col-totals
   [data]

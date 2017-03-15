@@ -15,6 +15,8 @@
                  [org.clojure/clojurescript "1.8.51"] ;;Match figwheel
                  ;;If you need cuda 8...
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
+                 ;;If you need cuda 7.5...
+                 ;;[org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
                  ]
 
 

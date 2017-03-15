@@ -12,6 +12,7 @@
   (:import [org.bytedeco.javacpp cuda
             BytePointer IntPointer LongPointer DoublePointer
             Pointer PointerPointer FloatPointer ShortPointer
+            SizeTPointer
             cuda$CUmod_st cuda$CUctx_st cuda$CUfunc_st cuda$CUstream_st
             cuda$CUevent_st cublas cublas$cublasContext
             curand curand$curandGenerator_st]
@@ -97,6 +98,15 @@
 (defn zero-term-array-to-string
   [^"[B" byte-ary]
   (String. ^"[B" (into-array Byte/TYPE (take-while #(not= 0 %) (seq byte-ary)))))
+
+
+(defn get-memory-info
+  []
+  (let [free (SizeTPointer. 1)
+        total (SizeTPointer. 1)]
+    (cuda-call (cuda/cudaMemGetInfo free total))
+    {:free (.get free)
+     :total (.get total)}))
 
 
 (defn list-devices
@@ -226,7 +236,6 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
 
 (defn load-multiple-datatype-function
   ([module-name fn-name dtype-seq]
-   ;(println "loading function" fn-name)
    (try
     (let [module (load-module (io/input-stream (io/resource module-name)))]
       (into {} (map (fn [dt]
@@ -267,7 +276,10 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
     (resource/track rand-context)))
 
 
-(defrecord CudaDriver [device-functions ^cublas$cublasContext cublas ^curand$curandGenerator_st curand])
+(defrecord CudaDriver [current-device
+                       device-functions
+                       ^cublas$cublasContext cublas
+                       ^curand$curandGenerator_st curand])
 
 (defrecord CudaStream [^CudaDriver driver ^cuda$CUstream_st stream])
 
@@ -290,7 +302,7 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
     (jcpp-dtype/release-pointer item)))
 
 
-(defn cuda-driver
+(defn driver
   []
   (context)
   (let [device-functions {:memset (load-all-datatype-function "memset")
@@ -299,7 +311,8 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
                           :l2-constraint-scale (load-float-double-function
                                                 "l2_constraint_scale")
                           :select (load-float-double-function "select")}]
-    (->CudaDriver (atom device-functions)
+    (->CudaDriver :no-selected-device
+                  (atom device-functions)
                   (blas-context)
                   (rand-context))))
 
@@ -345,20 +358,33 @@ before we set it, do the operation, and unlock the object after."
 
 (extend-type CudaDriver
   drv/PDriver
-  (get-devices [impl] (list-devices))
+  (get-devices [impl]
+    (list-devices))
+
+  (memory-info [impl]
+    (get-memory-info))
+
   (set-current-device [impl device]
-    (cuda/cudaSetDevice ^int (:device-id device)))
+    (cuda/cudaSetDevice ^int (:device-id device))
+    (assoc impl :current-device device))
+
+  (get-current-device [impl]
+    (:current-device impl))
+
   (create-stream [impl]
     (let [retval (cuda$CUstream_st.)]
       (cuda/cudaStreamCreate retval)
       (->CudaStream impl (resource/track retval))))
+
   (allocate-host-buffer [impl elem-count elem-type]
     (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count)))
+
   (allocate-device-buffer [impl ^long elem-count elem-type]
     (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
           retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
       (cuda-call (cuda/cudaMalloc retval size))
       (resource/track (->DevicePointer size retval))))
+
   (sub-buffer-impl [impl buffer offset length]
     (let [^DevicePointer buffer buffer
           offset (long offset)
@@ -366,6 +392,7 @@ before we set it, do the operation, and unlock the object after."
           byte-size (dtype/datatype->byte-size (dtype/get-datatype buffer))
           new-size (* byte-size length)]
       (->DevicePointer new-size (jcpp-dtype/offset-pointer (.ptr buffer) offset))))
+
   (allocate-rand-buffer [impl elem-count]
     (drv/allocate-device-buffer impl elem-count :float)))
 
@@ -380,7 +407,9 @@ before we set it, do the operation, and unlock the object after."
         dest-dtype (dtype/get-datatype dest-buffer)
         elem-count (long elem-count)]
     (when-not (= dest-dtype src-dtype)
-      (throw (Exception. "Copy datatypes do not match")))
+      (throw (ex-info "Copy datatypes do not match"
+                      {:src-dtype src-dtype
+                       :dest-dtype dest-dtype})))
     (when-not (<= (+ src-offset elem-count)
                   src-len)
       (throw (Exception. "Attempt to copy past extents of buffer.")))
