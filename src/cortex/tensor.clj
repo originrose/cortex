@@ -417,13 +417,6 @@ that rerequires the items to have the same element count."
   (or (= 0 rhs-ecount)
       (= 0 (rem lhs-ecount rhs-ecount))))
 
-(defmulti typed-assign!
-  "Multimethods for typed assignment."
-  (fn
-    [dest src]
-    [(datatype->keyword dest)
-     (datatype->keyword src)]))
-
 
 (defn dense?
   [^Tensor tensor]
@@ -764,6 +757,14 @@ to non-gemm operations."
           (range n-cols))))
 
 
+(defmulti typed-assign!
+  "Multimethods for typed assignment."
+  (fn
+    [dest src]
+    [(datatype->keyword dest)
+     (datatype->keyword src)]))
+
+
 (defmethod typed-assign! [:tensor :number]
   [^Tensor dest src]
   (if (simple-tensor? dest)
@@ -805,11 +806,35 @@ to non-gemm operations."
       (do
         (ensure-same-device dest src)
         (tm/assign! (check-stream)
-                    (tensor->buffer dest) (tensor->index-system dest) (ecount dest)
-                    (tensor->buffer src) (tensor->index-system src) (ecount src))))))
+                    (tensor->buffer dest) (tensor->index-system dest)
+                    (tensor->buffer src) (tensor->index-system src)
+                    (max (ecount src) (ecount dest)))))))
 
 
-(defmethod typed-binary-op)
+(defmulti typed-binary-op
+  "Binary operations may contain one or two scalars in various
+  positions.  This multimethod disambiguates between those positions."
+  (fn [dest alpha x beta y op]
+    [(datatype->keyword x)
+     (datatype->keyword y)]))
+
+
+(defmethod typed-binary-op [:number :number]
+  [dest alpha x beta y op]
+  )
+
+
+(defmethod typed-binary-op [:tensor :number]
+  [dest alpha x beta y op]
+  )
+
+(defmethod typed-binary-op [:number :tensor]
+  [dest alpha x beta y op]
+  )
+
+(defmethod typed-binary-op [:tensor :tensor]
+  [dest alpha x beta y op]
+  )
 
 
 (defn binary-op

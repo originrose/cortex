@@ -14,11 +14,32 @@
   (assign-constant! [stream buffer index-system value n-elems]
     "Assign a constant value to a buffer. using an index strategy.")
   (assign! [stream
-            dest dest-idx-sys dest-ecount
-            src src-idx-sys src-ecount]
+            dest dest-idx-sys
+            src src-idx-sys
+            n-elems]
     "Assign to dest values from src using the appropriate index strategy.  Note that assignment
 *alone* should be marshalling if both src and dst are on the same device.  So for the three
 types used in the library: [:float :double :int] all combinations of assignment independent of
 indexing strategy should be provided.
 This function will not be called if dest and src are on different devices, memcpy semantics are
-enforced for that case."))
+enforced for that case.")
+  (binary-accum-constant! [stream
+                           dest dest-idx dest-alpha
+                           scalar
+                           n-elems operation reverse-operands?])
+
+  (binary-accum! [stream
+                  dest dest-idx dest-alpha
+                  src src-idx src-alpha
+                  n-elems operation reverse-operands?])
+
+  (binary-op-constant! [stream
+                        dest dest-idx
+                        src src-idx src-alpha
+                        scalar
+                        n-elems operation reverse-operands?])
+  (binary-op! [stream
+               dest dest-idx
+               x x-idx x-alpha
+               y y-idx y-alpha
+               n-elems operation]))
