@@ -168,13 +168,10 @@
                                 results (->> (execute/run new-network (take 100 test-dataset) :batch-size batch-size)
                                              (map :label))
                                 score (percent= results (take 100 test-labels))]
-                            (println (format "Score for epoch %s: %s\n\n" (inc epoch) score))
+                            (println (format "Score for epoch %s: %s" (inc epoch) score))
                             new-network))
                   network
                   (range n-epochs))
-        _ (println "Training complete")
         results (->> (execute/run network test-dataset :batch-size batch-size)
-                     (map :label))
-        ]
-    (is (> (percent= results test-labels) 0.6))
-    ))
+                     (map :label))]
+    (is (> (percent= results test-labels) 0.6))))
