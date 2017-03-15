@@ -2,10 +2,13 @@
   (:require [clojure.java.io :as io]
             [cortex.datasets.util :as util]
             [clojure.core.matrix :as mat]
+            [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
             [mikera.vectorz.matrix-api])
   (:import
     [java.io DataInputStream]))
+
+(set! *warn-on-reflection* true)
 
 (mat/set-current-implementation :vectorz)
 
@@ -54,22 +57,27 @@
 
 (defn load-data
   [{:keys [name size] :as item}]
-  (with-open [input (mnist-data-stream name)]
+  (with-open [^DataInputStream input (mnist-data-stream name)]
     (assert= (.readInt input) 2051 "Wrong magic number")
     (assert= (.readInt input) size "Unexpected image count")
     (assert= (.readInt input) WIDTH "Unexpected row count")
     (assert= (.readInt input) HEIGHT "Unexpected column count")
-    (let [ary (mat/new-array :vectorz [size HEIGHT WIDTH])]
+    (let [core-m-array (mat/new-array :vectorz [size HEIGHT WIDTH])
+          ^doubles dbl-array (mp/as-double-array core-m-array)]
       (c-for [img 0 (< img size) (inc img)]
         (c-for [row 0 (< row HEIGHT) (inc row)]
           (c-for [col 0 (< col WIDTH) (inc col)]
-            (mat/mset! ary img row col (ub-to-double (.readUnsignedByte input))))))
-      ary)))
+                 (aset dbl-array
+                       (+ (* img HEIGHT WIDTH)
+                          (* row WIDTH)
+                          col)
+                       (ub-to-double (.readUnsignedByte input))))))
+      core-m-array)))
 
 
 (defn load-labels
   [{:keys [name size] :as item}]
-  (with-open [input (mnist-data-stream name)]
+  (with-open [^DataInputStream input (mnist-data-stream name)]
     (let [label-vector (vec (repeat 10 0))]
       (assert= (.readInt input ) 2049 "Wrong magic number")
       (assert= (.readInt input ) size "Unexpected image count")
