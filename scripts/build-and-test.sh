@@ -4,7 +4,7 @@ set -e
 
 ./scripts/build-and-deploy.sh
 
-PROJECTS="importers/caffe importers/keras examples/optimise"
+PROJECTS="importers/caffe importers/keras examples/optimise experiment"
 
 for proj in $PROJECTS; do
     pushd $proj

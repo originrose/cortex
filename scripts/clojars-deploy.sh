@@ -2,7 +2,7 @@
 
 set -e
 
-PROJECTS="cortex datasets compute gpu-compute caffe keras optimise suite"
+PROJECTS=". experiment importers/caffe importers/keras"
 
 for proj in $PROJECTS; do
     pushd $proj
