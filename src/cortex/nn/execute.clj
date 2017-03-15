@@ -1073,6 +1073,9 @@ any loss-specific parameter buffers."
                       :as options}]
   (resource/with-resource-context
     (let [context (or context (compute-context :datatype datatype))
+          ;;In the case where the context was passed in we ignore the datatype argument
+          ;;else we run into problems pulling data off the gpu.
+          datatype (get context :datatype)
           stream-shapes (ds/column-shapes dataset)
           network (-> (assoc network :batch-size batch-size)
                       (traverse/bind-vars-to-network)

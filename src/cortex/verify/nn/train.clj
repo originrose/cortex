@@ -165,13 +165,15 @@
                           (let [new-network (execute/train network dataset
                                                            :context context
                                                            :batch-size batch-size)
-                                results (->> (execute/run new-network (take 100 test-dataset) :batch-size batch-size)
+                                results (->> (execute/run new-network (take 100 test-dataset)
+                                               :batch-size batch-size
+                                               :context context)
                                              (map :label))
                                 score (percent= results (take 100 test-labels))]
                             (println (format "Score for epoch %s: %s" (inc epoch) score))
                             new-network))
                   network
                   (range n-epochs))
-        results (->> (execute/run network test-dataset :batch-size batch-size)
+        results (->> (execute/run network test-dataset :batch-size batch-size :context context)
                      (map :label))]
     (is (> (percent= results test-labels) 0.6))))
