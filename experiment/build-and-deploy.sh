@@ -2,4 +2,4 @@
 
 set -e
 
-./get-test-models.sh && lein test
+lein test
