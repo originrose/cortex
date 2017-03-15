@@ -782,24 +782,6 @@ to non-gemm operations."
           (get-datatype src))))
 
 
-(defn- ensure-memcpy-semantics
-  [dest src]
-  (when-not-error (= (ecount dest) (ecount src))
-    "inter-device operations must have simple memory semants"
-    {:dest-ecount (ecount dest)
-     :src-ecount (ecount src)})
-  (when-not-error (and (simple-tensor? dest)
-                       (simple-tensor? src))
-    "Inter-device operations must have simple (mono-increasing and dense) address strategies"
-    {:simple-dest? (simple-tensor? dest)
-     :simple-src? (simple-tensor? src)})
-  (when-not-error (= (get-datatype src)
-                     (get-datatype dest))
-    "Inter-device operations must match datatypes."
-    {:dest-datatype (get-datatype dest)
-     :src-datatype (get-datatype src)}))
-
-
 (defmethod typed-assign! [:tensor :tensor]
   [^Tensor dest ^Tensor src]
   (let [dest-ecount (ecount dest)
@@ -825,6 +807,16 @@ to non-gemm operations."
         (tm/assign! (check-stream)
                     (tensor->buffer dest) (tensor->index-system dest) (ecount dest)
                     (tensor->buffer src) (tensor->index-system src) (ecount src))))))
+
+
+(defmethod typed-binary-op)
+
+
+(defn binary-op
+  "Perform the operation:
+dest = alpha * x op beta * y.
+x or y may be a scalar, dest must not be."
+  [^Tensor dest alpha x beta y op])
 
 
 (extend-type Tensor
