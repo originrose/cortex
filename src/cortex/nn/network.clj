@@ -7,6 +7,7 @@
     [clojure.core.matrix.macros :refer [c-for]]
     [think.datatype.core :as dtype]
     [cortex.graph :as graph]
+    [cortex.argument :as arg]
     [cortex.loss :as loss]
     [cortex.compute.driver :as drv]
     [cortex.compute.math :as math]
@@ -31,6 +32,30 @@
                desc)))
 
 
+(defn- map->loss-term-seq
+  [item-map]
+  (->> (keys item-map)
+       (map (fn [loss-key]
+              (loss/loss-term-from-map-key-val loss-key (get item-map loss-key))))
+       (remove nil?)))
+
+
+(defn- generate-node-loss-terms
+  [node]
+  (let [node-losses (->> (map->loss-term-seq node)
+                         (map #(arg/set-arg-node-output % :output (get node :id))))
+        trainable-parameters (->> (graph/get-node-arguments node)
+                                  (filter :gradients?))
+        parameter-losses (->> trainable-parameters
+                              (map map->loss-term-seq)
+                              (mapcat (fn [parameter loss-term-seq]
+                                        (map #(arg/set-arg-node-argument
+                                               % :output (get node :id) (get parameter :key))
+                                             loss-term-seq))
+                                      trainable-parameters))]
+    (concat node-losses parameter-losses)))
+
+
 (defn- add-node-to-graph
   [[graph last-id] desc]
   (let [predecessor-id-seq (if (get desc :parents)
@@ -38,21 +63,18 @@
                              (if last-id
                                [last-id]
                                []))
-        ; TODO: Is this necessary?  For 1.0 why don't we get rid of
-        ; any backward compatibility stuff, and then stabilize
-        ; going forward?
-
-        ;;For backward compatibility we need to embed any parameter argument
-        ;;buffers into maps
         desc (embed-param-args desc)
         [graph id] (graph/add-node graph desc
-                                   predecessor-id-seq)]
+                                   predecessor-id-seq)
+        ;;Add any loss terms embedded in the description
+        graph (->> (generate-node-loss-terms (graph/get-node graph id))
+                   (reduce (fn [graph loss-term]
+                             (first (graph/add-node graph loss-term [id])))
+                           graph))]
     [(if (= :input (get desc :type))
        (let [{:keys [output-channels
                      output-height
                      output-width]} desc]
-         ; If we can generate the stream-descriptor from an input
-         ; node, why store it in the graph?
          (-> graph
              (graph/update-node id #(assoc-in % [:input :stream] id))
              (graph/add-stream id
@@ -62,6 +84,25 @@
                                  output-width))))
        graph)
      id]))
+
+
+(defn- generate-output-losses
+  "This algorithm will fail if a loss term is attached to a node's parameters as a graph leaf.
+  Take all the leaves of the graph that do not have losses attached and attach default losses to
+  them"
+  [graph]
+  (->> (graph/leaves graph)
+       (map #(graph/get-node graph %))
+       (remove loss/is-loss-node?)
+       (map #(vector % (layers/get-layer-default-loss %)))
+       (reduce (fn [graph [leaf loss-node]]
+                 (let [loss-node (-> loss-node
+                                     (arg/set-arg-stream :labels (get leaf :id))
+                                     (arg/set-arg-node-output :output (get leaf :id)))]
+                   (-> (graph/add-node graph loss-node [(get leaf :id)])
+                       first)))
+               graph)))
+
 
 
 (defn network
@@ -79,10 +120,18 @@
              (reduce add-node-to-graph
                      [graph nil]
                      (flatten network-desc)))
+           generate-output-losses
+           ;;Calculate dimensions flowing through the graph.  We need input sizes for this
+           ;;but now output sizes as output sizes are derived from input sizes
            graph/build-graph
+           ;;Generate streams definitions and make sure they agree.
+           graph/generate-leaf-streams
+           ;;Generate parameters and ensure shapes match
            graph/generate-parameters))))
   ([network-desc]
    (linear-network {:compute-graph (graph/empty-graph)} network-desc)))
+
+
 
 (defn backend
   [network]
@@ -133,9 +182,11 @@
 
 
 (defn add-property-to-layer
-  "Given a fully built network, adds properties like :learning-attenuation or :regularization to specific layers by node-id
-  To get a list of node-id -> (keys (get-in network [:compute-graph :nodes)))
-  ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0 :regularization )"
+  "Given a fully built network, adds properties like :learning-attenuation or :regularization to
+  specific layers by node-id To get a list of node-id -> (keys (get-in network [:compute-graph
+  :nodes)))
+  ex: (add-property-to-layer network :conv-1 :learning-attentuation 0.0
+  :regularization )"
   [network node-id key value]
   (update network :compute-graph
           (fn [graph]

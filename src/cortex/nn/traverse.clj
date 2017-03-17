@@ -402,62 +402,6 @@ which means removing extra information from them."
                      :output-bindings (get-output-bindings network)}))))
 
 
-(defn remove-existing-loss-terms
-  [network]
-  (-> network
-      (update :traversal dissoc :loss-function)
-      (update :compute-graph
-              #(->> (graph/dfs-seq %)
-                    (map (fn [node-id]
-                           (let [pass-set (-> (graph/get-node % node-id)
-                                              graph/get-node-metadata
-                                              :passes
-                                              set)]
-                             (when (contains? pass-set :loss)
-                               node-id))))
-                    (remove nil?)
-                    (reduce graph/remove-node %)))))
-
-
-(defn- map->loss-term-seq
-  [item-map]
-  (->> (keys item-map)
-       (map (fn [loss-key]
-              (loss/loss-term-from-map-key-val loss-key (get item-map loss-key))))
-       (remove nil?)))
-
-
-(defn- generate-node-loss-terms
-  [network node]
-  (let [node-losses (->> (map->loss-term-seq node)
-                         (map #(arg/set-arg-node-output % :output (get node :id))))
-        trainable-parameters (->> (graph/get-node-arguments node)
-                                  (filter :gradients?))
-        parameter-losses (->> trainable-parameters
-                              (map map->loss-term-seq)
-                              (mapcat (fn [parameter loss-term-seq]
-                                        (map #(arg/set-arg-node-argument
-                                               % :output (get node :id) (get parameter :key))
-                                             loss-term-seq))
-                                      trainable-parameters))]
-    (concat node-losses parameter-losses)))
-
-
-(defn- generate-loss-function
-  [network nodes output-bindings loss]
-  (let [network (remove-existing-loss-terms network)
-        node-losses (->> nodes
-                         (mapcat (partial generate-node-loss-terms network)))
-        output-losses (->> output-bindings
-                           (filter #(and (get % :loss)
-                                         (get % :stream)))
-                           (map (fn [{:keys [node-id stream loss]}]
-                                  (-> loss
-                                      (arg/set-arg-node-output :output node-id)
-                                      (arg/set-arg-stream :labels stream)))))]
-    (concat loss output-losses node-losses)))
-
-
 (defn- merge-streams
   [stream-map graph]
   (reduce (fn [graph [stream size]]
@@ -547,16 +491,7 @@ parameters by adding buffer-ids in some cases."
         forward-traversal-nodes  (->> backward-pass
                                       reverse
                                       (map :id)
-                                      (map #(graph/get-node (:compute-graph network) %)))
-        ;;If the loss function is regenerated then any loss term parameters are lost.
-        [network loss-fn]
-        (if-not (get-in network [:traversal :loss-function])
-          (->> (generate-loss-function network
-                                       forward-traversal-nodes
-                                       (get-output-bindings network)
-                                       loss-fn)
-               (generate-loss-term-parameters network stream-map))
-          [network (get-in network [:traversal :loss-function])])]
+                                      (map #(graph/get-node (:compute-graph network) %)))]
     (update network
             :traversal
             #(merge %
@@ -566,14 +501,7 @@ parameters by adding buffer-ids in some cases."
                                    reverse-forward-traversal
                                    clean-traversal-incoming-outgoing)
                      :buffers buffer-map
-                     :type :training
-                     :stream-map (->> (get-in network [:compute-graph :streams])
-                                      (map (fn [[k v]]
-                                             [k (graph/stream->size
-                                                 (get network :compute-graph) k)]))
-                                      (into {}))
-                     :optimizer optimizer
-                     :loss-function loss-fn}))))
+                     :type :training}))))
 
 
 (defn add-forward-traversal

@@ -195,10 +195,60 @@ buffers."
     (get node :type)))
 
 
+(declare node->output-dimensions)
+
+
+(defn ensure-single-output-dimensions
+  "Ensure a node has one output and get it's output dimensions."
+  [previous node]
+  (let [output-dims (node->output-dimensions previous)]
+   (when-not (or (= 1 (count output-dims))
+                 (= 1 (count (filter #(= (get node :id)
+                                         (get % :id))
+                                     output-dims))))
+     (throw (ex-info "Previous node has multiple output dimensions pertaining to this node."
+                     {:previous previous
+                      :node node
+                      :output-dimensions (node->output-dimensions previous)}))))
+  (first (node->output-dimensions previous)))
+
+
+(defn carry-input-dims-forward
+  [previous item]
+  (assoc item :input-dimensions [(assoc
+                                  (ensure-single-output-dimensions previous item)
+                                  :id (get previous :id))]))
+
+
+(defn carry-io-dims-forward
+  [previous item]
+  (let [input-dims (ensure-single-output-dimensions previous item)]
+    ;;For single input nodes it is still important to note the parent this input came from.
+    (assoc item :input-dimensions [(assoc input-dims :id (get previous :id))]
+           ;;But for single outputs the source is clear.
+           :output-dimensions [(dissoc input-dims :id)])))
+
+
+(defn ensure-single-parent
+  [graph node previous-id-seq]
+  (when-not (= 1 (count previous-id-seq))
+    (throw (ex-info "Node only takes a single node of input."
+                    {:node node
+                     :previous previous-id-seq})))
+  (get-node graph (first previous-id-seq)))
+
+
+(defn- default-build-fn
+  [graph node predecessor-ids successor-ids]
+  (let [previous (ensure-single-parent graph node predecessor-ids)]
+    (carry-io-dims-forward previous node)))
+
+
+
 ;;lots of nodes do not need to be built.
 (defmethod build-node :default
-  [graph node p-id-seq s-id-seq]
-  node)
+  [& args]
+  (apply default-build-fn args))
 
 
 (defn stream-descriptor
@@ -211,6 +261,14 @@ a vector of floats."
     :width width})
   ([width]
    (stream-descriptor 1 1 width)))
+
+
+(defn shape->stream-descriptor
+  [shape]
+  (condp = (count shape)
+    1 (stream-descriptor (first shape))
+    3 (let [[channels height width] shape]
+        (stream-descriptor channels height width))))
 
 
 (defn stream-descriptor->size
@@ -429,7 +487,9 @@ that each id has an unambiguous mapping to a dimension."
 
 (defn dimensions->size
   ^long [dims]
-  (apply * (vals (dissoc dims :id))))
+  (apply * (vals (-> dims
+                     (dissoc :id)
+                     (dissoc :stream)))))
 
 
 (defn dimensions->shape
@@ -682,14 +742,12 @@ at least :buffer if not both :buffer and :gradient."
 
 
 (defn resolve-arguments
-  "Resolve the arguments to a particular node.  It is expected the
-  stream map contains the augmented data if necessary.  Note that for
-  uniformity the values are returned without modification.  This means
-  the the format of the stream map and the node->output-map must be
-  entries of the form of at least {:buffer data} instead of linking
-  key directly to data.  This allows a uniform system both when doing
-  auto-differentiation and when simply doing execution because when
-  doing back propagation the entries must link to both {:buffer
+  "Resolve the arguments to a particular node.  It is expected the stream map contains the
+  augmented data if necessary.  Note that for uniformity the values are returned without
+  modification.  This means the the format of the stream map and the node->output-map must be
+  entries of the form of at least {:buffer data} instead of linking key directly to data.  This
+  allows a uniform system both when doing auto-differentiation and when simply doing execution
+  because when doing back propagation the entries must link to both {:buffer
   :gradient}."
   [graph node stream-map node-id->output-map]
   (->> (get-node-arguments node)
@@ -722,3 +780,26 @@ at least :buffer if not both :buffer and :gradient."
     (throw (ex-info "Failed to find buffer for buffer id"
                     {:buffer-id buffer-id
                      :buffers (keys (get graph :buffers))}))))
+
+
+(defmulti generate-stream-definitions
+  "A stream definition is a pair of [stream shape].  Some nodes can generate this assuming
+  they are built (normal loss terms for example) but most nodes cannot say anything useful
+  for this step."
+  (fn [graph node]
+    (get node :type)))
+
+
+(defmethod generate-stream-definitions :default
+  [graph node]
+  [])
+
+
+(defn generate-leaf-streams
+  [graph]
+  (->> (leaves graph)
+       (map #(get-node graph %))
+       (mapcat (partial generate-stream-definitions graph))
+       (reduce (fn [graph [stream shape]]
+                 (add-stream graph stream (shape->stream-descriptor shape)))
+               graph)))
