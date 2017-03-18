@@ -796,6 +796,9 @@ at least :buffer if not both :buffer and :gradient."
 
 
 (defn generate-leaf-streams
+  "Given the graph datastructure, generate streams for stream bindings. Node's generate streams
+  based on their output size and possibly based on some internal state defined in the node such
+  as a combination of the stream they are bound to and another node's output size."
   [graph]
   (->> (leaves graph)
        (map #(get-node graph %))
@@ -803,3 +806,46 @@ at least :buffer if not both :buffer and :gradient."
        (reduce (fn [graph [stream shape]]
                  (add-stream graph stream (shape->stream-descriptor shape)))
                graph)))
+
+
+(defn filter-graph
+  "Given a graph and a predicate produce a new graph with only functions that match
+the predicate."
+  [graph pred]
+  (->> (get graph :nodes)
+       vals
+       (remove pred)
+       (reduce remove-node graph)))
+
+
+(defn get-required-streams
+  "Run through nodes of graph and keep track of streams encountered.  Return the set of stream
+  names."
+  [graph]
+  (->> (get graph :nodes)
+       vals
+       (mapcat #(get-node-arguments %))
+       (filter #(= :stream (get % :type)))
+       (map :stream)
+       set))
+
+
+(defn get-output-node-ids
+  "Run through nodes of graph and identify nodes are either leaves or that are bound in
+  arguments.  Only nodes that return truthy for predicate will be returned."
+  [graph pred]
+  (let [passing-leaves (->> (leaves graph)
+                            (map #(get-node graph))
+                            (filter pred)
+                            (map :id))
+        ;;There is an inherent issue here in that losses (not loss gradients) are always
+        ;;calculated on the cpu.  This means we have to jump through hoops in order to get them
+        ;;evaulated during training (to measure loss).  This would be aleviated if loss terms
+        ;;are made part of the graph.
+        passing-args (->> (get graph :nodes)
+                          vals
+                          (mapcat #(get-node-arguments %))
+                          (filter #(= :node-output (get % :type)))
+                          (map :node-id)
+                          (filter (comp pred #(get-node graph %))))]
+    (set passing-leaves passing-args)))

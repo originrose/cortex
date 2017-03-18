@@ -103,7 +103,7 @@ constructors are all variable args with the extra arguments expected to be
   [graph node argument]
   [(graph/node->output-size node)])
 
-b
+
 (defmethod graph/build-node :linear
   [graph node predecessor-id-seq successor-id-seq]
   (-> (graph/ensure-single-parent graph node predecessor-id-seq)

@@ -21,7 +21,7 @@
    (layers/softmax)])
 
 (def mnist-description-with-toys
-  [(layers/input 28 28 1)
+  [(layers/input 28 28 1 :id :data)
    (layers/multiplicative-dropout 0.1)
    (layers/convolutional 5 0 1 20 :weights {:l1-regularization 0.001})
    (layers/max-pooling 2 0 2)
@@ -33,13 +33,14 @@
    (layers/dropout 0.75)
    (layers/batch-normalization)
    (layers/linear 500) ;;If you use this description put that at 1000
-   (layers/relu :id :feature :center-loss {:labels {:stream :labels}
-                                           :label-indexes {:stream :labels}
-                                           :label-inverse-counts {:stream :labels}
+   (layers/relu :id :feature :center-loss {:labels {:stream :output}
+                                           :label-indexes {:stream :output}
+                                           :label-inverse-counts {:stream :output}
                                            :lambda 0.05
                                            :alpha 0.9})
    (layers/dropout 0.5)
-   (layers/linear->softmax 10)])
+   (layers/linear 10)
+   (layers/softmax :id :output)])
 
 
 (defn realize-traversal-pass
