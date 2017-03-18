@@ -194,69 +194,6 @@ which means removing extra information from them."
       second))
 
 
-(defn- check-for-io-bindings
-  "Without any io bindings there is no traversal."
-  [network]
-  (when-not (and (> (count (get-input-bindings network)) 0)
-                 (> (count (get-output-bindings network)) 0))
-    (throw (ex-info "Either no input or no output bindings were found on the network"
-                    {:input-bindings (get-input-bindings network)
-                     :output-bindings (get-output-bindings network)}))))
-
-
-(defn- merge-streams
-  [stream-map graph]
-  (reduce (fn [graph [stream size]]
-            (if-not (contains? (get graph :streams) stream)
-              (graph/add-stream graph stream (graph/stream-descriptor
-                                              (long size)))
-              graph))
-          graph
-          stream-map))
-
-
-(defn- set-loss-terms
-  [loss-term-vec graph]
-  ;;map each loss term to the node it is most associated with (its output)
-  ;;and attach it to that node in the graph.  Generate parameters and then
-  ;;create a new vector of loss terms with the added information.
-  (reduce (fn [[graph loss-term-vec] loss-term]
-            (when-not (contains? (-> (graph/get-node-metadata loss-term)
-                                     :passes
-                                     set)
-                                 :loss)
-              (throw (ex-info "Loss term does not contain the loss pass in it's metadata"
-                              {:loss-term loss-term
-                               :metadata (graph/get-node-metadata loss-term)})))
-            (let [node-id (->> (graph/get-node-arguments loss-term)
-                               (map :node-id)
-                               (remove nil?)
-                               first)
-                  _ (when-not node-id
-                      (throw (ex-info "failed to find node for loss term"
-                                      {:term loss-term
-                                       :arguments (vec (graph/get-node-arguments
-                                                        loss-term))})))
-                  [graph term-id] (graph/add-node graph loss-term [node-id])]
-              [graph (conj loss-term-vec (assoc loss-term :id term-id))]))
-          [graph []]
-          loss-term-vec))
-
-
-(defn- generate-loss-term-parameters
-  "Generating loss term parameters modifies the nodes associated with those
-parameters by adding buffer-ids in some cases."
-  [network stream-map loss-term-vec]
-  (let [[graph loss-term-vec] (->> (get network :compute-graph)
-                                   (merge-streams stream-map)
-                                   (set-loss-terms loss-term-vec))
-        graph (graph/generate-parameters graph)]
-    [(assoc network :compute-graph graph)
-     (->> loss-term-vec
-          (map :id)
-          (mapv #(graph/get-node graph %)))]))
-
-
 (defn add-training-traversal
   "Given a network create master buffer list, traversals (forward,backward)
   and input and output buffer lists.
@@ -282,9 +219,7 @@ parameters by adding buffer-ids in some cases."
    & {:keys [optimizer keep-non-trainable? loss-fn]
       :or {optimizer (adam/adam)
            loss-function []}}]
-  (check-for-io-bindings network)
-  (let [network (remove-existing-loss-terms network)
-        forward-traversal (forward-traversal network)
+  (let [forward-traversal (forward-traversal network)
         forward-traversal (filter-traversal network :training forward-traversal)
         buffer-map (traversal->buffers forward-traversal {})
         backward-pass (if keep-non-trainable?
@@ -313,9 +248,7 @@ parameters by adding buffer-ids in some cases."
   and we expect implementations to have multiple batches in flight simultaneously.  We
   default to optimising for memory because this avoids OOM situations with large networks."
   [{:keys [compute-graph] :as network} stream-map]
-  (check-for-io-bindings network)
-  (let [network (remove-existing-loss-terms network)
-        forward-traversal (->> (forward-traversal network)
+  (let [forward-traversal (->> (forward-traversal network)
                                (filter-traversal network :inference))]
     (update network
             :traversal

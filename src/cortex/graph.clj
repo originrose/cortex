@@ -281,13 +281,18 @@ a vector of floats."
   (assoc-in graph [:streams stream-name] shape-descriptor))
 
 
-(defn stream->size
+(defn stream->descriptor
   [graph stream-name]
   (if-let [stream-shape (get-in graph [:streams stream-name])]
-    (stream-descriptor->size stream-shape)
+    stream-shape
     (throw (ex-info "Failed to find stream in graph"
                     {:stream stream-name
                      :available-streams (keys (get graph :streams))}))))
+
+
+(defn stream->size
+  [graph stream-name]
+  (stream-descriptor->size (stream->descriptor graph stream-name)))
 
 
 (defn get-node
@@ -311,9 +316,6 @@ a vector of floats."
       node)
     (assoc node :id (util/generate-id (name (get node :type))
                                       (set (keys (get graph :nodes)))))))
-
-
-
 
 
 (defn- edges
@@ -815,10 +817,11 @@ the predicate."
   (->> (get graph :nodes)
        vals
        (remove pred)
+       (map :id)
        (reduce remove-node graph)))
 
 
-(defn get-required-streams
+(defn graph->required-streams
   "Run through nodes of graph and keep track of streams encountered.  Return the set of stream
   names."
   [graph]
@@ -830,12 +833,12 @@ the predicate."
        set))
 
 
-(defn get-output-node-ids
+(defn graph->output-node-ids
   "Run through nodes of graph and identify nodes are either leaves or that are bound in
   arguments.  Only nodes that return truthy for predicate will be returned."
   [graph pred]
   (let [passing-leaves (->> (leaves graph)
-                            (map #(get-node graph))
+                            (map #(get-node graph %))
                             (filter pred)
                             (map :id))
         ;;There is an inherent issue here in that losses (not loss gradients) are always
@@ -848,4 +851,4 @@ the predicate."
                           (filter #(= :node-output (get % :type)))
                           (map :node-id)
                           (filter (comp pred #(get-node graph %))))]
-    (set passing-leaves passing-args)))
+    (set (concat passing-leaves passing-args))))

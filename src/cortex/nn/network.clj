@@ -222,58 +222,46 @@
         (mapcat (partial network->node-parameters network)))))
 
 
-(defn loss-output-bindings
+(defn is-non-loss-node?
+  [node]
+  (not (loss/is-loss-node? node)))
+
+
+(defn training-graph
   [network]
-  (->> (get-in network [:traversal :loss-function])
-       (mapcat loss/get-loss-term-node-outputs)))
+  (get network :compute-graph))
 
 
-(defn output-bindings
-  "Return the outputs of the network.  Anything explicity marked with an output binding
-and anything that has a loss term attached to it's output becomes an output binding."
+(defn inference-graph
   [network]
-  (let [forward-pass (get-in network [:traversal :forward])
-        id->pass (->> (group-by :id forward-pass)
-                      (map (fn [[k v]]
-                             (when-not (= 1 (count v))
-                               (throw (ex-info "Node mapped to multiple pass operations"
-                                               {:node-id k
-                                                :passes v})))
-                             [k (first v)]))
-                      (into {}))
-        graph (network->graph network)]
-    (->> (concat (traverse/get-output-bindings network)
-                 (loss-output-bindings network))
-         (map :node-id)
-         distinct
-         (map (fn [node-id]
-                (when-not (= 1 (count (get-in id->pass [node-id :outgoing])))
-                  (throw (ex-info "Output nodes must have a single output."
-                                  {:node-id node-id
-                                   :pass (get id->pass node-id)})))
-                (let [output-id (first (get-in id->pass [node-id :outgoing]))]
-                  {:node-id node-id
-                   :buffers (get-in network [:compute-binding
-                                             :traversal-buffers
-                                             output-id])
-                   :output-size (graph/node->output-size
-                                 (graph/get-node graph node-id))}))))))
+  (graph/filter-graph (training-graph network)
+                      is-non-loss-node?))
 
 
-(defn input-bindings
+(defn training-output-node-ids
   [network]
-  (->> (traverse/get-input-bindings network)
-       (filter #(get % :stream))
-       (map (fn [{:keys [stream node-id] :as entry}]
-              (assoc entry
-                :buffers
-                (get-in network [:compute-binding
-                                 :traversal-buffers
-                                 {:stream stream}])
-                :size (get-in network [:compute-graph
-                                       :nodes
-                                       node-id
-                                       :input-size]))))))
+  (graph/graph->output-node-ids (training-graph network) is-non-loss-node?))
+
+
+(defn inference-output-node-ids
+  [network]
+  (graph/graph->output-node-ids (inference-graph network) identity))
+
+
+(defn- graph-streams
+  [net-graph]
+  (->> (graph/graph->required-streams net-graph)
+       (map #(vector % (graph/stream->descriptor net-graph %)))))
+
+
+(defn- training-streams
+  [network]
+  (graph-streams (training-graph network)))
+
+
+(defn inference-streams
+  [network]
+  (graph-streams (inference-graph network)))
 
 
 (defn output-values
