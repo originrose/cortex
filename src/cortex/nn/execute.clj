@@ -673,19 +673,19 @@ any loss-specific parameter buffers."
 ;;  Inference
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn- infer-seq-support-data
-  [network]
+  [network output-bindings]
   (let [batch-size (long (get network :batch-size))
         driver (network/driver network)
         datatype (network/datatype network)
-        output-bindings (->> (network/output-bindings network)
+        output-bindings (->> output-bindings
                              (mapv (fn [{:keys [output-size] :as entry}]
                                      (assoc entry
-                                       :elem-count (* batch-size (long output-size))
-                                       :host-buffer
-                                       (drv/allocate-host-buffer driver
-                                                                 (* batch-size
-                                                                    (long output-size))
-                                                                 datatype)))))
+                                            :elem-count (* batch-size (long output-size))
+                                            :host-buffer
+                                            (drv/allocate-host-buffer driver
+                                                                      (* batch-size
+                                                                         (long output-size))
+                                                                      datatype)))))
         copy-fn (fn [^long idx ^long output-size host-buffer double-buffers]
                   (dtype/copy! host-buffer (* idx output-size)
                                (get double-buffers idx) 0
@@ -814,7 +814,8 @@ any loss-specific parameter buffers."
                                              false
                                              [stream->data-map]))
         ;;generate a sequence of buffers in order to generate the numeric gradients.
-        numeric-buffers (concat (->> (network/input-bindings network)
+        numeric-buffers (concat (->> (network/training-streams network)
+                                     (network/input-streams->input-bindings)
                                      (map (fn [{:keys [stream] :as entry}]
                                             (merge (dissoc entry :buffers)
                                                    (get entry :buffers)))))
@@ -906,17 +907,6 @@ any loss-specific parameter buffers."
                       (assoc loss-term :value)))))))
 
 
-(defn- setup-network
-  "Setup a network for either training or inference."
-  [context network input-bindings output-bindings batch-size traverse-fn]
-  (-> network
-      (assoc  :batch-size batch-size) network
-        (traverse/bind-input-bindings input-bindings)
-        (traverse/bind-output-bindings output-bindings)
-        (traverse-fn)
-        (bind-context-to-network context {})))
-
-
 (defn dataset-batches
   "Paritions the dataset into batches and does the seq-of-maps ->
   map-of-seqs transformation."
@@ -926,9 +916,11 @@ any loss-specific parameter buffers."
          (partition batch-size)
          (map #(apply merge-with conj initial-map %)))))
 
+
 (defn- augmented-stream-key?
   [k]
   (and (map? k) (:stream k) (:augmentation k)))
+
 
 ;; TODO: can we get rid of required keys here by pre-filtering the dataset (from the traversal leaves)?
 (defn batch-buffers
@@ -938,8 +930,8 @@ any loss-specific parameter buffers."
         datatype (network/datatype network)
         required-keys (clojure.set/union
                        (if training?
-                         (traverse/required-io-keys network)
-                         (traverse/required-input-keys network))
+                         (network/training-streams network)
+                         (network/inference-streams network))
                        (set (filter augmented-stream-key? (keys batch))))
         batch-size (long (:batch-size network))]
     (when (zero? (count required-keys))

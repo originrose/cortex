@@ -464,6 +464,10 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
   (->> (get graph :nodes)
        vals
        (filter is-loss-node?)
+       ;;When loss functions are just standard nodes then this will change
+       (map #(dissoc %
+                     :input-dimensions
+                     :output-dimensions))
        vec))
 
 

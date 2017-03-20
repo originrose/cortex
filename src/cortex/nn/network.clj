@@ -11,8 +11,7 @@
     [cortex.loss :as loss]
     [cortex.compute.driver :as drv]
     [cortex.compute.math :as math]
-    [cortex.nn.layers :as layers]
-    [cortex.nn.traverse :as traverse])
+    [cortex.nn.layers :as layers])
   (:import [java.util UUID]))
 
 (def MAX-RESULT-VECTOR-SIZE 100)
@@ -105,7 +104,7 @@
 
 
 
-(defn network
+(defn empty-network
   ([]
    {:compute-graph (graph/empty-graph)}))
 
@@ -114,6 +113,9 @@
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
   ([network network-desc]
+   (when-not (get network :compute-graph)
+     (throw (ex-info "This doesn't look like a network; missing compute-graph key"
+                     {:network network})))
    (update network :compute-graph
      (fn [graph]
        (-> (first
@@ -129,7 +131,7 @@
            ;;Generate parameters and ensure shapes match
            graph/generate-parameters))))
   ([network-desc]
-   (linear-network {:compute-graph (graph/empty-graph)} network-desc)))
+   (linear-network (empty-network) network-desc)))
 
 
 
@@ -161,17 +163,51 @@
   [network]
   (get-in network [:compute-binding :loss-function]))
 
+(defn network->graph
+  [network]
+  (if-let [retval (get network :compute-graph)]
+    retval
+    (throw (ex-info "Network does not appear to contain a graph; keys should contain :compute-graph"
+                    {:network-keys (keys network)}))))
+
+(defn is-non-loss-node?
+  [node]
+  (not (loss/is-loss-node? node)))
+
+
+(def graph-types
+  [:training ;;Includes loss nodes
+   :inference ;;Loss nodes are filtered out.
+   ])
+
+
+(defn specific-graph
+  [network graph-type]
+  (let [initial-graph (network->graph network)]
+    (condp = graph-type
+      :training
+      initial-graph
+      :inference
+      (graph/filter-graph initial-graph is-non-loss-node?))))
+
+(defn- ensure-1-leaf
+  [network]
+  (let [net-graph (network->graph network)
+        leaves (graph/leaves net-graph)]
+    (when-not (= 1 (count leaves))
+      (throw (ex-info "Graph must only have 1 leaf"
+                      {:leaves leaves})))
+    network))
+
 ;; When using these functions, make sure to call traverse/auto-bind-io
 ;; and traverse/network->training-traversal on the resulting network
 (defn assoc-layers-to-network
-  "Appends a list of layers to the end of the compute-graph"
+  "Appends a list of layers to the end of the compute-graph."
   [network layer-list]
-  (let [leaves (graph/leaves (get network :compute-graph))
-        layer-list (vec (flatten layer-list))]
-    (when-not (= 1 (count leaves))
-      (throw (ex-info "cannot auto-append to graphs with either zero or multiple leaves"
-                      {:leaves leaves})))
-    (linear-network network (update layer-list 0 #(assoc % :parents leaves)))))
+  (let [network (-> (assoc network :compute-graph (specific-graph network :inference))
+                    ensure-1-leaf)]
+    (linear-network network (assoc-in (vec layer-list) [0 :parents]
+                                      (graph/leaves (network->graph network))))))
 
 
 (defn dissoc-layers-from-network
@@ -192,13 +228,6 @@
           (fn [graph]
            (graph/update-node graph node-id #(assoc % key value)))))
 
-
-(defn network->graph
-  [network]
-  (if-let [retval (get network :compute-graph)]
-    retval
-    (throw (ex-info "Network does not appear to contain a graph; keys should contain :compute-graph"
-                    {:network-keys (keys network)}))))
 
 
 (defn network->node
@@ -222,46 +251,48 @@
         (mapcat (partial network->node-parameters network)))))
 
 
-(defn is-non-loss-node?
-  [node]
-  (not (loss/is-loss-node? node)))
+(defn output-node-ids
+  [network graph-type]
+  (let [spec-graph (specific-graph network graph-type)]
+    (condp = graph-type
+      :training
+      (graph/graph->output-node-ids spec-graph is-non-loss-node?)
+      :inference
+      (graph/graph->output-node-ids spec-graph identity))))
 
 
-(defn training-graph
-  [network]
-  (get network :compute-graph))
+(defn graph-streams
+  [network graph-type]
+  (let [spec-graph (specific-graph network graph-type)]
+   (->> (graph/graph->required-streams spec-graph)
+        (map #(vector % (graph/stream->descriptor spec-graph %))))))
 
 
-(defn inference-graph
-  [network]
-  (graph/filter-graph (training-graph network)
-                      is-non-loss-node?))
+(defn output-ids->output-bindings
+  "Get a sequence of at least:
+{ :node-id
+  :output-size
+}"
+  [network output-id-seq]
+  (mapv (fn [id]
+          {:size (graph/node->output-size
+                  (graph/get-node
+                   (get network :compute-graph)))
+           :node-id id})
+        output-id-seq))
 
 
-(defn training-output-node-ids
-  [network]
-  (graph/graph->output-node-ids (training-graph network) is-non-loss-node?))
-
-
-(defn inference-output-node-ids
-  [network]
-  (graph/graph->output-node-ids (inference-graph network) identity))
-
-
-(defn- graph-streams
-  [net-graph]
-  (->> (graph/graph->required-streams net-graph)
-       (map #(vector % (graph/stream->descriptor net-graph %)))))
-
-
-(defn- training-streams
-  [network]
-  (graph-streams (training-graph network)))
-
-
-(defn inference-streams
-  [network]
-  (graph-streams (inference-graph network)))
+(defn input-streams->input-bindings
+  "Get a sequence of at least:
+{:stream
+ :output-size
+}"
+  [network input-stream-seq]
+  (->> (mapv
+        (fn [id]
+          {:stream id
+           :size (graph/stream->size (get network :compute-graph) id)}))
+       input-stream-seq))
 
 
 (defn output-values
@@ -288,6 +319,42 @@
                                       buffer)})
                          double-buffers))))
          (apply map merge))))
+
+
+(defn loss-function
+  "Loss functions are summations of terms.  Thus they are order independent.  To highlight this
+  contract and to make comparisons valid over time, the terms are returned in a set."
+  [network]
+  (-> (network->graph network)
+      loss/generate-loss-function
+      set))
+
+
+(defn- node-id-is-in-pass?
+  [graph pass node-id]
+  (contains? (layers/get-pass-set
+              (graph/get-node graph node-id))
+             pass))
+
+
+(defn leaf-inference-layers
+  [network]
+  (let [graph (network->graph network)
+        is-inference? (partial node-id-is-in-pass? graph :inference)
+        is-training? (partial node-id-is-in-pass? graph :training)
+        keep-inference-nodes (fn [map-data]
+                               (->> map-data
+                                    (map (fn [[k v]]
+                                           (when (is-inference? k)
+                                             (when-let [v (-> (filter #(or (is-inference? %)
+                                                                           (is-training? %)) v)
+                                                             seq)]
+                                              k))))
+                                    (remove nil?)
+                                    set))
+        parent-set (keep-inference-nodes (graph/parent->child-map graph))
+        child-set (keep-inference-nodes (graph/child->parent-map graph))]
+    (c-set/difference child-set parent-set)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Print Layer Summary
@@ -351,30 +418,3 @@ opposed to networks), but consider:
                          (for [k parameter-keys]
                                    [k (layer->buffer-shape network layer k)])))))
          (pprint/print-table (concat ["type" "input" "output"] parameter-keys)))))
-
-
-(defn- node-id-is-in-pass?
-  [graph pass node-id]
-  (contains? (layers/get-pass-set
-              (graph/get-node graph node-id))
-             pass))
-
-
-(defn leaf-inference-layers
-  [network]
-  (let [graph (network->graph network)
-        is-inference? (partial node-id-is-in-pass? graph :inference)
-        is-training? (partial node-id-is-in-pass? graph :training)
-        keep-inference-nodes (fn [map-data]
-                               (->> map-data
-                                    (map (fn [[k v]]
-                                           (when (is-inference? k)
-                                             (when-let [v (-> (filter #(or (is-inference? %)
-                                                                           (is-training? %)) v)
-                                                             seq)]
-                                              k))))
-                                    (remove nil?)
-                                    set))
-        parent-set (keep-inference-nodes (graph/parent->child-map graph))
-        child-set (keep-inference-nodes (graph/child->parent-map graph))]
-    (c-set/difference child-set parent-set)))

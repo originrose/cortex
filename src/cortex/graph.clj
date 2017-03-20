@@ -131,6 +131,10 @@ buffers."
   If any of the predecessors does not exist an error will be thrown.  Returns a pair
   of [graph node-id]"
   [graph node predecessor-id-seq]
+  (when-not (contains? graph :nodes)
+    (throw (ex-info "nil graph in add-node"
+                    {:graph graph
+                     :node node})))
   (when-not (every? (get graph :nodes) predecessor-id-seq)
     (throw (ex-info "Failed to find all predecessor id's in graph"
                     {:id-seq predecessor-id-seq
@@ -198,6 +202,13 @@ buffers."
 (declare node->output-dimensions)
 
 
+(defn clear-dimension-identifiers
+  "Remove identifiers on dimensions.  This is used as a general tool when copying input
+  dimensions to output dimensions.  The identifiers on the input dimensions should be removed."
+  [dims]
+  (dissoc dims :id :stream))
+
+
 (defn ensure-single-output-dimensions
   "Ensure a node has one output and get it's output dimensions."
   [previous node]
@@ -209,8 +220,9 @@ buffers."
      (throw (ex-info "Previous node has multiple output dimensions pertaining to this node."
                      {:previous previous
                       :node node
-                      :output-dimensions (node->output-dimensions previous)}))))
-  (first (node->output-dimensions previous)))
+                      :output-dimensions output-dims})))
+   (clear-dimension-identifiers (first output-dims))))
+
 
 
 (defn carry-input-dims-forward
@@ -219,14 +231,13 @@ buffers."
                                   (ensure-single-output-dimensions previous item)
                                   :id (get previous :id))]))
 
-
 (defn carry-io-dims-forward
   [previous item]
   (let [input-dims (ensure-single-output-dimensions previous item)]
     ;;For single input nodes it is still important to note the parent this input came from.
     (assoc item :input-dimensions [(assoc input-dims :id (get previous :id))]
            ;;But for single outputs the source is clear.
-           :output-dimensions [(dissoc input-dims :id)])))
+           :output-dimensions [input-dims])))
 
 
 (defn ensure-single-parent
@@ -489,9 +500,7 @@ that each id has an unambiguous mapping to a dimension."
 
 (defn dimensions->size
   ^long [dims]
-  (apply * (vals (-> dims
-                     (dissoc :id)
-                     (dissoc :stream)))))
+  (apply * (vals (clear-dimension-identifiers dims))))
 
 
 (defn dimensions->shape

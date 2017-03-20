@@ -60,7 +60,6 @@ constructors are all variable args with the extra arguments expected to be
                       {:node node})))
     (if-let [stream-desc (get-in graph [:streams (get input-data :stream)])]
       (let [io-dimension (assoc stream-desc :stream (get input-data :stream))]
-        ; TODO: why does an input node have input-* anything?
         (assoc node
                :input-dimensions [io-dimension]
                :output-dimensions [io-dimension]))
