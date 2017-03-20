@@ -5,7 +5,7 @@
             [cortex.nn.traverse :as traverse]
             [cortex.verify.utils :as utils]
             [cortex.verify.nn.layers :as verify-layers]
-            [cortex.verify.nn.train :as verify-train]
+            [cortex.verify.nn.data :as verify-data]
             [clojure.test :refer :all]
             [cortex.optimize :as opt]
             [cortex.loss :as loss]
@@ -48,9 +48,9 @@
                                           input output batch-size)
                                          :bind-opts {:numeric-gradients? true}) network
     (execute/generate-numeric-gradients context network
-                                   (merge (verify-layers/vec->stream-map input :data)
-                                          (verify-layers/vec->stream-map output :labels))
-                                   epsilon)
+                                        (merge (verify-layers/vec->stream-map input :data)
+                                               (verify-layers/vec->stream-map output :labels))
+                                        epsilon)
     (verify-layers/unpack-bound-network context network :test)))
 
 
@@ -75,8 +75,8 @@
                        (add-id-to-desc-list
                         [(layers/input 2)
                          (layers/linear 1)])
-                       [(take batch-size verify-train/CORN-DATA)]
-                       [(take batch-size verify-train/CORN-LABELS)]
+                       [(take batch-size verify-data/CORN-DATA)]
+                       [(take batch-size verify-data/CORN-LABELS)]
                        1e-4 batch-size)
         check-gradients)))
 

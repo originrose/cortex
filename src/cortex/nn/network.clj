@@ -14,8 +14,6 @@
     [cortex.nn.layers :as layers])
   (:import [java.util UUID]))
 
-(def MAX-RESULT-VECTOR-SIZE 100)
-
 
 (defn embed-param-args
   [desc]
@@ -133,35 +131,6 @@
   ([network-desc]
    (linear-network (empty-network) network-desc)))
 
-
-
-(defn backend
-  [network]
-  (get-in network [:compute-binding :backend]))
-
-(defn driver
-  [network]
-  (get-in network [:compute-binding :backend :driver]))
-
-(defn stream
-  [network]
-  (get-in network [:compute-binding :backend :stream]))
-
-(defn datatype
-  [network]
-  (get-in network [:compute-binding :backend :datatype]))
-
-(defn parameters
-  [network]
-  (get-in network [:compute-binding :trainable-parameters]))
-
-(defn optimizers
-  [network]
-  (get-in network [:compute-binding :optimizer]))
-
-(defn loss-fn
-  [network]
-  (get-in network [:compute-binding :loss-function]))
 
 (defn network->graph
   [network]
@@ -287,38 +256,12 @@
 {:stream
  :output-size
 }"
-  [network input-stream-seq]
+  [network graph-stream-seq]
   (->> (mapv
-        (fn [id]
+        (fn [[id descriptor]]
           {:stream id
-           :size (graph/stream->size (get network :compute-graph) id)}))
-       input-stream-seq))
-
-
-(defn output-values
-  [{:keys [batch-size] :as network} output-buffers]
-  (let [stream (stream network)]
-    (->> output-buffers
-         (mapv (fn [{:keys [buffers node-id output-size host-buffer elem-count]}]
-                 (let [buffer (get buffers :buffer)
-                       double-buffers (->> (repeatedly batch-size
-                                                       #(double-array output-size))
-                                           vec)]
-                   (drv/copy-device->host stream
-                                          (math/device-buffer buffer) 0
-                                          host-buffer 0
-                                          elem-count)
-                   (drv/wait-for-event (drv/create-event stream))
-                   (c-for [idx 0 (< idx batch-size) (inc idx)]
-                          (dtype/copy! host-buffer (long (* idx output-size))
-                                       (get double-buffers idx) 0
-                                       output-size))
-                   (mapv (fn [buffer]
-                           {node-id (if (< output-size MAX-RESULT-VECTOR-SIZE)
-                                      (vec buffer)
-                                      buffer)})
-                         double-buffers))))
-         (apply map merge))))
+           :size (graph/stream-descriptor->size descriptor)}))
+       graph-stream-seq))
 
 
 (defn loss-function

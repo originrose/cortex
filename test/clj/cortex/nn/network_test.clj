@@ -3,15 +3,8 @@
     [clojure.test :refer :all]
     [clojure.core.matrix :as m]
     [cortex.graph :as graph]
-    [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]]
     [cortex.nn.layers :as layers]
-    [cortex.nn.execute :as execute]
     [cortex.nn.network :as network]))
-
-(defn- corn-dataset
-  []
-  (mapv (fn [d l] {:data d :labels l})
-        CORN-DATA CORN-LABELS))
 
 
 (deftest specify-weights-bias
@@ -74,11 +67,16 @@
                                         (layers/concatenate :parents [:left :right] :id :concat)
                                         (layers/linear 10)])
         graph (network/network->graph network)
-        concat-node (graph/get-node graph :concat)]
+        concat-node (graph/get-node graph :concat)
+        clean-output-dims (fn [node-id]
+                           (-> (graph/get-node graph node-id)
+                               graph/node->output-dimensions
+                               first
+                               graph/clear-dimension-identifiers))]
     (is (= (+ (* 25 25 10) 500)
            (graph/node->output-size concat-node)))
-    (is (= (set [(assoc (first (graph/node->output-dimensions (graph/get-node graph :right)))
+    (is (= (set [(assoc (clean-output-dims :right)
                         :id :right)
-                 (assoc (first (graph/node->output-dimensions (graph/get-node graph :left)))
+                 (assoc (clean-output-dims :left)
                         :id :left)])
            (set (graph/node->input-dimensions concat-node))))))

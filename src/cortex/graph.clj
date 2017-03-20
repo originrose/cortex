@@ -385,10 +385,9 @@ a vector of floats."
                    #(get p->c-map %)
                    :roots)
          (drop 1)
-         ;;Account for cases where the graph has multiple roots.
-         ;;by taking the last occurance of a multiply-occuring node.
-         ;;this ensures that a child will not get visited until after
-         ;;every parent has been visited.
+         ;;Account for cases where the graph has multiple roots.  by taking the last occurance
+         ;;of a multiply-occuring node.  this ensures that a child will not get visited until
+         ;;after every parent has been visited.
          reverse
          distinct
          reverse)))

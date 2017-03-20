@@ -125,8 +125,8 @@
   [& [context]]
   (let [n-epochs 4
         batch-size 10
-        dataset (take 1000 @training-dataset*)
-        test-dataset @test-dataset*
+        dataset (take 1000 @mnist-training-dataset*)
+        test-dataset @mnist-test-dataset*
         test-labels (map :label test-dataset)
         network (network/linear-network MNIST-NETWORK)
         _ (println (format "Training MNIST network for %s epochs..." n-epochs))

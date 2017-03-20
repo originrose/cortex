@@ -342,13 +342,13 @@ the client's perspective is located in the buffers section."
 
 (defn get-forward-buffers
   "Get the set of buffers used for the forward pass"
-  [network]
-  (->> (get-in network [:traversal :forward])
+  [traversal]
+  (->> (get traversal :forward)
        traversal-buffers))
 
 
 (defn get-backward-buffers
   "Get the set of buffers used for the backward pass"
-  [network]
-  (->> (get-in network [:traversal :backward])
+  [traversal]
+  (->> (get traversal :backward)
        traversal-buffers))
