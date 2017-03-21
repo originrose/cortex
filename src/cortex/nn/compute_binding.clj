@@ -32,7 +32,7 @@
              (not (empty? (first batch-sequence))))
     (->> (map (fn [stream-name]
                 [stream-name
-                 (mapcat #(get % stream-name) batch-sequence)])
+                 (map #(get % stream-name) batch-sequence)])
               (keys (first batch-sequence)))
          (into {}))))
 
@@ -469,7 +469,13 @@ can replace either the :buffer or the :gradient."
                            (let [input-buffer (get id->buffer-map
                                                    (get map-key traverse-map-key))]
                              (if input-buffer
-                               [map-key (assoc buffer-entry buffer-type input-buffer)]
+                               (if (= (dtype/ecount input-buffer)
+                                      (dtype/ecount (get buffer-entry buffer-type)))
+                                 [map-key (assoc buffer-entry buffer-type input-buffer)]
+                                 (throw (ex-info "Existing buffer and replacement buffer elem-counts do not match!"
+                                                 {:item-key map-key
+                                                  :incoming-ecount (dtype/ecount input-buffer)
+                                                  :existing-ecount (dtype/ecount (get buffer-entry buffer-type))})))
                                [map-key buffer-entry]))))
                     (into {})))))
 

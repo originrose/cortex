@@ -87,11 +87,10 @@
                                (gaussian/ensure-gaussian! 5 20)))
         output input]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input input-size)
-                         (layers/batch-normalization :ave-factor 1.0)])
+                       [(layers/input 1 1 input-size :id :data)
+                        (layers/batch-normalization :ave-factor 1.0 :id :test)]
                        [input] [output]
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -106,12 +105,12 @@
         input (flatten (repeat batch-size (range n-input)))
         output input]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input input-dim input-dim num-input-channels)
-                         (layers/local-response-normalization :k 1 :n lrn-n
-                                                              :alpha 1.0 :beta 0.75)])
+                       [(layers/input input-dim input-dim num-input-channels :id :data)
+                        (layers/local-response-normalization :k 1 :n lrn-n
+                                                             :alpha 1.0 :beta 0.75
+                                                             :id :test)]
                        [input] [output]
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -125,11 +124,10 @@
         input (flatten (repeat batch-size (repeat (quot n-input 2) [-1 1])))
         output input]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input input-dim input-dim n-channels)
-                         (layers/prelu)])
+                       [(layers/input input-dim input-dim n-channels :id :data)
+                        (layers/prelu :id :test)]
                        [input] [output]
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -143,7 +141,11 @@
                                (range (* batch-size item-count
                                          num-inputs)))
                     (map #(partition item-count %))
-                    (mapv vec))
+                    (mapv vec)
+                    ((fn [input-val]
+                       {:right (first input-val)
+                        :left (second input-val)})))
+
         outputs [(repeat (* item-count num-inputs batch-size) 1)]]
     (-> (get-gradients context
                        [(layers/input item-count 1 1 :id :right)
@@ -151,7 +153,7 @@
                         (layers/concatenate :parents [:left :right]
                                             :id :test)]
                        inputs outputs
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 (defn split-gradient
@@ -160,15 +162,19 @@
         input-size 5
         num-outputs 2
         inputs [(mapv vec (partition input-size (range (* batch-size input-size))))]
-        outputs (repeat num-outputs (repeat (* input-size batch-size) 1))]
+        outputs (->> (repeat num-outputs (repeat (* input-size batch-size) 1))
+                     ((fn [output-vec]
+                        {:output-1 (first output-vec)
+                         :output-2 (second output-vec)})))]
     (-> (get-gradients context
                        [(layers/input input-size)
                         (layers/split :id :test)
-                        (layers/split)
-                        (layers/split :parents [:test])]
+                        (layers/split :id :output-1)
+                        (layers/split :parents [:test] :id :output-2)]
                        inputs outputs
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
+
 
 (defn join-+-gradient
   [context]
@@ -180,7 +186,11 @@
         inputs (->> (mapv #(->>
                             (take (* batch-size %) input-sequence)
                             (partition %))
-                          input-counts))
+                          input-counts)
+                    ((fn [input-vec]
+                       {:left (first input-vec)
+                        :middle (second input-vec)
+                        :third (nth input-vec 2)})))
         output-count (apply max input-counts)
         outputs [(->> (repeat (* batch-size output-count) 1)
                       (partition output-count))]]
@@ -191,7 +201,7 @@
                         (layers/join :parents [:left :middle :right]
                                      :id :test)]
                        inputs outputs
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -205,7 +215,11 @@
         inputs (->> (mapv #(->>
                             (take (* batch-size %) input-sequence)
                             (partition %))
-                          input-counts))
+                          input-counts)
+                    ((fn [input-vec]
+                       {:left (first input-vec)
+                        :middle (second input-vec)
+                        :third (nth input-vec 2)})))
         output-count (apply max input-counts)
         outputs [(->> (repeat (* batch-size output-count) 1)
                       (partition output-count))]]
@@ -217,5 +231,5 @@
                                          :operation :*
                                          :id :test)]
                            inputs outputs
-                           1e-4 batch-size)
+                           1e-4 batch-size :test)
             check-gradients)))

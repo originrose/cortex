@@ -55,12 +55,17 @@ Furthermore infer should be both wrapped in a resource context and completely re
   checking.  The data should be saved back to the network after the passes."
   [network context batch-size stream->input-map epsilon]
   (resource/with-resource-context
-    (let [network (compute-binding/bind-context-to-network network
-                                                           context
-                                                           batch-size
-                                                           (traverse/training-traversal network)
-                                                           {:gradients? true
-                                                            :numeric-gradients? true})
+    (let [network (compute-binding/bind-context-to-network
+                   network
+                   context
+                   batch-size
+                   ;;A lot of the gradient tests have no trainable nodes so we have to disable
+                   ;;the backward pass optimization where we do not traverse nodes that contribute
+                   ;;no useful gradients to the solution.
+                   (traverse/training-traversal network
+                                                :keep-non-trainable? true)
+                   {:gradients? true
+                    :numeric-gradients? true})
           ;;Generate all of the calculated gradients.
           parameters (compute-binding/parameters network)
           ;;Store the input buffers as traversal buffers
@@ -86,15 +91,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
           stream (compute-binding/stream network)
           batch-size (compute-binding/batch-size network)
           output-buffers (compute-binding/output-binding-buffers network batch-size
-                                                                 (compute-binding/datatype network) :training)
-          forward-fn (fn [param-value host-buffer device-buffer elem-count idx]
-                       (dtype/set-value! host-buffer idx param-value)
-                       (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
-                       ;;Raw-forward is used here to avoid calling prepare-forward again.  But this
-                       ;;is not an inference pass; it is an actual forward pass.
-                       (compute-binding/do-traverse network :raw-forward)
-                       (compute-binding/batches->columnsv
-                        (compute-binding/output-values network output-buffers)))
+                                                                 (compute-binding/datatype network)
+                                                                 :training)
           stream->batches-map (->> stream->input-map
                                    (map (fn [[k v]]
                                           [k (->> v
@@ -103,15 +101,25 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                                                 batch-size))
                                                   (mapv vec))]))
                                    (into {}))
-          data->loss (fn [inference-data]
-                       (compute-binding/execute-live-loss-fn context network
-                                                             inference-data
-                                                             stream->batches-map))]
+          ;;Run the network forward and generate the loss.
+          forward-fn (fn [param-value host-buffer device-buffer elem-count idx]
+                       (dtype/set-value! host-buffer idx param-value)
+                       (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
+                       ;;Raw-forward is used here to avoid calling prepare-forward again.  But this
+                       ;;is not an inference pass; it is an actual forward pass.
+                       (compute-binding/do-traverse network :raw-forward)
+                       (let [net-outputs (-> (compute-binding/output-values network output-buffers)
+                                             compute-binding/batches->columnsv)]
+                         (compute-binding/execute-live-loss-fn
+                          context network
+                          net-outputs
+                          stream->batches-map)))]
       (doseq [{:keys [buffer numeric-gradient host-buffer] :as entry} numeric-buffers]
         (let [device-buffer (math/device-buffer buffer)]
           (when-not (and numeric-gradient host-buffer)
             (throw (ex-info "failed to allocate appropriate buffers for numeric gradients."
-                            {:buffer-keys (keys entry)})))
+                            {:buffer-keys (keys entry)
+                             :entry entry})))
           (let [elem-count (m/ecount buffer)]
             (drv/copy-device->host stream device-buffer 0 host-buffer 0 elem-count)
             (drv/wait-for-event (drv/create-event stream))
@@ -121,8 +129,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
                     negative (forward-fn (- param-value epsilon) host-buffer device-buffer elem-count idx)
                     ;;The loss is normally divided by the batch size to get an average loss
                     ;;but in our case we don't want the average; we want the actual loss.
-                    gradient (/ (* (- (double (data->loss positive))
-                                      (double (data->loss negative)))
+                    gradient (/ (* (- (double positive)
+                                      (double negative))
                                    batch-size)
                                 (* 2 epsilon))]
                 (dtype/set-value! host-buffer idx param-value)
