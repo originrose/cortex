@@ -130,16 +130,19 @@
         test-labels (map :label test-dataset)
         network (network/linear-network MNIST-NETWORK)
         _ (println (format "Training MNIST network for %s epochs..." n-epochs))
+        _ (network/print-layer-summary network (traverse/training-traversal network))
         network (reduce (fn [network epoch]
                           (let [new-network (execute/train network dataset
                                                            :context context
                                                            :batch-size batch-size)
                                 results (->> (execute/run new-network (take 100 test-dataset)
                                                :batch-size batch-size
-                                               :context context)
-                                             (map :label))
-                                score (percent= results (take 100 test-labels))]
+                                               :context context
+                                               :loss-outputs? true))
+                                loss-fn (execute/execute-loss-fn network results (take 100 test-dataset))
+                                score (percent= (map :label results) (take 100 test-labels))]
                             (println (format "Score for epoch %s: %s" (inc epoch) score))
+                            (println (loss/loss-fn->table-str loss-fn))
                             new-network))
                   network
                   (range n-epochs))

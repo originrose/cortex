@@ -338,10 +338,9 @@ opposed to networks), but consider:
          traverse/auto-bind-io
          traverse/network->training-traversal
          network/print-layer-summary)"
-  [network]
+  [network traversal]
   (let [parameter-keys (network->parameter-keys network)]
-    (->> network
-         :traversal :forward
+    (->> (get traversal :forward)
          (mapv (fn [{:keys [id]}]
                  (let [layer (graph/get-node (network->graph network) id)]
                    (into {"type" (:type layer)

@@ -34,6 +34,76 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [cortex.nn.compute-binding :as compute-binding]))
 
 
+(defn- normalize-argument-buffer
+  [arg-buf]
+  (let [buf-value (get arg-buf :buffer)]
+    (if (map? buf-value)
+      (assoc arg-buf :buffer (get buf-value :data))
+      arg-buf)))
+
+
+(defn- execute-loss-term
+  "Execute a loss term.  This uses the context to find node and loss parameters."
+  [graph loss-term inference-maps dataset-maps]
+  (when-not (= (count inference-maps)
+               (count dataset-maps))
+    (throw (ex-info "Inference and dataset counts differ"
+                    {:inference-count (count inference-maps)
+                     :dataset-count (count dataset-maps)})))
+  (* (double (loss/get-loss-lambda loss-term))
+     (/ (->> (map (fn [node-map stream-map]
+                    (loss/loss loss-term (graph/resolve-arguments graph loss-term stream-map node-map)))
+                  inference-maps dataset-maps)
+             (apply +))
+        (count inference-maps))))
+
+
+(defn live-parameter-graph
+  [network]
+  (-> (network/network->graph network)
+      (assoc :buffers #(compute-binding/get-parameter network %))))
+
+
+(defn execute-bound-loss-fn
+  "Execute a loss function against a running network returning the loss value as a double.
+  Inferences and dataset outputs are expected to be maps of data."
+  [network inferences dataset-outputs]
+  (let [param-graph (live-parameter-graph network)]
+   (apply + (->> (network/loss-function network)
+                 (map #(execute-loss-term param-graph % inferences dataset-outputs))))))
+
+
+
+(defn- augment-and-normalize-streams
+  [graph batch-data]
+  (->> (graph/augment-streams graph batch-data)
+       (map (fn [[k v]]
+              [k (if (map? v)
+                   (get v :data)
+                   v)]))
+       (into {})))
+
+
+(defn execute-loss-fn
+  "Given the set of inferences from an inference run of the network and the set of labels along
+  with the bindings (traverse/get-io-bindings network) return the loss function from the
+  traverse where each term has a :value member with it's post-lambda-multiplied value."
+  [network inferences dataset]
+  (let [augmented-dataset (->> dataset
+                               compute-binding/batches->columns
+                               (augment-and-normalize-streams (network/network->graph network))
+                               compute-binding/columns->maps)
+        ;;In this case we assum the graph has updated versions of the parameters
+        ;;So we map to a function that returns exactly the parameter.
+        param-graph (-> (network/network->graph network)
+                        (assoc :buffers #(get-in network [:compute-graph :buffers % :buffer])))]
+    (->> (network/loss-function network)
+         (mapv (fn [loss-term]
+                 (->> (execute-loss-term param-graph loss-term
+                                         inferences augmented-dataset)
+                      (assoc loss-term :value)))))))
+
+
 (defn train-batch!
   [network forward-buffer-map & {:keys [optimize?]
                                  :or [optimize? true]}]
@@ -101,6 +171,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                                                 batch-size))
                                                   (mapv vec))]))
                                    (into {}))
+          stream-maps (-> stream->batches-map
+                          compute-binding/columns->maps)
           ;;Run the network forward and generate the loss.
           forward-fn (fn [param-value host-buffer device-buffer elem-count idx]
                        (dtype/set-value! host-buffer idx param-value)
@@ -108,12 +180,11 @@ Furthermore infer should be both wrapped in a resource context and completely re
                        ;;Raw-forward is used here to avoid calling prepare-forward again.  But this
                        ;;is not an inference pass; it is an actual forward pass.
                        (compute-binding/do-traverse network :raw-forward)
-                       (let [net-outputs (-> (compute-binding/output-values network output-buffers)
-                                             compute-binding/batches->columnsv)]
-                         (compute-binding/execute-live-loss-fn
-                          context network
+                       (let [net-outputs (compute-binding/output-values network output-buffers)]
+                         (execute-bound-loss-fn
+                          network
                           net-outputs
-                          stream->batches-map)))]
+                          stream-maps)))]
       (doseq [{:keys [buffer numeric-gradient host-buffer] :as entry} numeric-buffers]
         (let [device-buffer (math/device-buffer buffer)]
           (when-not (and numeric-gradient host-buffer)
@@ -271,9 +342,10 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn run
-  "Run a network on a dataset.  The results are returned as a sequence of
-  maps where the node :id is the key for each output value."
-  [network dataset & {:keys [batch-size context datatype]
+   "Run a network on a dataset.  The results are returned as a sequence of maps where the node
+  :id is the key for each output value.  There is an option to include outputs required to
+  generate the actual network loss."
+  [network dataset & {:keys [batch-size context datatype loss-outputs?]
                       :or {batch-size 1
                            datatype :double}
                       :as options}]
@@ -296,7 +368,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                      (map :device-array (vals batch-buffers)))
              ;;Replace the incoming stream buffers with the ones from the batching system.
           network (compute-binding/update-traversal-buffers network stream->buffer-map :stream :buffer)
-          output-buffers (compute-binding/output-binding-buffers network batch-size datatype :inference)]
+          output-buffers (compute-binding/output-binding-buffers network
+                                                                 batch-size
+                                                                 datatype
+                                                                 (if loss-outputs?
+                                                                   :training
+                                                                   :inference))]
       (reduce
        (fn [results next-batch]
          (load-batch! network next-batch batch-buffers)
