@@ -10,7 +10,7 @@
     [cortex.nn.network :as network]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.execute :as execute]
-    [cortex.nn.execute.machinery :as machinery]
+    [cortex.nn.compute-binding :as compute-binding]
     [cortex.verify.utils :as utils]))
 
 
@@ -19,7 +19,7 @@
                                      :or {bind-opts {}}}]
   (let [network (network/linear-network description)]
     (-> network
-        (machinery/bind-context-to-network context batch-size
+        (compute-binding/bind-context-to-network context batch-size
                                            (traverse/training-traversal network :keep-non-trainable? true)
                                            bind-opts))))
 
@@ -37,8 +37,8 @@
 
 (defn unpack-bound-network
   [context network test-layer-id]
-  (let [network (machinery/save-to-network context network {:save-gradients? true})
-        traversal (get network :traversal)
+  (let [network (compute-binding/save-to-network context network {:save-gradients? true})
+        traversal (compute-binding/traversal network)
         test-node (get-in network [:compute-graph :nodes test-layer-id])
         parameter-descriptions (->> (graph/get-node-arguments test-node)
                                     (filter #(= :parameter (get % :type))))
@@ -111,8 +111,8 @@
       (throw (ex-info "Not all output nodes have provided gradients"
                       {:provided-nodes provided-output-nodes
                        :missing-nodes (clojure.set/difference network-output-nodes provided-output-nodes)}))))
-  (let [bound-network (machinery/traverse context bound-network stream->input-map :forward)]
-    (machinery/traverse context bound-network node-id->output-gradient-map :backward)))
+  (let [bound-network (compute-binding/traverse context bound-network stream->input-map :forward)]
+    (compute-binding/traverse context bound-network node-id->output-gradient-map :backward)))
 
 
 (defn forward-backward-bound-network

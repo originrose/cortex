@@ -15,7 +15,7 @@
   (execute/compute-context :backend :cpu
                            :datatype test-utils/*datatype*))
 
-(def-double-float-test relu-activation
+(deftest relu-activation
   (verify-layers/relu-activation (create-context)))
 
 (def-double-float-test relu-activation-batch

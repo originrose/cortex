@@ -1,4 +1,4 @@
-(ns cortex.nn.execute.machinery
+(ns cortex.nn.compute-binding
   "Internal machinery needed to make execute work.  Ideally this machinery is used during
   execute, layer unit tests, and gradient checking in such a way that once the layer unit tests
   work someone has some confidence that this module is correct."
@@ -64,7 +64,7 @@
        (= :weight (get parameter :type))))
 
 
-(declare backend driver datatype)
+(declare backend driver datatype batch-size)
 
 
 (defn- bind-node-parameter-buffers
@@ -92,12 +92,12 @@
                                            :host-buffer (alloc-host (m/ecount graph-buffer)))
                                     (is-l2-max-constraint-valid? parameter)
                                     (merge (allocate-l2-temp-data graph-buffer backend)))
-                                  (catch Exception e (throw e #_(ex-info "graph-buffer is corrupt: "
-                                                                         {:type (type graph-buffer)
-                                                                          :buffer-id buffer-id
-                                                                          :buffer graph-buffer
-                                                                          :parameter parameter
-                                                                          :e e}))))))))))
+                                  (catch Exception e (throw (ex-info "graph-buffer is corrupt: "
+                                                                     {:type (type graph-buffer)
+                                                                      :buffer-id buffer-id
+                                                                      :buffer graph-buffer
+                                                                      :parameter parameter
+                                                                      :e e}))))))))))
             compute-buffers
             (network/network->node-parameters network (get node :id)))))
 
@@ -135,7 +135,7 @@
        (map (fn [{:keys [key type] :as arg}]
               (let [batch-size (long (if (= type :node-parameter)
                                        1
-                                       (get network :batch-size)))
+                                       (batch-size network)))
                     arg-shape (graph/get-argument-shape (network/network->graph network)
                                                         loss-term
                                                         arg)]
@@ -173,6 +173,9 @@
    traversal
    {:keys [gradients? numeric-gradients? optimizer] :as options}]
   (let [backend (backend-fn)
+        network (assoc network
+                       :compute-binding {:batch-size batch-size}
+                       :traversal traversal)
         stream-map (get traversal :stream-map)
         id->node-map (get compute-graph :nodes)
         traverse-type (get traversal :type)
@@ -191,7 +194,8 @@
          (fn [compute-binding id]
            (let [node (graph/get-node compute-graph id)
                  node-params (network/network->node-parameters network id)]
-             (-> (update-in compute-binding [:nodes id]
+             (-> compute-binding
+                 (update-in [:nodes id]
                             (fn [compute-node]
                               (or compute-node
                                   (when (->> (layers/get-pass-set node)
@@ -243,15 +247,17 @@
                                    (apply +))
         [network loss-function] (load-loss-function network backend
                                                     (traverse/gradient-loss-function
-                                                     network traversal))]
-    (-> network
-        (assoc-in [:compute-binding :optimizer]
-                  (when optimizer
-                    (optimize/create-optimizer backend
-                                               optimizer
-                                               trainable-param-count)))
-        (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
-        (assoc-in [:compute-binding :loss-function] loss-function))))
+                                                     network traversal))
+        retval
+        (-> network
+            (assoc-in [:compute-binding :optimizer]
+                      (when optimizer
+                        (optimize/create-optimizer backend
+                                                   optimizer
+                                                   trainable-param-count)))
+            (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
+            (assoc-in [:compute-binding :loss-function] loss-function))]
+    retval))
 
 
 (defn save-to-network
@@ -339,7 +345,13 @@
 
 (defn batch-size
   ^long [network]
-  (get network :batch-size))
+  (get-in network [:compute-binding :batch-size]))
+
+(defn traversal
+  "Traversal is not stored under compute binding because after saving the network clients such
+  as the unit test system need to get the traversal."
+  [network]
+  (get network :traversal))
 
 
 (defn output-binding-buffers
@@ -436,7 +448,8 @@
                                                      (get map-key input-key))]
                                (if input-buffer
                                  [map-key (assoc buffer-entry buffer-type input-buffer)]
-                                 [map-key buffer-entry])))))))))
+                                 [map-key buffer-entry]))))
+                      (into {}))))))
 
 
 (defn traversal-buffers
@@ -460,7 +473,7 @@
   (let [{:keys [traversal-key buffer-type input-key]} (get PASS-METADATA pass-direction)
         network (update-traversal-buffers network stream->buffer-map pass-direction)
         traversal-buffers (traversal-buffers network)
-        traversal-pass (get-in network [:traversal traversal-key])
+        traversal-pass (get (traversal network) traversal-key)
         backend (backend network)
         buffer-resolve (partial find-buffers traversal-buffers)
         pass (->> traversal-pass
@@ -617,8 +630,8 @@
   "Takes a map of buffer-id to input value and copies the input values
   into device buffers."
   [network id->input-map]
-  (let [batch-size (get network :batch-size)
-        backend (get-in network [:compute-binding :backend])]
+  (let [batch-size (batch-size network)
+        backend (backend network)]
     (->> id->input-map
          (map (fn [[k v]]
                 [k (backend/array backend v batch-size)]))
@@ -714,7 +727,7 @@ any loss-specific parameter buffers."
                                (map (fn [[k items]]
                                       [k (mapcat :incoming items)]))
                                (into {}))]
-    (->> (get-in network [:traversal :loss-function])
+    (->> (traverse/gradient-loss-function network (traversal network))
          (mapcat loss/get-loss-term-node-outputs)
          (map #(get % :node-id))
          (distinct)
@@ -823,7 +836,7 @@ any loss-specific parameter buffers."
 (defn execute-live-loss-fn
   "Execute a loss function against a running network returning the loss value as a double.  Inferences and dataset outputs are expected to be maps of columns of data."
   [context network inferences dataset-outputs]
-  (apply + (->> (get-in network [:traversal :loss-function])
+  (apply + (->> (network/loss-function network)
                 (map #(execute-live-loss-term context network % inferences dataset-outputs)))))
 
 
@@ -849,22 +862,8 @@ any loss-specific parameter buffers."
                                    (network/network->graph network)
                                    %))
                            batches->columns)]
-    (->> (get-in network [:traversal :loss-function])
+    (->> (network/loss-function network)
          (mapv (fn [loss-term]
                  (->> (execute-live-loss-term context network loss-term
                                               inference-columns dataset-columns)
                       (assoc loss-term :value)))))))
-
-
-(defn train-batch!
-  [network forward-buffer-map & {:keys [optimize?]
-                                 :or [optimize? true]}]
-  (-> network
-      (do-traverse forward-buffer-map :forward)
-      (zero-traverse-gradients)
-      (compute-loss-term-gradients)
-      (do-traverse {} :backward)
-      (#(if optimize?
-          (optimize-network %)
-          %)))
-  :ok)
