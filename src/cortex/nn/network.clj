@@ -234,34 +234,8 @@
   [network graph-type]
   (let [spec-graph (specific-graph network graph-type)]
    (->> (graph/graph->required-streams spec-graph)
-        (map #(vector % (graph/stream->descriptor spec-graph %))))))
-
-
-(defn output-ids->output-bindings
-  "Get a sequence of at least:
-{ :node-id
-  :output-size
-}"
-  [network output-id-seq]
-  (mapv (fn [id]
-          {:size (graph/node->output-size
-                  (graph/get-node
-                   (get network :compute-graph)))
-           :node-id id})
-        output-id-seq))
-
-
-(defn input-streams->input-bindings
-  "Get a sequence of at least:
-{:stream
- :output-size
-}"
-  [network graph-stream-seq]
-  (->> (mapv
-        (fn [[id descriptor]]
-          {:stream id
-           :size (graph/stream-descriptor->size descriptor)}))
-       graph-stream-seq))
+        (map #(vector % (graph/stream->descriptor spec-graph %)))
+        (into {}))))
 
 
 (defn loss-function

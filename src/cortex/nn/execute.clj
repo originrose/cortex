@@ -34,31 +34,53 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [cortex.nn.compute-binding :as compute-binding]))
 
 
+(defn train-batch!
+  [network forward-buffer-map & {:keys [optimize?]
+                                 :or [optimize? true]}]
+  (-> network
+      (compute-binding/update-traversal-buffers forward-buffer-map :stream :buffer)
+      (compute-binding/do-traverse :forward)
+      (compute-binding/zero-traverse-gradients)
+      (compute-binding/compute-loss-term-gradients)
+      (compute-binding/do-traverse :backward)
+      (#(if optimize?
+          (compute-binding/optimize-network %)
+          %)))
+  :ok)
+
+
 (defn generate-numeric-gradients
   "Run network forward and backward like 'forward-backward' but also calculate numeric
   gradients w/r/t the loss function and the provided answer.  This allows for gradient
   checking.  The data should be saved back to the network after the passes."
-  [context network batch-size stream->input-map epsilon & {:keys [optimizer]}]
+  [network context batch-size stream->input-map epsilon]
   (resource/with-resource-context
     (let [network (compute-binding/bind-context-to-network network
                                                            context
                                                            batch-size
                                                            (traverse/training-traversal network)
-                                                           :optimizer optimizer)
-          stream->data-map (compute-binding/load-id->input-map network stream->input-map)
+                                                           {:gradients? true
+                                                            :numeric-gradients? true})
           ;;Generate all of the calculated gradients.
           parameters (compute-binding/parameters network)
+          ;;Store the input buffers as traversal buffers
+          network (compute-binding/update-traversal-buffers
+                   network
+                   (compute-binding/load-id->input-map network stream->input-map)
+                   :stream
+                   :buffer)
           ;;This calls prepare-forward exactly once and does one forward
           ;;plus backward and loss gradient to generate calculated gradients
-          network (compute-binding/update-traversal-buffers network stream->input-map :forward)
-          _ (compute-binding/train-batch! network {} :optimize? false)
-          ;;generate a sequence of buffers in order to generate the numeric gradients.
+          _ (train-batch! network {} :optimize? false)
+          ;;generate a sequence of buffers where we will generate numeric gradients for each buffer.
+          ;;We use the inference graph because we want to check input gradients.
           numeric-buffers (concat (->> (network/graph-streams network :inference)
-                                       (network/input-streams->input-bindings network)
-                                       (map (fn [{:keys [stream size] :as entry}]
-                                              (merge entry (compute-binding/find-traversal-buffer
-                                                            network
-                                                            {:stream stream})))))
+                                       (map (fn [[stream dims]]
+                                              (let [map-key {:stream stream}]
+                                                (merge map-key
+                                                       (compute-binding/find-traversal-buffer
+                                                        network
+                                                        map-key))))))
                                   (filter #(get % :gradients?) parameters))
           epsilon (double epsilon)
           stream (compute-binding/stream network)
@@ -70,7 +92,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
                        (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
                        ;;Raw-forward is used here to avoid calling prepare-forward again.  But this
                        ;;is not an inference pass; it is an actual forward pass.
-                       (compute-binding/do-traverse network {} :raw-forward)
+                       (compute-binding/do-traverse network :raw-forward)
                        (compute-binding/batches->columnsv
                         (compute-binding/output-values network output-buffers)))
           stream->batches-map (->> stream->input-map
@@ -208,20 +230,6 @@ Furthermore infer should be both wrapped in a resource context and completely re
                   (cuda-backend-fn datatype (= backend :cuda)))]
     {:backend-fn (or cuda-fn #(cpu/backend datatype))
      :datatype datatype}))
-
-
-(defn train-batch!
-  [network forward-buffer-map & {:keys [optimize?]
-                                 :or [optimize? true]}]
-  (-> network
-      (do-traverse forward-buffer-map :forward)
-      (zero-traverse-gradients)
-      (compute-loss-term-gradients)
-      (do-traverse {} :backward)
-      (#(if optimize?
-          (optimize-network %)
-          %)))
-  :ok)
 
 
 (defn train

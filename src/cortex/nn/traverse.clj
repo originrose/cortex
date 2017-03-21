@@ -188,6 +188,15 @@
        (into {})))
 
 
+(defn stream-arguments->buffers
+  [network buffer-map graph-type]
+  (->> (network/graph-streams network graph-type)
+       (map (fn [[k dim]]
+              [{:stream k} {:dimension dim}]))
+       (into {})
+       (merge buffer-map)))
+
+
 (defn- reverse-forward-traversal
   "See create-forward-traversal.  Reverse of same sequence."
   [forward-traversal]
@@ -267,7 +276,7 @@ the client's perspective is located in the buffers section."
                      forward-traversal
                      (remove-non-trainable network forward-traversal))
                    reverse-forward-traversal)
-     :buffers buffers
+     :buffers (stream-arguments->buffers network buffers :training)
      :type :training}))
 
 
@@ -328,7 +337,7 @@ the client's perspective is located in the buffers section."
   (let [[forward-traversal buffers] (network->forward-traversal-and-buffers
                                      network :inference)]
     {:forward forward-traversal
-     :buffers buffers
+     :buffers (stream-arguments->buffers network buffers :inference)
      :type :inference}))
 
 

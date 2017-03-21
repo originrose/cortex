@@ -354,27 +354,48 @@
   (get network :traversal))
 
 
+(defn traversal-buffers
+  [network]
+  (get-in network [:compute-binding :traversal-buffers]))
+
+
+(defn find-traversal-buffer
+  [network traversal-id]
+  (if-let [retval
+           (get-in network [:compute-binding :traversal-buffers traversal-id])]
+    retval
+    (throw (ex-info "Unable to find traversal buffer"
+                    {:id traversal-id
+                     :available-buffers (keys (traversal-buffers network))}))))
+
+
+(defn node-activations
+  [network node-id]
+  (find-traversal-buffer network {:id node-id}))
+
+
 (defn output-binding-buffers
   [network batch-size datatype graph-type]
   (let [driver (driver network)]
     (mapv
-     (fn [{:keys [size] :as entry}]
-       (assoc entry
-              :elem-count (* batch-size (long size))
-              :host-buffer
-              (drv/allocate-host-buffer driver
-                                        (* batch-size
-                                           (long size))
-                                        datatype)))
-     (->> (network/output-node-ids network graph-type)
-          (network/output-ids->output-bindings network)))))
+     (fn [id]
+       (let [node (graph/get-node (network/network->graph network) id)
+             size (graph/node->output-size node)]
+        {:node-id id
+         :host-buffer (drv/allocate-host-buffer driver
+                                                (* batch-size
+                                                   (long size))
+                                                datatype)
+         :buffers (node-activations network id)}))
+     (network/output-node-ids network graph-type))))
 
 
 (defn output-values
-  [{:keys [batch-size] :as network} output-buffers
+  [network output-buffers
    & {:keys [max-result-vector-size]
       :or {max-result-vector-size 100}}]
-  (let [stream (stream network)]
+  (let [stream (stream network)
+        batch-size (batch-size network)]
     (->> output-buffers
          (mapv (fn [{:keys [buffers node-id host-buffer]}]
                  (let [buffer (get buffers :buffer)
@@ -429,61 +450,44 @@
 
 
 (defn update-traversal-buffers
-  "Replace the network's traversal buffers with ones updated from the id->buffer-map."
-  [network id->buffer-map pass-direction]
-  (let [{:keys [traversal-key buffer-type input-key]} (get PASS-METADATA pass-direction)]
-    (update-in network [:compute-binding :traversal-buffers]
-               (fn [buf-map]
-                 (->> buf-map
-                      (map (fn [[map-key buffer-entry]]
-                             ;;Assoc the input buffers into
-                             ;;the appropriate spots if they
-                             ;;are passed in.
-                             (when (and (contains? map-key input-key)
-                                        (nil? (get map-key input-key)))
-                               (throw (ex-info "Invalid buffer id:"
-                                               {:map-key map-key
-                                                :input-key input-key})))
-                             (let [input-buffer (get id->buffer-map
-                                                     (get map-key input-key))]
-                               (if input-buffer
-                                 [map-key (assoc buffer-entry buffer-type input-buffer)]
-                                 [map-key buffer-entry]))))
-                      (into {}))))))
+  "Replace the network's traversal buffers with ones updated from the id->buffer-map.
+Traversal buffers are stored under two types of keys, :id and :stream and someone
+can replace either the :buffer or the :gradient."
+  [network id->buffer-map traverse-map-key buffer-type]
+  (update-in network [:compute-binding :traversal-buffers]
+             (fn [buf-map]
+               (->> buf-map
+                    (map (fn [[map-key buffer-entry]]
+                           ;;Assoc the input buffers into
+                           ;;the appropriate spots if they
+                           ;;are passed in.
+                           (when (and (contains? map-key traverse-map-key)
+                                      (nil? (get map-key traverse-map-key)))
+                             (throw (ex-info "Invalid buffer id:"
+                                             {:map-key map-key
+                                              :input-key traverse-map-key})))
+                           (let [input-buffer (get id->buffer-map
+                                                   (get map-key traverse-map-key))]
+                             (if input-buffer
+                               [map-key (assoc buffer-entry buffer-type input-buffer)]
+                               [map-key buffer-entry]))))
+                    (into {})))))
 
 
-(defn traversal-buffers
-  [network]
-  (get-in network [:compute-binding :traversal-buffers]))
-
-
-(defn find-traversal-buffer
-  [network traversal-id]
-  (if-let [retval
-           (get-in network [:compute-binding :traversal-buffers traversal-id])]
-    retval
-    (throw (ex-info "Unable to find traversal buffer"
-                    {:id traversal-id
-                     :available-buffers (keys (traversal-buffers network))}))))
-
-
-(defn- add-pass-to-network
-  "Create a new pass with items mapped to buffers."
-  [network stream->buffer-map pass-direction]
+(defn- mapped-traversal
+  "Create a new specific traversal with items mapped to buffers.  So for instance create a forward
+traversal with the inputs and outputs mapped to specific buffers."
+  [network pass-direction]
   (let [{:keys [traversal-key buffer-type input-key]} (get PASS-METADATA pass-direction)
-        network (update-traversal-buffers network stream->buffer-map pass-direction)
         traversal-buffers (traversal-buffers network)
         traversal-pass (get (traversal network) traversal-key)
         backend (backend network)
-        buffer-resolve (partial find-buffers traversal-buffers)
-        pass (->> traversal-pass
-                  (mapv (fn [{:keys [incoming outgoing] :as item}]
-                          (assoc item
-                            :incoming (buffer-resolve incoming)
-                            :outgoing (buffer-resolve outgoing)))))]
-    (-> network
-        (assoc-in [:compute-binding :traversal-buffers] traversal-buffers)
-        (assoc-in [:compute-binding :passes pass-direction] pass))))
+        buffer-resolve (partial find-buffers traversal-buffers)]
+    (->> traversal-pass
+         (mapv (fn [{:keys [incoming outgoing] :as item}]
+                 (assoc item
+                        :incoming (buffer-resolve incoming)
+                        :outgoing (buffer-resolve outgoing)))))))
 
 
 (defn print-traversal-buffers
@@ -506,8 +510,7 @@
 
 (defn- generate-node-id->output-map
   [network]
-  (let [network (add-pass-to-network network {} :forward)
-        pass (get-in network [:compute-binding :passes :forward])]
+  (let [pass (mapped-traversal network :forward)]
     (into {}
           (map (fn [{:keys [incoming id outgoing] :as arg}]
                  [id (first outgoing)])
@@ -518,9 +521,11 @@
   ([network id id->output-map]
    (let [special-graph (-> (network/network->graph network)
                            (assoc :buffers (get-in network [:compute-binding :parameter-buffers])))
-         stream-map (->> (get-in network [:compute-binding :stream->buffer-map])
+         stream-map (->> (traversal-buffers network)
                          (map (fn [[k v]]
-                                [k {:buffer v}]))
+                                (when (contains? k :stream)
+                                  [(get k :stream) (select-keys v [:buffer])])))
+                         (remove nil?)
                          (into {}))
          node (graph/get-node special-graph id)]
      (graph/resolve-arguments special-graph node stream-map id->output-map)))
@@ -608,13 +613,8 @@
 
 
 (defn do-traverse
-  [network stream->buffer-map pass-direction]
-  (let [network (add-pass-to-network network
-                                     stream->buffer-map
-                                     pass-direction)
-        mapped-pass (get-in network [:compute-binding :passes pass-direction])
-        node-pass-map (group-by :id mapped-pass)
-        network (assoc-in network [:compute-binding :node-pass-map] node-pass-map)]
+  [network pass-direction]
+  (let [mapped-pass (mapped-traversal network pass-direction)]
     (reduce
       (fn [network pass-function]
         (->> mapped-pass
@@ -644,10 +644,10 @@
   expectiation is that the id->input-map has buffers that aren't
   already uploaded to the device."
   [context network id->input-map pass-direction]
-  (let [input-map (load-id->input-map network id->input-map)]
-    (do-traverse network
-                 input-map
-                 pass-direction)))
+  (let [{:keys [traversal-key buffer-type input-key]} (get PASS-METADATA pass-direction)]
+    (-> network
+        (update-traversal-buffers (load-id->input-map network id->input-map) input-key buffer-type)
+        (do-traverse pass-direction))))
 
 
 
@@ -721,8 +721,7 @@ can write into are node-loss buffers.  Node parameter buffers are cleared as par
 process, stream's do not have gradient buffers, and the loss function itself is responsible for managing
 any loss-specific parameter buffers."
   [network]
-  (let [network (add-pass-to-network network {} :backward)
-        id->input-buffers (->> (get-in network [:compute-binding :passes :backward])
+  (let [id->input-buffers (->> (mapped-traversal network :backward)
                                (group-by :id)
                                (map (fn [[k items]]
                                       [k (mapcat :incoming items)]))

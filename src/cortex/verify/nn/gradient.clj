@@ -42,16 +42,13 @@
 
 
 (defn generate-gradients
-  [context network input output epsilon batch-size]
-  (as-> (verify-layers/bind-test-network context network batch-size
-                                         (verify-layers/io-vec->stream->size-map
-                                          input output batch-size)
-                                         :bind-opts {:numeric-gradients? true}) network
-    (execute/generate-numeric-gradients context network
-                                        (merge (verify-layers/vec->stream-map input :data)
-                                               (verify-layers/vec->stream-map output :labels))
-                                        epsilon)
-    (verify-layers/unpack-bound-network context network :test)))
+  [context description input output epsilon batch-size labels-key]
+  (-> (network/linear-network description)
+      (execute/generate-numeric-gradients context batch-size
+                                          (merge (verify-layers/vec->stream-map input :data)
+                                                 (verify-layers/vec->stream-map output labels-key))
+                                          epsilon)
+      (verify-layers/unpack-network :test)))
 
 
 (defn get-gradients
@@ -72,12 +69,11 @@
   [context]
   (let [batch-size 2]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input 2)
-                         (layers/linear 1)])
+                       [(layers/input 1 1 2 :id :data)
+                        (layers/linear 1 :id :test)]
                        [(take batch-size verify-data/CORN-DATA)]
                        [(take batch-size verify-data/CORN-LABELS)]
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 

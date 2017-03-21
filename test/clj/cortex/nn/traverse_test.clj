@@ -108,7 +108,8 @@
              {:id :output} {:dimension {:channels 1, :height 1, :width 10}},
              {:id :relu-1} {:dimension {:channels 20, :height 12, :width 12}},
              {:id :relu-2} {:dimension {:channels 50, :height 4, :width 4}},
-             {:stream :data} {:dimension {:channels 1, :height 28, :width 28}}}
+             {:stream :data} {:dimension {:channels 1, :height 28, :width 28}}
+             {:stream :output} {:dimension {:channels 1, :height 1, :width 10}}}
             (get training-traversal :buffers))))
     ;;Using set below to make the output order independent.  Loss terms are added so the definition
     ;;of the loss function is independent of order.
@@ -361,7 +362,8 @@
              {:id :linear-1} {:dimension {:channels 1, :height 1, :width 10}},
              {:id :right} {:dimension {:channels 1, :height 1, :width 500}},
              {:stream :input-1} {:dimension {:channels 10, :height 10, :width 10}},
-             {:stream :left} {:dimension {:channels 1, :height 1, :width 500}}}
+             {:stream :left} {:dimension {:channels 1, :height 1, :width 500}}
+             {:stream :linear-1} {:dimension {:channels 1, :height 1, :width 10}}}
             (get train-traversal :buffers))))
 
     (is (= [nil nil]
@@ -395,7 +397,8 @@
              {:id :linear-1} {:dimension {:channels 1, :height 1, :width 10}},
              {:id :right} {:dimension {:channels 1, :height 1, :width 500}},
              {:stream :input-1} {:dimension {:channels 10, :height 10, :width 10}},
-             {:stream :left} {:dimension {:channels 1, :height 1, :width 500}}},
+             {:stream :left} {:dimension {:channels 1, :height 1, :width 500}}
+             {:stream :linear-1} {:dimension {:channels 1, :height 1, :width 10}}},
             (get train-traversal :buffers))))))
 
 
@@ -423,5 +426,7 @@
              {:id :split-1} {:dimension {:channels 1, :height 1, :id :split-1, :width 50}},
              {:id :split-1-1} {:dimension {:channels 1, :height 1, :id :double-split, :width 50}},
              {:id :split-2} {:dimension {:channels 1, :height 1, :id :single-split, :width 50}},
-             {:stream :input-1} {:dimension {:channels 1, :height 1, :width 50}}}
+             {:stream :input-1} {:dimension {:channels 1, :height 1, :width 50}}
+             {:stream :single-split} {:dimension {:channels 1, :height 1, :width 20}},
+             {:stream :double-split} {:dimension {:channels 1, :height 1, :width 10}}}
             (get train-traversal :buffers))))))

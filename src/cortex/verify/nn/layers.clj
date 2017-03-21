@@ -35,10 +35,9 @@
       (bind-test-network context batch-size))))
 
 
-(defn unpack-bound-network
-  [context network test-layer-id]
-  (let [network (compute-binding/save-to-network context network {:save-gradients? true})
-        traversal (compute-binding/traversal network)
+(defn unpack-network
+  [network test-layer-id]
+  (let [traversal (compute-binding/traversal network)
         test-node (get-in network [:compute-graph :nodes test-layer-id])
         parameter-descriptions (->> (graph/get-node-arguments test-node)
                                     (filter #(= :parameter (get % :type))))
@@ -67,6 +66,12 @@
      :output (get (first outgoing-buffers) :buffer)
      :input-gradient (get (first incoming-buffers) :gradient)
      :numeric-input-gradient (get (first incoming-buffers) :numeric-gradient)}))
+
+
+(defn unpack-bound-network
+  [context network test-layer-id]
+  (unpack-network (compute-binding/save-to-network context network {:save-gradients? true})
+                  test-layer-id))
 
 
 (defn- vec->id-val-pairs
