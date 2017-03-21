@@ -109,7 +109,12 @@
              {:id :relu-1} {:dimension {:channels 20, :height 12, :width 12}},
              {:id :relu-2} {:dimension {:channels 50, :height 4, :width 4}},
              {:stream :data} {:dimension {:channels 1, :height 28, :width 28}}
-             {:stream :output} {:dimension {:channels 1, :height 1, :width 10}}}
+             {:stream :output} {:dimension {:channels 1, :height 1, :width 10}}
+             {:stream {:stream :output,
+                       :augmentation :cortex.stream-augment/labels->inverse-counts}} {:dimension {}},
+             {:stream
+              {:stream :output,
+               :augmentation :cortex.stream-augment/labels->indexes}} {:dimension {}}}
             (get training-traversal :buffers))))
     ;;Using set below to make the output order independent.  Loss terms are added so the definition
     ;;of the loss function is independent of order.

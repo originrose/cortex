@@ -148,7 +148,7 @@
 (defn- load-loss-function
   "Return a map of node-id->loaded loss terms associated with that node."
   [network backend loss-function]
-  (let [batch-size (get network :batch-size)
+  (let [batch-size (batch-size network)
         loss-function
         (->> loss-function
              (mapv (fn [loss-term]
@@ -188,6 +188,9 @@
                            (traverse/get-backward-buffers traversal)
                            #{})
         network (assoc-in network [:compute-binding :backend] backend)
+        traversal-loss-function (if (contains? traversal :backward)
+                                  (traverse/gradient-loss-function network traversal)
+                                  [])
         ;; Setup the parameter buffers
         compute-binding
         (reduce
@@ -209,7 +212,7 @@
                                                            numeric-gradients?))))))
          (get-in network [:compute-binding])
          (->> (concat (get traversal :forward)
-                      (get traversal :loss-function))
+                      traversal-loss-function)
               (map :id)))
 
         ;; Setup the traversal buffers (for passing activations and gradients)
@@ -245,9 +248,7 @@
         trainable-param-count (->> trainable-parameters
                                    (map (comp m/ecount :buffer))
                                    (apply +))
-        [network loss-function] (load-loss-function network backend
-                                                    (traverse/gradient-loss-function
-                                                     network traversal))
+        [network loss-function] (load-loss-function network backend traversal-loss-function)
         retval
         (-> network
             (assoc-in [:compute-binding :optimizer]
@@ -691,7 +692,7 @@ traversal with the inputs and outputs mapped to specific buffers."
         stream (stream network)
         ;; Call batch-update so the optimizer can do batch level computations
         optimizer (optimize/batch-update (optimizers network))
-        buffer-alpha (/ 1.0 (double (get network :batch-size)))]
+        buffer-alpha (/ 1.0 (double (batch-size network)))]
     ;; Call compute-parameters! on all of the paramter buffers
     (reduce (fn [offset {:keys [buffer gradient
                                 learning-attenuation non-trainable?]

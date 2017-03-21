@@ -238,6 +238,21 @@
         (into {}))))
 
 
+(defn augmented-streams
+  [network graph-type]
+  (let [spec-graph (specific-graph network graph-type)]
+    (->> (get spec-graph :nodes)
+         vals
+         (mapcat #(map (fn [arg]
+                         [% arg])
+                       (graph/get-node-arguments %)))
+         (filter #(= :stream-augmentation (get-in % [1 :type])))
+         (map (fn [[node arg]]
+                [(arg/augmented-stream-arg->id arg)
+                 {}]))
+         (into {}))))
+
+
 (defn loss-function
   "Loss functions are summations of terms.  Thus they are order independent.  To highlight this
   contract and to make comparisons valid over time, the terms are returned in a set."

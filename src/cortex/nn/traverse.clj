@@ -190,7 +190,8 @@
 
 (defn stream-arguments->buffers
   [network buffer-map graph-type]
-  (->> (network/graph-streams network graph-type)
+  (->> (concat (network/graph-streams network graph-type)
+               (network/augmented-streams network graph-type))
        (map (fn [[k dim]]
               [{:stream k} {:dimension dim}]))
        (into {})

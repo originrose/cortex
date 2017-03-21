@@ -163,11 +163,13 @@ Furthermore infer should be both wrapped in a resource context and completely re
         stream (compute-binding/stream network)
         datatype (compute-binding/datatype network)
         required-keys (clojure.set/union
-                       (if training?
-                         (network/graph-streams network :training)
-                         (network/graph-streams network :training))
+                       (->> (if training?
+                              (network/graph-streams network :training)
+                              (network/graph-streams network :inference))
+                            (map first)
+                            set)
                        (set (filter augmented-stream-key? (keys batch))))
-        batch-size (long (:batch-size network))]
+        batch-size (compute-binding/batch-size network)]
     (when (zero? (count required-keys))
       (throw (ex-info "Zero required keys in batch-buffers" {})))
     (->> (for [k required-keys]
@@ -248,10 +250,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
           context (or context (compute-context :datatype datatype))
-          network (compute-binding/bind-context-to-network context
-                                                     batch-size
-                                                     (traverse/training-traversal network)
-                                                     {:optimizer optimizer})
+          network (compute-binding/bind-context-to-network
+                   network
+                   context
+                   batch-size
+                   (traverse/training-traversal network)
+                   {:optimizer optimizer})
           batches (->> (dataset-batches dataset batch-size)
                        (map (partial graph/augment-streams (network/network->graph network))))
           batch-buffers (batch-buffers network (first batches) true)
@@ -275,29 +279,28 @@ Furthermore infer should be both wrapped in a resource context and completely re
                       :as options}]
   (resource/with-resource-context
     (let [context (or context (compute-context :datatype datatype))
+          network (compute-binding/bind-context-to-network network context
+                                                           batch-size
+                                                           (traverse/inference-traversal network)
+                                                           {})
           ;;In the case where the context was passed in we ignore the datatype argument
           ;;else we run into problems pulling data off the gpu.
           datatype (get context :datatype)
-          network (compute-binding/bind-context-to-network context
-                                                     batch-size
-                                                     (traverse/inference-traversal network) {})
           batches (->> (dataset-batches dataset batch-size)
                        (map (partial graph/augment-streams (network/network->graph network))))
           _ (when (empty? batches)
               (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?")))
+
           batch-buffers (batch-buffers network (first batches) false)
           stream->buffer-map (zipmap (keys batch-buffers)
                                      (map :device-array (vals batch-buffers)))
-          network (assoc-in network
-                            [:compute-binding :stream->buffer-map]
-                            stream->buffer-map)
-          output-buffers (compute-binding/output-binding-buffers network batch-size datatype)]
+             ;;Replace the incoming stream buffers with the ones from the batching system.
+          network (compute-binding/update-traversal-buffers network stream->buffer-map :stream :buffer)
+          output-buffers (compute-binding/output-binding-buffers network batch-size datatype :inference)]
       (reduce
        (fn [results next-batch]
          (load-batch! network next-batch batch-buffers)
-         ;; (println "\nTraversal:")
-         ;; (clojure.pprint/pprint (get-in network [:traversal :forward]))
-         (compute-binding/do-traverse network stream->buffer-map :inference)
+         (compute-binding/do-traverse network :inference)
          (concat results (compute-binding/output-values network output-buffers)))
        []
        batches))))
