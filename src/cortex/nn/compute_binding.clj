@@ -558,10 +558,11 @@ traversal with the inputs and outputs mapped to specific buffers."
       (clojure.pprint/pprint (mapv (fn [{:keys [buffer gradient]}]
                                      [:incoming {:buffer (to-double buffer)}])
                                    incoming))))
-  (pass-function
-    (get-in network [:compute-binding :nodes id])
-    (resolve-node-arguments network id)
-    incoming outgoing))
+  (let [id->output-map (generate-node-id->output-map network)]
+    (pass-function
+     (get-in network [:compute-binding :nodes id])
+     (resolve-node-arguments network id id->output-map)
+     incoming outgoing)))
 
 
 
@@ -720,11 +721,15 @@ traversal with the inputs and outputs mapped to specific buffers."
                                                 offset gradient buffer)
                   (when (is-l2-max-constraint-valid? parameter)
                     (apply-l2-max-constraint network parameter)))
-                (when gradient
-                  (drv/memset stream gradient-buf 0 0 elem-count))
                 (+ offset elem-count)))
             0
             parameters)
+
+    (->> parameters
+         (map :gradient)
+         (remove nil?)
+         (backend/zero-many! (backend network))
+         dorun)
     (assoc-in network
               [:compute-binding :optimizer]
               optimizer)))
