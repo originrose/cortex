@@ -13,38 +13,11 @@
     [cortex.nn.execute :as execute]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.network :as network]
-    [cortex.datasets.mnist :as mnist]))
-
-;; Data from: Dominick Salvator and Derrick Reagle
-;; Shaum's Outline of Theory and Problems of Statistics and Economics
-;; 2nd edition,  McGraw-Hill, 2002, pg 157
-
-;; Predict corn yield from fertilizer and insecticide inputs
-;; [corn, fertilizer, insecticide]
-
-;; The text solves the model exactly using matrix techniques and determines
-;; that corn = 31.98 + 0.65 * fertilizer + 1.11 * insecticides
-
-(def CORN-DATA
-  [[6  4]
-   [10  4]
-   [12  5]
-   [14  7]
-   [16  9]
-   [18 12]
-   [22 14]
-   [24 20]
-   [26 21]
-   [32 24]])
-
-
-(def CORN-LABELS
-  [[40] [44] [46] [48] [52] [58] [60] [68] [74] [80]])
-
-
-(def CORN-DATASET
-  (mapv (fn [d l] {:data d :label l})
-        CORN-DATA CORN-LABELS))
+    [cortex.verify.nn.data
+     :refer [CORN-DATA CORN-LABELS CORN-DATASET
+             mnist-training-dataset*
+             mnist-test-dataset*]
+     :as data]))
 
 
 (def MNIST-NETWORK
@@ -65,10 +38,6 @@
                               :lambda 1e-4})
    (layers/linear 10)
    (layers/softmax :id :label)])
-
-
-(defonce training-dataset* (future (mnist/training-dataset)))
-(defonce test-dataset* (future (mnist/test-dataset)))
 
 (defn min-index
   "Returns the index of the minimum value in a vector."
@@ -156,21 +125,24 @@
   [& [context]]
   (let [n-epochs 4
         batch-size 10
-        dataset (take 1000 @training-dataset*)
-        test-dataset @test-dataset*
+        dataset (take 1000 @mnist-training-dataset*)
+        test-dataset @mnist-test-dataset*
         test-labels (map :label test-dataset)
         network (network/linear-network MNIST-NETWORK)
         _ (println (format "Training MNIST network for %s epochs..." n-epochs))
+        _ (network/print-layer-summary network (traverse/training-traversal network))
         network (reduce (fn [network epoch]
                           (let [new-network (execute/train network dataset
                                                            :context context
                                                            :batch-size batch-size)
                                 results (->> (execute/run new-network (take 100 test-dataset)
                                                :batch-size batch-size
-                                               :context context)
-                                             (map :label))
-                                score (percent= results (take 100 test-labels))]
+                                               :context context
+                                               :loss-outputs? true))
+                                loss-fn (execute/execute-loss-fn network results (take 100 test-dataset))
+                                score (percent= (map :label results) (take 100 test-labels))]
                             (println (format "Score for epoch %s: %s" (inc epoch) score))
+                            (println (loss/loss-fn->table-str loss-fn))
                             new-network))
                   network
                   (range n-epochs))

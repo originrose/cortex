@@ -119,7 +119,7 @@ back into the stream augmentation argument."
   (select-keys argument [:stream :augmentation]))
 
 
-(defmethod get-argument-metadata :stream-agumentation
+(defmethod get-argument-metadata :stream-augmentation
   [parameter]
   {})
 

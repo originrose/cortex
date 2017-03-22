@@ -332,10 +332,8 @@ whitespace = #'\\s*'")
                       model)
           network (network/linear-network model)]
       (when-let [failures (seq (get network :verification-failures))]
-        (let [ordered-nodes (->> network
-                                 traverse/auto-bind-io
-                                 (#(traverse/add-forward-traversal % {}))
-                                 (#(get-in % [:traversal :forward]))
+        (let [ordered-nodes (->> (traverse/training-traversal network)
+                                 :forward
                                  (mapv (fn [{:keys [incoming id outgoing]}]
                                            (get-in network [:compute-graph :nodes id]))))]
          (throw (ex-info "Verification failures detected:"

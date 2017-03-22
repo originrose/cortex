@@ -50,6 +50,14 @@ to the loss function.
   (graph/get-node-metadata loss-term))
 
 
+(defn is-loss-node?
+  [node]
+  (contains? (-> (graph/get-node-metadata node)
+                 :passes
+                 set)
+             :loss))
+
+
 (defn get-loss-lambda
   [loss-term]
   (or (get loss-term :lambda)
@@ -185,6 +193,30 @@ containing the buffer coming from the network.
   (generic-loss-term item-key))
 
 
+(defn- generate-loss-term-stream-definitions
+  "Some loss terms have a constraint that the stream ecount must match the node's
+output ecount.  For those loss terms generating a stream definition is possible."
+  [graph loss-term]
+  (let [arguments (graph/get-node-arguments loss-term)
+        node-output (-> (filter #(= :node-output (get % :type)) arguments)
+                        first)
+        stream-input (-> (filter #(= :stream (get % :type)) arguments)
+                         first)]
+    (if (and node-output stream-input)
+      (let [stream-name (get stream-input :stream)
+            node-id (get node-output :node-id)
+            output-node (graph/get-node graph node-id)
+            output-size (graph/node->output-size output-node)]
+        ;;Return one stream definition and one output size
+        [[stream-name [output-size]]])
+      [])))
+
+
+(defmethod graph/generate-stream-definitions :mse-loss
+  [graph mse-loss]
+  (generate-loss-term-stream-definitions graph mse-loss))
+
+
 (defn softmax-loss
   "Softmax loss.  Applied to a node and a softmax (1-hot encoded) output stream."
   [& args]
@@ -198,6 +230,11 @@ containing the buffer coming from the network.
   {:arguments {:output {:gradients? true}
                :labels {}}
    :passes [:loss]})
+
+
+(defmethod graph/generate-stream-definitions :softmax-loss
+  [graph loss-term]
+  (generate-loss-term-stream-definitions graph loss-term))
 
 (defn log-likelihood-softmax-loss
   ^double [softmax-output answer]
@@ -399,6 +436,7 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
   [item-key]
   (center-loss))
 
+
 (defn loss-fn->table-str
   [loss-fn]
   (with-out-str
@@ -418,4 +456,24 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
                                                [:output
                                                 :argument])))
                               loss-fn))))
- 
+
+
+(defn generate-loss-function
+  "Given a graph with loss terms attached filter the nodes by if they are losses"
+  [graph]
+  (->> (get graph :nodes)
+       vals
+       (filter is-loss-node?)
+       ;;When loss functions are just standard nodes then this will change
+       (map #(dissoc %
+                     :input-dimensions
+                     :output-dimensions))
+       vec))
+
+
+
+(defn remove-existing-loss-terms
+  "Remove any loss terms from the graph."
+  [graph]
+  (->> (generate-loss-function graph)
+       (reduce graph/remove-node graph)))

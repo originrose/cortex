@@ -283,7 +283,8 @@
         reshape-indexes (int-array reshape-indexes)]
     ;;If there is a faster way of doing this I don't know it...
     (c-for [idx 0 (< idx n-elems) (inc idx)]
-           (let [output-idx (input-idx->output-idx! idx input-strides reshape-indexes output-strides input-dim-indexes output-dim-indexes)]
+           (let [output-idx (input-idx->output-idx! idx input-strides reshape-indexes
+                                                    output-strides input-dim-indexes output-dim-indexes)]
              (aset retval output-idx (aget data idx))))
     retval))
 
@@ -412,10 +413,8 @@
 (defn- network->nodes
        "Given a network return a list of nodes in forward pass order"
        [network]
-       (let [forward-pass (-> (traverse/auto-bind-io network)
-                         (traverse/add-training-traversal
-                          {})
-                         (get-in [:traversal :forward]))]
+  (let [forward-pass (-> (traverse/training-traversal network)
+                         :forward)]
             (->> (map :id forward-pass)
                  (map #(get-in network [:compute-graph :nodes %])))))
 

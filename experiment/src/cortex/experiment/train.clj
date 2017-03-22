@@ -9,6 +9,7 @@
     [cortex.optimize :as opt]
     [cortex.optimize.adam :as adam]
     [cortex.nn.execute :as execute]
+    [cortex.nn.compute-binding :as compute-binding]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.network :as network])
   (:import [java.io File]))
@@ -34,11 +35,11 @@
 
 
 (defn- per-epoch-fn
-  [new-network old-network test-ds network-filename
+  [new-network old-network batch-size test-ds network-filename
    best-network-fn simple-loss-print? context]
-  (let [batch-size (:batch-size new-network)
-        labels (execute/run new-network test-ds :batch-size batch-size)
-        loss-fn (execute/network->applied-loss-fn context new-network test-ds labels)
+  (let [batch-size (long batch-size)
+        labels (execute/run new-network test-ds :batch-size batch-size :loss-outputs? true)
+        loss-fn (execute/execute-loss-fn new-network test-ds labels)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get old-network :cv-loss)]
                             ;; TODO: Is there a bug here? What if the best-loss isn't sequential?
@@ -120,10 +121,7 @@
                       (assoc network :cv-loss {})
                       network))]
       (println "Training network:")
-      (network/print-layer-summary (-> network
-                                       traverse/auto-bind-io
-                                       (traverse/add-training-traversal
-                                         (ds/column-shapes train-ds))))
+      (network/print-layer-summary network (traverse/training-traversal network))
       (loop [network network
              epoch 0]
         (if (and epoch-count (> epoch epoch-count))
@@ -133,7 +131,7 @@
                              :optimizer optimizer
                              :context context)
               (assoc :epoch-count epoch)
-              (per-epoch-fn network test-ds network-filename best-network-fn simple-loss-print?
+              (per-epoch-fn network batch-size test-ds network-filename best-network-fn simple-loss-print?
                             context)
               (recur (inc epoch))))))))
 
