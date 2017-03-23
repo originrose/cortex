@@ -12,7 +12,7 @@
   (ce/compute-context :datatype verify-utils/*datatype*
                       :backend :cuda))
 
-(deftest corn
+(def-double-float-test corn
   (verify-train/test-corn (create-context)))
 
 (def-double-float-test mnist

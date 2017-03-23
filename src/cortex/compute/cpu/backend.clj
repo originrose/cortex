@@ -619,7 +619,7 @@ Calculates: (sum(x[i]^2)*alpha + K)"
       [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
       (let [start-offset# (* batch-idx# batch-stride# )
             ;;Create a function that will be used to parallelize the computation
-            pixel-fn#
+            lrn-forward-fn#
             (fn [^long start# ^long len#]
               (try
                (let [end# (+ start# len#)
@@ -641,7 +641,7 @@ Calculates: (sum(x[i]^2)*alpha + K)"
                                                             divisor#))))))))
                (catch Throwable e# (clojure.pprint/pprint e#))))]
         ;;(pixel-fn# 0 num-pixels#)
-        (launch-parallel-for num-pixels# pixel-fn#)))))
+        (launch-parallel-for num-pixels# lrn-forward-fn#)))))
 
 
 (defmacro cpu-lrn-backward-impl
@@ -679,7 +679,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
       [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
       (let [start-offset# (* batch-idx# batch-stride# )
             ;;Create a function that will be used to parallelize the computation
-            pixel-fn#
+            lrn-backward-fn#
             (fn [^long start# ^long len#]
               (try
                (let [end# (+ start# len#)
@@ -730,7 +730,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                            (.get output-gradient# range-idx#))))))
                            (.set input-gradient# chan-idx# output-accum#))))))))
                (catch Throwable e# (clojure.pprint/pprint e#))))]
-        (launch-parallel-for num-pixels# pixel-fn#)))))
+        (launch-parallel-for num-pixels# lrn-backward-fn#)))))
 
 
 (extend-type DoubleArrayView

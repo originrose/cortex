@@ -546,7 +546,8 @@ relies only on blockDim.x block.x and thread.x"
 (defn cuda-event
   []
   (let [retval (cuda$CUevent_st. )]
-    (cuda-call (cuda/cudaEventCreate retval))
+    ;;https://devtalk.nvidia.com/default/topic/538619/why-is-cudamemsetasync-cudamemcpyasync-or-even-cudaeventrecord-killing-parallel-kernel-exec/
+    (cuda-call (cuda/cudaEventCreateWithFlags retval cuda/cudaEventDisableTiming))
     (resource/track retval)))
 
 

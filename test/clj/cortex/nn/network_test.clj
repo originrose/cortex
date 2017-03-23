@@ -3,15 +3,8 @@
     [clojure.test :refer :all]
     [clojure.core.matrix :as m]
     [cortex.graph :as graph]
-    [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]]
     [cortex.nn.layers :as layers]
-    [cortex.nn.execute :as execute]
     [cortex.nn.network :as network]))
-
-(defn- corn-dataset
-  []
-  (mapv (fn [d l] {:data d :labels l})
-        CORN-DATA CORN-LABELS))
 
 
 (deftest specify-weights-bias
@@ -39,9 +32,8 @@
 (deftest generate-weights-bias
   (let [bias-data [0 0]
         built-network (network/linear-network [(layers/input 2)
-                                              (layers/linear
-                                               2)
-                                              (layers/relu)])]
+                                               (layers/linear 2)
+                                               (layers/relu)])]
     (is (not (nil? (m/eseq (get-in built-network
                                    [:compute-graph :buffers
                                     (get-in built-network
@@ -75,35 +67,16 @@
                                         (layers/concatenate :parents [:left :right] :id :concat)
                                         (layers/linear 10)])
         graph (network/network->graph network)
-        concat-node (graph/get-node graph :concat)]
+        concat-node (graph/get-node graph :concat)
+        clean-output-dims (fn [node-id]
+                           (-> (graph/get-node graph node-id)
+                               graph/node->output-dimensions
+                               first
+                               graph/clear-dimension-identifiers))]
     (is (= (+ (* 25 25 10) 500)
            (graph/node->output-size concat-node)))
-    (is (= (set [(assoc (first (graph/node->output-dimensions (graph/get-node graph :right)))
+    (is (= (set [(assoc (clean-output-dims :right)
                         :id :right)
-                 (assoc (first (graph/node->output-dimensions (graph/get-node graph :left)))
+                 (assoc (clean-output-dims :left)
                         :id :left)])
            (set (graph/node->input-dimensions concat-node))))))
-
-
-(defn test-run
-  []
-  (let [dataset (corn-dataset)]
-    (execute/run [(layers/input 2 1 1 :id :data)
-                  (layers/linear 1 :id :yield)]
-                 dataset
-                 :batch-size 1)))
-
-(deftest classify-corn
-  (testing "Ensure that we can run a simple classifier."
-    (let [big-dataset (apply concat (repeatedly 5000 (fn []
-                                                       (mapv (fn [{:keys [data labels]}]
-                                                               {:labels (if (> (first labels) 50) 1 0)
-                                                                :data data}) (corn-dataset))) ))]
-      (loop [network (network/linear-network
-                       [(layers/input 2 1 1 :id :data)
-                        (layers/linear 2)
-                        (layers/softmax :output-channels 2 :id :labels)])
-             epoch 0]
-        (if (> 20 epoch)
-          (recur (cortex.nn.execute/train network big-dataset :batch-size 50) (inc epoch))
-          network)))))
