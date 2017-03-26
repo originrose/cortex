@@ -811,7 +811,7 @@ to non-gemm operations."
                     (max (ecount src) (ecount dest)))))))
 
 
-(defmulti typed-binary-op
+(defmulti ^:private typed-binary-op
   "Binary operations may contain one or two scalars in various
   positions.  This multimethod disambiguates between those positions."
   (fn [dest alpha x beta y op]
@@ -821,27 +821,106 @@ to non-gemm operations."
 
 (defmethod typed-binary-op [:number :number]
   [dest alpha x beta y op]
-  )
+  (assign! dest
+           (let [x (* (double alpha) (double x))
+                 y (* (double beta) (double y))]
+             (condp = op
+               :+ (+ x y)
+               :- (- x y)
+               :* (* x y)
+               :/ (/ x y)))))
+
+
+(defn- ensure-ecounts-commensurate
+  [x y]
+  (let [n-x (ecount x)
+        n-y (ecount y)
+        min-ec (min n-x n-y)
+        max-ec (long (max (n-x n-y)))]
+    (when-not (= 0 min-ec)
+      (when-not-error (= 0 (rem max-ec min-ec))
+        "Element counts are not commensurate"
+        {:x-ecount (ecount x)
+         :y-ecount (ecount y)}))))
+
+
+(defn- binary-op-constant!
+  [dest alpha x beta y op reverse-operands?]
+  (ensure-ecounts-commensurate dest x)
+  (ensure-datatypes dest x)
+  (let [y (* (double beta) (double y))
+        driver (tensor->driver dest)]
+    (if (compute-drv/alias? driver dest x)
+      (tm/binary-accum-constant!
+       (check-stream)
+       (tensor->buffer dest) (tensor->index-system dest) alpha
+       y
+       (ecount dest) op reverse-operands?)
+      (do
+        (check-partial-alias driver dest x)
+        (tm/binary-op-constant!
+         (check-stream)
+         (tensor->buffer dest) (tensor->index-system dest)
+         (tensor->buffer x) (tensor->index-system x) alpha
+         (* (double beta) (double y))
+         (max (ecount x)
+              (ecount dest)) op reverse-operands?))))
+  dest)
 
 
 (defmethod typed-binary-op [:tensor :number]
   [dest alpha x beta y op]
-  )
+  (binary-op-constant! dest alpha x beta y op false))
+
 
 (defmethod typed-binary-op [:number :tensor]
   [dest alpha x beta y op]
-  )
+  (binary-op-constant! dest beta y alpha x op true))
+
 
 (defmethod typed-binary-op [:tensor :tensor]
   [dest alpha x beta y op]
-  )
+  (let [driver (tensor->driver dest)]
+    (if (or (compute-drv/alias? driver dest x)
+            (compute-drv/alias? driver dest y))
+      (let [x-alias? (compute-drv/alias? driver dest x)
+            [alpha beta y rev-ops?] (if x-alias?
+                                      [alpha beta y false]
+                                      [beta alpha x true])]
+        (ensure-ecounts-commensurate dest y)
+        (ensure-datatypes dest y)
+        (check-partial-alias driver dest y)
+        (tm/binary-accum!
+         (check-stream)
+         (tensor->buffer dest) (tensor->index-system dest) alpha
+         (tensor->buffer y) (tensor->index-system y) beta
+         (max (ecount dest)
+              (ecount y)) op rev-ops?))
+      (do
+        (ensure-ecounts-commensurate dest x)
+        (ensure-ecounts-commensurate dest y)
+        (ensure-ecounts-commensurate x y)
+        (ensure-datatypes x y dest)
+        (check-partial-alias driver dest x y)
+        (tm/binary-op!
+         (check-stream)
+         (tensor->buffer dest) (tensor->index-system dest)
+         (tensor->buffer x) (tensor->index-system x) alpha
+         (tensor->buffer y) (tensor->index-system y) beta
+         (max (ecount dest)
+              (ecount x)
+              (ecount y)) op))))
+  dest)
 
 
 (defn binary-op
   "Perform the operation:
 dest = alpha * x op beta * y.
-x or y may be a scalar, dest must not be."
-  [^Tensor dest alpha x beta y op])
+x or y may be a scalar, dest must not be.
+Datatypes must match."
+  [^Tensor dest alpha x beta y op]
+  (typed-binary-op dest alpha x beta y op)
+  dest)
 
 
 (extend-type Tensor

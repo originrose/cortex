@@ -26,20 +26,29 @@ enforced for that case.")
   (binary-accum-constant! [stream
                            dest dest-idx dest-alpha
                            scalar
-                           n-elems operation reverse-operands?])
-
-  (binary-accum! [stream
-                  dest dest-idx dest-alpha
-                  src src-idx src-alpha
-                  n-elems operation reverse-operands?])
+                           n-elems operation reverse-operands?]
+    "Binary operation where dest is involved in the computation.
+dest[idx] = alpha * dest[idx] op scalar")
 
   (binary-op-constant! [stream
                         dest dest-idx
-                        src src-idx src-alpha
+                        x x-idx x-alpha
                         scalar
-                        n-elems operation reverse-operands?])
+                        n-elems operation reverse-operands?]
+    "Binary operation where dest is not involved in the computation.
+dest[idx] = alpha * x[idx] op scalar")
+
+  (binary-accum! [stream
+                  dest dest-idx dest-alpha
+                  y y-idx y-alpha
+                  n-elems operation reverse-operands?]
+    "Binary operation where dest is involved in the computation.
+dest[idx] = alpha * dest[idx] op y[idx]")
+
   (binary-op! [stream
                dest dest-idx
                x x-idx x-alpha
                y y-idx y-alpha
-               n-elems operation]))
+               n-elems operation]
+    "Binary operation where dest is not involved in the computation.
+dest[idx] = alpha * x[idx] op y[idx]"))
