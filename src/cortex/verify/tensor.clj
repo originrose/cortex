@@ -52,3 +52,35 @@ for the cuda backend."
      (ct/assign! final intermediate)
      (is (m/equals (range 9)
                    (ct/to-double-array final))))))
+
+
+(defn binary-constant-op
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [tens-a (ct/->tensor (partition 3 (range 9)))
+         tens-b (ct/->tensor (repeat 9 0))]
+
+     (when-not (= datatype :byte)
+       (ct/binary-op! tens-b 2.0 tens-a 3.0 4.0 :*)
+       (is (m/equals (mapv #(* 24 %) (range 9))
+                     (ct/to-double-array tens-b))))
+
+     (ct/binary-op! tens-b 2.0 tens-a 3.0 4.0 :+)
+     (is (m/equals (mapv #(+ 12 (* 2 %)) (range 9))
+                   (ct/to-double-array tens-b)))
+
+
+     ;;Check reversing operands works.
+     (ct/binary-op! tens-b 3.0 4.0 2.0 tens-a :-)
+     (is (m/equals (mapv #(- 12 (* 2 %)) (range 9))
+                   (ct/to-double-array tens-b)))
+
+     (ct/assign! tens-b 1.0)
+     (is (m/equals (repeat 9 1)
+                   (ct/to-double-array tens-b)))
+
+     ;;Check accumulation
+     (ct/binary-op! tens-b 1.0 tens-b 1.0 1.0 :+)
+     (is (m/equals (mapv #(+ 1 %) (repeat 9 1))
+                   (ct/to-double-array tens-b))))))

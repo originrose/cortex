@@ -17,3 +17,7 @@
 
 (def-all-dtype-test assign-marshal
   (verify-tensor/assign-marshal (driver) *datatype*))
+
+
+(def-all-dtype-test binary-constant-op
+  (verify-tensor/binary-constant-op (driver) *datatype*))

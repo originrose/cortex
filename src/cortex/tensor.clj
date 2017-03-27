@@ -341,7 +341,7 @@ that rerequires the items to have the same element count."
   (let [partially-overlapping-args (->> args
                                         (map #(tensor->buffer ^Tensor %))
                                         (#(combo/combinations % 2))
-                                        (filter #(apply compute-drv/partially-alias? %))
+                                        (filter #(apply compute-drv/partially-alias? driver %))
                                         seq)]
     (when-not-error (nil? partially-overlapping-args)
       "Partially overlapping arguments detected."
@@ -836,7 +836,7 @@ to non-gemm operations."
   (let [n-x (ecount x)
         n-y (ecount y)
         min-ec (min n-x n-y)
-        max-ec (long (max (n-x n-y)))]
+        max-ec (long (max n-x n-y))]
     (when-not (= 0 min-ec)
       (when-not-error (= 0 (rem max-ec min-ec))
         "Element counts are not commensurate"
@@ -847,10 +847,10 @@ to non-gemm operations."
 (defn- binary-op-constant!
   [dest alpha x beta y op reverse-operands?]
   (ensure-ecounts-commensurate dest x)
-  (ensure-datatypes dest x)
+  (ensure-datatypes (dtype/get-datatype dest) x)
   (let [y (* (double beta) (double y))
         driver (tensor->driver dest)]
-    (if (compute-drv/alias? driver dest x)
+    (if (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer x))
       (tm/binary-accum-constant!
        (check-stream)
        (tensor->buffer dest) (tensor->index-system dest) alpha
@@ -862,7 +862,7 @@ to non-gemm operations."
          (check-stream)
          (tensor->buffer dest) (tensor->index-system dest)
          (tensor->buffer x) (tensor->index-system x) alpha
-         (* (double beta) (double y))
+         y
          (max (ecount x)
               (ecount dest)) op reverse-operands?))))
   dest)
@@ -881,14 +881,14 @@ to non-gemm operations."
 (defmethod typed-binary-op [:tensor :tensor]
   [dest alpha x beta y op]
   (let [driver (tensor->driver dest)]
-    (if (or (compute-drv/alias? driver dest x)
-            (compute-drv/alias? driver dest y))
+    (if (or (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer x))
+            (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer y)))
       (let [x-alias? (compute-drv/alias? driver dest x)
             [alpha beta y rev-ops?] (if x-alias?
                                       [alpha beta y false]
                                       [beta alpha x true])]
         (ensure-ecounts-commensurate dest y)
-        (ensure-datatypes dest y)
+        (ensure-datatypes (get-datatype dest) y)
         (check-partial-alias driver dest y)
         (tm/binary-accum!
          (check-stream)
@@ -900,7 +900,7 @@ to non-gemm operations."
         (ensure-ecounts-commensurate dest x)
         (ensure-ecounts-commensurate dest y)
         (ensure-ecounts-commensurate x y)
-        (ensure-datatypes x y dest)
+        (ensure-datatypes (get-datatype x) y dest)
         (check-partial-alias driver dest x y)
         (tm/binary-op!
          (check-stream)
@@ -913,7 +913,7 @@ to non-gemm operations."
   dest)
 
 
-(defn binary-op
+(defn binary-op!
   "Perform the operation:
 dest = alpha * x op beta * y.
 x or y may be a scalar, dest must not be.

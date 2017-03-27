@@ -261,7 +261,7 @@
            dest-idx->address# (get-elem-idx->address dest-idx-sys#)
            scalar# (datatype->cast-fn ~datatype scalar#)
            dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)]
-       (c-for [idx# (long n-elems#)]
+       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [dest-idx# (.idx_to_address dest-idx->address# idx#)]
                 (dtype/v-aset dest# dest-idx#
                               (datatype->cast-fn
@@ -338,7 +338,7 @@
            y# (datatype->view-cast-fn ~datatype y#)
            y-idx->address# (get-elem-idx->address y-idx-sys#)
            y-alpha# (datatype->cast-fn ~datatype y-alpha#)]
-       (c-for [idx# (long n-elems#)]
+       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [dest-idx# (.idx_to_address dest-idx->address# idx#)
                     y-idx# (.idx_to_address y-idx->address# idx#)]
                 (dtype/v-aset dest# dest-idx#
