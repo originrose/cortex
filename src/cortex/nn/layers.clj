@@ -260,10 +260,10 @@ no change to the input."
 ;; Composites
 
 (defn linear->softmax
-  [num-classes & args]
+  [num-classes & {:keys [] :as args}]
   (vec
-   (concat (apply linear num-classes args)
-           (apply softmax args))))
+   (concat (apply linear num-classes (flatten (seq (dissoc args :id))))
+           (apply softmax (flatten (seq args))))))
 
 
 (defn linear->relu
