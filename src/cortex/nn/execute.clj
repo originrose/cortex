@@ -361,7 +361,9 @@ Furthermore infer should be both wrapped in a resource context and completely re
           batches (->> (dataset-batches dataset batch-size)
                        (map (partial graph/augment-streams (network/network->graph network))))
           _ (when (empty? batches)
-              (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?")))
+              (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
+                              {:batch-size batch-size
+                               :dataset-count (count dataset)})))
 
           batch-buffers (batch-buffers network (first batches) false)
           stream->buffer-map (zipmap (keys batch-buffers)
