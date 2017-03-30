@@ -136,6 +136,23 @@ namespace tensor { namespace index_system {
       };
     }
 
+    __device__
+    int get_index_from_strategy( const general_index_system& sys, int elem)
+    {
+      switch(sys.type)
+      {
+      case strategy_type::constant:
+	return strategy<strategy_type::constant>(sys.c_or_len)(elem);
+      case strategy_type::monotonically_increasing:
+	return strategy<strategy_type::monotonically_increasing>(sys.c_or_len)(elem);
+      case strategy_type::monotonically_decreasing:
+	return strategy<strategy_type::monotonically_decreasing>(sys.c_or_len)(elem);
+      case strategy_type::indexed:
+	return strategy<strategy_type::indexed>(sys.indexes, sys.c_or_len)(elem);
+      };
+      return 0;
+    }
+
     template<typename operator_t>
     __device__
     void with_addr_layout(const general_index_system& sys, operator_t op)
@@ -145,6 +162,17 @@ namespace tensor { namespace index_system {
       }
       else {
 	op(addr_layout(sys.num_columns, sys.column_stride));
+      }
+    }
+
+    __device__
+    int get_index_with_layout(const general_index_system& sys, int idx)
+    {
+      if (sys.num_columns == sys.column_stride) {
+	return idx;
+      }
+      else {
+	return addr_layout(sys.num_columns, sys.column_stride)(idx);
       }
     }
 
@@ -224,6 +252,53 @@ namespace tensor { namespace index_system {
 			       operator_t op)
     {
       with_index_system(lhs_sys, index_2_lhs_sys<operator_t>(rhs_sys, op));
+    }
+
+    template<typename operator_t, typename dest_strat_type>
+    struct index_3_binder
+    {
+      operator_t m_op;
+      dest_strat_type m_dest_sys;
+      __device__ index_3_binder( operator_t op,
+				 dest_strat_type dest_sys )
+	: m_op ( op )
+	, m_dest_sys( dest_sys ) {
+      }
+      template<typename lhs_strat_type, typename rhs_strat_type>
+      __device__ void operator()( lhs_strat_type lhs_sys, rhs_strat_type rhs_sys ) {
+	m_op( m_dest_sys, lhs_sys, rhs_sys );
+      }
+    };
+
+    template<typename op_t>
+    struct index_3_op
+    {
+      op_t m_op;
+      const general_index_system& lhs_sys;
+      const general_index_system& rhs_sys;
+      __device__ index_3_op( op_t op,
+			     const general_index_system& _lhs_sys,
+			     const general_index_system& _rhs_sys)
+	: m_op (op)
+	, lhs_sys(_lhs_sys)
+	, rhs_sys(_rhs_sys){}
+      template<typename strategy>
+      __device__ void operator()(strategy dest) {
+	with_2_index_systems(lhs_sys, rhs_sys,
+			     index_3_binder<op_t, strategy>( m_op, dest ) );
+      }
+    };
+
+
+    template<typename operator_t>
+    __device__
+    void with_3_index_systems( const general_index_system& dest_sys,
+			       const general_index_system& lhs_sys,
+			       const general_index_system& rhs_sys,
+			       operator_t op)
+    {
+      with_index_system(dest_sys,
+			index_3_op<operator_t>(op, lhs_sys, rhs_sys));
     }
 
   }}
