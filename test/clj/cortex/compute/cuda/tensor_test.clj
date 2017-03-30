@@ -3,6 +3,7 @@
             [cortex.compute.verify.utils
              :refer [def-double-float-test
                      def-all-dtype-test
+                     def-cas-dtype-test
                      *datatype*
                      test-wrapper]]
             [clojure.test :refer :all]
@@ -17,3 +18,7 @@
 
 (def-all-dtype-test assign-marshal
   (verify-tensor/assign-marshal (driver) *datatype*))
+
+
+(deftest binary-constant-op
+  (verify-tensor/binary-constant-op (driver) *datatype*))

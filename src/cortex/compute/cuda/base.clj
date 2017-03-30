@@ -271,6 +271,18 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
   ([fn-name]
    (load-multiple-datatype-function fn-name dtype/datatypes)))
 
+(defn cas-datatypes
+  "Get the array of datatypes for which cuda supports CAS operation."
+  []
+  [:double :float :int :long])
+
+(defn load-cas-datatype-function
+  ([module-name fn-name]
+   (load-multiple-datatype-function module-name fn-name (cas-datatypes)))
+  ([fn-name]
+   (load-multiple-datatype-function fn-name (cas-datatypes))))
+
+
 (defn load-float-double-function
   ([module-name fn-name]
    (load-multiple-datatype-function module-name fn-name [:double :float]))
