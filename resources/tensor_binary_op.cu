@@ -18,10 +18,9 @@ void binary_op(dtype* dest, const general_index_system& dest_sys,
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    dest[get_index_with_layout(dest_sys, elem_idx)]
-      = static_cast<dtype>( binary_op( operation,
-				       lhs[get_index_with_layout(lhs_sys, elem_idx)],
-				       rhs[get_index_with_layout(rhs_sys, elem_idx)]));
+    dest[dest_sys(elem_idx)]
+      = operation( lhs[lhs_sys(elem_idx)],
+		   rhs[rhs_sys(elem_idx)] );
   }
 }
 

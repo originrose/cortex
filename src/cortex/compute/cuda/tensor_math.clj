@@ -77,14 +77,14 @@
                      (index-system->cuda index-system)
                      [value n-elems]))))
   (assign! [stream
-            dest dest-idx-sys dest-ecount
-            src src-idx-sys src-ecount]
+            dest dest-idx-sys
+            src src-idx-sys
+            n-elems]
     (let [lhs-dtype (dtype/get-datatype dest)
           rhs-dtype (dtype/get-datatype src)
           assign-fn (cuda-base/get-or-create-fn stream :tensor-assign [lhs-dtype rhs-dtype]
                                                 #(cuda-base/load-2-datatype-function
-                                                  "tensor_assign"))
-          n-elems (long (max dest-ecount src-ecount))]
+                                                  "tensor_assign"))]
       (apply cuda-base/launch-linear-kernel
              (concat [stream assign-fn n-elems 0]
                      [(cuda-base/->ptr dest)]
