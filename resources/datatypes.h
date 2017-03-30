@@ -22,6 +22,13 @@
   DATATYPE_ITERATOR(f64_t, _d)		 \
 
 
+#define ITERATE_DATATYPES_EXPORT_CAS	 \
+  DATATYPE_ITERATOR(int32_t, _i)	 \
+  DATATYPE_ITERATOR(int64_t, _l)	 \
+  DATATYPE_ITERATOR(f32_t, _f)		 \
+  DATATYPE_ITERATOR(f64_t, _d)		 \
+
+
 #define ITERATE_2_DATATYPES			\
   DATATYPE_2_ITERATOR(int8_t,_b,int8_t,_b)	\
   DATATYPE_2_ITERATOR(int8_t,_b,int16_t,_s)	\
