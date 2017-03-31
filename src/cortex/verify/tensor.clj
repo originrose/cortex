@@ -84,3 +84,46 @@ for the cuda backend."
      (ct/binary-op! tens-b 1.0 tens-b 1.0 1.0 :+)
      (is (m/equals (mapv #(+ 1 %) (repeat 9 1))
                    (ct/to-double-array tens-b))))))
+
+
+(defn binary-op
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [tens-a (ct/->tensor (partition 3 (range 9)))
+         tens-b (ct/->tensor (repeat 9 2))
+         tens-c (ct/->tensor (repeat 9 10))]
+     (ct/binary-op! tens-c 2.0 tens-a 2.0 tens-b :*)
+     (is (m/equals (mapv #(* 2 2 2 %) (flatten (partition 3 (range 9))))
+                   (ct/to-double-array tens-c)))
+     (ct/binary-op! tens-b 1.0 tens-c 2.0 tens-a :-)
+     (is (m/equals [0.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 42.0, 48.0]
+                   (ct/to-double-array tens-b)))
+
+     ;;A binary accumulation operation where the destination is the same
+     ;;as one of the operands.
+     (ct/binary-op! tens-c 1.0 tens-c 2.0 tens-a :-)
+     (is (m/equals [0.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0, 42.0, 48.0]
+                   (ct/to-double-array tens-c)))
+     (let [tens-c-small (ct/subvector tens-c 0 :length 3)
+           sub-fn (fn [nth-idx]
+                    (->> (partition 3 (range 9))
+                         (map #(nth % nth-idx))))
+           c-data (vec (ct/to-double-array tens-c))]
+       (ct/binary-op! tens-c-small 1.0 tens-c-small 2.0 tens-a :-)
+       (is (m/equals (mapv (fn [elem-idx]
+                             (apply -
+                                    (nth c-data elem-idx)
+                                    (mapv #(* 2.0 %)
+                                          (sub-fn elem-idx))))
+                           [0 1 2])
+                     (ct/to-double-array tens-c-small)))
+       (let [c-data (vec (ct/to-double-array tens-c-small))]
+         (ct/binary-op! tens-c-small 2.0 tens-a 1.0 tens-c-small :-)
+         (is (m/equals (mapv (fn [elem-idx]
+                               (reduce (fn [result a-elem]
+                                         (- a-elem result))
+                                       (nth c-data elem-idx)
+                                       (map #(* 2.0 %) (sub-fn elem-idx))))
+                             [0 1 2])
+                       (ct/to-double-array tens-c-small))))))))

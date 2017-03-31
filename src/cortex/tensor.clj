@@ -883,7 +883,7 @@ to non-gemm operations."
   (let [driver (tensor->driver dest)]
     (if (or (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer x))
             (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer y)))
-      (let [x-alias? (compute-drv/alias? driver dest x)
+      (let [x-alias? (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer x))
             [alpha beta y rev-ops?] (if x-alias?
                                       [alpha beta y false]
                                       [beta alpha x true])]

@@ -21,3 +21,7 @@
 
 (def-all-dtype-test binary-constant-op
   (verify-tensor/binary-constant-op (driver) *datatype*))
+
+
+(def-double-float-test binary-op
+  (verify-tensor/binary-op (driver) *datatype*))
