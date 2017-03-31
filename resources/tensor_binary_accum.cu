@@ -22,11 +22,12 @@ void binary_accum(dtype* dest, const general_index_system& dest_sys, dtype dest_
   if ( elem_idx < n_elems ) {
     int dest_idx = dest_sys(elem_idx);
     dtype rhs_val = rhs_alpha * rhs[rhs_sys(elem_idx)];
-    dtype* write_ptr = dest + dest_idx;
-    TIntType* int_addr = TConverterType::from(write_ptr);
+    dtype* dest_ptr = dest + dest_idx;
+    TIntType* int_addr = TConverterType::from(dest_ptr);
+    volatile dtype* write_ptr(dest_ptr);
     TIntType old, assumed;
     do {
-      dtype dest_val = dest[dest_idx];
+      dtype dest_val = *write_ptr;
       assumed = TConverterType::from(dest_val);
       dtype new_val = operation(dest_val * dest_alpha, rhs_val);
       old = atomicCAS(int_addr, assumed, TConverterType::from(new_val));

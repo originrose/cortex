@@ -24,5 +24,5 @@
   (verify-tensor/binary-constant-op (driver) *datatype*))
 
 
-(deftest binary-op
-  (verify-tensor/binary-op (driver) :int))
+(def-cas-dtype-test binary-op
+  (verify-tensor/binary-op (driver) *datatype*))

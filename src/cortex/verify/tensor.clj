@@ -119,10 +119,10 @@ for the cuda backend."
                            [0 1 2])
                      (ct/to-double-array tens-c-small)))
        (let [c-data (vec (ct/to-double-array tens-c-small))]
-         (ct/binary-op! tens-c-small 2.0 tens-a 1.0 tens-c-small :-)
+         (ct/binary-op! tens-c-small 2.0 tens-a 1.0 tens-c-small :+)
          (is (m/equals (mapv (fn [elem-idx]
                                (reduce (fn [result a-elem]
-                                         (- a-elem result))
+                                         (+ a-elem result))
                                        (nth c-data elem-idx)
                                        (map #(* 2.0 %) (sub-fn elem-idx))))
                              [0 1 2])
