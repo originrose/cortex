@@ -49,8 +49,8 @@
        :* (int 2)
        :/ (int 3))])
   ([operation rev-ops?]
-   [(operation->cuda operation)
-    (int (if rev-ops? 1 0))]))
+   (conj (operation->cuda operation)
+         (int (if rev-ops? 1 0)))))
 
 
 (defonce cuda_typename_expansion
@@ -97,12 +97,13 @@
                                                 #(cuda-base/load-2-datatype-function
                                                   "tensor_assign"))]
       (apply cuda-base/launch-linear-kernel
-             (concat [stream assign-fn n-elems 0]
-                     [(cuda-base/->ptr dest)]
-                     (index-system->cuda dest-idx-sys)
-                     [(cuda-base/->ptr src)]
-                     (index-system->cuda src-idx-sys)
-                     [n-elems]))))
+             (-> (concat [stream assign-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx-sys)
+                         [(cuda-base/->ptr src)]
+                         (index-system->cuda src-idx-sys)
+                         [n-elems])
+                 vec))))
 
   (binary-accum-constant! [stream
                            dest dest-idx dest-alpha
@@ -112,14 +113,16 @@
           binop-fn (cuda-base/get-or-create-fn stream :tensor-accum-constant
                                                dest-dtype
                                                #(cuda-base/load-cas-datatype-function
-                                                 "tensor_accum_constant"))]
+                                                 "tensor_accum_constant"))
+          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
-             (concat [stream binop-fn n-elems 0]
-                     [(cuda-base/->ptr dest)]
-                     (index-system->cuda dest-idx)
-                     [dest-alpha scalar]
-                     (operation->cuda operation reverse-operands?)
-                     [n-elems]))))
+             (-> (concat [stream binop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(->dtype dest-alpha) (->dtype scalar)]
+                         (operation->cuda operation reverse-operands?)
+                         [n-elems])
+                 vec))))
 
   (binary-op-constant! [stream
                         dest dest-idx
@@ -130,16 +133,18 @@
           binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-op-constant
                                                dest-dtype
                                                #(cuda-base/load-all-datatype-function
-                                                 "tensor_binary_op_constant"))]
+                                                 "tensor_binary_op_constant"))
+          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
-             (concat [stream binop-fn n-elems 0]
-                     [(cuda-base/->ptr dest)]
-                     (index-system->cuda dest-idx)
-                     [(cuda-base/->ptr x)]
-                     (index-system->cuda x-idx)
-                     [x-alpha scalar]
-                     (operation->cuda operation reverse-operands?)
-                     [n-elems]))))
+             (-> (concat [stream binop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(cuda-base/->ptr x)]
+                         (index-system->cuda x-idx)
+                         [(->dtype x-alpha) (->dtype scalar)]
+                         (operation->cuda operation reverse-operands?)
+                         [n-elems])
+                 vec))))
 
   (binary-accum! [stream
                   dest dest-idx dest-alpha
@@ -149,17 +154,19 @@
           binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-accum
                                                dest-dtype
                                                #(cuda-base/load-cas-datatype-function
-                                                 "tensor_binary_accum"))]
+                                                 "tensor_binary_accum"))
+          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
-             (concat [stream binop-fn n-elems 0]
-                     [(cuda-base/->ptr dest)]
-                     (index-system->cuda dest-idx)
-                     [dest-alpha]
-                     [(cuda-base/->ptr y)]
-                     (index-system->cuda y-idx)
-                     [y-alpha]
-                     (operation->cuda operation reverse-operands?)
-                     [n-elems]))))
+             (-> (concat [stream binop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(->dtype dest-alpha)]
+                         [(cuda-base/->ptr y)]
+                         (index-system->cuda y-idx)
+                         [(->dtype y-alpha)]
+                         (operation->cuda operation reverse-operands?)
+                         [n-elems])
+                 vec))))
 
   (binary-op! [stream
                dest dest-idx
@@ -170,16 +177,18 @@
           binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-op
                                                dest-dtype
                                                #(cuda-base/load-all-datatype-function
-                                                 "tensor_binary_op"))]
+                                                 "tensor_binary_op"))
+          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
-             (concat [stream binop-fn n-elems 0]
-                     [(cuda-base/->ptr dest)]
-                     (index-system->cuda dest-idx)
-                     [(cuda-base/->ptr x)]
-                     (index-system->cuda x-idx)
-                     [x-alpha]
-                     [(cuda-base/->ptr y)]
-                     (index-system->cuda y-idx)
-                     [y-alpha]
-                     (operation->cuda operation)
-                     [n-elems])))))
+             (-> (concat [stream binop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(cuda-base/->ptr x)]
+                         (index-system->cuda x-idx)
+                         [(->dtype x-alpha)]
+                         [(cuda-base/->ptr y)]
+                         (index-system->cuda y-idx)
+                         [(->dtype y-alpha)]
+                         (operation->cuda operation)
+                         [n-elems])
+                 vec)))))

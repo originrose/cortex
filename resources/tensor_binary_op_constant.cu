@@ -20,7 +20,7 @@ void binary_op_constant(dtype* dest, const general_index_system& dest_sys,
   if ( elem_idx < n_elems ) {
     dest[dest_sys(elem_idx)]
       = operation( static_cast<dtype>(lhs[lhs_sys(elem_idx)] * lhs_alpha),
-		   scalar );
+      		   scalar );
   }
 }
 

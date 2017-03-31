@@ -20,5 +20,5 @@
   (verify-tensor/assign-marshal (driver) *datatype*))
 
 
-(deftest binary-constant-op
-  (verify-tensor/binary-constant-op (driver) *datatype*))
+(def-cas-dtype-test binary-constant-op
+  (verify-tensor/binary-constant-op (driver) :float))

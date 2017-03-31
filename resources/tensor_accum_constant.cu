@@ -11,7 +11,7 @@ using namespace tensor::operations;
 
 template<typename dtype>
 __device__
-void constant_accum(dtype* dest, const general_index_system& dest_sys, dtype dest_alpha,
+void accum_constant(dtype* dest, const general_index_system& dest_sys, dtype dest_alpha,
 		    dtype scalar,
 		    const general_operation& operation,
 		    int n_elems)
@@ -38,11 +38,11 @@ void constant_accum(dtype* dest, const general_index_system& dest_sys, dtype des
 #define DATATYPE_ITERATOR(dtype,export_sym)				\
   extern "C"								\
   __global__								\
-  void tensor_binary_accum##export_sym(					\
+  void tensor_accum_constant##export_sym(				\
     datatype::dtype* dest, EXPLODE_IDX_SYSTEM(dest), datatype::dtype dest_alpha, \
     const datatype::dtype scalar,					\
     EXPLODE_OP_SYSTEM_REV(bin_op), int n_elems) {			\
-    constant_accum( dest, ENCAPSULATE_IDX_SYSTEM(dest), dest_alpha,	\
+    accum_constant( dest, ENCAPSULATE_IDX_SYSTEM(dest), dest_alpha,	\
 		    scalar,						\
 		    ENCAPSULATE_OP_SYSTEM_REV(bin_op),			\
 		    n_elems );						\

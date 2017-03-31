@@ -59,7 +59,7 @@ for the cuda backend."
   (tensor-context
    driver datatype
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
-         tens-b (ct/->tensor (repeat 9 0))]
+         tens-b (ct/->tensor (repeat 9 1))]
 
      (when-not (= datatype :byte)
        (ct/binary-op! tens-b 2.0 tens-a 3.0 4.0 :*)
