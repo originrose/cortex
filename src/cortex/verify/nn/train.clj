@@ -137,9 +137,10 @@
     (when context
       ((:backend-fn context)))
     (let [n-epochs 4
-          batch-size 10
-          dataset (take 1000 @mnist-training-dataset*)
-          test-dataset @mnist-test-dataset*
+          training-batch-size 10
+          running-batch-size 100
+          dataset (take 100 @mnist-training-dataset*)
+          test-dataset (take 100 @mnist-test-dataset*)
           test-labels (map :label test-dataset)
           network (network/linear-network MNIST-NETWORK)
           _ (println (format "Training MNIST network for %s epochs..." n-epochs))
@@ -147,18 +148,19 @@
           network (reduce (fn [network epoch]
                             (let [new-network (execute/train network dataset
                                                              :context context
-                                                             :batch-size batch-size)
-                                  results (->> (execute/run new-network (take 100 test-dataset)
-                                                 :batch-size batch-size
+                                                             :batch-size training-batch-size)
+                                  results (->> (execute/run new-network test-dataset
+                                                 :batch-size running-batch-size
                                                  :context context
                                                  :loss-outputs? true))
-                                  loss-fn (execute/execute-loss-fn network results (take 100 test-dataset))
-                                  score (percent= (map :label results) (take 100 test-labels))]
+                                  loss-fn (execute/execute-loss-fn network results test-dataset)
+                                  score (percent= (map :label results) test-labels)]
                               (println (format "Score for epoch %s: %s" (inc epoch) score))
                               (println (loss/loss-fn->table-str loss-fn))
                               new-network))
                           network
                           (range n-epochs))
-          results (->> (execute/run network test-dataset :batch-size batch-size :context context)
+          results (->> (execute/run network test-dataset
+                         :batch-size running-batch-size :context context)
                        (map :label))]
       (is (> (percent= results test-labels) 0.6)))))
