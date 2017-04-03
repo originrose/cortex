@@ -203,12 +203,6 @@ If the input contains no channels then you get a scale factor per input paramete
   [(merge-args {:type :logistic} args)])
 
 
-(defn linear->logistic
-  [num-output & args]
-  (concat (apply linear num-output args)
-          (apply logistic args)))
-
-
 (defmethod graph/get-node-metadata :logistic
   [& args]
   (default-layer-metadata))
@@ -217,12 +211,6 @@ If the input contains no channels then you get a scale factor per input paramete
 (defn tanh
   [& args]
   [(merge-args {:type :tanh} args)])
-
-
-(defn linear->tanh
-  [num-output & args]
-  (concat (apply linear num-output args)
-          (apply tanh args)))
 
 
 (defmethod graph/get-node-metadata :tanh
@@ -259,17 +247,42 @@ no change to the input."
 
 ;; Composites
 
+(defn- seq-without-id
+  [coll]
+  (->> coll
+       (reduce (fn [[eax last-elt] elt]
+                 (if (or (= :id elt) (= :id last-elt))
+                   [eax elt]
+                   [(conj eax elt) elt]))
+               [[] nil])
+       (first)
+       (seq)))
+
 (defn linear->softmax
   [num-classes & args]
   (vec
-   (concat (apply linear num-classes args)
+   (concat (apply linear num-classes (seq-without-id args))
            (apply softmax args))))
 
 
 (defn linear->relu
   [num-output & args]
-  (concat (apply linear num-output args)
+  (concat (apply linear num-output (seq-without-id args))
           (apply relu args)))
+
+
+(defn linear->tanh
+  [num-output & args]
+  (concat (apply linear num-output (seq-without-id args))
+          (apply tanh args)))
+
+
+(defn linear->logistic
+  [num-output & args]
+  (concat (apply linear num-output (seq-without-id args))
+          (apply logistic args)))
+
+
 
 
 ;; Convolutional Layers

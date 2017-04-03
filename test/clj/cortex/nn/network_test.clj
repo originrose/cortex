@@ -80,3 +80,25 @@
                  (assoc (clean-output-dims :left)
                         :id :left)])
            (set (graph/node->input-dimensions concat-node))))))
+
+
+(deftest composite-layer-id
+  (let [network (network/linear-network [(layers/input 2 1 1 :id :in)
+                                         (layers/linear->softmax 2 :id :out)])
+        out-node (network/network->node network :out)]
+    (is (= :softmax (:type out-node))))
+
+  (let [network (network/linear-network [(layers/input 2 1 1 :id :in)
+                                         (layers/linear->relu 2 :id :out)])
+        out-node (network/network->node network :out)]
+    (is (= :relu (:type out-node))))
+
+  (let [network (network/linear-network [(layers/input 2 1 1 :id :in)
+                                         (layers/linear->tanh 2 :id :out)])
+        out-node (network/network->node network :out)]
+    (is (= :tanh (:type out-node))))
+
+  (let [network (network/linear-network [(layers/input 2 1 1 :id :in)
+                                         (layers/linear->logistic 2 :id :out)])
+        out-node (network/network->node network :out)]
+    (is (= :logistic (:type out-node)))))
