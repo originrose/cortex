@@ -317,7 +317,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   [network dataset &
    {:keys [batch-size context optimizer datatype]
     :or {batch-size 10
-         datatype :double}}]
+         datatype :float}}]
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
           context (or context (compute-context :datatype datatype))
@@ -347,7 +347,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   generate the actual network loss."
   [network dataset & {:keys [batch-size context datatype loss-outputs?]
                       :or {batch-size 1
-                           datatype :double}
+                           datatype :float}
                       :as options}]
   (resource/with-resource-context
     (let [context (or context (compute-context :datatype datatype))
