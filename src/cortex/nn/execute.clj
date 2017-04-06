@@ -314,6 +314,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn train
+  "Train.  Returns a tuple of network and optimizer where both the network and optimizer's
+parameters are updated."
   [network dataset &
    {:keys [batch-size context optimizer datatype]
     :or {batch-size 10
@@ -338,7 +340,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
       (doseq [batch batches]
         (load-batch! network batch batch-buffers)
         (train-batch! network stream->buffer-map :optimize? true))
-      (compute-binding/save-to-network context network {}))))
+      (compute-binding/save-to-network context network {:save-optimizer-parameters? true}))))
 
 
 (defn run

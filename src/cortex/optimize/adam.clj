@@ -10,7 +10,8 @@
    [cortex.util :as util]
    [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
    [think.datatype.marshal :as marshal]
-   [think.parallel.core :as parallel])
+   [think.parallel.core :as parallel]
+   [cortex.graph :as graph])
   (:import
    [think.datatype ArrayView IntArrayView]))
 
@@ -145,14 +146,14 @@
                          gradient-alpha gradient parameters m v)))
 
 
-(defrecord Adam [backend optimizer step-fn param-count m v pow-beta1-t pow-beta2-t]
+(defrecord Adam [backend optimizer step-fn pow-beta1-t pow-beta2-t]
   PGradientOptimizer
-  (batch-update [this]
+  (batch-update [this optimizer-parameters]
     (let [{:keys [beta1 beta2]} optimizer]
       (-> this
           (update :pow-beta1-t #(* (double %) (double beta1)))
           (update :pow-beta2-t #(* (double %) (double beta2))))))
-  (compute-parameters! [this gradient-alpha offset gradient parameters]
+  (compute-parameters! [this {:keys [m v]} gradient-alpha offset gradient parameters]
     (let [{:keys [alpha beta1 beta2 epsilon]} optimizer]
       (step-fn offset
                alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
@@ -160,30 +161,36 @@
 
 
 (defn- setup-optimizer
-  [backend optimizer step-fn param-count]
+  [backend optimizer step-fn]
   (let [driver (drv/get-driver backend)
         stream (drv/get-stream backend)
-        datatype (dtype/get-datatype backend)
-        m (math/new-array driver stream datatype [param-count])
-        v (math/new-array driver stream datatype [param-count])]
-    (->Adam backend optimizer step-fn param-count m v POW-BETA1-T POW-BETA2-T)))
+        datatype (dtype/get-datatype backend)]
+    (->Adam backend optimizer step-fn POW-BETA1-T POW-BETA2-T)))
 
 
 (defmethod create-optimizer [:cpu :adam]
-  [backend optimizer param-count]
+  [backend optimizer]
   (let [cpu-fns (datatype-buffer-cast-iterator create-cpu-adam-step-fn)]
     (setup-optimizer backend optimizer
-                     (adam-step-fn backend cpu-fns dispatch-to-cpu)
-                     param-count)))
+                     (adam-step-fn backend cpu-fns dispatch-to-cpu))))
 
 
 (defmethod create-optimizer [:cuda :adam]
-  [backend optimizer param-count]
+  [backend optimizer]
   ;; Load the compiled GPU kernel for floats and doubles
   (let [cuda-fns (cuda-drv/load-float-double-function "adam.fatbin" "adam_step")]
     (setup-optimizer backend optimizer
-                     (adam-step-fn backend cuda-fns dispatch-to-gpu)
-                     param-count)))
+                     (adam-step-fn backend cuda-fns dispatch-to-gpu))))
+
+
+(defmethod graph/get-node-metadata :adam
+  [desc]
+  {:arguments
+   {:m {:initialization {:type :constant :value 0}
+        :type :parameter}
+    :v {:initialization {:type :constant :value 0}
+        :type :parameter}}
+   :passes #{:training}})
 
 (defn adam
   [& args]
