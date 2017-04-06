@@ -127,14 +127,15 @@
              epoch 0]
         (if (and epoch-count (> epoch epoch-count))
           network
-          (let [[network optimizer] (execute/train network train-ds
-                                                   :batch-size batch-size
-                                                   :optimizer optimizer
-                                                   :context context)]
+          (let [{:keys [network optimizer]}
+                (execute/train network train-ds
+                               :batch-size batch-size
+                               :optimizer optimizer
+                               :context context)]
            (-> network
                (assoc :epoch-count epoch)
-               (per-epoch-fn network batch-size test-ds network-filename best-network-fn simple-loss-print?
-                             context)
+               (per-epoch-fn network batch-size test-ds network-filename
+                             best-network-fn simple-loss-print? context)
                (recur optimizer (inc epoch)))))))))
 
 

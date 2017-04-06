@@ -330,15 +330,16 @@
                                 {}
                                 (get-in network [:compute-binding :traversal-buffers]))))
             (dissoc :compute-binding))]
-    (if save-optimizer-parameters?
-      [retval (when-let [optimizer (get-in network [:compute-binding :src-optimizer])]
+    (cond-> {:network retval}
+      save-optimizer-parameters?
+      (assoc :optimizer
+             (when-let [optimizer (get-in network [:compute-binding :src-optimizer])]
                 (cond-> optimizer
                   (get-in network [:compute-binding :optimizer-parameters])
                   (merge (->> (get-in network [:compute-binding :optimizer-parameters])
                               (map (fn [[k v]]
                                      [k (core-m v)]))
-                              (into {})))))]
-      retval)))
+                              (into {})))))))))
 
 
 (defn get-parameter
