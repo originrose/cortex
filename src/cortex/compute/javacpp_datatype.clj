@@ -161,6 +161,14 @@ threadsafe while (.position ptr offset) is not."
   (->> (marshal/buffer-type-iterator copy-to-impl)
        (into {})))
 
+(extend-type Pointer
+  marshal/PTypeToCopyToFn
+  (get-copy-to-fn [dest dest-offset]
+    (marshal/get-copy-to-fn (as-buffer dest) dest-offset))
+  dtype/PCopyQueryIndirect
+  (get-indirect-copy-fn [dest dest-offset]
+    (marshal/get-copy-to-fn dest dest-offset)))
+
 
 (defn float->double-ary-time-test
   []
