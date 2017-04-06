@@ -108,10 +108,11 @@
                         optimizer optimizer
                         epoch 0]
                    (if (> 3 epoch)
-                     (let [[network optimizer] (execute/train network big-dataset
-                                                              :batch-size 1
-                                                              :context context
-                                                              :optimizer optimizer)
+                     (let [{:keys [network optimizer]}
+                           (execute/train network big-dataset
+                                          :batch-size 1
+                                          :context context
+                                          :optimizer optimizer)
                            results (map :label (execute/run network dataset :context context))
                            err (regression-error results labels)]
                        (recur network optimizer (inc epoch)))
@@ -148,11 +149,12 @@
           _ (network/print-layer-summary network (traverse/training-traversal network))
           [network optimizer]
           (reduce (fn [[network optimizer] epoch]
-                    (let [[new-network optimizer] (execute/train network dataset
-                                                                 :context context
-                                                                 :batch-size training-batch-size
-                                                                 :optimizer optimizer)
-                          results (->> (execute/run new-network test-dataset
+                    (let [{:keys [network optimizer]}
+                          (execute/train network dataset
+                                         :context context
+                                         :batch-size training-batch-size
+                                         :optimizer optimizer)
+                          results (->> (execute/run network test-dataset
                                          :batch-size running-batch-size
                                          :context context
                                          :loss-outputs? true))
@@ -160,7 +162,7 @@
                           score (percent= (map :label results) test-labels)]
                       (println (format "Score for epoch %s: %s" (inc epoch) score))
                       (println (loss/loss-fn->table-str loss-fn))
-                      [new-network optimizer]))
+                      [network optimizer]))
                   [network nil]
                   (range n-epochs))
           results (->> (execute/run network test-dataset

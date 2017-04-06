@@ -208,7 +208,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
                 ;;Reset device buffer to original value.
                 (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
                 (dtype/set-value! numeric-gradient idx gradient))))))
-      (compute-binding/save-to-network context network {:save-gradients? true}))))
+      (-> (compute-binding/save-to-network context network {:save-gradients? true})
+          :network))))
 
 
 
