@@ -70,7 +70,8 @@
 
 (defn unpack-bound-network
   [context network test-layer-id]
-  (unpack-network (compute-binding/save-to-network context network {:save-gradients? true})
+  (unpack-network (-> (compute-binding/save-to-network context network {:save-gradients? true})
+                      :network)
                   test-layer-id))
 
 
