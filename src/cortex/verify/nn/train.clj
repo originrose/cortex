@@ -105,15 +105,16 @@
          optimizer (adam/adam :alpha 0.01)
          network (corn-network)
          network (loop [network network
+                        optimizer optimizer
                         epoch 0]
                    (if (> 3 epoch)
-                     (let [network (execute/train network big-dataset
-                                                  :batch-size 1
-                                                  :context context
-                                                  :optimizer optimizer)
+                     (let [[network optimizer] (execute/train network big-dataset
+                                                              :batch-size 1
+                                                              :context context
+                                                              :optimizer optimizer)
                            results (map :label (execute/run network dataset :context context))
                            err (regression-error results labels)]
-                       (recur network (inc epoch)))
+                       (recur network optimizer (inc epoch)))
                      network))
          results (map :label (execute/run network dataset :batch-size 10 :context context))
          err (regression-error results labels)]
@@ -145,22 +146,27 @@
           network (network/linear-network MNIST-NETWORK)
           _ (println (format "Training MNIST network for %s epochs..." n-epochs))
           _ (network/print-layer-summary network (traverse/training-traversal network))
-          network (reduce (fn [network epoch]
-                            (let [new-network (execute/train network dataset
-                                                             :context context
-                                                             :batch-size training-batch-size)
-                                  results (->> (execute/run new-network test-dataset
-                                                 :batch-size running-batch-size
-                                                 :context context
-                                                 :loss-outputs? true))
-                                  loss-fn (execute/execute-loss-fn network results test-dataset)
-                                  score (percent= (map :label results) test-labels)]
-                              (println (format "Score for epoch %s: %s" (inc epoch) score))
-                              (println (loss/loss-fn->table-str loss-fn))
-                              new-network))
-                          network
-                          (range n-epochs))
+          [network optimizer]
+          (reduce (fn [[network optimizer] epoch]
+                    (let [[new-network optimizer] (execute/train network dataset
+                                                                 :context context
+                                                                 :batch-size training-batch-size
+                                                                 :optimizer optimizer)
+                          results (->> (execute/run new-network test-dataset
+                                         :batch-size running-batch-size
+                                         :context context
+                                         :loss-outputs? true))
+                          loss-fn (execute/execute-loss-fn network results test-dataset)
+                          score (percent= (map :label results) test-labels)]
+                      (println (format "Score for epoch %s: %s" (inc epoch) score))
+                      (println (loss/loss-fn->table-str loss-fn))
+                      [new-network optimizer]))
+                  [network nil]
+                  (range n-epochs))
           results (->> (execute/run network test-dataset
                          :batch-size running-batch-size :context context)
                        (map :label))]
+      ;;Ensure the optimizer was updated
+      (is (= (clojure.set/intersection #{:m :v} (set (keys optimizer)))
+             #{:m :v}))
       (is (> (percent= results test-labels) 0.6)))))

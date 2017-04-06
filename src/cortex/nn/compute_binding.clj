@@ -18,6 +18,7 @@
             [cortex.compute.math :as math]
             [cortex.loss :as loss]
             [cortex.util :as util]
+            [cortex.buffer-initialization :as buf-init]
             [clojure.core.matrix.macros :refer [c-for]]))
 
 
@@ -261,11 +262,26 @@
         [network loss-function] (load-loss-function network backend traversal-loss-function)
         retval
         (-> network
+            (assoc-in [:compute-binding :src-optimizer] optimizer)
             (assoc-in [:compute-binding :optimizer]
                       (when optimizer
                         (optimize/create-optimizer backend
-                                                   optimizer
-                                                   trainable-param-count)))
+                                                   optimizer)))
+            (assoc-in [:compute-binding :optimizer-parameters]
+                      (when optimizer
+                        (let [param-shape [trainable-param-count]]
+                         (->> (get (graph/get-node-metadata optimizer) :arguments)
+                              (map (fn [[k v]]
+                                     (let [initial-buffer (or (get optimizer k)
+                                                              (buf-init/initialize-buffer
+                                                               (assoc (get v :initialization)
+                                                                      :shape param-shape)))]
+                                       (when-not (= param-shape (m/shape initial-buffer))
+                                         (throw (ex-info "Optimizer parameter shape mismatch"
+                                                         {:require-shape param-shape
+                                                          :existing-shape (m/shape initial-buffer)})))
+                                       [k (backend/array backend initial-buffer)])))
+                              (into {})))))
             (assoc-in [:compute-binding :trainable-parameters] trainable-parameters)
             (assoc-in [:compute-binding :loss-function] loss-function))]
     retval))
@@ -275,8 +291,10 @@
   "Return a new network without context information and with any persistent information
   (like parameters) updated.  This may be called multiple times during the training
   process.  Options is map that may contain:
-   * save-gradients? - save the gradients *and* the io buffers."
-  [context network {:keys [save-gradients?] :as options}]
+  * save-gradients? - save the gradients *and* the io buffers.
+  * save-optimizer-parameters? - when true, return a tuple of network and optimizer with any parameters
+    assoc'd in."
+  [context network {:keys [save-gradients? save-optimizer-parameters?] :as options}]
   (let [backend (backend network)
         core-m (fn [data]
                  (when data
@@ -285,32 +303,42 @@
                     (when host-buffer
                       (let [retval (double-array (m/ecount host-buffer))]
                         (dtype/copy! host-buffer 0 retval 0 (m/ecount host-buffer))
-                        retval)))]
-    (-> network
-        (update-in [:compute-graph :buffers]
-                   (fn [buffers]
-                     (reduce
-                      (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
-                        (update buffers buf-id
-                                (fn [result-buffer]
-                                  (cond-> (assoc result-buffer :buffer (core-m buffer))
-                                    (and save-gradients? gradient)
-                                    (assoc :gradient (core-m gradient)
-                                           :numeric-gradient (->doubles numeric-gradient))))))
-                      buffers
-                      (get-in network [:compute-binding :parameter-buffers]))))
-        (assoc-in [:traversal :buffers]
-                  (if save-gradients?
-                    (reduce (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
-                              (update buffers buf-id
-                                      #(assoc
-                                        %
-                                        :buffer (core-m buffer)
-                                        :gradient (core-m gradient)
-                                        :numeric-gradient (->doubles numeric-gradient))))
-                            {}
-                            (get-in network [:compute-binding :traversal-buffers]))))
-        (dissoc :compute-binding))))
+                        retval)))
+        retval
+        (-> network
+            (update-in [:compute-graph :buffers]
+                       (fn [buffers]
+                         (reduce
+                          (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
+                            (update buffers buf-id
+                                    (fn [result-buffer]
+                                      (cond-> (assoc result-buffer :buffer (core-m buffer))
+                                        (and save-gradients? gradient)
+                                        (assoc :gradient (core-m gradient)
+                                               :numeric-gradient (->doubles numeric-gradient))))))
+                          buffers
+                          (get-in network [:compute-binding :parameter-buffers]))))
+            (assoc-in [:traversal :buffers]
+                      (if save-gradients?
+                        (reduce (fn [buffers [buf-id {:keys [buffer gradient numeric-gradient]}]]
+                                  (update buffers buf-id
+                                          #(assoc
+                                            %
+                                            :buffer (core-m buffer)
+                                            :gradient (core-m gradient)
+                                            :numeric-gradient (->doubles numeric-gradient))))
+                                {}
+                                (get-in network [:compute-binding :traversal-buffers]))))
+            (dissoc :compute-binding))]
+    (if save-optimizer-parameters?
+      [retval (when-let [optimizer (get-in network [:compute-binding :src-optimizer])]
+                (cond-> optimizer
+                  (get-in network [:compute-binding :optimizer-parameters])
+                  (merge (->> (get-in network [:compute-binding :optimizer-parameters])
+                              (map (fn [[k v]]
+                                     [k (core-m v)]))
+                              (into {})))))]
+      retval)))
 
 
 (defn get-parameter
@@ -346,9 +374,14 @@
   [network]
   (get-in network [:compute-binding :trainable-parameters]))
 
-(defn optimizers
+(defn optimizer
   [network]
   (get-in network [:compute-binding :optimizer]))
+
+
+(defn optimizer-parameters
+  [network]
+  (get-in network [:compute-binding :optimizer-parameters]))
 
 (defn loss-fn
   [network]
@@ -702,7 +735,7 @@ traversal with the inputs and outputs mapped to specific buffers."
   (let [parameters (parameters network)
         stream (stream network)
         ;; Call batch-update so the optimizer can do batch level computations
-        optimizer (optimize/batch-update (optimizers network))
+        optimizer (optimize/batch-update (optimizer network) (optimizer-parameters network))
         buffer-alpha (/ 1.0 (double (batch-size network)))]
     ;; Call compute-parameters! on all of the paramter buffers
     (reduce (fn [offset {:keys [buffer gradient
@@ -717,6 +750,7 @@ traversal with the inputs and outputs mapped to specific buffers."
                     param-buf (math/device-buffer buffer)]
                 (when-not non-trainable?
                   (optimize/compute-parameters! optimizer
+                                                (optimizer-parameters network)
                                                 (* buffer-alpha learning-attenuation)
                                                 offset gradient buffer)
                   (when (is-l2-max-constraint-valid? parameter)

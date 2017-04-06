@@ -7,30 +7,29 @@
     [cortex.compute.cpu.backend :as cpu-backend]
     [cortex.compute.cpu.driver :as cpu-drv]
     [cortex.compute.cuda.driver :as cuda-drv]
-    [cortex.util :as util])
+    [cortex.util :as util]
+    [cortex.graph :as graph])
   (:import
    [cortex.compute.optimize AdadeltaOptimizer]
    [think.datatype FloatArrayView DoubleArrayView]))
 
 (set! *warn-on-reflection* true)
 
-(defrecord Adadelta [backend optimizer step-fn param-count grad-accum dx-accum]
+(defrecord Adadelta [backend optimizer step-fn]
   PGradientOptimizer
-  (batch-update [this]
+  (batch-update [this _]
     this)
-  (compute-parameters! [this gradient-alpha offset gradient parameters]
+  (compute-parameters! [this {:keys [grad-accum dx-accum]} gradient-alpha offset gradient parameters]
     (let [{:keys [decay epsilon]} optimizer]
       (step-fn backend gradient parameters gradient-alpha offset
                       decay epsilon grad-accum dx-accum))))
 
 (defn- setup-optimizer
-  [backend optimizer step-fn param-count]
+  [backend optimizer step-fn]
   (let [driver (drv/get-driver backend)
         stream (drv/get-stream backend)
-        datatype (dtype/get-datatype backend)
-        m (math/new-array driver stream datatype [param-count])
-        v (math/new-array driver stream datatype [param-count])]
-   (->Adadelta backend optimizer step-fn param-count m v)))
+        datatype (dtype/get-datatype backend)]
+   (->Adadelta backend optimizer step-fn)))
 
 (defn cpu-adadelta-step-float!
   [^FloatArrayView gradient ^FloatArrayView parameters gradient-alpha
@@ -49,7 +48,7 @@
     (.data grad-accum) (.data dx-accum)))
 
 (defmethod create-optimizer [:cpu :adadelta]
-  [backend optimizer param-count]
+  [backend optimizer]
   (let [datatype (dtype/get-datatype backend)
         typed-step-fn
         (cond
@@ -67,7 +66,7 @@
             (cpu-drv/with-stream-dispatch stream
               (typed-step-fn gradient-view param-view gradient-alpha param-offset
                              decay epsilon grad-sq-accum-view dx-sq-accum-view))))]
-    (setup-optimizer backend optimizer step-fn param-count)))
+    (setup-optimizer backend optimizer step-fn)))
 
 (defn cuda-adadelta-step-float!
   [backend typed-cuda-fn gradient parameters gradient-alpha
@@ -90,7 +89,7 @@
     gradient parameters item-count))
 
 (defmethod create-optimizer [:cuda :adadelta]
-  [backend optimizer param-count]
+  [backend optimizer]
   (let [datatype (dtype/get-datatype backend)
         cuda-fns (cuda-drv/load-float-double-function "adadelta.fatbin" "adadelta_step")
         typed-cuda-fn (:fn (get cuda-fns datatype))
@@ -103,14 +102,25 @@
              epsilon grad-sq-accum dx-sq-accum]
           (let [gradient-view (cuda-drv/->ptr gradient)
                 param-view (cuda-drv/->ptr parameters)
-                grad-sq-accum-view (cuda-drv/->ptr grad-sq-accum param-offset)
-                dx-sq-accum-view (cuda-drv/->ptr dx-sq-accum param-offset)
-                item-count (dtype/ecount gradient)]
+                item-count (dtype/ecount gradient)
+                grad-sq-accum-view (cuda-drv/->ptr grad-sq-accum)
+                dx-sq-accum-view (cuda-drv/->ptr dx-sq-accum)]
             (typed-step-fn backend typed-cuda-fn
                            gradient-view param-view
                            gradient-alpha decay epsilon
                            grad-sq-accum-view dx-sq-accum-view item-count)))]
-    (setup-optimizer backend optimizer step-fn param-count)))
+    (setup-optimizer backend optimizer step-fn)))
+
+
+(defmethod graph/get-node-metadata :adadelta
+  [desc]
+  {:arguments
+   {:grad-accum {:initialization {:type :constant :value 0}
+                 :type :parameter}
+    :dx-accum {:initialization {:type :constant :value 0}
+               :type :parameter}}
+   :passes #{:training}})
+
 
 (defn adadelta
   [& args]

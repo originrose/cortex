@@ -36,7 +36,11 @@
   [backend]
   (let [parameters-1 (nn-backend/array backend [1 2 3 4])
         parameters-2 (nn-backend/array backend [1 2 3 4])
-        optimizer (create-optimizer backend (adam/adam) 8)]
+        m (nn-backend/new-array backend [8])
+        v (nn-backend/new-array backend [8])
+        optimizer (create-optimizer backend (adam/adam))
+        opt-map {:m m
+                 :v v}]
     (reduce (fn [optimizer item]
               (let [gradient-1 (nn-backend/array backend
                                                (map #(* 2.0 %)
@@ -46,9 +50,9 @@
                                                  (map #(* 2.0 %)
                                                       (nn-backend/to-double-array backend
                                                                                   parameters-2)))
-                    optimizer (opt/batch-update optimizer)
-                    _ (opt/compute-parameters! optimizer 1.0 0 gradient-1 parameters-1)
-                    _ (opt/compute-parameters! optimizer 0.0 4 gradient-2 parameters-2)
+                    optimizer (opt/batch-update optimizer opt-map)
+                    _ (opt/compute-parameters! optimizer opt-map 1.0 0 gradient-1 parameters-1)
+                    _ (opt/compute-parameters! optimizer opt-map 0.0 4 gradient-2 parameters-2)
                     item (m/eseq item)
                     guess-1 (m/eseq (nn-backend/to-double-array backend parameters-1))
                     guess-2 (m/eseq (nn-backend/to-double-array backend parameters-2))]
