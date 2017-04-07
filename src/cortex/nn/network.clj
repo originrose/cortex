@@ -55,8 +55,8 @@
 
 (defn- add-node-to-graph
   [[graph last-id] desc]
-  (let [predecessor-id-seq (if (get desc :parents)
-                             (get desc :parents)
+  (let [predecessor-id-seq (if-let [parents (get desc :parents)]
+                             parents
                              (if last-id
                                [last-id]
                                []))
