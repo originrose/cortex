@@ -582,7 +582,12 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
 (defmethod get-argument-shape :node-argument
   [graph node argument]
   (let [target-node (get-node graph (get argument :node-id))
-        target-arg (get-node-argument graph node (get argument :argument))]
+        target-arg (get-node-argument target-node (get argument :argument))]
+    (when-not (and target-node target-arg)
+      (throw (ex-info "Failed to find node or node argument"
+                      {:node target-node
+                       :argument target-arg
+                       :src-argument argument})))
     (get-argument-shape graph target-node target-arg)))
 
 (defmethod get-argument-shape :stream-augmentation

@@ -123,17 +123,20 @@
       (println "Training network:")
       (network/print-layer-summary network (traverse/training-traversal network))
       (loop [network network
+             optimizer optimizer
              epoch 0]
         (if (and epoch-count (> epoch epoch-count))
           network
-          (-> (execute/train network train-ds
-                             :batch-size batch-size
-                             :optimizer optimizer
-                             :context context)
-              (assoc :epoch-count epoch)
-              (per-epoch-fn network batch-size test-ds network-filename best-network-fn simple-loss-print?
-                            context)
-              (recur (inc epoch))))))))
+          (let [{:keys [network optimizer]}
+                (execute/train network train-ds
+                               :batch-size batch-size
+                               :optimizer optimizer
+                               :context context)]
+           (-> network
+               (assoc :epoch-count epoch)
+               (per-epoch-fn network batch-size test-ds network-filename
+                             best-network-fn simple-loss-print? context)
+               (recur optimizer (inc epoch)))))))))
 
 
 (defn print-trained-networks-summary

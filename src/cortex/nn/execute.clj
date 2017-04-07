@@ -208,7 +208,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
                 ;;Reset device buffer to original value.
                 (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
                 (dtype/set-value! numeric-gradient idx gradient))))))
-      (compute-binding/save-to-network context network {:save-gradients? true}))))
+      (-> (compute-binding/save-to-network context network {:save-gradients? true})
+          :network))))
 
 
 
@@ -314,10 +315,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn train
+  "Train.  Returns a tuple of network and optimizer where both the network and optimizer's
+parameters are updated."
   [network dataset &
    {:keys [batch-size context optimizer datatype]
     :or {batch-size 10
-         datatype :double}}]
+         datatype :float}}]
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
           context (or context (compute-context :datatype datatype))
@@ -338,7 +341,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
       (doseq [batch batches]
         (load-batch! network batch batch-buffers)
         (train-batch! network stream->buffer-map :optimize? true))
-      (compute-binding/save-to-network context network {}))))
+      (compute-binding/save-to-network context network {:save-optimizer-parameters? true}))))
 
 
 (defn run
@@ -347,7 +350,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   generate the actual network loss."
   [network dataset & {:keys [batch-size context datatype loss-outputs?]
                       :or {batch-size 1
-                           datatype :double}
+                           datatype :float}
                       :as options}]
   (resource/with-resource-context
     (let [context (or context (compute-context :datatype datatype))

@@ -348,4 +348,5 @@ opposed to networks), but consider:
                           "output" (layer->output-str layer)}
                          (for [k parameter-keys]
                                    [k (layer->buffer-shape network layer k)])))))
-         (pprint/print-table (concat ["type" "input" "output"] parameter-keys)))))
+         (pprint/print-table (concat ["type" "input" "output"] parameter-keys)))
+    (println "Parameter count:" (graph/parameter-count (:compute-graph network)))))
