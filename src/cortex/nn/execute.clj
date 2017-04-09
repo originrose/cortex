@@ -106,7 +106,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 (defn train-batch!
   [network forward-buffer-map & {:keys [optimize?]
-                                 :or [optimize? true]}]
+                                 :or {optimize? true}}]
   (-> network
       (compute-binding/update-traversal-buffers forward-buffer-map :stream :buffer)
       (compute-binding/do-traverse :forward)
