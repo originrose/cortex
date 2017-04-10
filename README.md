@@ -32,7 +32,7 @@ Also, for an example of using cortex in a more real-world scenario please see:
 
 ### Existing Framework Comparisons
 
-* Stanford CS 231 [Lecture 12](http://cs231n.stanford.edu/slides/winter1516_lecture12.pdf) contains a detailed
+* Stanford CS 231 [Lecture 12](http://cs231n.stanford.edu/slides/2016/winter1516_lecture12.pdf) contains a detailed
   breakdown of Caffe, Torch, Theano, and TensorFlow.
 
 
