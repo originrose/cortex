@@ -27,7 +27,8 @@
 (def description
   [(layers/input 2 1 1 :id :data)
    (layers/batch-normalization)
-   (layers/linear 1)
+   ;;Fix the weights to make the unit test work.
+   (layers/linear 1 :weights [[0.2 -0.2]])
    (layers/logistic :id :labels)])
 
 (deftest logistic-test

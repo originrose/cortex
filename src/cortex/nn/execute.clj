@@ -379,10 +379,9 @@ parameters are updated."
                                                                  (if loss-outputs?
                                                                    :training
                                                                    :inference))]
-      (reduce
-       (fn [results next-batch]
-         (load-batch! network next-batch batch-buffers)
-         (compute-binding/do-traverse network :inference)
-         (concat results (compute-binding/output-values network output-buffers)))
-       []
-       batches))))
+      (->> batches
+           (mapcat (fn [next-batch]
+                     (load-batch! network next-batch batch-buffers)
+                     (compute-binding/do-traverse network :inference)
+                     (compute-binding/output-values network output-buffers)))
+           vec))))

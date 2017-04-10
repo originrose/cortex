@@ -39,7 +39,7 @@
    best-network-fn simple-loss-print? context]
   (let [batch-size (long batch-size)
         labels (execute/run new-network test-ds :batch-size batch-size :loss-outputs? true)
-        loss-fn (execute/execute-loss-fn new-network test-ds labels)
+        loss-fn (execute/execute-loss-fn new-network labels test-ds)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get old-network :cv-loss)]
                             ;; TODO: Is there a bug here? What if the best-loss isn't sequential?
@@ -50,7 +50,7 @@
       (println (loss/loss-fn->table-str loss-fn)))
     (if (or (nil? current-best-loss)
             (< (double loss-val) (double current-best-loss)))
-      (do
+      (let [new-network (assoc new-network :cv-loss loss-fn)]
         (println "Saving network")
         (save-network new-network loss-fn network-filename)
         (when best-network-fn
@@ -74,6 +74,30 @@
                                  (first))]
         (io/make-parents backup-filename)
         (io/copy (io/file network-filename) (io/file backup-filename))))))
+
+
+(defn- to-epoch-seq
+  [item epoch-count]
+  (let [retval (if (map? (first item))
+                 (repeat item)
+                 item)]
+    (if epoch-count
+      (take epoch-count retval)
+      retval)))
+
+
+(defn- recur-train-network
+  [network train-ds test-ds optimizer train-fn test-fn]
+  (let [train-data (first train-ds)
+        test-data (first test-ds)
+        old-network network]
+    (when (and train-data test-data)
+      (let [{:keys [network optimizer]} (train-fn network train-data optimizer)]
+        (test-fn (update network :epoch-count inc) old-network test-data)
+        (cons network
+              (lazy-seq
+               (recur-train-network network (rest train-ds) (rest test-ds)
+                                    optimizer train-fn test-fn)))))))
 
 
 (defn train-n
@@ -113,30 +137,28 @@
     (let [optimizer (or optimizer (adam/adam))
           context (execute/compute-context)
           network-filename (str network-filestem ".nippy")
+          train-ds (to-epoch-seq train-ds epoch-count)
+          test-ds (to-epoch-seq test-ds epoch-count)
           network (if (vector? network)
                     (do
                       (backup-trained-network network-filestem)
                       (network/linear-network network))
                     (if reset-score
                       (assoc network :cv-loss {})
-                      network))]
+                      network))
+          network (if (number? (get network :epoch-count))
+                    network
+                    (assoc network :epoch-count 0))
+          train-fn #(execute/train %1 %2
+                                   :batch-size batch-size
+                                   :optimizer %3
+                                   :context context)
+          test-fn #(per-epoch-fn %1 %2 batch-size %3 network-filename
+                                 best-network-fn simple-loss-print? context)]
       (println "Training network:")
       (network/print-layer-summary network (traverse/training-traversal network))
-      (loop [network network
-             optimizer optimizer
-             epoch 0]
-        (if (and epoch-count (> epoch epoch-count))
-          network
-          (let [{:keys [network optimizer]}
-                (execute/train network train-ds
-                               :batch-size batch-size
-                               :optimizer optimizer
-                               :context context)]
-           (-> network
-               (assoc :epoch-count epoch)
-               (per-epoch-fn network batch-size test-ds network-filename
-                             best-network-fn simple-loss-print? context)
-               (recur optimizer (inc epoch)))))))))
+      (->> (recur-train-network network train-ds test-ds optimizer train-fn test-fn)
+           last))))
 
 
 (defn print-trained-networks-summary
