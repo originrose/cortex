@@ -29,38 +29,49 @@
 
 (defn save-network
   "Saves a trained network out to the filesystem."
-  [network network-loss network-filename]
-  (->> (assoc network :cv-loss network-loss)
-       (util/write-nippy-file network-filename)))
+  [network network-filename]
+  (println "Saving network to" network-filename)
+  (util/write-nippy-file network-filename network)
+  network)
 
 
-(defn- per-epoch-fn
-  [new-network old-network batch-size test-ds network-filename
-   best-network-fn simple-loss-print? context]
+(defn default-network-test-fn
+  "Given the context, old network, the new network and a test dataset, return a map indicating if the
+new network is indeed the best one and the network with enough information added to make comparing
+networks possible.
+{:best-network? boolean
+:network (assoc new-network :whatever information-needed-to-compare).
+}"
+  [simple-loss-print? batch-size context ;;no change per epoch
+   new-network old-network test-ds] ;;change per epoch
   (let [batch-size (long batch-size)
-        labels (execute/run new-network test-ds :batch-size batch-size :loss-outputs? true)
+        labels (execute/run new-network test-ds
+                 :batch-size batch-size
+                 :loss-outputs? true
+                 :context context)
         loss-fn (execute/execute-loss-fn new-network labels test-ds)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get old-network :cv-loss)]
                             ;; TODO: Is there a bug here? What if the best-loss isn't sequential?
                             (when (sequential? best-loss)
-                              (apply + (map :value best-loss))))]
+                              (apply + (map :value best-loss))))
+        best-network? (or (nil? current-best-loss)
+                          (< (double loss-val)
+                             (double current-best-loss)))]
     (println (format "Loss for epoch %s: %s" (get new-network :epoch-count) loss-val))
     (when-not simple-loss-print?
       (println (loss/loss-fn->table-str loss-fn)))
-    (if (or (nil? current-best-loss)
-            (< (double loss-val) (double current-best-loss)))
-      (let [new-network (assoc new-network :cv-loss loss-fn)]
-        (println "Saving network")
-        (save-network new-network loss-fn network-filename)
-        (when best-network-fn
-          ;;We use the same format here as the output of the evaluate network function below
-          ;;so that clients can use the same network display system.  This is why we have data
-          ;;in columnar formats.
-          (best-network-fn {:test-dataset test-ds
-                            :labels labels
-                            :network new-network}))
-        new-network)
+    {:best-network? best-network?
+     :network (assoc new-network :cv-loss loss-fn)}))
+
+
+(defn- per-epoch-fn
+  [test-network-fn network-filename context ;;these don't change per epoch
+    new-network old-network test-ds] ;;these might
+  (let [test-results (test-network-fn context new-network old-network test-ds)
+        {:keys [best-network? network]} test-results]
+    (if best-network?
+      (save-network network network-filename)
       old-network)))
 
 
@@ -73,7 +84,8 @@
                                  (remove #(.exists (io/file %)))
                                  (first))]
         (io/make-parents backup-filename)
-        (io/copy (io/file network-filename) (io/file backup-filename))))))
+        (io/copy (io/file network-filename)
+                 (io/file backup-filename))))))
 
 
 (defn- to-epoch-seq
@@ -87,17 +99,17 @@
 
 
 (defn- recur-train-network
-  [network train-ds test-ds optimizer train-fn test-fn]
+  [network train-ds test-ds optimizer train-fn epoch-eval-fn]
   (let [train-data (first train-ds)
         test-data (first test-ds)
         old-network network]
     (when (and train-data test-data)
       (let [{:keys [network optimizer]} (train-fn network train-data optimizer)
-            network (test-fn (update network :epoch-count inc) old-network test-data)]
+            network (epoch-eval-fn (update network :epoch-count inc) old-network test-data)]
         (cons network
               (lazy-seq
                (recur-train-network network (rest train-ds) (rest test-ds)
-                                    optimizer train-fn test-fn)))))))
+                                    optimizer train-fn epoch-eval-fn)))))))
 
 
 (defn train-n
@@ -114,11 +126,15 @@
   Note, we have to have enough memory to store the cross-validation dataset
   in memory while training.
 
-  When a better network is detected best-network-fn is called with a single
-  argument of the form:
-  {:test-dataset  cross-validation dataset
-   :labels        labels inferred by the network on the test dataset
-   :network       network that generated the labels}
+  Every epoch a test function is called with these arguments:
+
+  (test-fn context new-network old-network test-ds)
+
+  It must return a map containing at least:
+
+{:best-network? true if this is the best network
+:network The new network with any extra information needed for comparison assoc'd onto it.
+}
 
   If epoch-count is provided then we stop training after that many epochs else
   we continue to train forever."
@@ -129,7 +145,8 @@
              optimizer
              reset-score
              force-gpu?
-             simple-loss-print?]
+             simple-loss-print?
+             test-fn]
       :or {batch-size 128
            network-filestem default-network-filestem
            reset-score false}}]
@@ -153,11 +170,12 @@
                                    :batch-size batch-size
                                    :optimizer %3
                                    :context context)
-          test-fn #(per-epoch-fn %1 %2 batch-size %3 network-filename
-                                 best-network-fn simple-loss-print? context)]
+          test-fn  (or test-fn
+                       (partial default-network-test-fn simple-loss-print? batch-size))
+          epoch-eval-fn (partial per-epoch-fn test-fn network-filename context)]
       (println "Training network:")
       (network/print-layer-summary network (traverse/training-traversal network))
-      (->> (recur-train-network network train-ds test-ds optimizer train-fn test-fn)
+      (->> (recur-train-network network train-ds test-ds optimizer train-fn epoch-eval-fn)
            last))))
 
 
