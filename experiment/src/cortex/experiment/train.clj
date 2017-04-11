@@ -141,7 +141,6 @@ networks possible.
   [network train-ds test-ds
    & {:keys [batch-size epoch-count
              network-filestem
-             best-network-fn
              optimizer
              reset-score
              force-gpu?
