@@ -92,8 +92,8 @@
         test-data (first test-ds)
         old-network network]
     (when (and train-data test-data)
-      (let [{:keys [network optimizer]} (train-fn network train-data optimizer)]
-        (test-fn (update network :epoch-count inc) old-network test-data)
+      (let [{:keys [network optimizer]} (train-fn network train-data optimizer)
+            network (test-fn (update network :epoch-count inc) old-network test-data)]
         (cons network
               (lazy-seq
                (recur-train-network network (rest train-ds) (rest test-ds)
