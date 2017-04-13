@@ -72,7 +72,7 @@ networks possible.
         {:keys [best-network? network]} test-results]
     (if best-network?
       (save-network network network-filename)
-      old-network)))
+      (assoc old-network :epoch-count (get new-network :epoch-count)))))
 
 
 (defn backup-trained-network
