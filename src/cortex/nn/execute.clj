@@ -45,15 +45,11 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn- execute-loss-term
   "Execute a loss term.  This uses the context to find node and loss parameters."
   [graph loss-term inference-maps dataset-maps]
-  (when-not (= (count inference-maps)
-               (count dataset-maps))
-    (throw (ex-info "Inference and dataset counts differ"
-                    {:inference-count (count inference-maps)
-                     :dataset-count (count dataset-maps)})))
   (* (double (loss/get-loss-lambda loss-term))
-     (/ (->> (map (fn [node-map stream-map]
-                    (loss/loss loss-term (graph/resolve-arguments graph loss-term stream-map node-map)))
-                  inference-maps dataset-maps)
+     (/ (->> (map #(->> (graph/resolve-arguments graph loss-term %1 %2)
+                        (loss/loss loss-term))
+                  dataset-maps
+                  inference-maps)
              (apply +))
         (count inference-maps))))
 
