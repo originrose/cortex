@@ -18,9 +18,15 @@
 (def-double-float-test mnist
   (verify-train/train-mnist (create-context)))
 
+(def-double-float-test dataset-batch-size-mismatch
+  (verify-train/dataset-batch-size-mismatch (create-context)))
+
 (comment
+
  (def-double-float-test simple-learning-attenuation
    (verify-train/test-simple-learning-attenuation (create-context)))
 
  (def-double-float-test softmax-channels
-   (verify-train/test-softmax-channels (create-context))))
+   (verify-train/test-softmax-channels (create-context)))
+
+ )

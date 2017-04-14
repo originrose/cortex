@@ -23,3 +23,7 @@
 
 (def-double-float-test mnist
   (verify-train/train-mnist (create-context)))
+
+
+(def-double-float-test dataset-batch-size-mismatch
+  (verify-train/dataset-batch-size-mismatch (create-context)))
