@@ -313,10 +313,9 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn train
   "Train.  Returns a tuple of network and optimizer where both the network and optimizer's
 parameters are updated."
-  [network dataset &
-   {:keys [batch-size context optimizer datatype]
-    :or {batch-size 10
-         datatype :float}}]
+  [network dataset & {:keys [batch-size context optimizer datatype]
+                      :or {batch-size 10
+                           datatype :float}}]
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
           context (or context (compute-context :datatype datatype))
