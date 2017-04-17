@@ -154,10 +154,10 @@
                                          :context context
                                          :batch-size training-batch-size
                                          :optimizer optimizer)
-                          results (->> (execute/run network test-dataset
-                                         :batch-size running-batch-size
-                                         :context context
-                                         :loss-outputs? true))
+                          results (execute/run network test-dataset
+                                    :context context
+                                    :batch-size running-batch-size
+                                    :loss-outputs? true)
                           loss-fn (execute/execute-loss-fn network results test-dataset)
                           score (percent= (map :label results) test-labels)]
                       (println (format "Score for epoch %s: %s" (inc epoch) score))
@@ -172,3 +172,26 @@
       (is (= (clojure.set/intersection #{:m :v} (set (keys optimizer)))
              #{:m :v}))
       (is (> (percent= results test-labels) 0.6)))))
+
+
+(defn dataset-batch-size-mismatch
+  [& [context]]
+  (resource/with-resource-context
+    (when context ((:backend-fn context)))
+    (let [batch-size 5
+          dataset-count 17
+          dataset (for [_ (range dataset-count)]
+                    {:data (vec (repeatedly (* 28 28) rand))
+                     :label (assoc (vec (repeat 10 0)) (rand-int 10) 1.0)})
+          network (network/linear-network MNIST-NETWORK)
+          {network :network} (execute/train network dataset
+                                            :context context
+                                            :batch-size batch-size)
+          results (execute/run network dataset
+                    :context context
+                    :batch-size batch-size
+                    :loss-outputs? true)
+          loss-fn (execute/execute-loss-fn network results dataset)
+          result-count (count results)]
+      (is (not (zero? (rem dataset-count batch-size))))
+      (is (zero? (rem result-count batch-size))))))

@@ -45,15 +45,11 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn- execute-loss-term
   "Execute a loss term.  This uses the context to find node and loss parameters."
   [graph loss-term inference-maps dataset-maps]
-  (when-not (= (count inference-maps)
-               (count dataset-maps))
-    (throw (ex-info "Inference and dataset counts differ"
-                    {:inference-count (count inference-maps)
-                     :dataset-count (count dataset-maps)})))
   (* (double (loss/get-loss-lambda loss-term))
-     (/ (->> (map (fn [node-map stream-map]
-                    (loss/loss loss-term (graph/resolve-arguments graph loss-term stream-map node-map)))
-                  inference-maps dataset-maps)
+     (/ (->> (map #(->> (graph/resolve-arguments graph loss-term %1 %2)
+                        (loss/loss loss-term))
+                  dataset-maps
+                  inference-maps)
              (apply +))
         (count inference-maps))))
 
@@ -106,7 +102,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 (defn train-batch!
   [network forward-buffer-map & {:keys [optimize?]
-                                 :or [optimize? true]}]
+                                 :or {optimize? true}}]
   (-> network
       (compute-binding/update-traversal-buffers forward-buffer-map :stream :buffer)
       (compute-binding/do-traverse :forward)
@@ -317,10 +313,9 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn train
   "Train.  Returns a tuple of network and optimizer where both the network and optimizer's
 parameters are updated."
-  [network dataset &
-   {:keys [batch-size context optimizer datatype]
-    :or {batch-size 10
-         datatype :float}}]
+  [network dataset & {:keys [batch-size context optimizer datatype]
+                      :or {batch-size 10
+                           datatype :float}}]
   (resource/with-resource-context
     (let [optimizer (or optimizer (adam/adam))
           context (or context (compute-context :datatype datatype))
@@ -379,10 +374,9 @@ parameters are updated."
                                                                  (if loss-outputs?
                                                                    :training
                                                                    :inference))]
-      (reduce
-       (fn [results next-batch]
-         (load-batch! network next-batch batch-buffers)
-         (compute-binding/do-traverse network :inference)
-         (concat results (compute-binding/output-values network output-buffers)))
-       []
-       batches))))
+      (->> batches
+           (mapcat (fn [next-batch]
+                     (load-batch! network next-batch batch-buffers)
+                     (compute-binding/do-traverse network :inference)
+                     (compute-binding/output-values network output-buffers)))
+           vec))))

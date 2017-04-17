@@ -486,7 +486,7 @@
       ;;zero count should be identical
       (is (= (final-answer 1) (final-answer 3)))
       (is (utils/about-there? (final-answer 0) total-elem-count 3))
-      (is (utils/about-there? (final-answer 2) (* 2.0 total-elem-count) 5)))))
+      (is (utils/about-there? (final-answer 2) (* 2.0 total-elem-count) 10)))))
 
 
 

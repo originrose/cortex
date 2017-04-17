@@ -4,7 +4,8 @@
             [clojure.test :refer :all]
             [cortex.nn.layers :as layers]
             [cortex.nn.execute :as execute]
-            [cortex.experiment.train :as train]))
+            [cortex.experiment.train :as train]
+            [cortex.nn.network :as network]))
 
 ;; This test namespace uses the logistic classifier to learn to predict whether
 ;; people will default based on their balance and income.
@@ -27,7 +28,8 @@
 (def description
   [(layers/input 2 1 1 :id :data)
    (layers/batch-normalization)
-   (layers/linear 1)
+   ;;Fix the weights to make the unit test work.
+   (layers/linear 1 :weights [[-0.2 0.2]])
    (layers/logistic :id :labels)])
 
 (deftest logistic-test
