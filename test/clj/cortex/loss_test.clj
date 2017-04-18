@@ -34,5 +34,4 @@
         buffer-map {:output 0.0
                     :labels 0.2}
         loss-value (loss/loss mse-loss buffer-map)]
-    (println "TODO: Un-comment this assertion after upgrading core.matrix > 0.57.0.")
-    #_(is (not (Double/isNaN loss-value)))))
+    (is (not (Double/isNaN loss-value)))))
