@@ -252,7 +252,9 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                        [augmented-stream-val datatype]))
                                    [(get batch k) datatype])
                  _ (when (nil? data)
-                     (throw (ex-info "Dataset batch missing key" {:key k})))
+                     (throw (ex-info "Dataset batch missing key"
+                                     {:key k
+                                      :dataset-keys (keys batch)})))
                  data-size (long (m/ecount data))
                  item-size (quot data-size batch-size)
                  _ (when-not (= 0 (rem data-size (long batch-size)))

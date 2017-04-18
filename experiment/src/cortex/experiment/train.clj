@@ -11,7 +11,8 @@
     [cortex.nn.execute :as execute]
     [cortex.nn.compute-binding :as compute-binding]
     [cortex.nn.traverse :as traverse]
-    [cortex.nn.network :as network])
+    [cortex.nn.network :as network]
+    [think.parallel.core :as parallel])
   (:import [java.io File]))
 
 (def default-network-filestem "trained-network")
@@ -88,27 +89,42 @@ networks possible.
                  (io/file backup-filename))))))
 
 
-(defn- to-epoch-seq
+(defn- create-n-callable-fn
+  [src-fn max-call-count]
+  (if max-call-count
+    (let [counter (atom 0)
+          max-call-count (long max-call-count)]
+      (fn []
+        (when (< @counter max-call-count)
+          (swap! counter inc)
+          (src-fn))))
+    src-fn))
+
+
+(defn- to-epoch-seq-fn
   [item epoch-count]
-  (let [retval (if (map? (first item))
-                 (repeat item)
-                 item)]
-    (if epoch-count
-      (take epoch-count retval)
-      retval)))
+  (if-not (fn? item)
+    (parallel/create-next-item-fn
+     (let [retval (if (map? (first item))
+                    (repeat item)
+                    item)]
+       (if epoch-count
+         (take epoch-count retval)
+         retval)))
+    (create-n-callable-fn item epoch-count)))
 
 
 (defn- recur-train-network
-  [network train-ds test-ds optimizer train-fn epoch-eval-fn]
-  (let [train-data (first train-ds)
-        test-data (first test-ds)
+  [network train-ds-fn test-ds-fn optimizer train-fn epoch-eval-fn]
+  (let [train-data (train-ds-fn)
+        test-data (test-ds-fn)
         old-network network]
     (when (and train-data test-data)
       (let [{:keys [network optimizer]} (train-fn network train-data optimizer)
             network (epoch-eval-fn (update network :epoch-count inc) old-network test-data)]
         (cons network
               (lazy-seq
-               (recur-train-network network (rest train-ds) (rest test-ds)
+               (recur-train-network network train-ds-fn test-ds-fn
                                     optimizer train-fn epoch-eval-fn)))))))
 
 
@@ -153,8 +169,11 @@ networks possible.
     (let [optimizer (or optimizer (adam/adam))
           context (execute/compute-context)
           network-filename (str network-filestem ".nippy")
-          train-ds (to-epoch-seq train-ds epoch-count)
-          test-ds (to-epoch-seq test-ds epoch-count)
+          ;;If someone is training with an infinite data sequence they have to actually pass in a function
+          ;;that when called returns the next epoch of data.  This is the only way so far to avoid
+          ;;'holding onto head' when the number of epochs rises.
+          train-ds-fn (to-epoch-seq-fn train-ds epoch-count)
+          test-ds-fn (to-epoch-seq-fn test-ds epoch-count)
           network (if (vector? network)
                     (do
                       (backup-trained-network network-filestem)
@@ -174,7 +193,7 @@ networks possible.
           epoch-eval-fn (partial per-epoch-fn test-fn network-filename context)]
       (println "Training network:")
       (network/print-layer-summary network (traverse/training-traversal network))
-      (->> (recur-train-network network train-ds test-ds optimizer train-fn epoch-eval-fn)
+      (->> (recur-train-network network train-ds-fn test-ds-fn optimizer train-fn epoch-eval-fn)
            last))))
 
 
