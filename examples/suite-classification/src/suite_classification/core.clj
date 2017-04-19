@@ -6,25 +6,19 @@
             [think.image.patch :as patch]
             [think.image.data-augmentation :as image-aug]
             [cortex.nn.layers :as layers]
-            [think.image.image-util :as image-util]
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
-            [cortex.dataset :as ds]
-            [cortex.suite.classification :as classification]
-            [cortex.suite.inference :as infer]
-            [cortex.suite.train :as suite-train]
-            [cortex.loss :as loss]
+            [cortex.experiment.classification :as classification]
+            [cortex.experiment.train :as train]
             [think.gate.core :as gate]
-            [think.parallel.core :as parallel]
-            [cortex.nn.traverse :as traverse]
             [cortex.nn.network :as network]
+            [cortex.nn.execute :as execute]
             [cortex.util :as util])
   (:import [java.io File]))
 
 
 (def image-size 28)
 (def num-classes 10)
-(def num-channels 1)
 (def datatype :float)
 
 
@@ -35,64 +29,65 @@
 (def ^:dynamic *running-from-repl* true)
 
 
-(defn ds-image->png
+(defn- ds-data->png
   [ds-data]
   (let [data-bytes (byte-array (* image-size image-size))
         num-pixels (alength data-bytes)
         retval (image/new-image image/*default-image-impl*
                                 image-size image-size :gray)]
     (c-for [idx 0 (< idx num-pixels) (inc idx)]
-           (aset data-bytes idx
-                 (unchecked-byte (* 255.0
-                                    (+ 0.5 (m/mget ds-data idx))))))
+           (let [[x y] [(mod idx image-size)
+                        (quot idx image-size)]]
+             (aset data-bytes idx
+                   (unchecked-byte (* 255.0
+                                      (+ 0.5 (m/mget ds-data y x)))))))
     (image/array-> retval data-bytes)))
 
 
-(defn vec-label->label
-  [ds-label]
-  (get (vec (map str (range 10)))
-       (util/max-index ds-label)))
-
-
-(defn write-data
-  [output-dir [idx [data label]]]
-  (let [img-path (str output-dir "/" label "/" idx ".png" )]
+(defn- save-image!
+  [output-dir [idx {:keys [data label]}]]
+  (let [img-path (format "%s/%s/%s.png" output-dir (util/max-index label) idx)]
     (when-not (.exists (io/file img-path))
       (io/make-parents img-path)
-      (imagez/save (ds-image->png data) img-path))
+      (imagez/save (ds-data->png data) img-path))
     nil))
 
 
-(defn produce-indexed-data-label-seq
-  [data-seq label-seq]
-  (->> (interleave data-seq
-                   (map vec-label->label label-seq))
-       (partition 2)
-       (map-indexed vector)))
+(defonce training-dataset
+  (do (println "Loading mnist training dataset.")
+      (let [start-time (System/currentTimeMillis)
+            ds (mnist/training-dataset)]
+        (println (format "Done loading mnist training dataset in %ss" (/ (- (System/currentTimeMillis) start-time) 1000.0)))
+        ds)))
+
+(defonce test-dataset
+  (do (println "Loading mnist test dataset.")
+      (let [start-time (System/currentTimeMillis)
+            ds (mnist/test-dataset)]
+        (println (format "Done loading mnist test dataset in %ss" (/ (- (System/currentTimeMillis) start-time) 1000.0)))
+        ds)))
+
+(def training-folder "mnist/training")
+(def test-folder "mnist/test")
 
 
-(defonce training-data mnist/training-data)
-(defonce training-labels mnist/training-labels)
-(defonce test-data mnist/test-data)
-(defonce test-labels mnist/test-labels)
-
-
-(defn build-image-data
+(defn build-image-data!
   []
-  (let [training-observation-label-seq (produce-indexed-data-label-seq
-                                        (training-data)
-                                        (training-labels))
-        testing-observation-label-seq (produce-indexed-data-label-seq
-                                       (test-data)
-                                       (test-labels))
-        train-fn (partial write-data "mnist/training")
-        test-fn (partial write-data "mnist/testing")]
-    (dorun (pmap train-fn training-observation-label-seq))
-    (dorun (pmap test-fn training-observation-label-seq))))
+  (dorun (map (partial save-image! training-folder)
+              (map-indexed vector training-dataset)))
+  (dorun (map (partial save-image! test-folder)
+              (map-indexed vector test-dataset))))
 
 
-(def initial-network
-  [(layers/input 28 28 1 :id :input)
+(defonce ensure-images-on-disk
+  (memoize
+   (fn []
+     (println "Ensuring image data is built, and availble on disk.")
+     (build-image-data!))))
+
+
+(def initial-description
+  [(layers/input 28 28 1 :id :data)
    (layers/convolutional 5 0 1 20)
    (layers/max-pooling 2 0 2)
    (layers/dropout 0.9)
@@ -101,12 +96,14 @@
    (layers/max-pooling 2 0 2)
    (layers/batch-normalization)
    (layers/linear 1000)
-   (layers/relu :center-loss {:labels {:stream :labels}
+   (layers/relu :center-loss {:label-indexes {:stream :labels}
+                              :label-inverse-counts {:stream :labels}
+                              :labels {:stream :labels}
                               :alpha 0.9
                               :lambda 1e-4})
    (layers/dropout 0.5)
    (layers/linear 10)
-   (layers/softmax :id :output)])
+   (layers/softmax :id :labels)])
 
 
 (def max-image-rotation-degrees 25)
@@ -121,11 +118,8 @@
 
 
 (defn mnist-png->observation
-  "Create an observation from input.  "
+  "Create an observation from input."
   [datatype augment? img]
-  ;;image->patch always returns [r-data g-data g-data]
-  ;;since we know these are grayscale *and* we setup the
-  ;;network for 1 channel we just take r-data
   (patch/image->patch (if augment?
                         (img-aug-pipeline img)
                         img)
@@ -138,57 +132,24 @@
   (patch/patch->image observation image-size))
 
 
-;;Bumping this up and producing several images per source image means that you may need
-;;to shuffle the training epoch data to keep your batches from being unbalanced...this has
-;;somewhat severe performance impacts.
-(def ^:dynamic *num-augmented-images-per-file* 1)
+(defn file->observation
+  "Create a possibly infinite sequence of [observation label]. Asking
+  for an infinite sequence implies some level of data augmentation to
+  avoid overfitting the network to the training data."
+  [augment? datatype file]
+  (let [label-idx (-> (re-seq #"(\d)/[^/]+$" (.getPath file)) first last)
+        img (imagez/load-image file)]
+    {:data (mnist-png->observation datatype augment? img)
+     :labels (util/idx->one-hot (Integer. label-idx) num-classes)}))
 
 
-(defn observation-label-pairs
-  "Create a possibly infinite sequence of [observation label].
-  Asking for an infinite sequence implies some level of data augmentation
-  to avoid overfitting the network to the training data."
-  [augment? datatype [file label]]
-  (let [img (imagez/load-image file)
-        png->obs #(mnist-png->observation datatype augment? img)
-        ;;When augmenting we can return any number of items from one image.
-        ;;You want to be sure that at your epoch size you get a very random, fairly
-        ;;balanced set of observations->labels.  Furthermore you want to be sure
-        ;;that at the batch size you have rough balance when possible.
-        ;;The infinite-dataset implementation will shuffle each epoch of data when
-        ;;training so it isn't necessary to randomize these patches at this level.
-        repeat-count (if augment?
-                       *num-augmented-images-per-file*
-                       1)]
-    ;;Laziness is not your friend here.  The classification system is setup
-    ;;to call this on another CPU thread while training *so* if you are lazy here
-    ;;then this sequence will get realized on the main training thread thus blocking
-    ;;the training process unnecessarily.
-    (mapv vector
-          (repeatedly repeat-count png->obs)
-          (repeat label))))
-
-
-(defonce ensure-dataset-is-created
-  (memoize
-   (fn []
-     (println "Ensuring image data is built...")
-     (build-image-data))))
-
-
-(defonce create-dataset
-  (memoize
-   (fn
-     []
-     (ensure-dataset-is-created)
-     (println "building dataset")
-     (classification/create-classification-dataset-from-labeled-data-subdirs
-      "mnist/training" "mnist/testing"
-      (ds/create-image-shape num-channels image-size image-size)
-      (partial observation-label-pairs true datatype)
-      (partial observation-label-pairs false datatype)
-      :epoch-element-count 60000
-      :shuffle-training-epochs? (> *num-augmented-images-per-file* 2)))))
+(defn create-dataset-from-folder
+  [folder-name]
+  (ensure-images-on-disk)
+  (println "Building dataset for folder:" folder-name)
+  (->> (file-seq (io/as-file folder-name))
+       (filter #(.endsWith (.getName %) "png"))
+       (map (partial file->observation (.contains folder-name "train") datatype))))
 
 
 (defn- walk-directory-and-create-path-label-pairs
@@ -201,149 +162,120 @@
                               :labels (.getName sub-file)})))))))
 
 
-(defn- balance-classes
+(defn- infinite-class-balanced-dataset
   [map-seq & {:keys [class-key]
               :or {class-key :labels}}]
   (->> (group-by class-key map-seq)
-       (map (fn [[k v]]
+       (map (fn [[_ v]]
               (->> (repeatedly #(shuffle v))
                    (mapcat identity))))
-       (apply interleave)))
-
-
-(defn- create-map-load-fn
-  [image->obs label->vec]
-  (let [image->obs (fn [img-path]
-                     (-> (imagez/load-image img-path)
-                         image->obs))]
-    (fn [{:keys [data labels]}]
-      {:data (image->obs data)
-       :labels (label->vec labels)})))
+       (apply interleave)
+       (partition 1024)))
 
 
 (defn- create-nippy-dataset
-  "For a  lot of use cases,  defining a dataset with  clojure datastructures and
-  saving that  either to an edn  file or to a  nippy file makes the  most sense.
-  Here is an example of building  the dataset manually (not using much pre-built
-  framework) and  ensuring that: 1.  The  testing data is shuffled.   This means
-  that when you  look at it you  see a representative sample.   2.  The training
-  data  is both  randomized and  balanced.  Balancing  your classification  data
-  tends to help things out a lot.
-
-  This uses the think.parallel library so that we have infinite (augmented) data
-  for training  and that data  loaded up  to 2000 images  ahead of where  we are
-  right now thus we get some ability to train and use the cpu to prepare data in
-  parallel efficiently without putting much thought into it.  Using the infinite
-  training data  does imply a  shutdown function to  stop those threads  at some
-  point; but this is only really necessary if you are going to create a bunch of
-  datasets.
-
-  It may  not be clear but  there is a  dataset function that takes  an infinite
-  sequence of maps and produces a dataset.   This is most likely the easiest and
-  fastest way to  build a dataset assuming you can  produce an infinite sequence
-  of maps, each map is one entry and all maps have the same keys."
-  []
-  (ensure-dataset-is-created)
-  (when-not (.exists (io/file "mnist-dataset.nippy"))
-    (util/write-nippy-file "mnist-dataset.nippy"
-                           {:testing (vec (shuffle
-                                           (walk-directory-and-create-path-label-pairs
-                                            "mnist/testing")))
-                            :training (vec
-                                       (walk-directory-and-create-path-label-pairs
-                                        "mnist/training"))}))
-  (let [{:keys [testing training]} (util/read-nippy-file "mnist-dataset.nippy")
-        classes (classification/get-class-names-from-directory "mnist/training")
-        label->vec (classification/create-label->vec-fn classes)
-        train-load-fn (create-map-load-fn
-                       (partial mnist-png->observation datatype true) label->vec)
-        test-load-fn (create-map-load-fn
-                      (partial mnist-png->observation datatype false) label->vec)
-        cv-seq (parallel/queued-pmap 1000 test-load-fn testing)
-        train-seq-data (parallel/queued-sequence train-load-fn
-                                                 [(balance-classes training)] :queue-depth 2000)
-        train-seq (get train-seq-data :sequence)
-        shutdown-fn (get train-seq-data :shutdown-fn)]
-    (-> (ds/map-sequence->dataset train-seq 60000 :cv-map-seq cv-seq :shutdown-fn shutdown-fn)
-        (assoc :class-names classes))))
+  "For a lot of use cases, defining a dataset with clojure
+  datastructures and saving that either to an edn file or to a nippy
+  file makes the most sense. Here we ensure that:
+    1. The test data is shuffled. This means that when you look at
+       it you see a representative sample.
+    2. The training data is both randomized and balanced. Balancing
+       your classes tends to help things out a lot.
+  Remember, a dataset is a sequence of maps."
+  [folder-name]
+  (ensure-images-on-disk)
+  (println "Creating nippy dataset for:" folder-name)
+  (let [training? (.contains folder-name "train")
+        dataset-file-name (if training?
+                            "train-dataset.nippy"
+                            "test-dataset.nippy")]
+    (when-not (.exists (io/file dataset-file-name))
+      (println "Did not find" dataset-file-name "- creating.")
+      (util/write-nippy-file dataset-file-name (create-dataset-from-folder folder-name)))
+    (let [dataset (util/read-nippy-file dataset-file-name)]
+      (if training?
+        (infinite-class-balanced-dataset dataset)
+        (shuffle dataset)))))
 
 
-(defn load-trained-network
-  []
-  (util/read-nippy-file "trained-network.nippy"))
+(def network-filename
+  (str train/default-network-filestem ".nippy"))
 
+
+(def class-names (vec (map str (range 10))))
 
 (defn display-dataset-and-model
-  ([dataset argmap]
-   (let [initial-description initial-network
-         data-display-atom (atom {})
+  ([] (display-dataset-and-model
+       (create-dataset-from-folder training-folder)
+       (create-dataset-from-folder test-folder) {}))
+  ([train-ds test-ds argmap]
+   (let [data-display-atom (atom {})
          confusion-matrix-atom (atom {})]
-     (classification/reset-dataset-display data-display-atom dataset mnist-observation->image)
-     (when-let [loaded-data (suite-train/load-network "trained-network.nippy"
-                                                      initial-description)]
-       (classification/reset-confusion-matrix confusion-matrix-atom mnist-observation->image
-                                              dataset
-                                              (apply suite-train/evaluate-network
-                                                     dataset
-                                                     loaded-data
-                                                     (-> (merge argmap
-                                                                {:batch-type :cross-validation})
-                                                         seq flatten))))
-
-     (let [open-message
-           (gate/open (atom
-                       (classification/create-routing-map confusion-matrix-atom
-                                                          data-display-atom))
-                      :clj-css-path "src/css"
-                      :live-updates? *running-from-repl*
-                      :port 8091)]
+     (println "Resetting dataset display.")
+     (classification/reset-dataset-display!
+      data-display-atom
+      train-ds
+      test-ds
+      mnist-observation->image
+      class-names)
+     (println "Opening the gate.")
+     (let [open-message (gate/open (atom
+                                    (classification/routing-map confusion-matrix-atom data-display-atom))
+                                   :clj-css-path "src/css"
+                                   :live-updates? *running-from-repl*
+                                   :port 8091)]
        (println open-message))
-     confusion-matrix-atom))
-  ([]
-   (display-dataset-and-model (create-dataset))))
+     confusion-matrix-atom)))
+
 
 (def ^:dynamic *run-from-nippy* true)
 
 
 (defn train-forever
+  ([] (train-forever {}))
   ([argmap]
-   (let [dataset (if *run-from-nippy*
-                   (create-nippy-dataset)
-                   (create-dataset))
-         confusion-matrix-atom (display-dataset-and-model dataset argmap)]
-     (apply classification/train-forever dataset mnist-observation->image
-            initial-network
-            (-> (merge argmap
-                       {:confusion-matrix-atom confusion-matrix-atom})
-                seq flatten))))
-  ([] (train-forever [{}])))
+   (println "Training forever.")
+   (let [[train-ds test-ds] (if *run-from-nippy*
+                              [(create-nippy-dataset training-folder)
+                               (create-nippy-dataset test-folder)]
+                              [(create-dataset-from-folder training-folder)
+                               (create-dataset-from-folder test-folder)])
+         confusion-matrix-atom (display-dataset-and-model train-ds test-ds argmap)]
+     (println "Datasets built, moving on to training.")
+     (apply classification/train-forever train-ds test-ds
+            mnist-observation->image
+            class-names
+            initial-description
+            (->> (assoc argmap :confusion-matrix-atom confusion-matrix-atom)
+                 (seq)
+                 (apply concat))))))
+
 
 (defn train-forever-uberjar
-  [argmap]
-  (with-bindings {#'*running-from-repl* (not (:live-updates? argmap))}
-    (train-forever argmap)))
+  ([] (train-forever-uberjar {}))
+  ([argmap]
+   (println "Training forever from uberjar.")
+   (with-bindings {#'*running-from-repl* (not (:live-updates? argmap))}
+     (train-forever argmap))))
+
 
 (defn label-one
   "Take an arbitrary image and label it."
   []
-  (let [file-label-pairs (shuffle (classification/directory->file-label-seq "mnist/testing"
+  (let [file-label-pairs (shuffle (classification/directory->file-label-seq test-folder
                                                                             false))
         [test-file test-label] (first file-label-pairs)
         test-img (imagez/load-image test-file)
         observation (mnist-png->observation datatype false test-img)]
     (imagez/show test-img)
-    (infer/classify-one-observation (util/read-nippy-file "trained-network.nippy")
-                                    observation (ds/create-image-shape num-channels
-                                                                       image-size
-                                                                       image-size)
-                                    (classification/get-class-names-from-directory
-                                     "mnist/testing"))))
+    (execute/run (util/read-nippy-file network-filename) [observation])))
+
 
 (defn fine-tuning-example
   "This is an example of how to use cortex to fine tune an existing network."
   []
-  (let [mnist-dataset (create-dataset)
-        mnist-network (load-trained-network)
+  (let [mnist-dataset (create-dataset-from-folder)
+        mnist-network (util/read-nippy-file network-filename)
         initial-description (:initial-description mnist-network)
         ;; To figure out at which point you'd like to split the network,
         ;; you can use (get-in mnist-net [:compute-graph :edges]) or
@@ -360,7 +292,6 @@
         modified-description (vec (concat (drop-last 3 initial-description) layers-to-add))
         modified-network (network/assoc-layers-to-network network-bottleneck layers-to-add)
         modified-network (dissoc modified-network :traversal)
-        modified-network (-> (network/linear-network modified-network)
-                             (traverse/auto-bind-io))]
-    (suite-train/train-n mnist-dataset modified-description modified-network
-                         :batch-size 128 :epoch-count 1)))
+        modified-network (network/linear-network modified-network)]
+    (train/train-n mnist-dataset modified-description modified-network
+                   :batch-size 128 :epoch-count 1)))

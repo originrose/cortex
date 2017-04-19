@@ -1,11 +1,12 @@
-1(defproject suite-classification "0.9.4-SNAPSHOT"
+(defproject suite-classification "0.9.4-SNAPSHOT"
   :description "Example of using the turn key classification system"
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/cortex "0.9.4-SNAPSHOT"]
+                 [thinktopic/experiment "0.9.4-SNAPSHOT"]
                  [org.clojure/tools.cli "0.3.5"]
+                 [thinktopic/think.image "0.4.8"]
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)
                  ;;you need to get simple servers up and running easily.
@@ -45,4 +46,9 @@
 
   :main suite-classification.main
   :aot [suite-classification.main]
-  :uberjar-name "classify-example.jar")
+  :uberjar-name "classify-example.jar"
+
+  :clean-targets ^{:protect false} [:target-path
+                                    "figwheel_server.log"
+                                    "resources/public/out/"
+                                    "resources/public/js/app.js"])
