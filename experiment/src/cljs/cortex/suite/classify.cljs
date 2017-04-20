@@ -1,6 +1,7 @@
 (ns cortex.suite.classify
   (:require-macros [cljs.core.async.macros :refer [go]])
-  (:require [cljs.core.async :as async :refer [<!]]
+  (:require [cljs.pprint]
+            [cljs.core.async :as async :refer [<!]]
             [reagent.core :refer [atom]]
             [think.gate.core :as gate]
             [think.gate.model :as model]))
@@ -131,3 +132,13 @@
        (if-let [dataset-data @dataset-atom]
          [display-dataset (dataset-data :dataset)]
          [:div "loading dataset"])])))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Main gate entry point
+(defmethod gate/component "default"
+  [& args]
+  (apply classify-component args))
+
+
+(gate/start-frontend)

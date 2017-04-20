@@ -14,6 +14,7 @@
 
 (defn -main
   [& args]
+  (println "Welcome! Please wait while we compile some Clojure code...")
   (let [argmap (parse-opts args cli-options)]
     (require 'suite-classification.core)
     ((resolve 'suite-classification.core/train-forever-uberjar)
