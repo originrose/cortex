@@ -23,14 +23,14 @@
               [{:id "dev"
                 :figwheel true
                 :source-paths ["src/cljs/"]
-                :compiler {:main "cortex.suite.classify"
+                :compiler {:main "cortex.experiment.classify"
                            :asset-path "out"
                            :output-to "resources/public/js/app.js"
                            :output-dir "resources/public/out"}}
                {:id "prod"
                 :source-paths ["src/cljs/"]
                 :jar true
-                :compiler {:main "cortex.suite.classify"
+                :compiler {:main "cortex.experiment.classify"
                            :output-to "resources/public/js/app.js"
                            :output-dir "target/uberjar"
                            :optimizations :advanced

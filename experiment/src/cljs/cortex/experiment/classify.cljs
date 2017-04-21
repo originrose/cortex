@@ -1,4 +1,4 @@
-(ns cortex.suite.classify
+(ns cortex.experiment.classify
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:require [cljs.pprint]
             [cljs.core.async :as async :refer [<!]]

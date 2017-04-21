@@ -21,8 +21,9 @@
 (def image-size 28)
 (def num-classes 10)
 
-(def initial-description
-  [(layers/input 28 28 1 :id :data)
+(defn initial-description
+  [input-w input-h num-classes]
+  [(layers/input input-w input-h 1 :id :data)
    (layers/convolutional 5 0 1 20)
    (layers/max-pooling 2 0 2)
    (layers/dropout 0.9)
@@ -101,18 +102,15 @@
      :done)))
 
 
-(def max-image-rotation-degrees 25)
-
 (defn- image-aug-pipeline
   "Uses think.image augmentation to vary training inputs."
   [image]
-  (-> image
-      (image-aug/rotate (- (rand-int (* 2 max-image-rotation-degrees))
-                           max-image-rotation-degrees)
-                        false)
-      (image-aug/inject-noise (* 0.25 (rand)))))
-
-
+  (let [max-image-rotation-degrees 25]
+    (-> image
+        (image-aug/rotate (- (rand-int (* 2 max-image-rotation-degrees))
+                             max-image-rotation-degrees)
+                          false)
+        (image-aug/inject-noise (* 0.25 (rand))))))
 
 
 (defn- mnist-observation->image
@@ -145,7 +143,7 @@
                                  (experiment-util/infinite-class-balanced-dataset))
                              (-> test-folder
                                  (experiment-util/create-dataset-from-folder :image-aug-fn (:image-aug-fn argmap)))]]
-     (classification/perform-experiment initial-description
+     (classification/perform-experiment (initial-description image-size image-size num-classes)
                                         train-ds test-ds
                                         mnist-observation->image
                                         class-mapping

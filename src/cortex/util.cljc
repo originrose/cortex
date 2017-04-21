@@ -58,7 +58,7 @@
 
 
 (defn max-index
-  "Good for finding softmax winners and converting back from one-hot."
+  "Given a vector (typically a softmax output or one-hot encoding) returns the index of the largest element."
   [coll]
   (if (empty? coll)
     -1
