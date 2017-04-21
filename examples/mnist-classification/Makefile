@@ -1,3 +1,6 @@
+SRC := $(shell find src -name "*.clj*")
+
+
 all: uberjar
 
 

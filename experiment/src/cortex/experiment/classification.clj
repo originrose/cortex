@@ -1,79 +1,24 @@
 (ns cortex.experiment.classification
   (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.core.matrix :as m]
-            [mikera.image.core :as i]
             [think.image.patch :as patch]
-            [think.parallel.core :as parallel]
             [think.gate.core :as gate]
             [cortex.util :as util]
             [cortex.experiment.train :as experiment-train]
             [cortex.nn.network :as network]
-            [cortex.nn.execute :as execute])
-  (:import [java.io File]))
-
-(def datatype :float)
+            [cortex.nn.execute :as execute]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-(defn- image->observation-data
-  "Create an observation from input."
-  [image datatype image-aug-fn]
-  (patch/image->patch (if image-aug-fn
-                        (image-aug-fn image)
-                        image)
-                      :datatype datatype
-                      :colorspace :gray))
 
-
-(defn- file->observation
-  "Given a file, returns an observation map (an element of a dataset)."
-  [image-aug-fn datatype num-classes ^File file]
-  (let [^String label-idx (-> (re-seq #"(\d)/[^/]+$" (.getPath file)) first last)
-        image (i/load-image file)]
-    {:data (image->observation-data image datatype image-aug-fn)
-     :labels (util/idx->one-hot (Integer. label-idx) num-classes)}))
-
-
-(defn create-dataset-from-folder
-  "Turns a folder of folders of images into a dataset (a sequence of maps)."
-  [folder-name & {:keys [image-aug-fn]}]
-  (println "Building dataset from folder:" folder-name)
-  (let [f (io/as-file folder-name)
-        num-classes (->> (.listFiles f)
-                         (filter #(.isDirectory ^File %))
-                         (count))]
-    (->> (file-seq f)
-         (filter #(.endsWith (.getName ^File %) "png"))
-         (map (partial file->observation
-                       (and (.contains ^String folder-name "train")
-                            image-aug-fn)
-                       datatype
-                       num-classes)))))
-
-
-(defn- infinite-class-balanced-dataset
-  "Given a dataset, returns an infinite sequence of maps perfectly
-  balanced by class."
-  [map-seq & {:keys [class-key epoch-size]
-              :or {class-key :labels
-                   epoch-size 1024}}]
-  (->> (group-by class-key map-seq)
-       (map (fn [[_ v]]
-              (->> (repeatedly #(shuffle v))
-                   (mapcat identity))))
-       (apply interleave)
-       (partition epoch-size)))
-
-
-(defn vec->label-fn
+(defn- vec->label-fn
   [{:keys [index->class-name]}]
   (fn [label-vec]
     (get index->class-name (util/max-index label-vec))))
 
 
-(defn network-eval->rich-confusion-matrix
+(defn- network-eval->rich-confusion-matrix
   "A rich confusion matrix is a confusion matrix with the list of
   inferences and observations in each cell instead of just a count."
   [class-mapping {:keys [labels test-ds] :as network-eval}]
@@ -96,7 +41,7 @@
                  initial-confusion-matrix))))
 
 
-(defn rich-confusion-matrix->network-confusion-matrix
+(defn- rich-confusion-matrix->network-confusion-matrix
   [rich-confusion-matrix observation->img-fn class-mapping]
   (let [class-names (vec (sort (keys (:class-name->index class-mapping))))]
     {:class-names class-names
@@ -117,7 +62,7 @@
                    class-names)}))
 
 
-(defn reset-confusion-matrix
+(defn- reset-confusion-matrix
   [confusion-matrix-atom observation->img-fn class-mapping network-eval]
   (swap! confusion-matrix-atom
          (fn [{:keys [update-index]}]
@@ -130,25 +75,25 @@
   nil)
 
 
-(defn network-confusion-matrix->simple-confusion-matrix
+(defn- network-confusion-matrix->simple-confusion-matrix
   [{:keys [matrix] :as network-confusion-matrix}]
   (update-in network-confusion-matrix [:matrix]
              (fn [matrix] (mapv #(mapv :count %) matrix))))
 
 
-(defn get-confusion-matrix
+(defn- get-confusion-matrix
   [confusion-matrix-atom & args]
   (network-confusion-matrix->simple-confusion-matrix
    @confusion-matrix-atom))
 
 
-(defn get-confusion-detail
+(defn- get-confusion-detail
   [confusion-matrix-atom {:keys [row col] :as params}]
   (->> (get-in @confusion-matrix-atom [:matrix row col])
        :inferences))
 
 
-(defn get-confusion-image
+(defn- get-confusion-image
   [confusion-matrix-atom params]
   (let [{:keys [row col index]} (->> params
                                      (map (fn [[k v]]
@@ -160,7 +105,7 @@
          index)))
 
 
-(defn reset-dataset-display!
+(defn- reset-dataset-display!
   [dataset-display-atom train-ds test-ds observation->img-fn class-mapping]
   (let [vec->label (vec->label-fn class-mapping)]
     (swap! dataset-display-atom
@@ -189,7 +134,7 @@
     nil))
 
 
-(defn get-dataset-data
+(defn- get-dataset-data
   [dataset-display-atom & args]
   (update-in @dataset-display-atom [:dataset]
              (fn [dataset-map]
@@ -198,14 +143,14 @@
                     dataset-map))))
 
 
-(defn get-dataset-image
+(defn- get-dataset-image
   [dataset-display-atom {:keys [batch-type index]}]
   (nth (get-in @dataset-display-atom
                [:dataset (edn/read-string batch-type) :images])
        (edn/read-string index)))
 
 
-(defn routing-map
+(defn- routing-map
   [confusion-matrix-atom dataset-display-atom]
   {"confusion-matrix" (partial get-confusion-matrix confusion-matrix-atom)
    "confusion-detail" (partial get-confusion-detail confusion-matrix-atom)
@@ -214,7 +159,7 @@
    "dataset-image" (partial get-dataset-image dataset-display-atom)})
 
 
-(defn test-fn
+(defn- test-fn
   "The `experiment` training system supports passing in a `test-fn`
   that gets called every epoch allowing the user to compare the old
   and new network and decide which is best. Here we calculate
@@ -249,7 +194,7 @@
      :network (assoc new-network :classification-accuracy classification-accuracy)}))
 
 
-(defn train-forever
+(defn- train-forever
   "Train forever. This function never returns."
   [initial-description train-ds test-ds observation->image-fn class-mapping
    & {:keys [batch-size confusion-matrix-atom force-gpu?]
@@ -287,21 +232,17 @@
 (defn perform-experiment
   "Main entry point:
     - initial-description: A cortex nerual net description to train.
-    - dataset-folder: Path to a folder of folders of folders to use as a dataset.
+    - train-ds: A dataset (sequence of maps) with keys `:data`, `:labels`, used for training.
+    - test-ds: A dataset (sequence of maps) with keys `:data`, `:labels`, used for testing.
     - observation->image-fn: A function that can take observation data and return png data for web display.
     - class-mapping: A map with two entries
-      - :class-name->index a map from class name strings to softmax indexes
-      - :index->class-name a map from softmax indexes to class name strings
-   Trains the net indefinitely on the data in the dataset-folder, and gives live updates on a local webserver hosted at http://localhost:8091."
-  ([initial-description dataset-folder observation->image-fn class-mapping]
-   (perform-experiment initial-description dataset-folder observation->image-fn class-mapping {}))
-  ([initial-description dataset-folder observation->image-fn class-mapping argmap]
-   (let [training-folder (str dataset-folder "training")
-         test-folder (str dataset-folder "test")
-         [train-ds test-ds] [(infinite-class-balanced-dataset
-                              (create-dataset-from-folder training-folder :image-aug-fn (:image-aug-fn argmap)))
-                             (create-dataset-from-folder test-folder :image-aug-fn (:image-aug-fn argmap))]
-         confusion-matrix-atom (display-dataset-and-model train-ds test-ds
+      - `:class-name->index` a map from class name strings to softmax indexes
+      - `:index->class-name` a map from softmax indexes to class name strings
+   Trains the net indefinitely on the provided training data, evaluating against the test data, and gives live updates on a local webserver hosted at http://localhost:8091."
+  ([initial-description train-ds test-ds observation->image-fn class-mapping]
+   (perform-experiment initial-description train-ds test-ds observation->image-fn class-mapping {}))
+  ([initial-description train-ds test-ds observation->image-fn class-mapping argmap]
+   (let [confusion-matrix-atom (display-dataset-and-model train-ds test-ds
                                                           observation->image-fn
                                                           class-mapping
                                                           (:live-updates? argmap))]

@@ -12,7 +12,8 @@
             [cortex.experiment.train :as train]
             [cortex.nn.network :as network]
             [cortex.nn.execute :as execute]
-            [cortex.util :as util])
+            [cortex.util :as util]
+            [cortex.experiment.util :as experiment-util])
   (:import [java.io File]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -96,7 +97,8 @@
      (dorun (map (partial save-image! (str dataset-folder "training"))
                  (map-indexed vector training-dataset)))
      (dorun (map (partial save-image! (str dataset-folder "test"))
-                 (map-indexed vector test-dataset))))))
+                 (map-indexed vector test-dataset)))
+     :done)))
 
 
 (def max-image-rotation-degrees 25)
@@ -136,12 +138,19 @@
   ([argmap]
    (ensure-images-on-disk!)
    (println "Training forever.")
-   (classification/perform-experiment initial-description
-                                      dataset-folder
-                                      mnist-observation->image
-                                      class-mapping
-                                      (merge argmap
-                                             (:image-aug-fn image-aug-pipeline)))))
+   (let [training-folder (str dataset-folder "training")
+         test-folder (str dataset-folder "test")
+         [train-ds test-ds] [(-> training-folder
+                                 (experiment-util/create-dataset-from-folder :image-aug-fn (:image-aug-fn argmap))
+                                 (experiment-util/infinite-class-balanced-dataset))
+                             (-> test-folder
+                                 (experiment-util/create-dataset-from-folder :image-aug-fn (:image-aug-fn argmap)))]]
+     (classification/perform-experiment initial-description
+                                        train-ds test-ds
+                                        mnist-observation->image
+                                        class-mapping
+                                        (merge argmap
+                                               (:image-aug-fn image-aug-pipeline))))))
 
 
 (defn train-forever-uberjar
@@ -166,7 +175,7 @@
   []
   (ensure-images-on-disk!)
   (let [observation (->> (str dataset-folder "test")
-                         (classification/create-dataset-from-folder)
+                         (experiment-util/create-dataset-from-folder)
                          (rand-nth))]
     (i/show (mnist-observation->image (:data observation)))
     {:answer (-> observation :labels util/max-index)
@@ -182,8 +191,8 @@
   "This is an example of how to use cortex to fine tune an existing network."
   []
   (ensure-images-on-disk!)
-  (let [train-ds (classification/create-dataset-from-folder (str dataset-folder "training"))
-        test-ds (classification/create-dataset-from-folder (str dataset-folder "test"))
+  (let [train-ds (experiment-util/create-dataset-from-folder (str dataset-folder "training"))
+        test-ds (experiment-util/create-dataset-from-folder (str dataset-folder "test"))
         mnist-network (util/read-nippy-file network-filename)
         initial-description (:initial-description mnist-network)
         ;; To figure out at which point you'd like to split the network,
