@@ -36,7 +36,8 @@ Next, build your project with the `docker build`  command (Remember to change
 the tag to something appropriate for your project).
 
 ```
-$ docker build -t docker-example .
+$ lein uberjar
+$ docker build -t library/docker-example .
 ```
 
 ## Running the container
@@ -49,11 +50,12 @@ simply run that in the background.
 
 ```
 $ sudo nvidia-docker-plugin &
-$ sudo nvidia-docker run docker-example
+$ sudo nvidia-docker run library/docker-example
 ```
 
 This should run your program in a Docker container while still leveraging the
-underlying GPU.
+underlying GPU. If you're using the example it will show the same output that
+is provided if running `lein run`.
 
 
 ## License

@@ -3,7 +3,7 @@
             [cortex.nn.execute :as execute]
             [cortex.nn.network :as network]
             [cortex.dataset :as ds]
-            [cortex.verify.nn.train :refer [CORN-DATA CORN-LABELS]])
+            [cortex.verify.nn.data :refer [CORN-DATA CORN-LABELS]])
   (:gen-class))
 
 (defn train-network
@@ -17,7 +17,7 @@
                       (layers/linear 1 :id :labels)])
            epoch 0]
       (if (> 2 epoch)
-        (recur (execute/train network corn-dataset :batch-size 10) (inc epoch))
+        (recur (:network (execute/train network corn-dataset :batch-size 10)) (inc epoch))
         network))))
 
 (defn -main
@@ -26,4 +26,4 @@
   (let [_ (println "Training network...")
         network (train-network)
         _ (println "Done.")]
-    nil))
+    (System/exit 0)))
