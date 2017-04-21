@@ -1,4 +1,4 @@
-(ns suite-classification.core
+(ns mnist-classification.core
   (:require [clojure.java.io :as io]
             [cortex.datasets.mnist :as mnist]
             [mikera.image.core :as i]
@@ -92,7 +92,7 @@
 (defonce ensure-images-on-disk!
   (memoize
    (fn []
-     (println "Ensuring image data is built, and availble on disk.")
+     (println "Ensuring image data is built, and available on disk.")
      (dorun (map (partial save-image! (str dataset-folder "training"))
                  (map-indexed vector training-dataset)))
      (dorun (map (partial save-image! (str dataset-folder "test"))
@@ -132,7 +132,7 @@
 ;; Main entry point. In general, a classification experiment trains a net
 ;; forever, providing live updates on a local web server.
 (defn train-forever
-  ([] (train-forever {:live-updates? true}))
+  ([] (train-forever {}))
   ([argmap]
    (ensure-images-on-disk!)
    (println "Training forever.")
@@ -145,7 +145,7 @@
 
 
 (defn train-forever-uberjar
-  ([] (train-forever-uberjar {:live-updates? true}))
+  ([] (train-forever-uberjar {}))
   ([argmap]
    (println "Training forever from uberjar.")
    (train-forever argmap)))

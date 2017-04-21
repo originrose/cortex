@@ -1,4 +1,4 @@
-(defproject suite-classification "0.9.4-SNAPSHOT"
+(defproject mnist-classification "0.9.4-SNAPSHOT"
   :description "An example of using experiment/classification on mnist."
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/experiment "0.9.4-SNAPSHOT"]
@@ -10,8 +10,8 @@
                  ;;[org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
                  ]
 
-  :main suite-classification.main
-  :aot [suite-classification.main]
+  :main mnist-classification.main
+  :aot [mnist-classification.main]
   :uberjar-name "classify-example.jar"
 
   :clean-targets ^{:protect false} [:target-path

@@ -279,7 +279,7 @@
                             class-mapping)
     (println (gate/open (atom (routing-map confusion-matrix-atom data-display-atom))
                         :clj-css-path "src/css"
-                        :live-updates? nil #_live-updates?
+                        :live-updates? live-updates?
                         :port 8091))
     confusion-matrix-atom))
 
