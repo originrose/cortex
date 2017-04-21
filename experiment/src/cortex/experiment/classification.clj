@@ -150,13 +150,19 @@
        (edn/read-string index)))
 
 
+(defn- get-accuracy-data
+  [classification-accuracy-atom & args]
+  @classification-accuracy-atom)
+
+
 (defn- routing-map
-  [confusion-matrix-atom dataset-display-atom]
+  [confusion-matrix-atom classification-accuracy-atom dataset-display-atom]
   {"confusion-matrix" (partial get-confusion-matrix confusion-matrix-atom)
    "confusion-detail" (partial get-confusion-detail confusion-matrix-atom)
    "confusion-image" (partial get-confusion-image confusion-matrix-atom)
    "dataset-data" (partial get-dataset-data dataset-display-atom)
-   "dataset-image" (partial get-dataset-image dataset-display-atom)})
+   "dataset-image" (partial get-dataset-image dataset-display-atom)
+   "accuracy-data" (partial get-accuracy-data classification-accuracy-atom)})
 
 
 (defn- test-fn
@@ -165,7 +171,7 @@
   and new network and decide which is best. Here we calculate
   classification accuracy (a good metric for classification tasks) and
   use that both for reporting and comparing."
-  [batch-size confusion-matrix-atom observation->img-fn class-mapping
+  [batch-size confusion-matrix-atom classification-accuracy-atom observation->img-fn class-mapping
    ;; TODO: no need for context here
    context new-network old-network test-ds]
   (let [labels (execute/run new-network test-ds :batch-size batch-size)
@@ -183,6 +189,7 @@
         best-network? (or (nil? old-classification-accuracy)
                           (> (double classification-accuracy)
                              (double old-classification-accuracy)))]
+    (swap! classification-accuracy-atom conj classification-accuracy)
     (if best-network?
       (reset-confusion-matrix confusion-matrix-atom
                               observation->img-fn
@@ -197,15 +204,17 @@
 (defn- train-forever
   "Train forever. This function never returns."
   [initial-description train-ds test-ds observation->image-fn class-mapping
-   & {:keys [batch-size confusion-matrix-atom force-gpu?]
+   & {:keys [batch-size confusion-matrix-atom classification-accuracy-atom force-gpu?]
       :or {batch-size 128
-           confusion-matrix-atom (atom {})}}]
+           confusion-matrix-atom (atom {})
+           classification-accuracy-atom (atom {})}}]
   (let [network (network/linear-network initial-description)]
     (experiment-train/train-n network
                               train-ds test-ds
                               :test-fn (partial test-fn
                                                 batch-size
                                                 confusion-matrix-atom
+                                                classification-accuracy-atom
                                                 observation->image-fn
                                                 class-mapping)
                               :batch-size batch-size
@@ -216,17 +225,21 @@
   "Starts the web server that gives real-time training updates."
   [train-ds test-ds observation->image-fn class-mapping live-updates?]
   (let [data-display-atom (atom {})
-        confusion-matrix-atom (atom {})]
+        confusion-matrix-atom (atom {})
+        classification-accuracy-atom (atom [])]
     (reset-dataset-display! data-display-atom
                             train-ds
                             test-ds
                             observation->image-fn
                             class-mapping)
-    (println (gate/open (atom (routing-map confusion-matrix-atom data-display-atom))
+    (println (gate/open (atom (routing-map confusion-matrix-atom
+                                           classification-accuracy-atom
+                                           data-display-atom))
                         :clj-css-path "src/css"
                         :live-updates? live-updates?
                         :port 8091))
-    confusion-matrix-atom))
+    [confusion-matrix-atom
+     classification-accuracy-atom]))
 
 
 (defn perform-experiment
@@ -242,15 +255,18 @@
   ([initial-description train-ds test-ds observation->image-fn class-mapping]
    (perform-experiment initial-description train-ds test-ds observation->image-fn class-mapping {}))
   ([initial-description train-ds test-ds observation->image-fn class-mapping argmap]
-   (let [confusion-matrix-atom (display-dataset-and-model train-ds test-ds
-                                                          observation->image-fn
-                                                          class-mapping
-                                                          (:live-updates? argmap))]
+   (let [[confusion-matrix-atom
+          classification-accuracy-atom]
+         (display-dataset-and-model train-ds test-ds
+                                    observation->image-fn
+                                    class-mapping
+                                    (:live-updates? argmap))]
      (apply train-forever
             initial-description
             train-ds test-ds
             observation->image-fn
             class-mapping
-            (->> (assoc argmap :confusion-matrix-atom confusion-matrix-atom)
+            (->> (assoc argmap :confusion-matrix-atom confusion-matrix-atom
+                        :classification-accuracy-atom classification-accuracy-atom)
                  (seq)
                  (apply concat))))))
