@@ -1,7 +1,7 @@
 (ns ^:gpu cortex.compute.nn.cuda-gradient-test
   (:require [clojure.test :refer :all]
             [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
-            [cortex.compute.cuda.backend :as cuda-backend]
+            ;[cortex.compute.cuda.backend :as cuda-backend]
             [cortex.verify.nn.gradient :as verify-gradient]
             [cortex.nn.execute :as execute]))
 

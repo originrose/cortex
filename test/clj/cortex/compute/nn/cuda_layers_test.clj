@@ -2,13 +2,13 @@
   (:require [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
             [clojure.test :refer :all]
             [cortex.verify.nn.layers :as verify-layers]
-            [cortex.compute.cuda.backend :as cuda-backend]
             [cortex.nn.execute :as execute]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
 (defn create-context
   []
+  (require '[cortex.compute.cuda.backend :as cuda-backend])
   (execute/compute-context :backend :cuda
                            :datatype verify-utils/*datatype*))
 

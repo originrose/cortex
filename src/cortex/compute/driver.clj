@@ -14,6 +14,35 @@
             [think.resource.core :as resource]))
 
 
+(defmulti dtype-cast
+  (fn [elem dtype]
+    dtype))
+
+(defmethod dtype-cast :double
+  [elem dtype]
+  (double elem))
+
+(defmethod dtype-cast :float
+  [elem dtype]
+  (float elem))
+
+(defmethod dtype-cast :long
+  [elem dtype]
+  (long elem))
+
+(defmethod dtype-cast :int
+  [elem dtype]
+  (int elem))
+
+(defmethod dtype-cast :short
+  [elem dtype]
+  (short elem))
+
+(defmethod dtype-cast :byte
+  [elem dtype]
+  (byte elem))
+
+
 (defprotocol PDriver
   "A driver is a generic compute abstraction.  Could be a group of threads,
   could be a machine on a network or it could be a CUDA or OpenCL driver.
