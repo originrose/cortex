@@ -1,8 +1,10 @@
+.PHONY: clean
 
-all: set_device
+clean: 
+	rm -f set_device
 
-set_device : set_device.cc cuda_errors.hpp
+set_device: set_device.cc cuda_errors.hpp
 	clang++ -std=c++11 -lcuda -ldl -lrt -pthread set_device.cc -o set_device
 
-clean:
-	rm set_device
+
+all: set_device
