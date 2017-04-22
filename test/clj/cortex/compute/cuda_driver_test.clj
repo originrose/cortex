@@ -9,7 +9,7 @@
 (defn create-driver
   []
   (require '[cortex.compute.cuda.driver :as cuda-driver])
-  (resolve 'cuda-driver/driver))
+  ((resolve 'cuda-driver/driver)))
 
 (verify-utils/def-all-dtype-test simple-stream
   (verify-driver/simple-stream (create-driver) verify-utils/*datatype*))
