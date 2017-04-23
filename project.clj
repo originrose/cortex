@@ -15,7 +15,7 @@
                  ;;The dataset abstraction uses parallel and optionally resource management.
                  [thinktopic/think.parallel "0.3.5"]
                  [thinktopic/think.datatype "0.3.10"]
-                 [thinktopic/resource "1.1.0"]]
+                 [thinktopic/think.resource "1.2.0"]]
 
   :java-source-paths ["java"]
 
