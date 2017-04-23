@@ -8,7 +8,8 @@
 (defn test-wrapper
   [test-fn]
   (resource/with-resource-context
-    (test-fn)))
+    (with-bindings {#'resource/*resource-debug-double-free* true}
+      (test-fn))))
 
 
 (def ^:dynamic *datatype* :double)

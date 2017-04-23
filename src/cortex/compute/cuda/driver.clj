@@ -39,6 +39,14 @@
 (defonce ^:private ^:dynamic *cuda-initialized-device-ids* (atom #{}))
 
 
+(def ^:dynamic *cuda-library-debug-print* nil)
+
+(defn cuda-library-debug-print
+  [& args]
+  (when *cuda-library-debug-print*
+    (apply println args)))
+
+
 (defn- set-cuda-device
   "Set the current device.  Ensure the primary context is initialized if we haven't
 set this device before.  Set device must be called before any other cuda functions."
@@ -56,12 +64,12 @@ set this device before.  Set device must be called before any other cuda functio
 
 (defrecord CudaDriver [devices])
 
-(defrecord CudaDevice [^CudaDriver driver
-                       device-id
+(defrecord CudaDevice [device-id
                        device-properties
                        device-functions
                        ^cublas$cublasContext cublas
-                       ^curand$curandGenerator_st curand])
+                       ^curand$curandGenerator_st curand
+                       resource-context])
 
 
 (defn ensure-device
@@ -73,11 +81,22 @@ set this device before.  Set device must be called before any other cuda functio
     (set-cuda-device cur-dev)))
 
 
+(def ^:dynamic *cuda-library-debug-execution* nil)
+
+(defmacro cuda-library-debug-thread-sync
+  []
+  `(when *cuda-library-debug-execution*
+     (check-cuda-error (cuda/cudaThreadSynchronize))))
+
+
 (defmacro cuda-call
   [& body]
-  `(do
-     (ensure-device)
-     (check-cuda-error ~@body)))
+  (let [body-str (pr-str body)]
+   `(do
+      (ensure-device)
+      (cuda-library-debug-print ~body-str)
+      (check-cuda-error ~@body)
+      (cuda-library-debug-thread-sync))))
 
 
 (defonce cublas-errors
@@ -99,12 +118,14 @@ set this device before.  Set device must be called before any other cuda functio
 
 (defmacro cublas-call
   [& body]
-  `(do
-     (ensure-device)
-     (let [retval# (do ~@body)]
-      (when-not (= retval# cublas/CUBLAS_STATUS_SUCCESS)
-        (throw (Exception. (format "Cublas error: %s" (cublas-error-to-string retval#)))))
-      retval#)))
+  (let [body-str (pr-str body)]
+   `(do
+      (ensure-device)
+      (cuda-library-debug-print ~body-str)
+      (let [retval# (do ~@body)]
+        (when-not (= retval# cublas/CUBLAS_STATUS_SUCCESS)
+          (throw (Exception. (format "Cublas error: %s" (cublas-error-to-string retval#)))))
+        retval#))))
 
 
 (defn reverse-hash-map
@@ -138,12 +159,14 @@ set this device before.  Set device must be called before any other cuda functio
 
 (defmacro curand-call
   [& body]
-  `(do
-     (ensure-device)
-     (let [retval# (do ~@body)]
-      (when-not (= retval# curand/CURAND_STATUS_SUCCESS)
-        (throw (Exception. (format "cuRAND error: %s" (curand-error-to-string retval#)))))
-      retval#)))
+  (let [body-str (pr-str body)]
+   `(do
+      (ensure-device)
+      (cuda-library-debug-print ~body-str)
+      (let [retval# (do ~@body)]
+        (when-not (= retval# curand/CURAND_STATUS_SUCCESS)
+          (throw (Exception. (format "cuRAND error: %s" (curand-error-to-string retval#)))))
+        retval#))))
 
 
 (defn zero-term-array-to-string
@@ -162,6 +185,10 @@ set this device before.  Set device must be called before any other cuda functio
 
 (defn list-devices
   []
+  ;;Set the default cuda device.  This initializes cuda
+  ;;and sets up an initialized primary context.  Without this
+  ;;list-devices will fail as the driver api has no current context.
+  (set-cuda-device {:device-id 0})
   (let [dev-count-ary (int-array 1)]
     (check-cuda-error (cuda/cuDeviceGetCount dev-count-ary))
     (map (fn [^long device-index]
@@ -217,7 +244,7 @@ set this device before.  Set device must be called before any other cuda functio
         _ (io/copy data-stream byte-stream)
         data-ptr (BytePointer. (.toByteArray byte-stream))]
     (cuda-call (cuda/cuModuleLoadData retval data-ptr))
-    retval))
+    (resource/track retval)))
 
 
 (defn get-function
@@ -312,7 +339,7 @@ set this device before.  Set device must be called before any other cuda functio
   CudaDriver
   (get-driver [item] item)
   CudaDevice
-  (get-driver [item] (.driver item))
+  (get-driver [item] (get item :driver))
   CudaStream
   (get-driver [item] (drv/get-driver (.device item))))
 
@@ -335,33 +362,46 @@ set this device before.  Set device must be called before any other cuda functio
     (jcpp-dtype/release-pointer item)))
 
 
+(extend-type CudaDevice
+  resource/PResource
+  (release-resource [item]
+    (drv/with-compute-device item
+      (let [res-ctx @(get item :resource-context)]
+        (resource/release-resource-context res-ctx)))))
+
+
 (defn- create-cuda-device
   [driver device-id properties]
   (set-cuda-device {:device-id device-id})
-  (let [retval (->CudaDevice driver device-id properties (atom nil) nil nil)]
-    (drv/with-compute-device retval
-      ;;Most of these functions require a device to be active in order to work.
-      (-> retval
-          (assoc :cublas (blas-context)
-                 :curand (rand-context))
-          (update :device-functions
-                  (fn [fn-atom]
-                    (reset! fn-atom
-                            {:memset (load-all-datatype-function "memset")
-                             :elementwise-multiply (load-float-double-function
-                                                    "elementwise_multiply")
-                             :l2-constraint-scale (load-float-double-function
-                                                   "l2_constraint_scale")
-                             :select (load-float-double-function "select")})))))))
+  (let [retval (->CudaDevice device-id properties (atom nil) nil nil (atom nil))
+        [retval res-ctx] (resource/return-resource-context
+                          (with-bindings {#'drv/*current-compute-device* retval}
+                            ;;Most of these functions require a device to be active in order to work.
+                            (-> retval
+                                (assoc :cublas (blas-context)
+                                       :curand (rand-context)
+                                       :driver driver)
+                                ((fn [retval]
+                                   (reset! (get retval :device-functions)
+                                           {:memset (load-all-datatype-function "memset")
+                                            :elementwise-multiply (load-float-double-function
+                                                                   "elementwise_multiply")
+                                            :l2-constraint-scale (load-float-double-function
+                                                                  "l2_constraint_scale")
+                                            :select (load-float-double-function "select")})
+                                   retval)))))]
+    (reset! (get retval :resource-context) res-ctx)
+    (resource/track retval)))
 
 
 (defn driver
   []
   (->CudaDriver (atom nil)))
 
+
 (defn current-cuda-device
   ^CudaDevice []
-  drv/*current-compute-device*)
+  (drv/current-device))
 
 
 (defn get-blas
@@ -377,7 +417,7 @@ set this device before.  Set device must be called before any other cuda functio
 (defn check-stream-device
   [stream]
   (when-not (identical? (get (drv/get-stream stream) :device)
-                        (drv/*current-compute-device*))
+                        (drv/current-device))
     (throw (ex-info "current device and stream device differ." {}))))
 
 
@@ -409,6 +449,7 @@ set this device before.  Set device must be called before any other cuda functio
   (release-resource [item]
     ;;Ensure the position of the pointer is 0 else the free call will fail
     (.position ptr 0)
+    (cuda-library-debug-print "Free: " (.address ptr))
     (cuda-call (cuda/cudaFree ptr)))
   mp/PElementCount
   (element-count [item] (quot size (dtype/datatype->byte-size (dtype/get-datatype ptr))))
@@ -420,19 +461,19 @@ set this device before.  Set device must be called before any other cuda functio
   drv/PDriver
   (get-devices [impl]
     (let [devices-atom (get impl :devices)]
-     (when-not @devices-atom
-       (reset! devices-atom
-               (->> (list-devices)
-                    (map (fn [dev-info]
-                           (try
-                             (create-cuda-device impl (get dev-info :device-id) dev-info)
-                             (catch Throwable e
-                               (println "Failed to create device: "
-                                        dev-info e)
-                               nil))))
-                    (remove nil?)
-                    vec)))
-     (map #(dissoc % :driver) @devices-atom)))
+      (when-not @devices-atom
+        (reset! devices-atom
+                (->> (list-devices)
+                     (map (fn [dev-info]
+                            (try
+                              (create-cuda-device impl (get dev-info :device-id) dev-info)
+                              (catch Throwable e
+                                (println "Failed to create device: "
+                                         dev-info e)
+                                nil))))
+                     (remove nil?)
+                     vec)))
+      (mapv #(dissoc % :driver) @devices-atom)))
 
   (memory-info [impl]
     (get-memory-info))
@@ -449,6 +490,7 @@ set this device before.  Set device must be called before any other cuda functio
     (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
           retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
       (cuda-call (cuda/cudaMalloc retval size))
+      (cuda-library-debug-print "Malloc: " (.address retval))
       (resource/track (->DevicePointer size retval))))
 
   (sub-buffer-impl [impl buffer offset length]
@@ -933,7 +975,7 @@ relies only on blockDim.x block.x and thread.x"
   (create-event [stream]
     (let [retval (cuda-event)]
       (cuda-call (cuda/cudaEventRecord retval (.stream stream)))
-      (resource/track retval)))
+      retval))
   ;;Ensure this stream cannot proceed until this event is triggered.
   (sync-event [stream ^cuda$CUevent_st event]
     (cuda-call (cuda/cudaStreamWaitEvent (.stream stream) event (int 0))))
@@ -1109,7 +1151,4 @@ relies only on blockDim.x block.x and thread.x"
 (extend-type cuda$CUevent_st
   drv/PEvent
   (wait-for-event [evt]
-    (cuda-call (cuda/cudaEventSynchronize evt)))
-  resource/PResource
-  (release-resource [evt]
-    (cuda-call (cuda/cudaEventDestroy evt))))
+    (cuda-call (cuda/cudaEventSynchronize evt))))

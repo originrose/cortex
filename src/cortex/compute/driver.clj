@@ -49,7 +49,18 @@ and a floating point buffer (cuda cuRand limitation)"))
   [device & body]
   `(let [device# ~device]
      (with-bindings {#'*current-compute-device* device#}
-       ~@body)))
+       (resource/with-resource-context
+         ~@body))))
+
+
+(defn default-device
+  [driver]
+  (first (get-devices driver)))
+
+
+(defn current-device
+  []
+  *current-compute-device*)
 
 
 (defprotocol PDriverProvider
@@ -125,6 +136,13 @@ executes to the event.")
                      dest dest-indexes dest-stride n-elems-per-idx))
 
 
+(defn sync-stream
+  [stream]
+  (let [evt (create-event stream)]
+    (wait-for-event evt)
+    (resource/release evt)))
+
+
 (defn host-array->device-buffer
   "Synchronously make a device buffer with these elements in it."
   [device stream upload-ary]
@@ -134,7 +152,7 @@ executes to the event.")
         device-buffer (allocate-device-buffer device elem-count datatype)]
     (dtype/copy! upload-ary 0 upload-buffer 0 elem-count)
     (copy-host->device stream upload-buffer 0 device-buffer 0 elem-count)
-    (wait-for-event (create-event stream))
+    (sync-stream stream)
     (resource/release upload-buffer)
     device-buffer))
 
@@ -147,7 +165,7 @@ executes to the event.")
         download-buffer (allocate-host-buffer device elem-count datatype)
         download-ary (dtype/make-array-of-type datatype elem-count)]
     (copy-device->host stream device-buffer 0 download-buffer 0 elem-count)
-    (wait-for-event (create-event stream))
+    (sync-stream stream)
     (dtype/copy! download-buffer 0 download-ary 0 elem-count)
     (resource/release download-buffer)
     download-ary))

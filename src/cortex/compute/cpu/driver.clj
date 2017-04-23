@@ -20,7 +20,33 @@
 (set! *unchecked-math* true)
 
 
-(defrecord CPUStream [input-chan exit-chan error-atom])
+(defrecord CPUDevice [device-id])
+(defrecord CPUStream [device input-chan exit-chan error-atom])
+(defrecord CPUDriver [devices error-atom])
+
+
+(extend-protocol drv/PDriverProvider
+  CPUDriver
+  (get-driver [driver] driver)
+  CPUDevice
+  (get-driver [device] (get device :driver))
+  CPUStream
+  (get-driver [stream] (drv/get-driver (.device stream))))
+
+
+(extend-protocol drv/PDeviceProvider
+  CPUDriver
+  (get-device [driver] (drv/default-device driver))
+  CPUDevice
+  (get-device [device] device)
+  CPUStream
+  (get-device [stream] (.device stream)))
+
+
+(extend-protocol drv/PStreamProvider
+  CPUStream
+  (get-stream [stream] stream))
+
 
 (extend-type CPUStream
   resource/PResource
@@ -35,8 +61,8 @@
 
 
 (defn cpu-stream
-  ([error-atom]
-   (let [^CPUStream retval (->CPUStream (async/chan 16) (async/chan) error-atom)]
+  ([device error-atom]
+   (let [^CPUStream retval (->CPUStream device (async/chan 16) (async/chan) error-atom)]
      (async/go
        (loop [next-val (async/<! (:input-chan retval))]
          (when next-val
@@ -47,14 +73,14 @@
            (recur (async/<! (:input-chan retval)))))
        (async/close! (:exit-chan retval)))
      (resource/track retval)))
-  ([] (cpu-stream (atom nil))))
+  ([device] (cpu-stream device (atom nil))))
 
 
 (defn main-thread-cpu-stream
   "Create a cpu stream that will execute everything immediately inline.
 Use with care; the synchonization primitives will just hang with this stream."
   ^CPUStream []
-  (->CPUStream nil nil nil))
+  (->CPUStream nil nil nil nil))
 
 
 (defn is-main-thread-cpu-stream?
@@ -155,21 +181,23 @@ Use with care; the synchonization primitives will just hang with this stream."
   (wait-for-event [event]
     (async/<!! (.input-chan event))))
 
-(defrecord CPUDriver [^long dev-count ^long current-device error-atom])
 
-(defn driver []
-  (->CPUDriver 1 1 (atom nil)))
+(defn driver
+  [& {:keys [num-devices]
+      :or {num-devices 1}}]
+  (let [retval (->CPUDriver (atom nil) (atom nil))]
+    (reset! (get retval :devices)
+            (->> (range num-devices)
+                 (mapv #(-> (->CPUDevice %)
+                            (assoc :driver retval)))))
+    retval))
+
 
 (extend-type CPUDriver
   drv/PDriver
   (get-devices [impl]
-    (mapv #(+ 1 %) (range (.dev-count impl))))
-
-  (set-current-device [impl ^long device]
-    (assoc impl :current-device device))
-
-  (get-current-device [impl]
-    (:current-device impl))
+    (mapv #(dissoc % :driver)
+          @(get impl :devices)))
 
   (memory-info [impl]
     (get-memory-info))
@@ -256,4 +284,3 @@ Use with care; the synchonization primitives will just hang with this stream."
 (extend-type Buffer
   resource/PResource
   (release-resource [buf]))
-

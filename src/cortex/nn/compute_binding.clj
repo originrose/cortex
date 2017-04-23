@@ -453,7 +453,7 @@
                                           (math/device-buffer buffer) 0
                                           host-buffer 0
                                           (dtype/ecount host-buffer))
-                   (drv/wait-for-event (drv/create-event stream))
+                   (drv/sync-stream stream)
                    (c-for [idx 0 (< idx batch-size) (inc idx)]
                           (dtype/copy! host-buffer (long (* idx output-size))
                                        (get double-buffers idx) 0

@@ -189,7 +189,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
                              :entry entry})))
           (let [elem-count (m/ecount buffer)]
             (drv/copy-device->host stream device-buffer 0 host-buffer 0 elem-count)
-            (drv/wait-for-event (drv/create-event stream))
+            (drv/sync-stream stream)
             (doseq [idx (range elem-count)]
               (let [param-value (double (dtype/get-value host-buffer idx))
                     positive (forward-fn (+ param-value epsilon) host-buffer device-buffer elem-count idx)
