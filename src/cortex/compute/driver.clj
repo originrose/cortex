@@ -14,6 +14,7 @@
             [think.resource.core :as resource]))
 
 
+
 (defprotocol PDriver
   "A driver is a generic compute abstraction.  Could be a group of threads,
   could be a machine on a network or it could be a CUDA or OpenCL driver.
@@ -24,11 +25,6 @@
   into them.  This means at least PAccess."
   (get-devices [impl]
     "Get a list of devices accessible to the system.")
-  (set-current-device [impl device]
-    "Set the current device.  In for cuda this sets the current device in thread-specific storage so expecting
-this to work in some thread independent way is a bad assumption.")
-  (get-current-device [impl]
-    "Get the current device from the current thread.")
   (memory-info [impl]
     "Get a map of {:free <long> :total <long>} describing the free and total memory in bytes.")
   (create-stream [impl]
@@ -45,9 +41,24 @@ and then uploaded to a device buffer.")
     "Allocate a buffer used for rands.  Random number generation in general needs a divisible-by-2 element count
 and a floating point buffer (cuda cuRand limitation)"))
 
+
+(def ^:dynamic *current-compute-device* nil)
+
+
+(defmacro with-compute-device
+  [device & body]
+  `(let [device# ~device]
+     (with-bindings {#'*current-compute-device* device#}
+       ~@body)))
+
+
 (defprotocol PDriverProvider
   "Get a driver from an object"
   (get-driver [impl]))
+
+(defprotocol PDeviceProvider
+  "Get a device from an object."
+  (get-device [impl]))
 
 (defprotocol PStream
   "Basic functionality expected of streams.  Streams are an abstraction of a stream of execution
@@ -140,4 +151,3 @@ executes to the event.")
     (dtype/copy! download-buffer 0 download-ary 0 elem-count)
     (resource/release download-buffer)
     download-ary))
-

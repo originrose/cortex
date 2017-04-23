@@ -46,11 +46,13 @@
 
 (defmacro cudnn-call
   [& body]
-  `(let [retval# (do ~@body)]
-     (when-not (= retval# cudnn/CUDNN_STATUS_SUCCESS)
-       (throw (Exception.
-               (format "Cudnn error: %s" (.getString (cudnn/cudnnGetErrorString retval#))))))
-     retval#))
+  `(do
+     (cuda-drv/ensure-device)
+     (let [retval# (do ~@body)]
+      (when-not (= retval# cudnn/CUDNN_STATUS_SUCCESS)
+        (throw (Exception.
+                (format "Cudnn error: %s" (.getString (cudnn/cudnnGetErrorString retval#))))))
+      retval#)))
 
 (defonce forward-algorithms
   (cuda-drv/reverse-hash-map
@@ -183,7 +185,7 @@
   (^cudnn$cudnnActivationStruct [mode] (activation-description mode cudnn/CUDNN_PROPAGATE_NAN 0.0)))
 
 
-(defrecord CudaBackend [type driver stream cudnn-context datatype network-functions])
+(defrecord CudaBackend [type stream cudnn-context datatype network-functions])
 
 (defn backend
   ([driver stream datatype]
@@ -207,10 +209,13 @@
 
 (defmacro stream-with-cudnn
   [backend & body]
-  `(let [stream# (drv/get-stream ~backend)
+  `(let [backend# ~backend
+         stream# (drv/get-stream backend#)
+         cuda-stream# (cuda-drv/get-cuda-stream stream#)
          ~'cudnn-context (get-cudnn ~backend)]
      (locking ~'cudnn-context
-       (cudnn/cudnnSetStream ~'cudnn-context (drv/get-stream stream#))
+       (cuda-drv/check-stream-device stream#)
+       (cudnn-call (cudnn/cudnnSetStream ~'cudnn-context cuda-stream#))
        ~@body)))
 
 
@@ -874,9 +879,11 @@ Backward Data: %s %d"
 
 (extend-type CudaBackend
   drv/PDriverProvider
-  (get-driver [impl] (.driver impl))
+  (get-driver [impl] (drv/get-stream (.stream impl)))
   drv/PStreamProvider
   (get-stream [impl] (.stream impl))
+  drv/PDeviceProvider
+  (get-device [impl] (drv/get-device (.stream impl)))
   dtype/PDatatype
   (get-datatype [impl] (.datatype impl))
   nn-backend/PLayerCreation

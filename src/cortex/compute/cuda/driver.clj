@@ -24,10 +24,9 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-
-(defmacro cuda-call
-  [& body]
-  `(let [result# (do ~@body)]
+(defmacro check-cuda-error
+  [result]
+  `(let [result# ~result]
      (when-not (= result# cuda/CUDA_SUCCESS)
        (let [result-val# (BytePointer.)]
          (cuda/cuGetErrorString result# result-val#)
@@ -35,6 +34,51 @@
            (throw (Exception. (format "CUDA Error %d %s" result# (.toString result-val#))))
            (throw (Exception. (format "CUDA Error: %s" (.getString result-val#)))))))
      result#))
+
+
+(defonce ^:private ^:dynamic *cuda-initialized-device-ids* (atom #{}))
+
+
+(defn- set-cuda-device
+  "Set the current device.  Ensure the primary context is initialized if we haven't
+set this device before.  Set device must be called before any other cuda functions."
+  [{:keys [device-id]}]
+  (when device-id
+   (let [device-id (long device-id)]
+     (check-cuda-error (cuda/cudaSetDevice device-id))
+     (when-not (contains? @*cuda-initialized-device-ids* device-id)
+       ;;Setting the device forces cuda to create a primary context. It does not however
+       ;;force cuda to initialize a primary context.  Malloc, however, does force initialization
+       ;;of the context.
+       (let [ignored (jcpp-dtype/make-empty-pointer-of-type :float)]
+         (check-cuda-error (cuda/cudaMalloc ignored 32)))
+       (swap! *cuda-initialized-device-ids* conj device-id)))))
+
+(defrecord CudaDriver [devices])
+
+(defrecord CudaDevice [^CudaDriver driver
+                       device-id
+                       device-properties
+                       device-functions
+                       ^cublas$cublasContext cublas
+                       ^curand$curandGenerator_st curand])
+
+
+(defn ensure-device
+  []
+  (let [cur-dev drv/*current-compute-device*]
+    (when-not cur-dev
+      (throw (ex-info "No cuda device is currently set - please call driver/with-compute-device"
+                      {})))
+    (set-cuda-device cur-dev)))
+
+
+(defmacro cuda-call
+  [& body]
+  `(do
+     (ensure-device)
+     (check-cuda-error ~@body)))
+
 
 (defonce cublas-errors
   (mapv vec (partition 2 ["CUBLAS_STATUS_SUCCESS"          0
@@ -52,12 +96,16 @@
   [blas-error]
   (ffirst (filter #(= (second %) blas-error) cublas-errors)))
 
+
 (defmacro cublas-call
   [& body]
-  `(let [retval# (do ~@body)]
-     (when-not (= retval# cublas/CUBLAS_STATUS_SUCCESS)
-       (throw (Exception. (format "Cublas error: %s" (cublas-error-to-string retval#)))))
-     retval#))
+  `(do
+     (ensure-device)
+     (let [retval# (do ~@body)]
+      (when-not (= retval# cublas/CUBLAS_STATUS_SUCCESS)
+        (throw (Exception. (format "Cublas error: %s" (cublas-error-to-string retval#)))))
+      retval#)))
+
 
 (defn reverse-hash-map
   [item]
@@ -87,12 +135,15 @@
     retval
     (format "Unrecognized error code: %d" (int code))))
 
+
 (defmacro curand-call
   [& body]
-  `(let [retval# (do ~@body)]
-     (when-not (= retval# curand/CURAND_STATUS_SUCCESS)
-       (throw (Exception. (format "cuRAND error: %s" (curand-error-to-string retval#)))))
-     retval#))
+  `(do
+     (ensure-device)
+     (let [retval# (do ~@body)]
+      (when-not (= retval# curand/CURAND_STATUS_SUCCESS)
+        (throw (Exception. (format "cuRAND error: %s" (curand-error-to-string retval#)))))
+      retval#)))
 
 
 (defn zero-term-array-to-string
@@ -104,7 +155,7 @@
   []
   (let [free (SizeTPointer. 1)
         total (SizeTPointer. 1)]
-    (cuda-call (cuda/cudaMemGetInfo free total))
+    (check-cuda-error (cuda/cudaMemGetInfo free total))
     {:free (.get free)
      :total (.get total)}))
 
@@ -112,7 +163,7 @@
 (defn list-devices
   []
   (let [dev-count-ary (int-array 1)]
-    (cuda-call (cuda/cuDeviceGetCount dev-count-ary))
+    (check-cuda-error (cuda/cuDeviceGetCount dev-count-ary))
     (map (fn [^long device-index]
            (let [device-ptr (int-array 1)
                  ^"[B" name-buf (make-array Byte/TYPE 512)
@@ -120,15 +171,15 @@
                  minor (int-array 1)
                  multiprocessor-count (int-array 1)
                  clock-rate (int-array 1)]
-             (cuda-call (cuda/cuDeviceGet device-ptr device-index))
+             (check-cuda-error (cuda/cuDeviceGet device-ptr device-index))
              (let [device (aget device-ptr 0)]
-               (cuda-call (cuda/cuDeviceGetName name-buf 512 device))
-               (cuda-call (cuda/cuDeviceComputeCapability major minor device))
-               (cuda-call (cuda/cuDeviceGetAttribute
+               (check-cuda-error (cuda/cuDeviceGetName name-buf 512 device))
+               (check-cuda-error (cuda/cuDeviceComputeCapability major minor device))
+               (check-cuda-error (cuda/cuDeviceGetAttribute
                            multiprocessor-count
                            cuda/CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT
                            device))
-               (cuda-call (cuda/cuDeviceGetAttribute
+               (check-cuda-error (cuda/cuDeviceGetAttribute
                            clock-rate
                            cuda/CU_DEVICE_ATTRIBUTE_CLOCK_RATE
                            device))
@@ -140,19 +191,7 @@
          (range (aget dev-count-ary 0)))))
 
 
-(defn first-valid-device
-  []
-  (:device-id (first (list-devices))))
-
-
-(def ^:dynamic *cuda-context* (atom nil))
-
-
 (extend-protocol resource/PResource
-  cuda$CUctx_st
-  (release-resource [item]
-    (compare-and-set! *cuda-context* item nil)
-    (cuda-call (cuda/cuCtxDestroy ^cuda$CUctx_st item)))
   cuda$CUmod_st
   (release-resource [item]
     (cuda-call (cuda/cuModuleUnload ^cuda$CUmod_st item)))
@@ -170,31 +209,6 @@
     (curand-call (curand/curandDestroyGenerator ctx))))
 
 
-(defn- local-create-context
-  [device-id]
-  (let [retval (cuda$CUctx_st.)]
-    (cuda-call (cuda/cuInit 0))
-    (let [device-id (or device-id (first-valid-device))]
-      (cuda-call (cuda/cuCtxCreate retval 0 device-id))
-      retval)))
-
-(defn context
-  "Call is ignored if the context has been created.  There can only possibly
-be (at the driver level) one context per device per process:
-https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
-  [& {:keys [device-id]}]
-  (resource/safe-create *cuda-context* #(local-create-context device-id)))
-
-
-;;Optional destruction...releasing the context will also destroy it.
-(defn destroy-context
-  []
-  (when *cuda-context*
-    (resource/release @*cuda-context*)))
-
-
-(defn get-ctx []
-  (context))
 
 (defn load-module
   [data-stream]
@@ -275,25 +289,44 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
     (curand-call (curand/curandCreateGenerator rand-context curand/CURAND_RNG_PSEUDO_DEFAULT))
     (resource/track rand-context)))
 
+(defrecord CudaStream [^CudaDevice device ^cuda$CUstream_st stream])
 
-(defrecord CudaDriver [current-device
-                       device-functions
-                       ^cublas$cublasContext cublas
-                       ^curand$curandGenerator_st curand])
 
-(defrecord CudaStream [^CudaDriver driver ^cuda$CUstream_st stream])
+(defprotocol PCudaStreamProvider
+  (get-cuda-stream-impl [item]))
 
-(extend-protocol drv/PStreamProvider
+(extend-protocol PCudaStreamProvider
   CudaStream
-  (get-stream [item] (:stream item))
+  (get-cuda-stream-impl [item] (:stream item))
   cuda$CUstream_st
-  (get-stream [item] item))
+  (get-cuda-stream-impl [item] item))
+
+
+(defn get-cuda-stream
+  ^cuda$CUstream_st [item]
+  (-> (drv/get-stream item)
+      get-cuda-stream-impl))
+
 
 (extend-protocol drv/PDriverProvider
   CudaDriver
   (get-driver [item] item)
+  CudaDevice
+  (get-driver [item] (.driver item))
   CudaStream
-  (get-driver [item] (.driver ^CudaStream item)))
+  (get-driver [item] (drv/get-driver (.device item))))
+
+
+(extend-protocol drv/PDeviceProvider
+  CudaDevice
+  (get-device [item] item)
+  CudaStream
+  (get-device [item] (.device item)))
+
+
+(extend-protocol drv/PStreamProvider
+  CudaStream
+  (get-stream [item] item))
 
 
 (extend-type Pointer
@@ -302,45 +335,72 @@ https://devtalk.nvidia.com/default/topic/519087/cuda-context-and-threading/"
     (jcpp-dtype/release-pointer item)))
 
 
+(defn- create-cuda-device
+  [driver device-id properties]
+  (set-cuda-device {:device-id device-id})
+  (let [retval (->CudaDevice driver device-id properties (atom nil) nil nil)]
+    (drv/with-compute-device retval
+      ;;Most of these functions require a device to be active in order to work.
+      (-> retval
+          (assoc :cublas (blas-context)
+                 :curand (rand-context))
+          (update :device-functions
+                  (fn [fn-atom]
+                    (reset! fn-atom
+                            {:memset (load-all-datatype-function "memset")
+                             :elementwise-multiply (load-float-double-function
+                                                    "elementwise_multiply")
+                             :l2-constraint-scale (load-float-double-function
+                                                   "l2_constraint_scale")
+                             :select (load-float-double-function "select")})))))))
+
+
 (defn driver
   []
-  (context)
-  (let [device-functions {:memset (load-all-datatype-function "memset")
-                          :elementwise-multiply (load-float-double-function
-                                                 "elementwise_multiply")
-                          :l2-constraint-scale (load-float-double-function
-                                                "l2_constraint_scale")
-                          :select (load-float-double-function "select")}]
-    (->CudaDriver :no-selected-device
-                  (atom device-functions)
-                  (blas-context)
-                  (rand-context))))
+  (->CudaDriver (atom nil)))
+
+(defn current-cuda-device
+  ^CudaDevice []
+  drv/*current-compute-device*)
 
 
 (defn get-blas
-  ^cublas$cublasContext [^CudaDriver device]
-  (.cublas device))
+  ^cublas$cublasContext []
+  (.cublas (current-cuda-device)))
+
 
 (defn get-rand
-  ^curand$curandGenerator_st [^CudaDriver device]
-  (.curand device))
+  ^curand$curandGenerator_st []
+  (.curand (current-cuda-device)))
+
+
+(defn check-stream-device
+  [stream]
+  (when-not (identical? (get (drv/get-stream stream) :device)
+                        (drv/*current-compute-device*))
+    (throw (ex-info "current device and stream device differ." {}))))
 
 
 (defmacro blas-with-stream
   "Setting the blas stream is not threadsafe so we have to lock the object
-before we set it, do the operation, and unlock the object after."
+  before we set it, do the operation, and unlock the object after."
   [stream & body]
-  `(let [^cublas$cublasContext ~'cublas (get-blas (drv/get-driver ~stream))]
+  `(let [stream# ~stream
+         ^cublas$cublasContext ~'cublas (get-blas)]
+     (check-stream-device stream#)
      (locking ~'cublas
-       (cublas/cublasSetStream_v2 ~'cublas (drv/get-stream ~stream))
+       (cublas/cublasSetStream_v2 ~'cublas (get-cuda-stream ~stream))
        ~@body)))
 
 
 (defmacro rand-with-stream
+  "See comments for blas-with-stream; same conditions hold."
   [stream & body]
-  `(let [^curand$curandGenerator_st ~'rand-context (get-rand (drv/get-driver ~stream))]
+  `(let [stream# ~stream
+         ^curand$curandGenerator_st ~'rand-context (get-rand)]
+     (check-stream-device stream#)
      (locking ~'rand-context
-       (curand/curandSetStream ~'rand-context (drv/get-stream ~stream))
+       (curand/curandSetStream ~'rand-context (get-cuda-stream stream#))
        ~@body)))
 
 
@@ -359,22 +419,28 @@ before we set it, do the operation, and unlock the object after."
 (extend-type CudaDriver
   drv/PDriver
   (get-devices [impl]
-    (list-devices))
+    (let [devices-atom (get impl :devices)]
+     (when-not @devices-atom
+       (reset! devices-atom
+               (->> (list-devices)
+                    (map (fn [dev-info]
+                           (try
+                             (create-cuda-device impl (get dev-info :device-id) dev-info)
+                             (catch Throwable e
+                               (println "Failed to create device: "
+                                        dev-info e)
+                               nil))))
+                    (remove nil?)
+                    vec)))
+     (map #(dissoc % :driver) @devices-atom)))
 
   (memory-info [impl]
     (get-memory-info))
 
-  (set-current-device [impl device]
-    (cuda/cudaSetDevice ^int (:device-id device))
-    (assoc impl :current-device device))
-
-  (get-current-device [impl]
-    (:current-device impl))
-
   (create-stream [impl]
     (let [retval (cuda$CUstream_st.)]
-      (cuda/cudaStreamCreate retval)
-      (->CudaStream impl (resource/track retval))))
+      (cuda-call (cuda/cudaStreamCreate retval))
+      (->CudaStream drv/*current-compute-device* (resource/track retval))))
 
   (allocate-host-buffer [impl elem-count elem-type]
     (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count)))
@@ -435,8 +501,10 @@ before we set it, do the operation, and unlock the object after."
   (^Pointer [item] (->ptr-impl item))
   (^Pointer [item offset] (jcpp-dtype/offset-pointer (->ptr-impl item) offset)))
 
+
 (defprotocol PLongConversion
   (to-long [item]))
+
 
 (extend-protocol PLongConversion
   Double
@@ -481,12 +549,14 @@ before we set it, do the operation, and unlock the object after."
   DevicePointer
   (to-long [this] (to-long (.ptr ^DevicePointer this))))
 
+
 (defn launch-kernel
   [stream kern-fn
    grid-dim-x grid-dim-y grid-dim-z
    block-dim-x block-dim-y block-dim-z
    shared-mem-size
    & kernel-args]
+  (check-stream-device stream)
   (let [^cuda$CUfunc_st kern-fn kern-fn
         grid-dim-x (long grid-dim-x)
         grid-dim-y (long grid-dim-y)
@@ -508,7 +578,7 @@ before we set it, do the operation, and unlock the object after."
                                     grid-dim-x grid-dim-y grid-dim-z
                                     block-dim-x block-dim-y block-dim-z
                                     shared-mem-size
-                                    ^cuda$CUstream_st (drv/get-stream stream)
+                                    ^cuda$CUstream_st (get-cuda-stream stream)
                                     arg-pointer
                                     nil))))
 
@@ -593,10 +663,16 @@ relies only on blockDim.x block.x and thread.x"
     (= datatype :double) (value->double-ptr value)
     (= datatype :float) (value->float-ptr value)))
 
+
+(defn- get-device-functions
+  [item]
+  (get (drv/get-device item) :device-functions))
+
+
 (defn dev-fn-from-stream
   [stream fn-name dtype]
   (if-let [retval
-           (get-in @(:device-functions (drv/get-driver stream)) [fn-name dtype :fn])]
+           (get-in @(get-device-functions stream) [fn-name dtype :fn])]
     retval
     (throw (ex-info "Failed to find cuda function"
                     {:fn-name fn-name
@@ -605,7 +681,7 @@ relies only on blockDim.x block.x and thread.x"
 
 (defn get-or-create-fn
   [stream fn-name dtype load-fn]
-  (let [dev-fns (get (drv/get-driver stream) :device-functions)]
+  (let [dev-fns (get-device-functions stream)]
     (when-not (contains? @dev-fns fn-name)
       (swap! dev-fns assoc fn-name (load-fn)))
     (dev-fn-from-stream stream fn-name dtype)))
@@ -1033,8 +1109,7 @@ relies only on blockDim.x block.x and thread.x"
 (extend-type cuda$CUevent_st
   drv/PEvent
   (wait-for-event [evt]
-    (cuda/cudaEventSynchronize evt))
+    (cuda-call (cuda/cudaEventSynchronize evt)))
   resource/PResource
   (release-resource [evt]
-    ;;Produces unknown cuda error
-    (comment (cuda-call (cuda/cudaEventDestroy evt)))))
+    (cuda-call (cuda/cudaEventDestroy evt))))
