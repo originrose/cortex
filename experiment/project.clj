@@ -1,4 +1,4 @@
-(defproject thinktopic/experiment "0.9.4-mt-SNAPSHOT"
+(defproject thinktopic/experiment "0.9.4-SNAPSHOT"
   :description "FIXME: write description"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
