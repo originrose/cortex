@@ -8,7 +8,7 @@
 
 (defn create-backend
   []
-  (cuda-backend/backend verify-utils/*datatype*))
+  (cuda-backend/backend :datatype verify-utils/*datatype*))
 
 
 (verify-utils/def-double-float-test adam

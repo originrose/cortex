@@ -34,30 +34,31 @@
 
 (defn test-adam
   [backend]
-  (let [parameters-1 (nn-backend/array backend [1 2 3 4])
-        parameters-2 (nn-backend/array backend [1 2 3 4])
-        m (nn-backend/new-array backend [8])
-        v (nn-backend/new-array backend [8])
-        optimizer (create-optimizer backend (adam/adam))
-        opt-map {:m m
-                 :v v}]
-    (reduce (fn [optimizer item]
-              (let [gradient-1 (nn-backend/array backend
-                                               (map #(* 2.0 %)
-                                                    (nn-backend/to-double-array backend
-                                                                                parameters-1)))
-                    gradient-2 (nn-backend/array backend
-                                                 (map #(* 2.0 %)
-                                                      (nn-backend/to-double-array backend
-                                                                                  parameters-2)))
-                    optimizer (opt/batch-update optimizer opt-map)
-                    _ (opt/compute-parameters! optimizer opt-map 1.0 0 gradient-1 parameters-1)
-                    _ (opt/compute-parameters! optimizer opt-map 0.0 4 gradient-2 parameters-2)
-                    item (m/eseq item)
-                    guess-1 (m/eseq (nn-backend/to-double-array backend parameters-1))
-                    guess-2 (m/eseq (nn-backend/to-double-array backend parameters-2))]
-                (is (cortex-utils/about-there? guess-1 item))
-                (is (cortex-utils/about-there? guess-2 [1.0 2.0 3.0 4.0]))
-                optimizer))
-            optimizer
-            adam-answers)))
+  (nn-backend/with-backend backend
+    (let [parameters-1 (nn-backend/array backend [1 2 3 4])
+          parameters-2 (nn-backend/array backend [1 2 3 4])
+          m (nn-backend/new-array backend [8])
+          v (nn-backend/new-array backend [8])
+          optimizer (create-optimizer backend (adam/adam))
+          opt-map {:m m
+                   :v v}]
+      (reduce (fn [optimizer item]
+                (let [gradient-1 (nn-backend/array backend
+                                                   (map #(* 2.0 %)
+                                                        (nn-backend/to-double-array backend
+                                                                                    parameters-1)))
+                      gradient-2 (nn-backend/array backend
+                                                   (map #(* 2.0 %)
+                                                        (nn-backend/to-double-array backend
+                                                                                    parameters-2)))
+                      optimizer (opt/batch-update optimizer opt-map)
+                      _ (opt/compute-parameters! optimizer opt-map 1.0 0 gradient-1 parameters-1)
+                      _ (opt/compute-parameters! optimizer opt-map 0.0 4 gradient-2 parameters-2)
+                      item (m/eseq item)
+                      guess-1 (m/eseq (nn-backend/to-double-array backend parameters-1))
+                      guess-2 (m/eseq (nn-backend/to-double-array backend parameters-2))]
+                  (is (cortex-utils/about-there? guess-1 item))
+                  (is (cortex-utils/about-there? guess-2 [1.0 2.0 3.0 4.0]))
+                  optimizer))
+              optimizer
+              adam-answers))))

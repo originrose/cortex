@@ -48,7 +48,7 @@
                    graph/build-graph
                    graph/generate-parameters)
          driver (drv/get-driver backend)
-         stream (backend/get-stream backend)
+         stream (backend/get-stream)
          stream->buffer-map (->> (graph/augment-streams graph input-buffer-map)
                                  (map (fn [[k v]]
                                         (if (map? v)

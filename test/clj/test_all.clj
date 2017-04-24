@@ -12,7 +12,6 @@
     [cortex.compute.nn.cuda-train-test]
     [cortex.compute.nn.gradient-test]
     [cortex.compute.nn.layers-test]
-    [cortex.compute.nn.optimize-test]
     [cortex.compute.nn.train-test]
     [cortex.loss-test]
     [cortex.nn.network-test]
