@@ -29,8 +29,8 @@
 
 (defmacro with-stream
   [stream & body]
-  (with-bindings {#'*current-backend-stream* stream}
-    ~@body))
+  `(with-bindings {#'*current-backend-stream* ~stream}
+     ~@body))
 
 
 (defn get-stream
