@@ -46,7 +46,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
                           {:error e}))
           (do
             (println "CUDA backend creation failed, reverting to CPU")
-            (cpu/backend datatype)))))))
+            (cpu/backend :datatype datatype)))))))
 
 
 (defn compute-context
