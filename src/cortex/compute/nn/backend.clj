@@ -16,6 +16,30 @@
             [think.datatype.core :as dtype]))
 
 
+(def ^:dynamic *current-backend-stream* nil)
+
+
+(defmacro with-backend
+  [backend & body]
+  `(let [backend# ~backend]
+     (drv/with-compute-device (drv/get-device backend#)
+       (with-bindings {#'*current-backend-stream* (drv/get-stream backend#)}
+         ~@body))))
+
+
+(defmacro with-stream
+  [stream & body]
+  (with-bindings {#'*current-backend-stream* stream}
+    ~@body))
+
+
+(defn get-stream
+  []
+  (when-not *current-backend-stream*
+    (throw (ex-info "Backend stream is nil.  Use backend/with-backend to set." {})))
+  *current-backend-stream*)
+
+
 (defprotocol PLayerCreation
   "For layers completely implemented in the backend we allow the backend to create
 some specific data from a description.  Most layers need to implement
@@ -41,20 +65,20 @@ computelayer/forward,backward."
 
 (defn array
   ([backend data items-per-batch]
-   (math/array (drv/get-driver backend) (drv/get-stream backend) (dtype/get-datatype backend)
+   (math/array (drv/get-driver backend) (get-stream) (dtype/get-datatype backend)
                data items-per-batch))
   ([backend data]
    (array backend data 1)))
 
 (defn new-array
   ([backend shape items-per-batch]
-   (math/new-array (drv/get-driver backend) (drv/get-stream backend) (dtype/get-datatype backend)
+   (math/new-array (drv/get-driver backend) (get-stream) (dtype/get-datatype backend)
                    shape items-per-batch))
   ([backend shape]
    (new-array backend shape 1)))
 
 (defn allocate-ones [backend elem-count]
-  (math/allocate-ones (drv/get-driver backend) (drv/get-stream backend)
+  (math/allocate-ones (drv/get-driver backend) (get-stream)
                       (dtype/get-datatype backend) elem-count))
 
 (defn allocate-rand-buffer
@@ -63,15 +87,15 @@ computelayer/forward,backward."
 
 (defn assign!
   [backend dest src]
-  (math/assign! (drv/get-stream backend) dest src))
+  (math/assign! (get-stream) dest src))
 
 (defn to-core-matrix
   [backend ary]
-  (math/to-core-matrix (drv/get-driver backend) (drv/get-stream backend) ary))
+  (math/to-core-matrix (drv/get-driver backend) (get-stream) ary))
 
 (defn device-array->array
   [backend datatype device-ary]
-  (math/device-array->array (drv/get-driver backend) (drv/get-stream backend)
+  (math/device-array->array (drv/get-driver backend) (get-stream)
                             datatype device-ary))
 
 (defn to-double-array
@@ -82,12 +106,12 @@ computelayer/forward,backward."
 (defn zero-many!
   [backend dev-array-seq]
   (doseq [ary dev-array-seq]
-    (drv/memset (drv/get-stream backend) (math/device-buffer ary) 0 0 (math/ecount ary))))
+    (drv/memset (get-stream) (math/device-buffer ary) 0 0 (math/ecount ary))))
 
 
 (defn biased-multiply!
   [backend input weights bias output]
-  (let [stream (drv/get-stream backend)]
+  (let [stream (get-stream)]
     (math/sum stream 1.0 bias 0.0 output)
     (math/gemm stream false true
                1.0 (math/as-2d-batch-matrix input) weights
@@ -97,7 +121,7 @@ computelayer/forward,backward."
 (defn biased-multiply-backward!
   [backend input weights bias output
    input-gradient weight-gradient bias-gradient output-gradient]
-  (let [stream (drv/get-stream backend)]
+  (let [stream (get-stream)]
     (when bias-gradient
       (math/sum stream 1.0 output-gradient 1.0 bias-gradient))
     (when input-gradient
@@ -108,4 +132,3 @@ computelayer/forward,backward."
       (math/gemm stream true false
                  1.0 (math/as-2d-batch-matrix output-gradient) (math/as-2d-batch-matrix input)
                  1.0 weight-gradient))))
-

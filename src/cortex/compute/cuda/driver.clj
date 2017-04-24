@@ -62,7 +62,9 @@ set this device before.  Set device must be called before any other cuda functio
          (check-cuda-error (cuda/cudaMalloc ignored 32)))
        (swap! *cuda-initialized-device-ids* conj device-id)))))
 
+
 (defrecord CudaDriver [devices])
+
 
 (defrecord CudaDevice [device-id
                        device-properties
@@ -339,7 +341,7 @@ set this device before.  Set device must be called before any other cuda functio
   CudaDriver
   (get-driver [item] item)
   CudaDevice
-  (get-driver [item] (get item :driver))
+  (get-driver [item] ((get item :driver-fn)))
   CudaStream
   (get-driver [item] (drv/get-driver (.device item))))
 
@@ -380,7 +382,9 @@ set this device before.  Set device must be called before any other cuda functio
                             (-> retval
                                 (assoc :cublas (blas-context)
                                        :curand (rand-context)
-                                       :driver driver)
+                                       ;;Use a function here instead of the object so that we can
+                                       ;;actually analyze the device in the repl.
+                                       :driver-fn (constantly driver))
                                 ((fn [retval]
                                    (reset! (get retval :device-functions)
                                            {:memset (load-all-datatype-function "memset")
@@ -396,6 +400,10 @@ set this device before.  Set device must be called before any other cuda functio
 
 (defn driver
   []
+  (when (and (drv/current-device)
+             (instance? CudaDevice (drv/current-device)))
+    (throw (ex-info "CUDA driver created while CUDA device is bound"
+                    {:current-device (drv/current-device)})))
   (->CudaDriver (atom nil)))
 
 
@@ -418,7 +426,9 @@ set this device before.  Set device must be called before any other cuda functio
   [stream]
   (when-not (identical? (get (drv/get-stream stream) :device)
                         (drv/current-device))
-    (throw (ex-info "current device and stream device differ." {}))))
+    (throw (ex-info "current device and stream device differ."
+                    {:current-device (drv/current-device)
+                     :stream-device (get (drv/get-stream stream) :device)}))))
 
 
 (defmacro blas-with-stream
@@ -473,7 +483,7 @@ set this device before.  Set device must be called before any other cuda functio
                                 nil))))
                      (remove nil?)
                      vec)))
-      (mapv #(dissoc % :driver) @devices-atom)))
+      @devices-atom))
 
   (memory-info [impl]
     (get-memory-info))
@@ -723,9 +733,19 @@ relies only on blockDim.x block.x and thread.x"
 
 (defn get-or-create-fn
   [stream fn-name dtype load-fn]
-  (let [dev-fns (get-device-functions stream)]
+  (let [device (drv/get-device stream)
+        dev-fns (get device :device-functions)]
     (when-not (contains? @dev-fns fn-name)
-      (swap! dev-fns assoc fn-name (load-fn)))
+      (let [resource-ctx-atom (get device :resource-context)
+            [_ res-ctx]
+            ;;Generate a new resource context.
+            (resource/return-resource-context
+             @resource-ctx-atom
+             (let [load-result (load-fn)]
+               (swap! dev-fns assoc fn-name load-result)))]
+        ;;Order is important, we want later resources released first so they must be
+        ;;the initial items.
+        (swap! resource-ctx-atom #(concat res-ctx %))))
     (dev-fn-from-stream stream fn-name dtype)))
 
 

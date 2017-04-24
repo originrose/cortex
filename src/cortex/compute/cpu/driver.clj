@@ -179,7 +179,9 @@ Use with care; the synchonization primitives will just hang with this stream."
 (extend-type CPUEvent
   drv/PEvent
   (wait-for-event [event]
-    (async/<!! (.input-chan event))))
+    (async/<!! (.input-chan event)))
+  resource/PResource
+  (release-resource [event]))
 
 
 (defn driver

@@ -11,7 +11,8 @@
    [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
    [think.datatype.marshal :as marshal]
    [think.parallel.core :as parallel]
-   [cortex.graph :as graph])
+   [cortex.graph :as graph]
+   [cortex.compute.nn.backend :as compute-backend])
   (:import
    [think.datatype ArrayView IntArrayView]))
 
@@ -121,7 +122,7 @@
    alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
    gradient-alpha gradient parameters m v]
   (let [datatype (dtype/get-datatype backend)
-        stream (drv/get-stream backend)
+        stream (compute-backend/get-stream)
         item-count (dtype/ecount gradient)
         ->d #(cuda-drv/dtype-cast % datatype)]
     (ensure-datatype datatype gradient parameters m v)
@@ -163,7 +164,7 @@
 (defn- setup-optimizer
   [backend optimizer step-fn]
   (let [driver (drv/get-driver backend)
-        stream (drv/get-stream backend)
+        stream (compute-backend/get-stream)
         datatype (dtype/get-datatype backend)]
     (->Adam backend optimizer step-fn POW-BETA1-T POW-BETA2-T)))
 

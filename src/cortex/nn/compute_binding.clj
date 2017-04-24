@@ -179,12 +179,11 @@
    :traversal   ...
    :batch-size  ...}"
   [{:keys [compute-graph] :as network}
-   {:keys [backend-fn] :as context}
+   backend
    batch-size
    traversal
    {:keys [gradients? numeric-gradients? optimizer] :as options}]
-  (let [backend (backend-fn)
-        network (assoc network
+  (let [network (assoc network
                        :compute-binding {:batch-size batch-size}
                        :traversal traversal)
         stream-map (get traversal :stream-map)

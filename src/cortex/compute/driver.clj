@@ -14,7 +14,6 @@
             [think.resource.core :as resource]))
 
 
-
 (defprotocol PDriver
   "A driver is a generic compute abstraction.  Could be a group of threads,
   could be a machine on a network or it could be a CUDA or OpenCL driver.
@@ -45,12 +44,19 @@ and a floating point buffer (cuda cuRand limitation)"))
 (def ^:dynamic *current-compute-device* nil)
 
 
-(defmacro with-compute-device
+(defmacro unsafe-with-compute-device
   [device & body]
   `(let [device# ~device]
      (with-bindings {#'*current-compute-device* device#}
-       (resource/with-resource-context
-         ~@body))))
+       ~@body)))
+
+
+(defmacro with-compute-device
+  [device & body]
+  `(unsafe-with-compute-device
+    ~device
+    (resource/with-resource-context
+      ~@body)))
 
 
 (defn default-device
@@ -67,9 +73,11 @@ and a floating point buffer (cuda cuRand limitation)"))
   "Get a driver from an object"
   (get-driver [impl]))
 
+
 (defprotocol PDeviceProvider
   "Get a device from an object."
   (get-device [impl]))
+
 
 (defprotocol PStream
   "Basic functionality expected of streams.  Streams are an abstraction of a stream of execution
@@ -92,9 +100,11 @@ executes to the event.")
   (sync-event [stream event]
     "Have this stream pause until a given event is triggered."))
 
+
 (defprotocol PStreamProvider
   "Get a stream from an object"
   (get-stream [impl]))
+
 
 (defprotocol PEvent
   (wait-for-event [event]
@@ -145,11 +155,11 @@ executes to the event.")
 
 (defn host-array->device-buffer
   "Synchronously make a device buffer with these elements in it."
-  [device stream upload-ary]
+  [driver stream upload-ary]
   (let [datatype (dtype/get-datatype upload-ary)
         elem-count (m/ecount upload-ary)
-        upload-buffer (allocate-host-buffer device elem-count datatype)
-        device-buffer (allocate-device-buffer device elem-count datatype)]
+        upload-buffer (allocate-host-buffer driver elem-count datatype)
+        device-buffer (allocate-device-buffer driver elem-count datatype)]
     (dtype/copy! upload-ary 0 upload-buffer 0 elem-count)
     (copy-host->device stream upload-buffer 0 device-buffer 0 elem-count)
     (sync-stream stream)
