@@ -201,24 +201,24 @@
   (let [context (or context (execute/compute-context))]
     (execute/with-compute-context context
       (let [network (network/linear-network MNIST-NETWORK)
-            batch-size 10
-            test-dataset (take 500 @mnist-test-dataset*)
-            test-dataset-seq (->> (repeat 5 test-dataset)
+            batch-size 100
+            test-dataset (take 2000 @mnist-test-dataset*)
+            test-dataset-seq (->> (repeat 10 test-dataset)
                                   (map (fn [dataset]
                                          {:dataset dataset
                                           :stream (drv/create-stream (drv/get-driver (drv/current-device)))})))
             test-labels (map :label test-dataset)
 
-            losses (->> test-dataset-seq
-                        (pmap (fn [{:keys [dataset stream]}]
-                                (nn-backend/with-stream stream
-                                  (->> (execute/run network dataset
-                                         :context context
-                                         :batch-size batch-size)
-                                       ((fn [inferences]
-                                          (-> (percent= (map :label inferences) test-labels)
-                                              (* 100))))))))
-                        distinct
-                        vec)]
+            losses (time (->> test-dataset-seq
+                              (pmap (fn [{:keys [dataset stream]}]
+                                      (nn-backend/with-stream stream
+                                        (->> (execute/run network dataset
+                                               :context context
+                                               :batch-size batch-size)
+                                             ((fn [inferences]
+                                                (-> (percent= (map :label inferences) test-labels)
+                                                    (* 100))))))))
+                              distinct
+                              vec))]
         (is (= 1 (count losses)))
         (is (not= nil (first losses)))))))

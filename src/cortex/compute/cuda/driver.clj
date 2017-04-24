@@ -1,6 +1,7 @@
 (ns cortex.compute.cuda.driver
   (:require [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
+            [think.datatype.marshal :as marshal]
             [clojure.java.io :as io]
             [think.resource.core :as resource]
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
@@ -493,10 +494,37 @@ set this device before.  Set device must be called before any other cuda functio
   (set-value! [_ offset value] (dtype/set-value! ptr offset value))
   (set-constant! [_ offset value elem-count]
     (dtype/set-constant! ptr offset value elem-count))
-  (get-value [_ offset] (dtype/get-value ptr offset)))
+  (get-value [_ offset] (dtype/get-value ptr offset))
+  marshal/PTypeToCopyToFn
+  (get-copy-to-fn [_ dest-offset]
+    (marshal/get-copy-to-fn ptr dest-offset))
+  dtype/PCopyQueryIndirect
+  (get-indirect-copy-fn [_ dest-offset]
+    (marshal/get-copy-to-fn ptr dest-offset)))
 
 
-(defn alloc-page-locked-memory
+(defn- host-ptr-as-buffer
+  [^HostPointer host-ptr]
+  (jcpp-dtype/as-buffer (.ptr host-ptr)))
+
+
+(defmacro copy-to-host-ptr-impl
+  [dest-type cast-type-fn copy-to-dest-fn cast-fn]
+  `[(keyword (name ~copy-to-dest-fn)) (fn [src# src-offset# dest# dest-offset# n-elems#]
+                                        (~(eval copy-to-dest-fn)
+                                         (host-ptr-as-buffer src#) src-offset#
+                                         dest# dest-offset# n-elems#))])
+
+(extend Pointer
+  marshal/PCopyToArray
+  (->> (marshal/array-type-iterator copy-to-host-ptr-impl)
+       (into {}))
+  marshal/PCopyToBuffer
+  (->> (marshal/buffer-type-iterator copy-to-host-ptr-impl)
+       (into {})))
+
+
+(defn- alloc-page-locked-memory
   [driver ^long elem-count elem-type]
   (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
         retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
@@ -505,6 +533,7 @@ set this device before.  Set device must be called before any other cuda functio
     (jcpp-dtype/set-pointer-limit-and-capacity retval elem-count)
     (resource/track (->HostPointer size retval))))
 
+(def ^:dynamic *use-page-locked-memory* true)
 
 (extend-type CudaDriver
   drv/PDriver
@@ -533,7 +562,9 @@ set this device before.  Set device must be called before any other cuda functio
       (->CudaStream drv/*current-compute-device* (resource/track retval))))
 
   (allocate-host-buffer [impl elem-count elem-type]
-    (alloc-page-locked-memory impl elem-count elem-type))
+    (if *use-page-locked-memory*
+      (alloc-page-locked-memory impl elem-count elem-type)
+      (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count))))
 
   (allocate-device-buffer [impl ^long elem-count elem-type]
     (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
