@@ -468,6 +468,44 @@ set this device before.  Set device must be called before any other cuda functio
   (get-datatype [item] (dtype/get-datatype ptr)))
 
 
+(defrecord HostPointer [^long size ^Pointer ptr]
+  resource/PResource
+  (release-resource [_]
+    ;;Ensure the position of the pointer is 0 else the free call will fail
+    (.position ptr 0)
+    (cuda-library-debug-print "FreeHost: " (.address ptr))
+    (check-cuda-error (cuda/cudaFreeHost ptr)))
+  mp/PElementCount
+  (element-count [_] (quot size (dtype/datatype->byte-size (dtype/get-datatype ptr))))
+  dtype/PDatatype
+  (get-datatype [_] (dtype/get-datatype ptr))
+  dtype/PCopyQueryDirect
+  (get-direct-copy-fn [_ dest-offset]
+    (dtype/get-direct-copy-fn ptr dest-offset))
+
+  dtype/PCopyToItemDirect
+  (copy-to-array-direct! [_ ptr-offset dest dest-offset elem-count]
+    (dtype/copy-to-array-direct! ptr ptr-offset dest dest-offset elem-count))
+  (copy-to-buffer-direct! [_ ptr-offset dest dest-offset elem-count]
+    (dtype/copy-to-buffer-direct! ptr ptr-offset dest dest-offset elem-count))
+
+  dtype/PAccess
+  (set-value! [_ offset value] (dtype/set-value! ptr offset value))
+  (set-constant! [_ offset value elem-count]
+    (dtype/set-constant! ptr offset value elem-count))
+  (get-value [_ offset] (dtype/get-value ptr offset)))
+
+
+(defn alloc-page-locked-memory
+  [driver ^long elem-count elem-type]
+  (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
+        retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
+    (check-cuda-error (cuda/cudaMallocHost retval size))
+    (cuda-library-debug-print "MallocHost: " (.address retval))
+    (jcpp-dtype/set-pointer-limit-and-capacity retval elem-count)
+    (resource/track (->HostPointer size retval))))
+
+
 (extend-type CudaDriver
   drv/PDriver
   (get-devices [impl]
@@ -495,7 +533,7 @@ set this device before.  Set device must be called before any other cuda functio
       (->CudaStream drv/*current-compute-device* (resource/track retval))))
 
   (allocate-host-buffer [impl elem-count elem-type]
-    (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count)))
+    (alloc-page-locked-memory impl elem-count elem-type))
 
   (allocate-device-buffer [impl ^long elem-count elem-type]
     (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
@@ -545,6 +583,8 @@ set this device before.  Set device must be called before any other cuda functio
   (->ptr-impl [item] item)
   DevicePointer
   (->ptr-impl [item] (.ptr ^DevicePointer item))
+  HostPointer
+  (->ptr-impl [item] (.ptr ^HostPointer item))
   DeviceArray
   (->ptr-impl [item] (->ptr-impl (math/device-buffer item)))
   nil

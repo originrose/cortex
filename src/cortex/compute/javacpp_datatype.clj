@@ -104,6 +104,13 @@ threadsafe while (.position ptr offset) is not."
     retval))
 
 
+(defn set-pointer-limit-and-capacity
+  ^Pointer [^Pointer ptr ^long elem-count]
+  (.set ^Field limit-field ptr elem-count)
+  (.set ^Field capacity-field ptr elem-count)
+  ptr)
+
+
 (defn release-pointer
   [^Pointer ptr]
   (.close ptr)
