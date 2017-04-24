@@ -14,6 +14,7 @@
     [cortex.nn.traverse :as traverse]
     [cortex.nn.network :as network]
     [cortex.compute.driver :as drv]
+    [cortex.compute.nn.backend :as nn-backend]
     [cortex.verify.nn.data
      :refer [CORN-DATA CORN-LABELS CORN-DATASET
              mnist-training-dataset*
@@ -193,3 +194,31 @@
             result-count (count results)]
         (is (not (zero? (rem dataset-count batch-size))))
         (is (zero? (rem result-count batch-size)))))))
+
+
+(defn multithread-infer
+  [& [context]]
+  (let [context (or context (execute/compute-context))]
+    (execute/with-compute-context context
+      (let [network (network/linear-network MNIST-NETWORK)
+            batch-size 10
+            test-dataset (take 500 @mnist-test-dataset*)
+            test-dataset-seq (->> (repeat 5 test-dataset)
+                                  (map (fn [dataset]
+                                         {:dataset dataset
+                                          :stream (drv/create-stream (drv/get-driver (drv/current-device)))})))
+            test-labels (map :label test-dataset)
+
+            losses (->> test-dataset-seq
+                        (pmap (fn [{:keys [dataset stream]}]
+                                (nn-backend/with-stream stream
+                                  (->> (execute/run network dataset
+                                         :context context
+                                         :batch-size batch-size)
+                                       ((fn [inferences]
+                                          (-> (percent= (map :label inferences) test-labels)
+                                              (* 100))))))))
+                        distinct
+                        vec)]
+        (is (= 1 (count losses)))
+        (is (not= nil (first losses)))))))
