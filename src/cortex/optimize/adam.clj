@@ -6,7 +6,7 @@
    [cortex.compute.driver :as drv]
    [cortex.compute.cpu.backend :as cpu-backend]
    [cortex.compute.cpu.driver :as cpu-drv]
-   [cortex.compute.cuda.driver :as cuda-drv]
+   ;[cortex.compute.cuda.driver :as cuda-drv]
    [cortex.util :as util]
    [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
    [think.datatype.marshal :as marshal]
@@ -47,7 +47,8 @@
 
 (defn- dispatch-to-gpu
   [stream dispatch-fn item-count & args]
-  (apply cuda-drv/launch-linear-kernel
+  (require 'cortex.compute.cuda.driver)
+  (apply (resolve 'cortex.compute.cuda.driver/launch-linear-kernel)
          stream dispatch-fn item-count 0
          args))
 
@@ -124,7 +125,7 @@
   (let [datatype (dtype/get-datatype backend)
         stream (compute-backend/get-stream)
         item-count (dtype/ecount gradient)
-        ->d #(cuda-drv/dtype-cast % datatype)]
+        ->d #(drv/dtype-cast % datatype)]
     (ensure-datatype datatype gradient parameters m v)
     (dev-dispatch-fn stream (get-in fn-map [datatype :fn]) item-count
                      (->d alpha) (->d beta1) (->d beta2) (->d epsilon)
@@ -179,7 +180,7 @@
 (defmethod create-optimizer [:cuda :adam]
   [backend optimizer]
   ;; Load the compiled GPU kernel for floats and doubles
-  (let [cuda-fns (cuda-drv/load-float-double-function "adam.fatbin" "adam_step")]
+  (let [cuda-fns ((resolve 'cortex.compute.cuda.driver/load-float-double-function) "adam.fatbin" "adam_step")]
     (setup-optimizer backend optimizer
                      (adam-step-fn backend cuda-fns dispatch-to-gpu))))
 

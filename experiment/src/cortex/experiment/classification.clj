@@ -1,229 +1,54 @@
 (ns cortex.experiment.classification
-  (:require [cortex.dataset :as ds]
-            [clojure.java.io :as io]
-            [think.parallel.core :as parallel]
-            [cortex.compute.cpu.backend :as cpu-backend]
-            [cortex.optimize :as opt]
-            [think.resource.core :as resource]
-            [cortex.util :as util]
+  (:require [clojure.edn :as edn]
             [clojure.core.matrix :as m]
-            [clojure.edn]
+            [think.image.patch :as patch]
+            [think.gate.core :as gate]
+            [cortex.util :as util]
             [cortex.experiment.train :as experiment-train]
-            [cortex.loss :as loss]
-            [cortex.nn.traverse :as traverse]
-            [cortex.nn.network :as network])
-  (:import [java.io File]))
-
+            [cortex.nn.network :as network]
+            [cortex.nn.execute :as execute]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
 
-(defn directory->file-label-seq
-  "Given a directory with subdirs named after labels, produce an
-infinite interleaved sequence of [sub-dir-name sub-dir-file]
-to create balanced training classes using partition along with interleave.
-Class balance is only guaranteed if the sequence is infinite or if
-each directory has the same number of files."
-  [dirname infinite?]
-  (let [sub-dirs (.listFiles ^File (io/file dirname))
-        file-sequences  (->> sub-dirs
-                             (map (fn [^File sub-dir]
-                                    (map vector
-                                     (if infinite?
-                                       (mapcat shuffle
-                                               (repeatedly #(seq (.listFiles sub-dir))))
-                                       (seq (.listFiles sub-dir)))
-                                     (repeat (.getName sub-dir))))))]
-    (if infinite?
-      (apply interleave file-sequences)
-      (-> (mapcat identity file-sequences)
-          shuffle))))
+(defn- vec->label-fn
+  [{:keys [index->class-name]}]
+  (fn [label-vec]
+    (get index->class-name (util/max-index label-vec))))
 
 
-(defn src-seq->obs-seq
-  "Perform a transformation from a src sequence to a obs-sequence
-assuming the src->obs transformation itself produces potentially a sequence
-of observations for a single src item.  Perform this transformation
-in an offline thread pool storing allowing up to queue-size transformed
-sequences in memory.  Return a combination of observations and
-a shutdown function to be used in the case where the input sequence
-is infinite."
-  [src-item-seq src-item->obs-seq-fn & {:keys [queue-size]
-                                          :or {queue-size 100}}]
-  (let [{:keys [sequence shutdown-fn]} (parallel/queued-sequence src-item->obs-seq-fn
-                                                                 [src-item-seq]
-                                                                 :queue-size queue-size)]
-    {:observations (mapcat identity sequence)
-     :shutdown-fn shutdown-fn}))
-
-
-(defn label->vec-fn
-  [class-names]
-  (let [num-classes (count class-names)
-        src-vec (vec (repeat num-classes 0))
-        class-name->index (into {} (map-indexed (comp vec reverse list) class-names))]
-    (fn [label]
-      (assoc src-vec (class-name->index label) 1))))
-
-
-(defn vec->label-fn
-  [class-names]
-  (let [index->class-name (into {} (map-indexed vector class-names))]
-    (fn [label-vec]
-      (get index->class-name (util/max-index label-vec)))))
-
-
-(defn classification-dataset
-  ([class-names data-shape
-    cv-epoch-seq
-    holdout-epoch-seq
-    training-epoch-seq
-    & {:keys [shutdown-fn]}]
-   (throw (ex-info "Dataset is now a sequence of maps. FIXME!" {}))
-  ; (let [label->vec (label->vec-fn class-names)
-  ;         seq-transform-fn #(map (fn [[data label]]
-  ;                                  [data (label->vec label)])
-  ;                                %)
-  ;         cv-epoch-seq (map seq-transform-fn cv-epoch-seq)
-  ;         holdout-epoch-seq (if (identical? cv-epoch-seq holdout-epoch-seq)
-  ;                             cv-epoch-seq
-  ;                             (map seq-transform-fn holdout-epoch-seq))
-  ;         training-epoch-seq (map seq-transform-fn training-epoch-seq)
-  ;         dataset (ds/infinite-dataset [[:data data-shape]
-  ;                                       [:labels (count class-names)]]
-  ;                                      cv-epoch-seq
-  ;                                      holdout-epoch-seq
-  ;                                      training-epoch-seq
-  ;                                      :shutdown-fn
-  ;                                      shutdown-fn)]
-  ;     (assoc dataset :class-names class-names))
-   ))
-
-
-(defn get-class-names-from-directory
-  [dirname]
-  (vec (sort
-        (map #(.getName ^File %)
-             (.listFiles
-              (io/file dirname))))))
-
-
-(defn labelled-subdirs->obs-label-seq
-  "Given labelled subdirs produce a possibly infinite (balanced) sequence
-of data or a finite potentially unbalanced sequence of data.
-Returns map of {:observations :shutdown-fn}."
-  [dirname infinite? queue-size file-label->obs-label-seq-fn]
-  (-> (directory->file-label-seq dirname infinite?)
-      (src-seq->obs-seq file-label->obs-label-seq-fn :queue-size queue-size)))
-
-
-(defn classification-dataset-from-labeled-data-subdirs
-  "Given a directory name and a function that can transform
-a single [^File file ^String sub-dir-name] into a sequence of
-[observation label] pairs produce a classification dataset.
-Queue size should be the number of obs-label-seqs it will take
-to add up to epoch-element-count.  This is a property of
-file-lable->obs-label-seq-fn.
-
-If your file->observation-seq function produces many identically labelled
-observations per file you need to shuffle your training epochs in order to
-keep your batches balanced.  This has somewhat severe performance implications
-because it forces the realization of the entire training epoch of data before
-the system can start training on it (as opposed to generating the epoch of data
-as it is training)."
-  [train-dirname test-dirname
-   data-shape
-   ;;training probably means augmentation
-   train-file-label->obs-label-seq-fn
-   ;;test means no augmentation
-   test-file-label->obs-label-seq-fn
-   & {:keys [queue-size epoch-element-count shuffle-training-epochs?]
-      :or {queue-size 100
-           epoch-element-count 10000}}]
-
-  (let [class-names (get-class-names-from-directory test-dirname)
-        _ (when-not (= class-names (get-class-names-from-directory train-dirname))
-            (throw (ex-info "Class names for test and train do not match"
-                            {:train-class-names (get-class-names-from-directory train-dirname)
-                             :test-class-names class-names})))
-
-        ;;I go back and forth about this but I think generally things work better if
-        ;;the cross validation set is kept in memory because we will be showing
-        ;;confusion matrixes and will want to map from observation->image and such
-        ;;which implies the entire sequence is in memory.
-        cv-epoch-seq (repeat (:observations
-                              (labelled-subdirs->obs-label-seq
-                               test-dirname
-                               false
-                               queue-size
-                               test-file-label->obs-label-seq-fn)))
-
-        holdout-epoch-seq cv-epoch-seq
-        {:keys [observations shutdown-fn]} (labelled-subdirs->obs-label-seq
-                                            train-dirname true queue-size
-                                            train-file-label->obs-label-seq-fn)
-        ;;An entire epoch of training data has to fit in memory for us to maintain that
-        ;;one file can produce n identically labelled items
-        training-epoch-seq (->> (partition epoch-element-count observations)
-                                (map (if shuffle-training-epochs?
-                                       shuffle
-                                       identity)))]
-    (classification-dataset class-names data-shape
-                            cv-epoch-seq
-                            holdout-epoch-seq
-                            training-epoch-seq
-                            :shutdown-fn
-                            shutdown-fn)))
-
-(defonce last-network-eval (atom nil))
-
-(defn network-eval->rich-confusion-matrix
-  "A rich confusion matrix is a confusion matrix with the list of inferences and
-observations in each cell instead of just a count."
-  [dataset {:keys [labels inferences data leaves] :as network-eval}]
-  (reset! last-network-eval network-eval)
-  (let [class-names (get dataset :class-names)
-        vec->label #(class-names (util/max-index (vec %)))
-        _ (when-not (and (= (count leaves) 1)
-                         (contains? labels :labels)
-                         (contains? data :data))
-            (throw (ex-info "Classification datasets should have :labels and :data and one leaf node with corresponding inferences."
-                            {:input (keys data)
-                             :labels (keys labels)
-                             :inferences (keys inferences)
-                             :leaves leaves})))
-        ;;There are a lot of firsts here because generically out network could take
-        ;;many inputs and produce many outputs.  When we are training classification
-        ;;tasks however we know this isn't the case; we have one input and one output
-        inferences (get inferences (first leaves))
-        data (get data :data)
-        labels (get labels :labels)
-        inference-answer-patch-pairs (->> (interleave inferences
-                                                      (map vec->label labels)
-                                                      data)
-                                          (partition 3))
+(defn- network-eval->rich-confusion-matrix
+  "A rich confusion matrix is a confusion matrix with the list of
+  inferences and observations in each cell instead of just a count."
+  [class-mapping {:keys [labels test-ds] :as network-eval}]
+  (let [class-names (sort (keys (:class-name->index class-mapping)))
+        vec->label (vec->label-fn class-mapping)
+        guess-answer-patch-triplets (map (fn [label {:keys [labels data]}]
+                                           [(:labels label) labels data])
+                                          labels
+                                          test-ds)
         initial-row (zipmap class-names (repeat {:inferences []
                                                  :observations []}))
         initial-confusion-matrix (zipmap class-names (repeat initial-row))]
-    (reduce (fn [conf-mat [inference answer patch]]
-              (update-in conf-mat [answer (vec->label inference)]
-                         (fn [{:keys [inferences observations]}]
-                           {:inferences (conj inferences inference)
-                            :observations (conj observations patch)})))
-            initial-confusion-matrix
-            inference-answer-patch-pairs)))
+    (->> guess-answer-patch-triplets
+         (reduce (fn [conf-mat [inference answer patch]]
+                   (update-in conf-mat [(vec->label answer)
+                                        (vec->label inference)]
+                              (fn [{:keys [inferences observations]}]
+                                {:inferences (conj inferences inference)
+                                 :observations (conj observations patch)})))
+                 initial-confusion-matrix))))
 
 
-(defn rich-confusion-matrix->network-confusion-matrix
-  [rich-confusion-matrix observation->img-fn]
-  (let [class-names (vec (sort (keys rich-confusion-matrix)))]
+(defn- rich-confusion-matrix->network-confusion-matrix
+  [rich-confusion-matrix observation->img-fn class-mapping]
+  (let [class-names (vec (sort (keys (:class-name->index class-mapping))))]
     {:class-names class-names
      :matrix (mapv (fn [row-name]
                      (mapv (fn [col-name]
                              (let [{:keys [inferences observations]}
                                    (get-in rich-confusion-matrix [row-name col-name])
-
                                    inference-obs-pairs (->> (interleave (map m/emax inferences)
                                                                         observations)
                                                             (partition 2 )
@@ -237,91 +62,79 @@ observations in each cell instead of just a count."
                    class-names)}))
 
 
-(defn reset-confusion-matrix
-  [confusion-matrix-atom observation->img-fn dataset network-eval]
+(defn- reset-confusion-matrix
+  [confusion-matrix-atom observation->img-fn class-mapping network-eval]
   (swap! confusion-matrix-atom
          (fn [{:keys [update-index]}]
            (merge
             {:update-index (inc (long (or update-index 0)))}
             (rich-confusion-matrix->network-confusion-matrix
-             (network-eval->rich-confusion-matrix dataset network-eval)
-             observation->img-fn))))
+             (network-eval->rich-confusion-matrix class-mapping network-eval)
+             observation->img-fn
+             class-mapping))))
   nil)
 
 
-(defn network-confusion-matrix->simple-confusion-matrix
+(defn- network-confusion-matrix->simple-confusion-matrix
   [{:keys [matrix] :as network-confusion-matrix}]
   (update-in network-confusion-matrix [:matrix]
              (fn [matrix] (mapv #(mapv :count %) matrix))))
 
 
-(defn get-confusion-matrix
+(defn- get-confusion-matrix
   [confusion-matrix-atom & args]
   (network-confusion-matrix->simple-confusion-matrix
    @confusion-matrix-atom))
 
 
-(defn get-confusion-detail
+(defn- get-confusion-detail
   [confusion-matrix-atom {:keys [row col] :as params}]
   (->> (get-in @confusion-matrix-atom [:matrix row col])
        :inferences))
 
 
-(defn get-confusion-image
+(defn- get-confusion-image
   [confusion-matrix-atom params]
   (let [{:keys [row col index]} (->> params
                                      (map (fn [[k v]]
                                             [k (if (string? v)
-                                                 (clojure.edn/read-string v)
+                                                 (edn/read-string v)
                                                  v)]))
                                      (into {}))]
     (nth (get-in @confusion-matrix-atom [:matrix row col :images])
          index)))
 
 
-(defn- dataset->example-batches
-  [dataset batch-definitions observation->img-fn vec->label]
-  (->> (mapv (fn [{:keys [batch-type postprocess]}]
-               (let [image-label-pairs
-                     (throw (ex-info "Datasets are now a sequence of maps. FIXME!" {}))
-                     ;(->> (ds/get-batches dataset 50 batch-type [:data :labels])
-                     ;     ds/batches->columns
-                     ;     (#(interleave (get % :data)
-                     ;                   (get % :labels)))
-                     ;     (partition 2)
-                     ;     postprocess
-                     ;     (take 100))
-                     ]
-                 [batch-type {:batch-type batch-type
-                              :images (pmap (fn [[observation label]]
-                                              (observation->img-fn observation))
-                                            image-label-pairs)
-                              :labels (map (fn [[observation label]]
-                                             (vec->label label))
-                                           image-label-pairs)}]))
-             batch-definitions)
-       (into {})))
-
-
-(defn reset-dataset-display
-  [dataset-display-atom dataset observation->img-fn]
-  (let [vec->label (vec->label-fn (:class-names dataset))
-        batch-defs [{:batch-type :holdout
-                     :postprocess shuffle}
-                    {:batch-type :cross-validation
-                     :postprocess shuffle}
-                    {:batch-type :training
-                     :postprocess identity}]]
+(defn- reset-dataset-display!
+  [dataset-display-atom train-ds test-ds observation->img-fn class-mapping]
+  (let [vec->label (vec->label-fn class-mapping)]
     (swap! dataset-display-atom
            (fn [{:keys [update-index]}]
              {:update-index (inc (long (or update-index 0)))
-              :dataset (dataset->example-batches dataset batch-defs
-                                                 observation->img-fn
-                                                 vec->label)}))
+              :dataset {:training (let [ds (->> (cond->> train-ds
+                                                  (seq? (first train-ds)) (first))
+                                                (take 50))]
+                                    {:batch-type :training
+                                     :images (pmap (fn [{:keys [data labels]}]
+                                                     (observation->img-fn data))
+                                                   ds)
+                                     :labels (pmap (fn [{:keys [data labels]}]
+                                                     (vec->label labels))
+                                                   ds)})
+                        :test (let [ds (->> test-ds
+                                            (shuffle)
+                                            (take 50))]
+                                {:batch-type :test
+                                 :images (pmap (fn [{:keys [data labels]}]
+                                                 (observation->img-fn data))
+                                               ds)
+                                 :labels (pmap (fn [{:keys [data labels]}]
+                                                 (vec->label labels))
+                                               ds)})}}))
     nil))
 
 
-(defn get-dataset-data
+(defn- get-dataset-data
   [dataset-display-atom & args]
   (update-in @dataset-display-atom [:dataset]
              (fn [dataset-map]
@@ -330,48 +143,130 @@ observations in each cell instead of just a count."
                     dataset-map))))
 
 
-(defn get-dataset-image
+(defn- get-dataset-image
   [dataset-display-atom {:keys [batch-type index]}]
-  (let [img
-        (nth
-         (get-in @dataset-display-atom
-                 [:dataset (clojure.edn/read-string batch-type) :images])
-         (clojure.edn/read-string index))]
-    img))
+  (nth (get-in @dataset-display-atom
+               [:dataset (edn/read-string batch-type) :images])
+       (edn/read-string index)))
 
 
-(defn routing-map
-  [confusion-matrix-atom dataset-display-atom]
+(defn- get-accuracy-data
+  [classification-accuracy-atom & args]
+  @classification-accuracy-atom)
+
+
+(defn- routing-map
+  [confusion-matrix-atom classification-accuracy-atom dataset-display-atom]
   {"confusion-matrix" (partial get-confusion-matrix confusion-matrix-atom)
    "confusion-detail" (partial get-confusion-detail confusion-matrix-atom)
    "confusion-image" (partial get-confusion-image confusion-matrix-atom)
    "dataset-data" (partial get-dataset-data dataset-display-atom)
-   "dataset-image" (partial get-dataset-image dataset-display-atom)})
+   "dataset-image" (partial get-dataset-image dataset-display-atom)
+   "accuracy-data" (partial get-accuracy-data classification-accuracy-atom)})
 
 
-(defn best-network-fn
-  [confusion-matrix-atom observation->img-fn dataset network-eval]
-  (reset-confusion-matrix confusion-matrix-atom observation->img-fn
-                          dataset network-eval))
+(defn- test-fn
+  "The `experiment` training system supports passing in a `test-fn`
+  that gets called every epoch allowing the user to compare the old
+  and new network and decide which is best. Here we calculate
+  classification accuracy (a good metric for classification tasks) and
+  use that both for reporting and comparing."
+  [batch-size confusion-matrix-atom classification-accuracy-atom observation->img-fn class-mapping
+   ;; TODO: no need for context here
+   context new-network old-network test-ds]
+  (let [labels (execute/run new-network test-ds :batch-size batch-size)
+        vec->label (vec->label-fn class-mapping)
+        old-classification-accuracy (:classification-accuracy old-network)
+        classification-accuracy (double
+                                 (/ (->> (map (fn [label observation]
+                                                (= (vec->label (:labels label))
+                                                   (vec->label (:labels observation))))
+                                              labels
+                                              test-ds)
+                                         (filter identity)
+                                         (count))
+                                    (count test-ds)))
+        best-network? (or (nil? old-classification-accuracy)
+                          (> (double classification-accuracy)
+                             (double old-classification-accuracy)))]
+    (swap! classification-accuracy-atom conj classification-accuracy)
+    (if best-network?
+      (reset-confusion-matrix confusion-matrix-atom
+                              observation->img-fn
+                              class-mapping
+                              {:labels labels
+                               :test-ds test-ds}))
+    (println "Classification accuracy:" classification-accuracy)
+    {:best-network? best-network?
+     :network (assoc new-network :classification-accuracy classification-accuracy)}))
 
 
-(defn train-forever
-  "Train forever.  This function never returns.  If an epoch count
-is provided then the best network will be loaded after N epochs and the
-training will continue from there."
-  [dataset observation->image-fn initial-description
-   & {:keys [epoch-count batch-size confusion-matrix-atom force-gpu?]
+(defn- train-forever
+  "Train forever. This function never returns."
+  [initial-description train-ds test-ds observation->image-fn class-mapping
+   & {:keys [batch-size confusion-matrix-atom classification-accuracy-atom force-gpu?]
       :or {batch-size 128
-           force-gpu? false
-           confusion-matrix-atom (atom {})}}]
-  (let [network (-> (network/linear-network initial-description)
-                    traverse/auto-bind-io)]
-   (doseq [_ (repeatedly
-               #(experiment-train/train-n dataset initial-description network
-                                          :best-network-fn (partial best-network-fn
-                                                                    confusion-matrix-atom
-                                                                    observation->image-fn
-                                                                    dataset)
-                                          :epoch-count epoch-count
-                                          :force-gpu? force-gpu?
-                                          :batch-size batch-size))])))
+           confusion-matrix-atom (atom {})
+           classification-accuracy-atom (atom {})}}]
+  (let [network (network/linear-network initial-description)]
+    (experiment-train/train-n network
+                              train-ds test-ds
+                              :test-fn (partial test-fn
+                                                batch-size
+                                                confusion-matrix-atom
+                                                classification-accuracy-atom
+                                                observation->image-fn
+                                                class-mapping)
+                              :batch-size batch-size
+                              :force-gpu? force-gpu?)))
+
+
+(defn- display-dataset-and-model
+  "Starts the web server that gives real-time training updates."
+  [train-ds test-ds observation->image-fn class-mapping live-updates?]
+  (let [data-display-atom (atom {})
+        confusion-matrix-atom (atom {})
+        classification-accuracy-atom (atom [])]
+    (reset-dataset-display! data-display-atom
+                            train-ds
+                            test-ds
+                            observation->image-fn
+                            class-mapping)
+    (println (gate/open (atom (routing-map confusion-matrix-atom
+                                           classification-accuracy-atom
+                                           data-display-atom))
+                        :clj-css-path "src/css"
+                        :live-updates? live-updates?
+                        :port 8091))
+    [confusion-matrix-atom
+     classification-accuracy-atom]))
+
+
+(defn perform-experiment
+  "Main entry point:
+    - initial-description: A cortex nerual net description to train.
+    - train-ds: A dataset (sequence of maps) with keys `:data`, `:labels`, used for training.
+    - test-ds: A dataset (sequence of maps) with keys `:data`, `:labels`, used for testing.
+    - observation->image-fn: A function that can take observation data and return png data for web display.
+    - class-mapping: A map with two entries
+      - `:class-name->index` a map from class name strings to softmax indexes
+      - `:index->class-name` a map from softmax indexes to class name strings
+   Trains the net indefinitely on the provided training data, evaluating against the test data, and gives live updates on a local webserver hosted at http://localhost:8091."
+  ([initial-description train-ds test-ds observation->image-fn class-mapping]
+   (perform-experiment initial-description train-ds test-ds observation->image-fn class-mapping {}))
+  ([initial-description train-ds test-ds observation->image-fn class-mapping argmap]
+   (let [[confusion-matrix-atom
+          classification-accuracy-atom]
+         (display-dataset-and-model train-ds test-ds
+                                    observation->image-fn
+                                    class-mapping
+                                    (:live-updates? argmap))]
+     (apply train-forever
+            initial-description
+            train-ds test-ds
+            observation->image-fn
+            class-mapping
+            (->> (assoc argmap :confusion-matrix-atom confusion-matrix-atom
+                        :classification-accuracy-atom classification-accuracy-atom)
+                 (seq)
+                 (apply concat))))))

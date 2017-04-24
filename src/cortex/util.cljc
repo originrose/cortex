@@ -58,14 +58,20 @@
 
 
 (defn max-index
+  "Given a vector (typically a softmax output or one-hot encoding) returns the index of the largest element."
   [coll]
-  (second (reduce (fn [[max-val max-idx] idx]
-                    (if (or (nil? max-val)
-                            (> (double (coll idx)) (double max-val)))
-                      [(coll idx) idx]
-                      [max-val max-idx]))
-                  [nil nil]
-                  (range (count coll)))))
+  (if (empty? coll)
+    -1
+    (->> (map-indexed vector coll)
+         (apply max-key second)
+         (first))))
+
+
+(defn idx->one-hot
+  "Given an index and a count `p`, returns a one-hot encoded vector in
+  `p`-dimensional space."
+  [idx p]
+  (assoc (vec (repeat p 0.0)) idx 1.0))
 
 ;;;; Timing
 

@@ -6,6 +6,7 @@
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
             [clojure.core.matrix.protocols :as mp]
             [cortex.compute.math :as math]
+            [cortex.compute.driver :refer [dtype-cast]]
             [cortex.compute.cpu.driver :as cpu-drv]
             [cortex.compute.math-util :as mu]
             [clojure.core.matrix :as m])
@@ -914,34 +915,6 @@ relies only on blockDim.x block.x and thread.x"
                      rand-buffer (long elem-count)))
        :else
        (throw (Exception. (str "Unrecognized distribution type: " distribution)))))))
-
-(defmulti dtype-cast
-  (fn [elem dtype]
-    dtype))
-
-(defmethod dtype-cast :double
-  [elem dtype]
-  (double elem))
-
-(defmethod dtype-cast :float
-  [elem dtype]
-  (float elem))
-
-(defmethod dtype-cast :long
-  [elem dtype]
-  (long elem))
-
-(defmethod dtype-cast :int
-  [elem dtype]
-  (int elem))
-
-(defmethod dtype-cast :short
-  [elem dtype]
-  (short elem))
-
-(defmethod dtype-cast :byte
-  [elem dtype]
-  (byte elem))
 
 
 (defn- alias?
