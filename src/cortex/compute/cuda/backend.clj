@@ -210,7 +210,7 @@
 
 
 (defn backend
-  [& {:keys [driver device datatype]
+  [& {:keys [driver device datatype stream]
       :or {datatype :float}}]
   (let [driver (or driver (cuda-drv/driver))
         device (or device (drv/default-device driver))]
@@ -230,7 +230,7 @@
                                       (cuda-drv/load-float-double-function
                                        "prepare_gaussian_dropout.fatbin"
                                        "prepare_gaussian_dropout")}
-                   default-stream (drv/create-stream driver)]
+                   default-stream (or stream (drv/create-stream driver))]
                (->CudaBackend :cuda device default-stream (cudnn-context) datatype network-functions)))]
         (resource/track (assoc backend :resource-context res-ctx))))))
 

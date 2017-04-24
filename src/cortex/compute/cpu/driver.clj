@@ -20,7 +20,7 @@
 (set! *unchecked-math* true)
 
 
-(defrecord CPUDevice [device-id])
+(defrecord CPUDevice [driver-fn device-id])
 (defrecord CPUStream [device input-chan exit-chan error-atom])
 (defrecord CPUDriver [devices error-atom])
 
@@ -29,7 +29,7 @@
   CPUDriver
   (get-driver [driver] driver)
   CPUDevice
-  (get-driver [device] (get device :driver))
+  (get-driver [device] ((get device :driver-fn)))
   CPUStream
   (get-driver [stream] (drv/get-driver (.device stream))))
 
@@ -190,16 +190,14 @@ Use with care; the synchonization primitives will just hang with this stream."
   (let [retval (->CPUDriver (atom nil) (atom nil))]
     (reset! (get retval :devices)
             (->> (range num-devices)
-                 (mapv #(-> (->CPUDevice %)
-                            (assoc :driver retval)))))
+                 (mapv #(-> (->CPUDevice (constantly retval) %)))))
     retval))
 
 
 (extend-type CPUDriver
   drv/PDriver
   (get-devices [impl]
-    (mapv #(dissoc % :driver)
-          @(get impl :devices)))
+    @(get impl :devices))
 
   (memory-info [impl]
     (get-memory-info))

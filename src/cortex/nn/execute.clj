@@ -55,7 +55,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
       :or {datatype :float}}]
   (let [cuda-fn (when-not (= backend :cpu)
                   (cuda-backend-fn datatype (= backend :cuda)))]
-    {:backend-fn (or cuda-fn #(cpu/backend datatype))
+    {:backend-fn (or cuda-fn #(cpu/backend :datatype datatype))
      :datatype datatype}))
 
 
