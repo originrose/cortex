@@ -340,6 +340,10 @@
                                      [k (core-m v)]))
                               (into {})))))))))
 
+(defn backend
+  [network]
+  (get-in network [:compute-binding :backend]))
+
 
 (defn get-parameter
   "Get a specific parameter's value from the network.  This is necessary
@@ -347,28 +351,26 @@
   return a map containing at least :buffer."
   [network buffer-id]
   (if-let [param-data (get-in network [:compute-binding :parameter-buffers buffer-id])]
-    (backend/to-core-matrix (get-in network [:compute-binding :backend]) (get param-data :buffer))
+    (backend/to-core-matrix (backend network) (get param-data :buffer))
     (throw (ex-info "Failed to find parameter"
                     {:buffer-id buffer-id
                      :available-buffers (keys (get-in network [:compute-binding :parameter-buffers]))}))))
 
 
 ;; Getters for various bound items.
-(defn backend
-  [network]
-  (get-in network [:compute-binding :backend]))
 
 (defn driver
   [network]
-  (get-in network [:compute-binding :backend :driver]))
+  (drv/get-driver (backend network)))
+
 
 (defn stream
   [network]
-  (get-in network [:compute-binding :backend :stream]))
+  (backend/get-stream))
 
 (defn datatype
   [network]
-  (get-in network [:compute-binding :backend :datatype]))
+  (dtype/get-datatype (backend network)))
 
 (defn parameters
   [network]
@@ -542,7 +544,7 @@ traversal with the inputs and outputs mapped to specific buffers."
 
 (defn print-traversal-buffers
   [network]
-  (let [backend (get-in network [:compute-binding :backend])
+  (let [backend (backend network)
         to-double #(when %
                      (vec (take 20 (backend/to-double-array backend %))))]
     (clojure.pprint/pprint (mapv (fn [[k v]]
@@ -586,7 +588,7 @@ traversal with the inputs and outputs mapped to specific buffers."
 (defmethod perform-pass :default
   [pass-direction network pass-function {:keys [incoming id outgoing]}]
   (comment
-    (let [backend (get-in network [:compute-binding :backend])
+    (let [backend (backend network)
           to-double #(vec (backend/to-double-array backend %))]
       (clojure.pprint/pprint (mapv (fn [{:keys [buffer gradient]}]
                                      [:incoming {:buffer (to-double buffer)}])
@@ -789,7 +791,7 @@ any loss-specific parameter buffers."
          (distinct)
          (mapcat id->input-buffers)
          (map :gradient)
-         (backend/zero-many! (get-in network [:compute-binding :backend]))
+         (backend/zero-many! (backend network))
          dorun)
     network))
 
