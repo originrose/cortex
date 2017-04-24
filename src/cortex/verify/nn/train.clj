@@ -202,8 +202,8 @@
     (execute/with-compute-context context
       (let [network (network/linear-network MNIST-NETWORK)
             batch-size 10
-            test-dataset (take 1000 @mnist-test-dataset*)
-            test-dataset-seq (->> (repeat 20 test-dataset)
+            test-dataset (take 500 @mnist-test-dataset*)
+            test-dataset-seq (->> (repeat 5 test-dataset)
                                   (map (fn [dataset]
                                          {:dataset dataset
                                           :stream (drv/create-stream (drv/get-driver (drv/current-device)))})))
