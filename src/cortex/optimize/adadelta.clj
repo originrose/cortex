@@ -5,6 +5,7 @@
     [think.datatype.core :as dtype]
     [cortex.compute.driver :as drv]
     [cortex.compute.cpu.backend :as cpu-backend]
+    [cortex.compute.nn.backend :as compute-backend]
     [cortex.compute.cpu.driver :as cpu-drv]
     ;[cortex.compute.cuda.driver :as cuda-drv]
     [cortex.util :as util]
@@ -27,7 +28,7 @@
 (defn- setup-optimizer
   [backend optimizer step-fn]
   (let [driver (drv/get-driver backend)
-        stream (drv/get-stream backend)
+        stream (compute-backend/get-stream)
         datatype (dtype/get-datatype backend)]
    (->Adadelta backend optimizer step-fn)))
 
@@ -72,21 +73,22 @@
   [backend typed-cuda-fn gradient parameters gradient-alpha
    decay epsilon grad-accum dx-accum item-count]
   ((resolve 'cortex.compute.cuda.driver/launch-linear-kernel)
-    (drv/get-stream backend) typed-cuda-fn item-count 0
-    (float decay) (float epsilon)
-    grad-accum dx-accum
-    (float gradient-alpha)
-    gradient parameters item-count))
+   (compute-backend/get-stream) typed-cuda-fn item-count 0
+   (float decay) (float epsilon)
+   grad-accum dx-accum
+   (float gradient-alpha)
+   gradient parameters item-count))
 
 (defn cuda-adadelta-step-double!
   [backend typed-cuda-fn gradient parameters gradient-alpha
    decay epsilon grad-accum dx-accum item-count]
   ((resolve 'cortex.compute.cuda.driver/launch-linear-kernel)
-    (drv/get-stream backend) typed-cuda-fn item-count 0
-    (double decay) (double epsilon)
-    grad-accum dx-accum
-    (double gradient-alpha)
-    gradient parameters item-count))
+   (compute-backend/get-stream) typed-cuda-fn item-count 0
+   (double decay) (double epsilon)
+   grad-accum dx-accum
+   (double gradient-alpha)
+   gradient parameters item-count))
+
 
 (defmethod create-optimizer [:cuda :adadelta]
   [backend optimizer]

@@ -302,7 +302,7 @@ supports it then there may be a faster way to do this operation."
          elem-count (alength ret-ary)
          host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
      (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
-     (drv/wait-for-event (drv/create-event stream))
+     (drv/sync-stream stream)
      (dtype/copy! host-buf 0 ret-ary 0 elem-count)
      retval))
   ;;Defaults to a 2d representation
@@ -320,7 +320,7 @@ supports it then there may be a faster way to do this operation."
         retval (dtype/make-array-of-type datatype elem-count)
         host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
     (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
-    (drv/wait-for-event (drv/create-event stream))
+    (drv/sync-stream stream)
     (dtype/copy! host-buf 0 retval 0 elem-count)
     retval))
 

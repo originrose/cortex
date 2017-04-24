@@ -160,41 +160,43 @@
              reset-score
              force-gpu?
              simple-loss-print?
-             test-fn]
+             test-fn
+             context]
       :or {batch-size 128
            network-filestem default-network-filestem
            reset-score false}}]
-  (resource/with-resource-context
-    (let [optimizer (or optimizer (adam/adam))
-          context (execute/compute-context)
-          network-filename (str network-filestem ".nippy")
-          ;; If someone is training with an infinite data sequence they have to
-          ;; actually pass in a function that when called returns the next epoch
-          ;; of data.  This is the only way so far to avoid 'holding onto head'
-          ;; when the number of epochs rises.
-          train-ds-fn (to-epoch-seq-fn train-ds epoch-count)
-          test-ds-fn (to-epoch-seq-fn test-ds epoch-count)
-          network (if (vector? network)
-                    (do
-                      (backup-trained-network network-filestem)
-                      (network/linear-network network))
-                    (if reset-score
-                      (assoc network :cv-loss {})
-                      network))
-          network (if (number? (get network :epoch-count))
-                    network
-                    (assoc network :epoch-count 0))
-          train-fn #(execute/train %1 %2
-                                   :batch-size batch-size
-                                   :optimizer %3
-                                   :context context)
-          test-fn  (or test-fn
-                       (partial default-network-test-fn simple-loss-print? batch-size))
-          epoch-eval-fn (partial per-epoch-fn test-fn network-filename context)]
-      (println "Training network:")
-      (network/print-layer-summary network (traverse/training-traversal network))
-      (->> (recur-train-network network train-ds-fn test-ds-fn optimizer train-fn epoch-eval-fn)
-           last))))
+  (let [context (or context (execute/compute-context))]
+    (execute/with-compute-context context
+      (let [optimizer (or optimizer (adam/adam))
+            context (execute/compute-context)
+            network-filename (str network-filestem ".nippy")
+            ;; If someone is training with an infinite data sequence they have to
+            ;; actually pass in a function that when called returns the next epoch
+            ;; of data.  This is the only way so far to avoid 'holding onto head'
+            ;; when the number of epochs rises.
+            train-ds-fn (to-epoch-seq-fn train-ds epoch-count)
+            test-ds-fn (to-epoch-seq-fn test-ds epoch-count)
+            network (if (vector? network)
+                      (do
+                        (backup-trained-network network-filestem)
+                        (network/linear-network network))
+                      (if reset-score
+                        (assoc network :cv-loss {})
+                        network))
+            network (if (number? (get network :epoch-count))
+                      network
+                      (assoc network :epoch-count 0))
+            train-fn #(execute/train %1 %2
+                                     :batch-size batch-size
+                                     :optimizer %3
+                                     :context context)
+            test-fn  (or test-fn
+                         (partial default-network-test-fn simple-loss-print? batch-size))
+            epoch-eval-fn (partial per-epoch-fn test-fn network-filename context)]
+        (println "Training network:")
+        (network/print-layer-summary network (traverse/training-traversal network))
+        (->> (recur-train-network network train-ds-fn test-ds-fn optimizer train-fn epoch-eval-fn)
+             last)))))
 
 
 (defn print-trained-networks-summary

@@ -8,7 +8,7 @@
 (defn create-backend
   []
   (require '[cortex.compute.cuda.backend :as cuda-backend])
-  ((resolve 'cuda-backend/backend) verify-utils/*datatype*))
+  ((resolve 'cuda-backend/backend) :datatype verify-utils/*datatype*))
 
 
 (verify-utils/def-double-float-test adam

@@ -12,7 +12,8 @@
     [cortex.compute.cpu.driver :as cpu-drv]
     [cortex.compute.nn.layers :as compute-layers]
     [cortex.compute.nn.protocols :as compute-protocols]
-    [cortex.compute.nn.backend :as nn-backend])
+    [cortex.compute.nn.backend :as nn-backend]
+    [think.resource.core :as resource])
   (:import
     [java.util Arrays]
     [java.util.concurrent ForkJoinPool Callable Future]
@@ -25,15 +26,36 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-(defrecord CPUBackend [type driver stream datatype])
+
+(defrecord CPUBackend [type device stream datatype resource-context]
+  dtype/PDatatype
+  (get-datatype [backend] (.datatype backend))
+  drv/PDriverProvider
+  (get-driver [backend] (drv/get-driver (.device backend)))
+  drv/PDeviceProvider
+  (get-device [backend] (.device backend))
+  drv/PStreamProvider
+  (get-stream [backend] (.stream backend))
+  resource/PResource
+  (release-resource [backend]
+    (drv/unsafe-with-compute-device
+     (.device backend)
+     (resource/release-resource-context @(get backend :resource-context)))))
+
 
 (defn backend
-  ([datatype]
-   (let [driver (cpu-drv/driver)
-         stream (drv/create-stream driver)]
-     (->CPUBackend :cpu driver stream datatype)))
-  ([]
-   (backend :double)))
+  [& {:keys [datatype driver device stream]
+      :or [datatype :double]}]
+  (let [driver (or driver (cpu-drv/driver))
+        device (or device (drv/default-device driver))]
+    (drv/unsafe-with-compute-device
+     device
+     (let [stream (or stream (drv/create-stream driver))
+           [backend res-ctx]
+           (resource/return-resource-context
+            (->CPUBackend :cpu device stream datatype (atom nil)))]
+       (reset! (get backend :resource-context) res-ctx)
+       (resource/track backend)))))
 
 
 (defprotocol PCPUNetworkImpl
@@ -1158,12 +1180,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 
 (extend-type CPUBackend
-  dtype/PDatatype
-  (get-datatype [backend] (.datatype backend))
-  drv/PDriverProvider
-  (get-driver [backend] (.driver backend))
-  drv/PStreamProvider
-  (get-stream [backend] (.stream backend))
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
     (cpu-layer backend layer batch-size))

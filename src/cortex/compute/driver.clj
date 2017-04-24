@@ -53,11 +53,6 @@
   into them.  This means at least PAccess."
   (get-devices [impl]
     "Get a list of devices accessible to the system.")
-  (set-current-device [impl device]
-    "Set the current device.  In for cuda this sets the current device in thread-specific storage so expecting
-this to work in some thread independent way is a bad assumption.")
-  (get-current-device [impl]
-    "Get the current device from the current thread.")
   (memory-info [impl]
     "Get a map of {:free <long> :total <long>} describing the free and total memory in bytes.")
   (create-stream [impl]
@@ -74,9 +69,44 @@ and then uploaded to a device buffer.")
     "Allocate a buffer used for rands.  Random number generation in general needs a divisible-by-2 element count
 and a floating point buffer (cuda cuRand limitation)"))
 
+
+(def ^:dynamic *current-compute-device* nil)
+
+
+(defmacro unsafe-with-compute-device
+  [device & body]
+  `(let [device# ~device]
+     (with-bindings {#'*current-compute-device* device#}
+       ~@body)))
+
+
+(defmacro with-compute-device
+  [device & body]
+  `(unsafe-with-compute-device
+    ~device
+    (resource/with-resource-context
+      ~@body)))
+
+
+(defn default-device
+  [driver]
+  (first (get-devices driver)))
+
+
+(defn current-device
+  []
+  *current-compute-device*)
+
+
 (defprotocol PDriverProvider
   "Get a driver from an object"
   (get-driver [impl]))
+
+
+(defprotocol PDeviceProvider
+  "Get a device from an object."
+  (get-device [impl]))
+
 
 (defprotocol PStream
   "Basic functionality expected of streams.  Streams are an abstraction of a stream of execution
@@ -99,9 +129,11 @@ executes to the event.")
   (sync-event [stream event]
     "Have this stream pause until a given event is triggered."))
 
+
 (defprotocol PStreamProvider
   "Get a stream from an object"
   (get-stream [impl]))
+
 
 (defprotocol PEvent
   (wait-for-event [event]
@@ -143,16 +175,23 @@ executes to the event.")
                      dest dest-indexes dest-stride n-elems-per-idx))
 
 
+(defn sync-stream
+  [stream]
+  (let [evt (create-event stream)]
+    (wait-for-event evt)
+    (resource/release evt)))
+
+
 (defn host-array->device-buffer
   "Synchronously make a device buffer with these elements in it."
-  [device stream upload-ary]
+  [driver stream upload-ary]
   (let [datatype (dtype/get-datatype upload-ary)
         elem-count (m/ecount upload-ary)
-        upload-buffer (allocate-host-buffer device elem-count datatype)
-        device-buffer (allocate-device-buffer device elem-count datatype)]
+        upload-buffer (allocate-host-buffer driver elem-count datatype)
+        device-buffer (allocate-device-buffer driver elem-count datatype)]
     (dtype/copy! upload-ary 0 upload-buffer 0 elem-count)
     (copy-host->device stream upload-buffer 0 device-buffer 0 elem-count)
-    (wait-for-event (create-event stream))
+    (sync-stream stream)
     (resource/release upload-buffer)
     device-buffer))
 
@@ -165,8 +204,7 @@ executes to the event.")
         download-buffer (allocate-host-buffer device elem-count datatype)
         download-ary (dtype/make-array-of-type datatype elem-count)]
     (copy-device->host stream device-buffer 0 download-buffer 0 elem-count)
-    (wait-for-event (create-event stream))
+    (sync-stream stream)
     (dtype/copy! download-buffer 0 download-ary 0 elem-count)
     (resource/release download-buffer)
     download-ary))
-

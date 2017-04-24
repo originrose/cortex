@@ -43,12 +43,13 @@
 
 (defn generate-gradients
   [context description input output epsilon batch-size labels-key]
-  (-> (network/linear-network description)
-      (execute/generate-numeric-gradients context batch-size
-                                          (merge (verify-layers/vec->stream-map input :data)
-                                                 (verify-layers/vec->stream-map output labels-key))
-                                          epsilon)
-      (verify-layers/unpack-network :test)))
+  (execute/with-compute-context context
+    (-> (network/linear-network description)
+        (execute/generate-numeric-gradients context batch-size
+                                            (merge (verify-layers/vec->stream-map input :data)
+                                                   (verify-layers/vec->stream-map output labels-key))
+                                            epsilon)
+        (verify-layers/unpack-network :test))))
 
 
 (defn get-gradients

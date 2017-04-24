@@ -179,12 +179,11 @@
    :traversal   ...
    :batch-size  ...}"
   [{:keys [compute-graph] :as network}
-   {:keys [backend-fn] :as context}
+   backend
    batch-size
    traversal
    {:keys [gradients? numeric-gradients? optimizer] :as options}]
-  (let [backend (backend-fn)
-        network (assoc network
+  (let [network (assoc network
                        :compute-binding {:batch-size batch-size}
                        :traversal traversal)
         stream-map (get traversal :stream-map)
@@ -341,6 +340,10 @@
                                      [k (core-m v)]))
                               (into {})))))))))
 
+(defn backend
+  [network]
+  (get-in network [:compute-binding :backend]))
+
 
 (defn get-parameter
   "Get a specific parameter's value from the network.  This is necessary
@@ -348,28 +351,26 @@
   return a map containing at least :buffer."
   [network buffer-id]
   (if-let [param-data (get-in network [:compute-binding :parameter-buffers buffer-id])]
-    (backend/to-core-matrix (get-in network [:compute-binding :backend]) (get param-data :buffer))
+    (backend/to-core-matrix (backend network) (get param-data :buffer))
     (throw (ex-info "Failed to find parameter"
                     {:buffer-id buffer-id
                      :available-buffers (keys (get-in network [:compute-binding :parameter-buffers]))}))))
 
 
 ;; Getters for various bound items.
-(defn backend
-  [network]
-  (get-in network [:compute-binding :backend]))
 
 (defn driver
   [network]
-  (get-in network [:compute-binding :backend :driver]))
+  (drv/get-driver (backend network)))
+
 
 (defn stream
   [network]
-  (get-in network [:compute-binding :backend :stream]))
+  (backend/get-stream))
 
 (defn datatype
   [network]
-  (get-in network [:compute-binding :backend :datatype]))
+  (dtype/get-datatype (backend network)))
 
 (defn parameters
   [network]
@@ -453,7 +454,7 @@
                                           (math/device-buffer buffer) 0
                                           host-buffer 0
                                           (dtype/ecount host-buffer))
-                   (drv/wait-for-event (drv/create-event stream))
+                   (drv/sync-stream stream)
                    (c-for [idx 0 (< idx batch-size) (inc idx)]
                           (dtype/copy! host-buffer (long (* idx output-size))
                                        (get double-buffers idx) 0
@@ -543,7 +544,7 @@ traversal with the inputs and outputs mapped to specific buffers."
 
 (defn print-traversal-buffers
   [network]
-  (let [backend (get-in network [:compute-binding :backend])
+  (let [backend (backend network)
         to-double #(when %
                      (vec (take 20 (backend/to-double-array backend %))))]
     (clojure.pprint/pprint (mapv (fn [[k v]]
@@ -587,7 +588,7 @@ traversal with the inputs and outputs mapped to specific buffers."
 (defmethod perform-pass :default
   [pass-direction network pass-function {:keys [incoming id outgoing]}]
   (comment
-    (let [backend (get-in network [:compute-binding :backend])
+    (let [backend (backend network)
           to-double #(vec (backend/to-double-array backend %))]
       (clojure.pprint/pprint (mapv (fn [{:keys [buffer gradient]}]
                                      [:incoming {:buffer (to-double buffer)}])
@@ -790,7 +791,7 @@ any loss-specific parameter buffers."
          (distinct)
          (mapcat id->input-buffers)
          (map :gradient)
-         (backend/zero-many! (get-in network [:compute-binding :backend]))
+         (backend/zero-many! (backend network))
          dorun)
     network))
 
