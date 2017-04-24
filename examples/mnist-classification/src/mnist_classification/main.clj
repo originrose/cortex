@@ -1,4 +1,4 @@
-(ns suite-classification.main
+(ns mnist-classification.main
   (:require [clojure.tools.cli :refer [parse-opts]])
   (:gen-class))
 
@@ -14,7 +14,8 @@
 
 (defn -main
   [& args]
+  (println "Welcome! Please wait while we compile some Clojure code...")
   (let [argmap (parse-opts args cli-options)]
-    (require 'suite-classification.core)
-    ((resolve 'suite-classification.core/train-forever-uberjar)
+    (require 'mnist-classification.core)
+    ((resolve 'mnist-classification.core/train-forever-uberjar)
      (:options argmap))))

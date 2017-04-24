@@ -26,7 +26,7 @@ Please see the various unit tests and examples for training a model.  Specifical
 [mnist verification](src/cortex/verify/nn/train.clj)
 
 Also, for an example of using cortex in a more real-world scenario please see:
-[mnist example](examples/suite-classification/src/suite_classification/core.clj).
+[mnist example](examples/mnist-classification/src/mnist_classification/core.clj).
 
 
 
@@ -74,7 +74,7 @@ The .zip contains some libraries that you will need to make available to the loa
 Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 8.0, if you're running 8.0 you will need to use change the javacpp dependency in your project file.
 
 
-[MNist Example](https://github.com/thinktopic/cortex/blob/master/examples/suite-classification/project.clj)
+[mnist Example](https://github.com/thinktopic/cortex/blob/master/examples/mnist-classification/project.clj)
 
 #### Mac OS
 These instructions follow the gpu setup from [Tensor Flow](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#optional-setup-gpu-for-mac), i.e.:

@@ -1,6 +1,7 @@
-(ns cortex.suite.classify
+(ns cortex.experiment.classify
   (:require-macros [cljs.core.async.macros :refer [go]])
-  (:require [cljs.core.async :as async :refer [<!]]
+  (:require [cljs.pprint]
+            [cljs.core.async :as async :refer [<!]]
             [reagent.core :refer [atom]]
             [think.gate.core :as gate]
             [think.gate.model :as model]))
@@ -90,8 +91,8 @@
                dataset))])
 
 
-(defn confusion-matrix-update
-  [confusion-atom dataset-atom]
+(defn update-atoms
+  [confusion-atom dataset-atom accuracy-atom]
   (go (let [new-matrix (<! (model/put "confusion-matrix"))
             current-matrix (get @confusion-atom :confusion-matrix)]
         (when-not (= (get new-matrix :update-index)
@@ -102,14 +103,26 @@
             current-data @dataset-atom]
         (when-not (= (get dataset-data :update-index)
                      (get current-data :update-index))
-          (reset! dataset-atom dataset-data)))))
+          (reset! dataset-atom dataset-data))))
+  (go (reset! accuracy-atom (<! (model/put "accuracy-data")))))
+
+
+(defn display-accuracy
+  [accuracy-data]
+  [:div.dataset
+   [:table
+    [:thead [:tr [:th "epoch"] [:th "accuracy"]]]
+    (into [:tbody]
+          (for [[i a] (map-indexed vector accuracy-data)]
+            [:tr [:td (inc i)] [:td a]]))]])
 
 
 (defn classify-component
   [& args]
   (let [confusion-atom (atom {})
-        dataset-atom (atom {})]
-    (js/setInterval #(confusion-matrix-update confusion-atom dataset-atom) 1000)
+        dataset-atom (atom {})
+        accuracy-atom (atom {})]
+    (js/setInterval #(update-atoms confusion-atom dataset-atom accuracy-atom) 1000)
     (fn [& args]
       [:div.classification
        [:div.title "CONFUSION MATRIX"]
@@ -130,4 +143,18 @@
        [:div.title "DATASET"]
        (if-let [dataset-data @dataset-atom]
          [display-dataset (dataset-data :dataset)]
-         [:div "loading dataset"])])))
+         [:div "loading dataset"])
+       [:div.title "CLASSIFICATION ACCURACY"]
+       (if-let [accuracy-data @accuracy-atom]
+         [display-accuracy accuracy-data]
+         [:div "loading accuracy"])])))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Main gate entry point
+(defmethod gate/component "default"
+  [& args]
+  (apply classify-component args))
+
+
+(gate/start-frontend)

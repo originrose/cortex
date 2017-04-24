@@ -37,12 +37,13 @@
 
 
 (defn default-network-test-fn
-  "Given the context, old network, the new network and a test dataset, return a map indicating if the
-new network is indeed the best one and the network with enough information added to make comparing
-networks possible.
-{:best-network? boolean
-:network (assoc new-network :whatever information-needed-to-compare).
-}"
+  "Given the context, old network, the new network and a test dataset,
+  return a map indicating if the new network is indeed the best one
+  and the network with enough information added to make comparing
+  networks possible.
+    {:best-network? boolean
+     :network (assoc new-network :whatever information-needed-to-compare).}"
+  ;; TODO: No need for context here.
   [simple-loss-print? batch-size context ;;no change per epoch
    new-network old-network test-ds] ;;change per epoch
   (let [batch-size (long batch-size)
@@ -147,10 +148,8 @@ networks possible.
   (test-fn context new-network old-network test-ds)
 
   It must return a map containing at least:
-
-{:best-network? true if this is the best network
-:network The new network with any extra information needed for comparison assoc'd onto it.
-}
+    {:best-network? true if this is the best network
+     :network The new network with any extra information needed for comparison assoc'd onto it.}
 
   If epoch-count is provided then we stop training after that many epochs else
   we continue to train forever."
@@ -169,9 +168,10 @@ networks possible.
     (let [optimizer (or optimizer (adam/adam))
           context (execute/compute-context)
           network-filename (str network-filestem ".nippy")
-          ;;If someone is training with an infinite data sequence they have to actually pass in a function
-          ;;that when called returns the next epoch of data.  This is the only way so far to avoid
-          ;;'holding onto head' when the number of epochs rises.
+          ;; If someone is training with an infinite data sequence they have to
+          ;; actually pass in a function that when called returns the next epoch
+          ;; of data.  This is the only way so far to avoid 'holding onto head'
+          ;; when the number of epochs rises.
           train-ds-fn (to-epoch-seq-fn train-ds epoch-count)
           test-ds-fn (to-epoch-seq-fn test-ds epoch-count)
           network (if (vector? network)

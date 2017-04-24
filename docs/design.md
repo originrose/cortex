@@ -40,10 +40,6 @@ implemented in a using generalized math operators available across compute frame
 ### gpu-compute
 * Cuda implementations of compute framework including neural network algorithms.
 
-### suite
-* Aggregating of functionality to provide a clear path and example for training various
-network types using the compute and gpu-compute frameworks.
-
 ### caffe
 * Caffe import for cortex using the compute functionality for verification.
 
@@ -68,7 +64,7 @@ Outputs for training are ```id->{:stream stream-name :loss loss-fn}```.
 graph and a sequence if input,answer pairs returns a sequence of
 progressively better trained graphs.  This builds a traversal which
 calculates a forward traversal, backward traversal and io buffer list
-for the execution context.  A traversal is a sequence of 
+for the execution context.  A traversal is a sequence of
 ```{:incoming :id: :outgoing}``` where incoming and outgoing are lists of buffer ids
 and id is the node for execution.  The training system is expected to
 respect the traversal but it could for instance use a completely
