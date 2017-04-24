@@ -6,7 +6,7 @@
     [cortex.compute.driver :as drv]
     [cortex.compute.cpu.backend :as cpu-backend]
     [cortex.compute.cpu.driver :as cpu-drv]
-    [cortex.compute.cuda.driver :as cuda-drv]
+    ;[cortex.compute.cuda.driver :as cuda-drv]
     [cortex.util :as util]
     [cortex.graph :as graph])
   (:import
@@ -71,7 +71,7 @@
 (defn cuda-adadelta-step-float!
   [backend typed-cuda-fn gradient parameters gradient-alpha
    decay epsilon grad-accum dx-accum item-count]
-  (cuda-drv/launch-linear-kernel
+  ((resolve 'cortex.compute.cuda.driver/launch-linear-kernel)
     (drv/get-stream backend) typed-cuda-fn item-count 0
     (float decay) (float epsilon)
     grad-accum dx-accum
@@ -81,7 +81,7 @@
 (defn cuda-adadelta-step-double!
   [backend typed-cuda-fn gradient parameters gradient-alpha
    decay epsilon grad-accum dx-accum item-count]
-  (cuda-drv/launch-linear-kernel
+  ((resolve 'cortex.compute.cuda.driver/launch-linear-kernel)
     (drv/get-stream backend) typed-cuda-fn item-count 0
     (double decay) (double epsilon)
     grad-accum dx-accum
@@ -91,7 +91,7 @@
 (defmethod create-optimizer [:cuda :adadelta]
   [backend optimizer]
   (let [datatype (dtype/get-datatype backend)
-        cuda-fns (cuda-drv/load-float-double-function "adadelta.fatbin" "adadelta_step")
+        cuda-fns ((resolve 'cortex.compute.cuda.driver/load-float-double-function) "adadelta.fatbin" "adadelta_step")
         typed-cuda-fn (:fn (get cuda-fns datatype))
         typed-step-fn
         (cond
@@ -100,11 +100,11 @@
         step-fn
         (fn [backend gradient parameters gradient-alpha param-offset decay
              epsilon grad-sq-accum dx-sq-accum]
-          (let [gradient-view (cuda-drv/->ptr gradient)
-                param-view (cuda-drv/->ptr parameters)
+          (let [gradient-view ((resolve 'cortex.compute.cuda.driver/->ptr) gradient)
+                param-view ((resolve 'cortex.compute.cuda.driver/->ptr) parameters)
                 item-count (dtype/ecount gradient)
-                grad-sq-accum-view (cuda-drv/->ptr grad-sq-accum)
-                dx-sq-accum-view (cuda-drv/->ptr dx-sq-accum)]
+                grad-sq-accum-view ((resolve 'cortex.compute.cuda.driver/->ptr) grad-sq-accum)
+                dx-sq-accum-view ((resolve 'cortex.compute.cuda.driver/->ptr) dx-sq-accum)]
             (typed-step-fn backend typed-cuda-fn
                            gradient-view param-view
                            gradient-alpha decay epsilon
