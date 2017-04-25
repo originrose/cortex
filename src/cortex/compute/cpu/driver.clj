@@ -13,14 +13,14 @@
             FloatBuffer DoubleBuffer Buffer]
            [com.github.fommil.netlib BLAS]
            [java.util Random]
-           [think.datatype ArrayView IntArrayView]))
+           [think.datatype ArrayViewBase IntArrayView]))
 
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* true)
 
 
-(defrecord CPUDevice [driver-fn device-id])
+(defrecord CPUDevice [driver-fn device-id error-atom])
 (defrecord CPUStream [device input-chan exit-chan error-atom])
 (defrecord CPUDriver [devices error-atom])
 
@@ -187,11 +187,29 @@ Use with care; the synchonization primitives will just hang with this stream."
 (defn driver
   [& {:keys [num-devices]
       :or {num-devices 1}}]
-  (let [retval (->CPUDriver (atom nil) (atom nil))]
+  (let [error-atom (atom nil)
+        retval (->CPUDriver (atom nil) error-atom)]
     (reset! (get retval :devices)
             (->> (range num-devices)
-                 (mapv #(-> (->CPUDevice (constantly retval) %)))))
+                 (mapv #(-> (->CPUDevice (constantly retval) % error-atom)))))
     retval))
+
+(extend-type CPUDevice
+  drv/PDevice
+  (memory-info-impl [impl]
+    (get-memory-info))
+
+  (create-stream-impl [impl]
+    (check-stream-error impl)
+    (cpu-stream impl (:error-atom impl)))
+
+  (allocate-device-buffer-impl [impl elem-count elem-type]
+    (check-stream-error impl)
+    (dtype/make-view elem-type elem-count))
+
+  (allocate-rand-buffer-impl [impl elem-count]
+    (check-stream-error impl)
+    (dtype/make-view :float elem-count)))
 
 
 (extend-type CPUDriver
@@ -199,27 +217,17 @@ Use with care; the synchonization primitives will just hang with this stream."
   (get-devices [impl]
     @(get impl :devices))
 
-  (memory-info [impl]
-    (get-memory-info))
-
-  (create-stream [impl]
+  (allocate-host-buffer-impl [impl elem-count elem-type options]
     (check-stream-error impl)
-    (cpu-stream (:error-atom impl)))
+    (dtype/make-view elem-type elem-count)))
 
-  (allocate-host-buffer [impl elem-count elem-type]
-    (check-stream-error impl)
-    (dtype/make-view elem-type elem-count))
 
-  (allocate-device-buffer [impl elem-count elem-type]
-    (check-stream-error impl)
-    (dtype/make-view elem-type elem-count))
-
-  (allocate-rand-buffer [impl elem-count]
-    (check-stream-error impl)
-    (dtype/make-view :float elem-count))
-
-  (sub-buffer-impl [impl buffer offset length]
-    (dtype/->view buffer offset length)))
+(extend-type ArrayViewBase
+  drv/PBuffer
+  (sub-buffer-impl [buffer offset length]
+    (dtype/->view buffer offset length))
+  resource/PResource
+  (release-resource [_]))
 
 
 (extend-type CPUStream
@@ -279,8 +287,3 @@ Use with care; the synchonization primitives will just hang with this stream."
                         beta (dtype/->view y) (dtype/->view y-indexes)
                         (dtype/->view result) (dtype/->view res-indexes)
                         n-elems-per-idx))))
-
-
-(extend-type Buffer
-  resource/PResource
-  (release-resource [buf]))

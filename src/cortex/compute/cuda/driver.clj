@@ -1,6 +1,7 @@
 (ns cortex.compute.cuda.driver
   (:require [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
+            [think.datatype.marshal :as marshal]
             [clojure.java.io :as io]
             [think.resource.core :as resource]
             [cortex.compute.javacpp-datatype :as jcpp-dtype]
@@ -24,6 +25,11 @@
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Errors and device initialization
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defmacro check-cuda-error
   [result]
@@ -62,17 +68,6 @@ set this device before.  Set device must be called before any other cuda functio
        (let [ignored (jcpp-dtype/make-empty-pointer-of-type :float)]
          (check-cuda-error (cuda/cudaMalloc ignored 32)))
        (swap! *cuda-initialized-device-ids* conj device-id)))))
-
-
-(defrecord CudaDriver [devices])
-
-
-(defrecord CudaDevice [device-id
-                       device-properties
-                       device-functions
-                       ^cublas$cublasContext cublas
-                       ^curand$curandGenerator_st curand
-                       resource-context])
 
 
 (defn ensure-device
@@ -178,7 +173,8 @@ set this device before.  Set device must be called before any other cuda functio
 
 
 (defn get-memory-info
-  []
+  [device-id]
+  (set-cuda-device device-id)
   (let [free (SizeTPointer. 1)
         total (SizeTPointer. 1)]
     (check-cuda-error (cuda/cudaMemGetInfo free total))
@@ -239,6 +235,10 @@ set this device before.  Set device must be called before any other cuda functio
     (curand-call (curand/curandDestroyGenerator ctx))))
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Cuda kernel creation/loading
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn load-module
   [data-stream]
@@ -307,153 +307,28 @@ set this device before.  Set device must be called before any other cuda functio
   ([fn-name]
    (load-multiple-datatype-function fn-name [:double :float])))
 
-(defn blas-context
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Sub context creation
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- blas-context
   ^cublas$cublasContext []
   (let [blas-context (cublas$cublasContext.)]
     (cublas-call (cublas/cublasCreate_v2 blas-context))
     (resource/track blas-context)))
 
-(defn rand-context
+(defn- rand-context
   ^curand$curandGenerator_st []
   (let [rand-context (curand$curandGenerator_st.)]
     (curand-call (curand/curandCreateGenerator rand-context curand/CURAND_RNG_PSEUDO_DEFAULT))
     (resource/track rand-context)))
 
-(defrecord CudaStream [^CudaDevice device ^cuda$CUstream_st stream])
 
 
-(defprotocol PCudaStreamProvider
-  (get-cuda-stream-impl [item]))
-
-(extend-protocol PCudaStreamProvider
-  CudaStream
-  (get-cuda-stream-impl [item] (:stream item))
-  cuda$CUstream_st
-  (get-cuda-stream-impl [item] item))
-
-
-(defn get-cuda-stream
-  ^cuda$CUstream_st [item]
-  (-> (drv/get-stream item)
-      get-cuda-stream-impl))
-
-
-(extend-protocol drv/PDriverProvider
-  CudaDriver
-  (get-driver [item] item)
-  CudaDevice
-  (get-driver [item] ((get item :driver-fn)))
-  CudaStream
-  (get-driver [item] (drv/get-driver (.device item))))
-
-
-(extend-protocol drv/PDeviceProvider
-  CudaDevice
-  (get-device [item] item)
-  CudaStream
-  (get-device [item] (.device item)))
-
-
-(extend-protocol drv/PStreamProvider
-  CudaStream
-  (get-stream [item] item))
-
-
-(extend-type Pointer
-  resource/PResource
-  (release-resource [item]
-    (jcpp-dtype/release-pointer item)))
-
-
-(extend-type CudaDevice
-  resource/PResource
-  (release-resource [item]
-    (drv/with-compute-device item
-      (let [res-ctx @(get item :resource-context)]
-        (resource/release-resource-context res-ctx)))))
-
-
-(defn- create-cuda-device
-  [driver device-id properties]
-  (set-cuda-device {:device-id device-id})
-  (let [retval (->CudaDevice device-id properties (atom nil) nil nil (atom nil))
-        [retval res-ctx] (resource/return-resource-context
-                          (with-bindings {#'drv/*current-compute-device* retval}
-                            ;;Most of these functions require a device to be active in order to work.
-                            (-> retval
-                                (assoc :cublas (blas-context)
-                                       :curand (rand-context)
-                                       ;;Use a function here instead of the object so that we can
-                                       ;;actually analyze the device in the repl.
-                                       :driver-fn (constantly driver))
-                                ((fn [retval]
-                                   (reset! (get retval :device-functions)
-                                           {:memset (load-all-datatype-function "memset")
-                                            :elementwise-multiply (load-float-double-function
-                                                                   "elementwise_multiply")
-                                            :l2-constraint-scale (load-float-double-function
-                                                                  "l2_constraint_scale")
-                                            :select (load-float-double-function "select")})
-                                   retval)))))]
-    (reset! (get retval :resource-context) res-ctx)
-    (resource/track retval)))
-
-
-(defn driver
-  []
-  (when (and (drv/current-device)
-             (instance? CudaDevice (drv/current-device)))
-    (throw (ex-info "CUDA driver created while CUDA device is bound"
-                    {:current-device (drv/current-device)})))
-  (->CudaDriver (atom nil)))
-
-
-(defn current-cuda-device
-  ^CudaDevice []
-  (drv/current-device))
-
-
-(defn get-blas
-  ^cublas$cublasContext []
-  (.cublas (current-cuda-device)))
-
-
-(defn get-rand
-  ^curand$curandGenerator_st []
-  (.curand (current-cuda-device)))
-
-
-(defn check-stream-device
-  [stream]
-  (when-not (identical? (get (drv/get-stream stream) :device)
-                        (drv/current-device))
-    (throw (ex-info "current device and stream device differ."
-                    {:current-device (drv/current-device)
-                     :stream-device (get (drv/get-stream stream) :device)}))))
-
-
-(defmacro blas-with-stream
-  "Setting the blas stream is not threadsafe so we have to lock the object
-  before we set it, do the operation, and unlock the object after."
-  [stream & body]
-  `(let [stream# ~stream
-         ^cublas$cublasContext ~'cublas (get-blas)]
-     (check-stream-device stream#)
-     (locking ~'cublas
-       (cublas/cublasSetStream_v2 ~'cublas (get-cuda-stream ~stream))
-       ~@body)))
-
-
-(defmacro rand-with-stream
-  "See comments for blas-with-stream; same conditions hold."
-  [stream & body]
-  `(let [stream# ~stream
-         ^curand$curandGenerator_st ~'rand-context (get-rand)]
-     (check-stream-device stream#)
-     (locking ~'rand-context
-       (curand/curandSetStream ~'rand-context (get-cuda-stream stream#))
-       ~@body)))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Specialized pointers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord DevicePointer [^long size ^Pointer ptr]
   resource/PResource
@@ -465,76 +340,118 @@ set this device before.  Set device must be called before any other cuda functio
   mp/PElementCount
   (element-count [item] (quot size (dtype/datatype->byte-size (dtype/get-datatype ptr))))
   dtype/PDatatype
-  (get-datatype [item] (dtype/get-datatype ptr)))
+  (get-datatype [item] (dtype/get-datatype ptr))
+  drv/PBuffer
+  (sub-buffer-impl [this offset length]
+    (->DevicePointer
+     (* (dtype/datatype->byte-size (dtype/get-datatype ptr))
+        (long length))
+     (drv/sub-buffer-impl ptr offset length))))
 
 
-(extend-type CudaDriver
-  drv/PDriver
-  (get-devices [impl]
-    (let [devices-atom (get impl :devices)]
-      (when-not @devices-atom
-        (reset! devices-atom
-                (->> (list-devices)
-                     (map (fn [dev-info]
-                            (try
-                              (create-cuda-device impl (get dev-info :device-id) dev-info)
-                              (catch Throwable e
-                                (println "Failed to create device: "
-                                         dev-info e)
-                                nil))))
-                     (remove nil?)
-                     vec)))
-      @devices-atom))
+(defrecord PageLockedPointer [^long size ^Pointer ptr]
+  resource/PResource
+  (release-resource [_]
+    ;;Ensure the position of the pointer is 0 else the free call will fail
+    (.position ptr 0)
+    (cuda-library-debug-print "FreeHost: " (.address ptr))
+    (check-cuda-error (cuda/cudaFreeHost ptr)))
+  mp/PElementCount
+  (element-count [_] (quot size (dtype/datatype->byte-size (dtype/get-datatype ptr))))
+  dtype/PDatatype
+  (get-datatype [_] (dtype/get-datatype ptr))
+  dtype/PCopyQueryDirect
+  (get-direct-copy-fn [_ dest-offset]
+    (dtype/get-direct-copy-fn ptr dest-offset))
 
-  (memory-info [impl]
-    (get-memory-info))
+  dtype/PCopyToItemDirect
+  (copy-to-array-direct! [_ ptr-offset dest dest-offset elem-count]
+    (dtype/copy-to-array-direct! ptr ptr-offset dest dest-offset elem-count))
+  (copy-to-buffer-direct! [_ ptr-offset dest dest-offset elem-count]
+    (dtype/copy-to-buffer-direct! ptr ptr-offset dest dest-offset elem-count))
 
-  (create-stream [impl]
-    (let [retval (cuda$CUstream_st.)]
-      (cuda-call (cuda/cudaStreamCreate retval))
-      (->CudaStream drv/*current-compute-device* (resource/track retval))))
+  dtype/PAccess
+  (set-value! [_ offset value] (dtype/set-value! ptr offset value))
+  (set-constant! [_ offset value elem-count]
+    (dtype/set-constant! ptr offset value elem-count))
+  (get-value [_ offset] (dtype/get-value ptr offset))
+  marshal/PTypeToCopyToFn
+  (get-copy-to-fn [_ dest-offset]
+    (marshal/get-copy-to-fn ptr dest-offset))
+  dtype/PCopyQueryIndirect
+  (get-indirect-copy-fn [_ dest-offset]
+    (marshal/get-copy-to-fn ptr dest-offset))
 
-  (allocate-host-buffer [impl elem-count elem-type]
-    (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count)))
-
-  (allocate-device-buffer [impl ^long elem-count elem-type]
-    (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
-          retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
-      (cuda-call (cuda/cudaMalloc retval size))
-      (cuda-library-debug-print "Malloc: " (.address retval))
-      (resource/track (->DevicePointer size retval))))
-
-  (sub-buffer-impl [impl buffer offset length]
-    (let [^DevicePointer buffer buffer
-          offset (long offset)
-          length (long length)
-          byte-size (dtype/datatype->byte-size (dtype/get-datatype buffer))
-          new-size (* byte-size length)]
-      (->DevicePointer new-size (jcpp-dtype/offset-pointer (.ptr buffer) offset))))
-
-  (allocate-rand-buffer [impl elem-count]
-    (drv/allocate-device-buffer impl elem-count :float)))
+  drv/PBuffer
+  (sub-buffer-impl [this offset length]
+    (->PageLockedPointer
+     (* (dtype/datatype->byte-size (dtype/get-datatype ptr))
+        (long length))
+     (drv/sub-buffer-impl ptr offset length))))
 
 
-(defn check-copy-buffer-types-and-sizes
-  [src-buffer src-offset dest-buffer dest-offset elem-count]
-  (let [src-offset (long src-offset)
-        src-len (dtype/ecount src-buffer)
-        src-dtype (dtype/get-datatype src-buffer)
-        dest-offset (long dest-offset)
-        dest-len (dtype/ecount dest-buffer)
-        dest-dtype (dtype/get-datatype dest-buffer)
-        elem-count (long elem-count)]
-    (when-not (= dest-dtype src-dtype)
-      (throw (ex-info "Copy datatypes do not match"
-                      {:src-dtype src-dtype
-                       :dest-dtype dest-dtype})))
-    (when-not (<= (+ src-offset elem-count)
-                  src-len)
-      (throw (Exception. "Attempt to copy past extents of buffer.")))
-    (when-not (<= (+ dest-offset elem-count)
-                  dest-len)
-      (throw (Exception. "Attempt to copy past extents of buffer.")))))
+(defn- host-ptr-as-buffer
+  [^PageLockedPointer host-ptr]
+  (jcpp-dtype/as-buffer (.ptr host-ptr)))
+
+
+(defmacro copy-to-host-ptr-impl
+  [dest-type cast-type-fn copy-to-dest-fn cast-fn]
+  `[(keyword (name ~copy-to-dest-fn)) (fn [src# src-offset# dest# dest-offset# n-elems#]
+                                        (~(eval copy-to-dest-fn)
+                                         (host-ptr-as-buffer src#) src-offset#
+                                         dest# dest-offset# n-elems#))])
+
+(extend PageLockedPointer
+  marshal/PCopyToArray
+  (->> (marshal/array-type-iterator copy-to-host-ptr-impl)
+       (into {}))
+  marshal/PCopyToBuffer
+  (->> (marshal/buffer-type-iterator copy-to-host-ptr-impl)
+       (into {})))
+
+
+(defn- alloc-page-locked-memory
+  [driver ^long elem-count elem-type]
+  (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
+        retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
+    (check-cuda-error (cuda/cudaMallocHost retval size))
+    (cuda-library-debug-print "MallocHost: " (.address retval))
+    (jcpp-dtype/set-pointer-limit-and-capacity retval elem-count)
+    (resource/track (->PageLockedPointer size retval))))
+
+
+(extend-type Pointer
+  drv/PBuffer
+  (sub-buffer-impl [this offset length]
+    (-> (jcpp-dtype/offset-pointer this offset)
+        (jcpp-dtype/set-pointer-limit-and-capacity length)))
+
+  resource/PResource
+  (release-resource [item]
+    (jcpp-dtype/release-pointer item)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Launching Cuda Kernels
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn check-stream-device
+  [stream]
+  (when-not (identical? (get (drv/get-stream stream) :device)
+                        (drv/current-device))
+    (throw (ex-info "current device and stream device differ."
+                    {:current-device (drv/current-device)
+                     :stream-device (get (drv/get-stream stream) :device)}))))
+
+
+(defprotocol PCudaStreamProvider
+  (get-cuda-stream-impl [item]))
+
+(defn get-cuda-stream
+  ^cuda$CUstream_st [item]
+  (-> (drv/get-stream item)
+      get-cuda-stream-impl))
 
 
 (defprotocol PToJavaCPPPointer
@@ -545,6 +462,8 @@ set this device before.  Set device must be called before any other cuda functio
   (->ptr-impl [item] item)
   DevicePointer
   (->ptr-impl [item] (.ptr ^DevicePointer item))
+  PageLockedPointer
+  (->ptr-impl [item] (.ptr ^PageLockedPointer item))
   DeviceArray
   (->ptr-impl [item] (->ptr-impl (math/device-buffer item)))
   nil
@@ -651,6 +570,199 @@ relies only on blockDim.x block.x and thread.x"
            threads-per-block 1 1
            shared-mem-size
            kernel-args)))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;Compute driver implementation
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(defrecord CudaDriver [devices])
+(defrecord CudaDevice [device-id
+                       device-properties
+                       device-functions
+                       ^cublas$cublasContext cublas
+                       ^curand$curandGenerator_st curand
+                       resource-context])
+(defrecord CudaStream [^CudaDevice device ^cuda$CUstream_st stream])
+
+
+(extend-protocol PCudaStreamProvider
+  CudaStream
+  (get-cuda-stream-impl [item] (:stream item))
+  cuda$CUstream_st
+  (get-cuda-stream-impl [item] item))
+
+
+
+(extend-protocol drv/PDriverProvider
+  CudaDriver
+  (get-driver [item] item)
+  CudaDevice
+  (get-driver [item] ((get item :driver-fn)))
+  CudaStream
+  (get-driver [item] (drv/get-driver (.device item))))
+
+
+(extend-protocol drv/PDeviceProvider
+  CudaDevice
+  (get-device [item] item)
+  CudaStream
+  (get-device [item] (.device item)))
+
+
+(extend-protocol drv/PStreamProvider
+  CudaStream
+  (get-stream [item] item))
+
+
+(extend-type CudaDevice
+  resource/PResource
+  (release-resource [item]
+    (drv/unsafe-with-compute-device item
+      (let [res-ctx @(get item :resource-context)]
+        (resource/release-resource-context res-ctx)))))
+
+
+(defn- create-cuda-device
+  [driver device-id properties]
+  (set-cuda-device {:device-id device-id})
+  (let [retval (->CudaDevice device-id properties (atom nil) nil nil (atom nil))
+        [retval res-ctx] (resource/return-resource-context
+                          (with-bindings {#'drv/*current-compute-device* retval}
+                            ;;Most of these functions require a device to be active in order to work.
+                            (-> retval
+                                (assoc :cublas (blas-context)
+                                       :curand (rand-context)
+                                       ;;Use a function here instead of the object so that we can
+                                       ;;actually analyze the device in the repl.
+                                       :driver-fn (constantly driver))
+                                ((fn [retval]
+                                   (reset! (get retval :device-functions)
+                                           {:memset (load-all-datatype-function "memset")
+                                            :elementwise-multiply (load-float-double-function
+                                                                   "elementwise_multiply")
+                                            :l2-constraint-scale (load-float-double-function
+                                                                  "l2_constraint_scale")
+                                            :select (load-float-double-function "select")})
+                                   retval)))))]
+    (reset! (get retval :resource-context) res-ctx)
+    (resource/track retval)))
+
+
+(defn current-cuda-device
+  ^CudaDevice []
+  (drv/current-device))
+
+
+(defn get-blas
+  ^cublas$cublasContext []
+  (.cublas (current-cuda-device)))
+
+
+(defn get-rand
+  ^curand$curandGenerator_st []
+  (.curand (current-cuda-device)))
+
+
+
+(defmacro blas-with-stream
+  "Setting the blas stream is not threadsafe so we have to lock the object
+  before we set it, do the operation, and unlock the object after."
+  [stream & body]
+  `(let [stream# ~stream
+         ^cublas$cublasContext ~'cublas (get-blas)]
+     (check-stream-device stream#)
+     (locking ~'cublas
+       (cublas/cublasSetStream_v2 ~'cublas (get-cuda-stream ~stream))
+       ~@body)))
+
+
+(defmacro rand-with-stream
+  "See comments for blas-with-stream; same conditions hold."
+  [stream & body]
+  `(let [stream# ~stream
+         ^curand$curandGenerator_st ~'rand-context (get-rand)]
+     (check-stream-device stream#)
+     (locking ~'rand-context
+       (curand/curandSetStream ~'rand-context (get-cuda-stream stream#))
+       ~@body)))
+
+
+(def ^:dynamic *use-page-locked-memory* true)
+
+(extend-type CudaDriver
+  drv/PDriver
+  (get-devices [impl]
+    (let [devices-atom (get impl :devices)]
+      (when-not @devices-atom
+        (reset! devices-atom
+                (->> (list-devices)
+                     (map (fn [dev-info]
+                            (try
+                              (create-cuda-device impl (get dev-info :device-id) dev-info)
+                              (catch Throwable e
+                                (println "Failed to create device: "
+                                         dev-info e)
+                                nil))))
+                     (remove nil?)
+                     vec)))
+      @devices-atom))
+
+
+  (allocate-host-buffer-impl [impl elem-count elem-type {:keys [usage-type]}]
+    (condp = usage-type
+      :one-time
+      (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count))
+      :reusable
+      (alloc-page-locked-memory impl elem-count elem-type))))
+
+
+(extend-type CudaDevice
+  drv/PDevice
+  (memory-info-impl [impl]
+    (get-memory-info (get impl :device-id)))
+
+  (create-stream-impl [impl]
+    (drv/unsafe-with-compute-device
+     impl
+     (let [retval (cuda$CUstream_st.)]
+       (cuda-call (cuda/cudaStreamCreate retval))
+       (->CudaStream impl (resource/track retval)))))
+
+  (allocate-device-buffer-impl [impl ^long elem-count elem-type]
+    (drv/unsafe-with-compute-device
+     impl
+     (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
+           retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
+       (cuda-call (cuda/cudaMalloc retval size))
+       (cuda-library-debug-print "Malloc: " (.address retval))
+       (resource/track (->DevicePointer size retval)))))
+
+  (allocate-rand-buffer-impl [impl elem-count]
+    (drv/allocate-device-buffer-impl impl elem-count :float)))
+
+
+(defn- check-copy-buffer-types-and-sizes
+  [src-buffer src-offset dest-buffer dest-offset elem-count]
+  (let [src-offset (long src-offset)
+        src-len (dtype/ecount src-buffer)
+        src-dtype (dtype/get-datatype src-buffer)
+        dest-offset (long dest-offset)
+        dest-len (dtype/ecount dest-buffer)
+        dest-dtype (dtype/get-datatype dest-buffer)
+        elem-count (long elem-count)]
+    (when-not (= dest-dtype src-dtype)
+      (throw (ex-info "Copy datatypes do not match"
+                      {:src-dtype src-dtype
+                       :dest-dtype dest-dtype})))
+    (when-not (<= (+ src-offset elem-count)
+                  src-len)
+      (throw (Exception. "Attempt to copy past extents of buffer.")))
+    (when-not (<= (+ dest-offset elem-count)
+                  dest-len)
+      (throw (Exception. "Attempt to copy past extents of buffer.")))))
 
 
 (defn generalized-cuda-async-copy
@@ -1145,3 +1257,12 @@ relies only on blockDim.x block.x and thread.x"
   drv/PEvent
   (wait-for-event [evt]
     (cuda-call (cuda/cudaEventSynchronize evt))))
+
+
+(defn driver
+  []
+  (when (and drv/*current-compute-device*
+             (instance? CudaDevice (drv/current-device)))
+    (throw (ex-info "CUDA driver created while CUDA device is bound"
+                    {:current-device (drv/current-device)})))
+  (->CudaDriver (atom nil)))

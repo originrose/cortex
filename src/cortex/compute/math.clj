@@ -6,7 +6,8 @@ in here should be 100% portable across different compute drivers."
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
             [cortex.compute.driver :as drv]
-            [think.datatype.core :as dtype]))
+            [think.datatype.core :as dtype]
+            [think.resource.core :as resource]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -100,6 +101,7 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   ([width]
    (tensor 1 1 1 width)))
 
+
 (defn core-mat-shape->tensor
   "Given a core-matrix shape produce a tensor."
   (^Tensor [shape]
@@ -160,13 +162,13 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   (batch-size [item] (.batch-size item)))
 
 
-(defn make-array-of-type
-  "Given a datatype and a specific amount of data then produce an array of that specific type."
+(defn make-java-array
+  "Given a datatype and a specific amount of data then produce an array.  If there is no fast path
+then an array of a given type is produced."
   [datatype data]
   (let [data (or (mp/as-double-array data)
                  data)]
-    (if (and (dtype/is-primitive-array? data)
-             (= (dtype/get-datatype data) datatype))
+    (if (dtype/is-primitive-array? data)
       data
       (dtype/make-array-of-type datatype (vec (m/eseq data))))))
 
@@ -203,45 +205,51 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
 (defn array
   "Create an array.  Similar to the core-matrix array function but also takes a batch-size
 argument for creating an array storing a batch of data."
-  ([device stream datatype data batch-size]
+  ([stream datatype data batch-size]
    (let [batch-size (long batch-size)
          data-shape (m/shape data)
-         data-ary (make-array-of-type datatype data)
+         data-ary (make-java-array datatype data)
          ;;synchronous call.
-         data-ptr (drv/host-array->device-buffer device stream data-ary)
+         data-ptr (drv/host-array->device-buffer stream data-ary :datatype datatype)
          n-elems (m/ecount data-ary)
          tensor (core-mat-shape->tensor data-shape batch-size)]
      (->DeviceArray data-ptr tensor)))
-  ([device stream datatype data] (array device stream datatype data 1)))
+  ([stream datatype data] (array stream datatype data 1)))
+
 
 (defn new-array
   "Create a new array with a given core-matrix shape and batch size."
-  ([device stream datatype shape batch-size]
-   (let [batch-size (long batch-size)
+  ([stream datatype shape batch-size]
+   (let [device (drv/get-device stream)
+         batch-size (long batch-size)
          t (core-mat-shape->tensor shape)
          t (tensor batch-size 1 (.height t) (.width t))
          n-elems (long (mp/element-count t))
-         dev-buf (drv/allocate-device-buffer device n-elems datatype)]
+         dev-buf (drv/allocate-device-buffer n-elems datatype :device device)]
      (drv/memset stream dev-buf 0 0 n-elems)
      (->DeviceArray dev-buf t)))
-  ([device stream datatype shape] (new-array device stream datatype shape 1))
-  ([device stream datatype batch-size channel-count height width]
-   (let [t (tensor batch-size channel-count height width)
+  ([stream datatype shape] (new-array stream datatype shape 1))
+  ([stream datatype batch-size channel-count height width]
+   (let [device (drv/get-device stream)
+         t (tensor batch-size channel-count height width)
          n-elems (long (mp/element-count t))
-         device-buffer (drv/allocate-device-buffer device n-elems datatype)]
+         device-buffer (drv/allocate-device-buffer n-elems datatype :device device)]
      (drv/memset stream device-buffer 0 0 n-elems)
      (->DeviceArray device-buffer t))))
 
+
 (defn allocate-ones
   "Allocate a buffer of ones, not an array of ones"
-  [device stream datatype elem-count]
-  (let [retval (drv/allocate-device-buffer device elem-count datatype)]
+  [stream datatype elem-count]
+  (let [device (drv/get-device stream)
+        retval (drv/allocate-device-buffer-impl device elem-count datatype)]
     (drv/memset stream retval 0 1 elem-count)
     (->DeviceArray retval (tensor elem-count))))
 
+
 (defn allocate-rand-buffer
-  [device elem-count]
-  (let [retval (drv/allocate-rand-buffer device elem-count)]
+  [elem-count]
+  (let [retval (drv/allocate-rand-buffer elem-count)]
     (->DeviceArray retval (tensor elem-count))))
 
 (defn ecount
@@ -296,18 +304,20 @@ argument for creating an array storing a batch of data."
 (defn to-core-matrix
   "Convert a device array to a core-matrix type.  This uses generic code and so if you know your backend
 supports it then there may be a faster way to do this operation."
-  ([device stream ^DeviceArray ary shape]
-   (let [retval (m/new-array :vectorz shape)
+  ([stream ^DeviceArray ary shape]
+   (let [device (drv/get-device stream)
+         retval (m/new-array :vectorz shape)
          ^doubles ret-ary (mp/as-double-array retval)
          elem-count (alength ret-ary)
-         host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
+         host-buf (drv/allocate-host-buffer (drv/get-driver device) elem-count (dtype/get-datatype ary))]
      (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
      (drv/sync-stream stream)
      (dtype/copy! host-buf 0 ret-ary 0 elem-count)
+     (resource/release host-buf)
      retval))
   ;;Defaults to a 2d representation
-  ([device stream ^DeviceArray ary]
-   (to-core-matrix device stream ary
+  ([stream ^DeviceArray ary]
+   (to-core-matrix stream ary
                    (if (is-tensor-1d-complete? (.tensor ary))
                      (shape-1d ary)
                      (shape-2d ary)))))
@@ -315,20 +325,22 @@ supports it then there may be a faster way to do this operation."
 
 (defn device-array->array
   "Copy a DeviceArray into a java array of a given datatype."
-  [device stream datatype ^DeviceArray ary]
-  (let [elem-count (ecount ary)
+  [stream datatype ^DeviceArray ary]
+  (let [device (drv/get-device stream)
+        elem-count (ecount ary)
         retval (dtype/make-array-of-type datatype elem-count)
-        host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
+        host-buf (drv/allocate-host-buffer (drv/get-driver device) elem-count (dtype/get-datatype ary))]
     (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
     (drv/sync-stream stream)
     (dtype/copy! host-buf 0 retval 0 elem-count)
+    (resource/release host-buf)
     retval))
 
 
 (defn to-double-array
   "Copy an DeviceArray into a double array."
-  [device stream ^DeviceArray ary]
-  (device-array->array device stream :double ary))
+  [stream ^DeviceArray ary]
+  (device-array->array stream :double ary))
 
 
 (defn gemm
@@ -411,7 +423,7 @@ being smaller than X so it can act as an accumulator for X."
 (defn split-array-into-batches
   "Given a device array with some batch size return a vector
 of device arrays one for each element in the batch."
-  [driver ^DeviceArray ary-data]
+  [^DeviceArray ary-data]
   (let [^Tensor t (.tensor ary-data)
         [batch-size batch-stride] (batch-shape ary-data)
         batch-size (long batch-size)
@@ -420,7 +432,7 @@ of device arrays one for each element in the batch."
                            (.height t) (.width t))
         dev-buf (device-buffer ary-data)]
     (mapv (fn [^long batch-idx]
-            (->DeviceArray (drv/sub-buffer driver dev-buf (* batch-idx batch-stride)
+            (->DeviceArray (drv/sub-buffer dev-buf (* batch-idx batch-stride)
                                            batch-stride) sub-tensor))
           (range batch-size))))
 
@@ -429,8 +441,9 @@ of device arrays one for each element in the batch."
   "Given a sequence of DeviceArrays return a sequence of arrays with the device
 arrays split into one entry per batch.  So for example if I have a batch size of 5
 and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 output-2 ...]]"
-  [driver data-array-seq]
-  (vec (partition (count data-array-seq)
-                  (apply interleave
-                         (map #(split-array-into-batches driver %)
-                              data-array-seq)))))
+  [data-array-seq]
+  (->> data-array-seq
+       (map split-array-into-batches)
+       (apply interleave)
+       (partition (count data-array-seq))
+       vec))

@@ -27,10 +27,7 @@
 
 (defn- setup-optimizer
   [backend optimizer step-fn]
-  (let [driver (drv/get-driver backend)
-        stream (compute-backend/get-stream)
-        datatype (dtype/get-datatype backend)]
-   (->Adadelta backend optimizer step-fn)))
+  (->Adadelta backend optimizer step-fn))
 
 (defn cpu-adadelta-step-float!
   [^FloatArrayView gradient ^FloatArrayView parameters gradient-alpha

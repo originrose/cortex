@@ -55,8 +55,7 @@
 
 (defn- ->buffer
   ([backend array ^long offset]
-   (drv/sub-buffer (drv/get-driver backend)
-                   (math/device-buffer array)
+   (drv/sub-buffer (math/device-buffer array)
                    offset
                    (- (dtype/ecount array) offset)))
   ([backend buffer]
@@ -164,10 +163,7 @@
 
 (defn- setup-optimizer
   [backend optimizer step-fn]
-  (let [driver (drv/get-driver backend)
-        stream (compute-backend/get-stream)
-        datatype (dtype/get-datatype backend)]
-    (->Adam backend optimizer step-fn POW-BETA1-T POW-BETA2-T)))
+  (->Adam backend optimizer step-fn POW-BETA1-T POW-BETA2-T))
 
 
 (defmethod create-optimizer [:cpu :adam]

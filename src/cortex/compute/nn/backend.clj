@@ -22,9 +22,12 @@
 (defmacro with-backend
   [backend & body]
   `(let [backend# ~backend]
-     (drv/with-compute-device (drv/get-device backend#)
-       (with-bindings {#'*current-backend-stream* (drv/get-stream backend#)}
-         ~@body))))
+     (-> (drv/with-compute-device (drv/get-device backend#)
+           (with-bindings {#'*current-backend-stream* (drv/get-stream backend#)}
+             ~@body))
+         ;;let an enclosing resource context deal with the resources created while the
+         ;;compute device was active.
+         first)))
 
 
 (defmacro with-stream
@@ -65,25 +68,25 @@ computelayer/forward,backward."
 
 (defn array
   ([backend data items-per-batch]
-   (math/array (drv/get-driver backend) (get-stream) (dtype/get-datatype backend)
+   (math/array (get-stream) (dtype/get-datatype backend)
                data items-per-batch))
   ([backend data]
    (array backend data 1)))
 
 (defn new-array
   ([backend shape items-per-batch]
-   (math/new-array (drv/get-driver backend) (get-stream) (dtype/get-datatype backend)
+   (math/new-array (get-stream) (dtype/get-datatype backend)
                    shape items-per-batch))
   ([backend shape]
    (new-array backend shape 1)))
 
 (defn allocate-ones [backend elem-count]
-  (math/allocate-ones (drv/get-driver backend) (get-stream)
+  (math/allocate-ones (get-stream)
                       (dtype/get-datatype backend) elem-count))
 
 (defn allocate-rand-buffer
   [backend elem-count]
-  (math/allocate-rand-buffer (drv/get-driver backend) elem-count))
+  (math/allocate-rand-buffer elem-count))
 
 (defn assign!
   [backend dest src]
@@ -91,12 +94,11 @@ computelayer/forward,backward."
 
 (defn to-core-matrix
   [backend ary]
-  (math/to-core-matrix (drv/get-driver backend) (get-stream) ary))
+  (math/to-core-matrix (get-stream) ary))
 
 (defn device-array->array
   [backend datatype device-ary]
-  (math/device-array->array (drv/get-driver backend) (get-stream)
-                            datatype device-ary))
+  (math/device-array->array (get-stream) datatype device-ary))
 
 (defn to-double-array
   [backend ary]

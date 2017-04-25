@@ -304,14 +304,14 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                      {:data-size data-size
                                       :batch-size batch-size
                                       :stream k})))
-                 device-array (math/new-array driver
-                                              stream
+                 device-array (math/new-array stream
                                               datatype
                                               [item-size]
                                               batch-size)
                  host-buffer (drv/allocate-host-buffer driver
                                                        (* item-size batch-size)
-                                                       datatype)]
+                                                       datatype
+                                                       :usage-type :reusable)]
              [k {:device-array device-array
                  :host-buffer host-buffer}]))
          (into {}))))

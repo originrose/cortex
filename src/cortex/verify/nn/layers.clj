@@ -155,7 +155,7 @@
   [context]
   (let [item-count 10
         ;;sums to zero
-        {:keys [output input-gradient]}
+        {:keys [output input-gradient] :as unpack}
         (forward-backward-test [(layers/input item-count)
                                 (layers/relu)]
                                context
