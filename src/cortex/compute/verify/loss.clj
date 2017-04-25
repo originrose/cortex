@@ -47,12 +47,11 @@
                    (graph/add-stream :labels (graph/stream-descriptor 5))
                    graph/build-graph
                    graph/generate-parameters)
-         driver (drv/get-driver backend)
          stream (backend/get-stream)
          stream->buffer-map (->> (graph/augment-streams graph input-buffer-map)
                                  (map (fn [[k v]]
                                         (if (map? v)
-                                          [k {:buffer (math/array driver stream (get v :datatype) (get v :data))}]
+                                          [k {:buffer (math/array stream (get v :datatype) (get v :data))}]
                                           [k {:buffer (backend/array backend v)}])))
                                  (into {}))
          ;;Upload buffers to device.

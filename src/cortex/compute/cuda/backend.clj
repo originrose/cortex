@@ -230,7 +230,7 @@
                                       (cuda-drv/load-float-double-function
                                        "prepare_gaussian_dropout.fatbin"
                                        "prepare_gaussian_dropout")}
-                   default-stream (or stream (drv/create-stream driver))]
+                   default-stream (or stream (drv/create-stream))]
                (->CudaBackend :cuda device default-stream (cudnn-context) datatype network-functions)))]
         (resource/track (assoc backend :resource-context res-ctx))))))
 
@@ -665,7 +665,7 @@ Backward Data: %s %d"
                                     (.get backward-filter-workspace-size)
                                     (.get backward-data-workspace-size))
           workspace (when-not (= 0 total-workspace-size)
-                      (drv/allocate-device-buffer (drv/get-driver backend) total-workspace-size :byte))]
+                      (drv/allocate-device-buffer total-workspace-size :byte))]
       (map->ConvolutionLayer
        {:backend backend
         :workspace workspace

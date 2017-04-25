@@ -50,7 +50,7 @@
         device (or device (drv/default-device driver))]
     (drv/unsafe-with-compute-device
      device
-     (let [stream (or stream (drv/create-stream driver))
+     (let [stream (or stream (drv/create-stream))
            [backend res-ctx]
            (resource/return-resource-context
             (->CPUBackend :cpu device stream datatype (atom nil)))]
@@ -966,8 +966,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                           (long (:output-height conv-config)))]
     (->ConvolutionalLayer backend conv-config
                           (convolution-matrix conv-config backend batch-size)
-                          (math/allocate-ones (drv/get-driver backend) (drv/get-stream backend)
-                                              (dtype/get-datatype backend) num-out-pixels))))
+                          (nn-backend/allocate-ones backend num-out-pixels))))
 
 (extend-type ConvolutionalLayer
   compute-protocols/ComputeLayer
@@ -1003,7 +1002,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                    1.0 weights input-convolved
                                    1.0 output)))
                     (math/batched-data-to-per-input-data
-                     (drv/get-driver (.backend layer))
                      [input output (.input-convolved layer)]))))))
 
   (backward [layer parameter-buffers output-buffers input-buffers]
@@ -1020,10 +1018,9 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
           bias (get-in parameter-buffers [:bias :buffer])
           weight-gradient (get-in parameter-buffers [:weights :gradient])
           bias-gradient (get-in parameter-buffers [:bias :gradient])
-          batch-driver (drv/get-driver (.backend layer))
           input-convolved (:input-convolved layer)
           batched-data [input output input-gradient output-gradient input-convolved]
-          io-data (math/batched-data-to-per-input-data batch-driver batched-data)
+          io-data (math/batched-data-to-per-input-data batched-data)
           cpu-stream (drv/get-stream (.backend layer))
           current-thread-stream (cpu-drv/main-thread-cpu-stream)]
       (cpu-drv/with-stream-dispatch cpu-stream
@@ -1073,8 +1070,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                        (cpu-max-pooling-forward (device-array->view input)
                                                 (device-array->view output)
                                                 conv-config))
-                     (math/batched-data-to-per-input-data (drv/get-driver (.backend layer))
-                                                          [input output]))))))
+                     (math/batched-data-to-per-input-data [input output]))))))
 
   (backward [layer parameters output-buffers input-buffers]
     (let [input (compute-layers/first-buffer input-buffers)
@@ -1090,7 +1086,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                                  (device-array->view output-gradient)
                                                  conv-config))
                      (math/batched-data-to-per-input-data
-                      (drv/get-driver (.backend layer))
                       [input output input-gradient output-gradient])))))))
 
 

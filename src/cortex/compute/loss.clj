@@ -83,8 +83,7 @@ buffer is expected to be entirely overwritten by operation."
 
 (defmethod create-compute-loss-term :l1-regularization
   [backend network loss-term batch-size]
-  (let [driver (drv/get-driver backend)
-        datatype (dtype/get-datatype backend)
+  (let [datatype (dtype/get-datatype backend)
         graph (network/network->graph network)
         argument (graph/get-node-argument loss-term :output)
         term-size (->> (graph/get-argument-shape graph
@@ -95,9 +94,8 @@ buffer is expected to be entirely overwritten by operation."
                          :node-output)
                     (* term-size batch-size)
                     term-size)]
-    (->L1RegularizationLoss loss-term backend (drv/allocate-device-buffer driver
-                                                                          term-size
-                                                                          datatype))))
+    (->L1RegularizationLoss loss-term backend
+                            (drv/allocate-device-buffer term-size datatype))))
 
 
 (defrecord L2RegularizationLoss [loss-term backend]
@@ -169,12 +167,10 @@ buffer is expected to be entirely overwritten by operation."
         labels-shape (graph/get-argument-shape graph loss-term
                                                (graph/get-node-argument loss-term :labels))
         batch-centers (backend/new-array backend output-shape batch-size)
-        monotonic-indexes (math/array (drv/get-driver backend)
-                                      (backend/get-stream)
+        monotonic-indexes (math/array (backend/get-stream)
                                       :int
                                       (range batch-size))
-        label-indexes (math/new-array (drv/get-driver backend)
-                                      (backend/get-stream)
+        label-indexes (math/new-array (backend/get-stream)
                                       :int
                                       [batch-size])
         temp-centers (backend/new-array backend [(apply * labels-shape) (apply * output-shape)])]

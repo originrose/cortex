@@ -741,7 +741,7 @@ relies only on blockDim.x block.x and thread.x"
        (resource/track (->DevicePointer size retval)))))
 
   (allocate-rand-buffer-impl [impl elem-count]
-    (drv/allocate-device-buffer impl elem-count :float)))
+    (drv/allocate-device-buffer-impl impl elem-count :float)))
 
 
 (defn- check-copy-buffer-types-and-sizes

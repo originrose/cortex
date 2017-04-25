@@ -431,7 +431,8 @@
          :host-buffer (drv/allocate-host-buffer driver
                                                 (* batch-size
                                                    (long size))
-                                                datatype)
+                                                datatype
+                                                :usage-type :reusable)
          :buffers (node-activations network id)}))
      (network/output-node-ids network graph-type))))
 
@@ -454,16 +455,24 @@
                                           (math/device-buffer buffer) 0
                                           host-buffer 0
                                           (dtype/ecount host-buffer))
-                   (drv/sync-stream stream)
-                   (c-for [idx 0 (< idx batch-size) (inc idx)]
-                          (dtype/copy! host-buffer (long (* idx output-size))
-                                       (get double-buffers idx) 0
-                                       output-size))
-                   (mapv (fn [buffer]
-                           {node-id (if (< output-size max-result-vector-size)
-                                      (vec buffer)
-                                      buffer)})
-                         double-buffers))))
+                   {:host-buffer host-buffer
+                    :output-size output-size
+                    :double-buffers double-buffers
+                    :node-id node-id})))
+         ((fn [buf-seq]
+            ;;One sync for entire buffer set.
+            (drv/sync-stream stream)
+            (->> buf-seq
+                 (mapv (fn [{:keys [host-buffer output-size double-buffers node-id]}]
+                         (c-for [idx 0 (< idx batch-size) (inc idx)]
+                                (dtype/copy! host-buffer (long (* idx output-size))
+                                             (get double-buffers idx) 0
+                                             output-size))
+                         (mapv (fn [buffer]
+                                 {node-id (if (< output-size max-result-vector-size)
+                                            (vec buffer)
+                                            buffer)})
+                               double-buffers))))))
          (apply map merge))))
 
 

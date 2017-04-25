@@ -6,7 +6,8 @@ in here should be 100% portable across different compute drivers."
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
             [cortex.compute.driver :as drv]
-            [think.datatype.core :as dtype]))
+            [think.datatype.core :as dtype]
+            [think.resource.core :as resource]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -99,6 +100,7 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
    (tensor 1 1 height width))
   ([width]
    (tensor 1 1 1 width)))
+
 
 (defn core-mat-shape->tensor
   "Given a core-matrix shape produce a tensor."
@@ -302,18 +304,20 @@ argument for creating an array storing a batch of data."
 (defn to-core-matrix
   "Convert a device array to a core-matrix type.  This uses generic code and so if you know your backend
 supports it then there may be a faster way to do this operation."
-  ([device stream ^DeviceArray ary shape]
-   (let [retval (m/new-array :vectorz shape)
+  ([stream ^DeviceArray ary shape]
+   (let [device (drv/get-device stream)
+         retval (m/new-array :vectorz shape)
          ^doubles ret-ary (mp/as-double-array retval)
          elem-count (alength ret-ary)
-         host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
+         host-buf (drv/allocate-host-buffer (drv/get-driver device) elem-count (dtype/get-datatype ary))]
      (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
      (drv/sync-stream stream)
      (dtype/copy! host-buf 0 ret-ary 0 elem-count)
+     (resource/release host-buf)
      retval))
   ;;Defaults to a 2d representation
-  ([device stream ^DeviceArray ary]
-   (to-core-matrix device stream ary
+  ([stream ^DeviceArray ary]
+   (to-core-matrix stream ary
                    (if (is-tensor-1d-complete? (.tensor ary))
                      (shape-1d ary)
                      (shape-2d ary)))))
@@ -321,13 +325,15 @@ supports it then there may be a faster way to do this operation."
 
 (defn device-array->array
   "Copy a DeviceArray into a java array of a given datatype."
-  [device stream datatype ^DeviceArray ary]
-  (let [elem-count (ecount ary)
+  [stream datatype ^DeviceArray ary]
+  (let [device (drv/get-device stream)
+        elem-count (ecount ary)
         retval (dtype/make-array-of-type datatype elem-count)
-        host-buf (drv/allocate-host-buffer device elem-count (dtype/get-datatype ary))]
+        host-buf (drv/allocate-host-buffer (drv/get-driver device) elem-count (dtype/get-datatype ary))]
     (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
     (drv/sync-stream stream)
     (dtype/copy! host-buf 0 retval 0 elem-count)
+    (resource/release host-buf)
     retval))
 
 
