@@ -335,7 +335,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn- dataset->uploading-batches
-  [network dataset batch-size batch-transfer-parallelism]
+  [network dataset batch-size batch-transfer-parallelism training?]
   (let [batch-transfer-parallelism (long (max batch-transfer-parallelism 1))
         batches (->> (dataset-batches dataset batch-size)
                      (map (partial graph/augment-streams (network/network->graph network))))
@@ -346,7 +346,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
         device (drv/current-device)
         batch-buffer-seq (->> (range batch-transfer-parallelism)
                               (mapv (fn [_]
-                                      (let [batch-buffers (batch-buffers network (first batches) true)]
+                                      (let [batch-buffers (batch-buffers network (first batches) training?)]
                                         {:batch-buffers batch-buffers
                                          :stream->buffer-map (zipmap (keys batch-buffers)
                                                                      (map :device-array (vals batch-buffers)))
@@ -378,7 +378,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
                      (traverse/training-traversal network)
                      {:optimizer optimizer})
             uploading-batches (dataset->uploading-batches network dataset batch-size
-                                                          batch-transfer-parallelism)]
+                                                          batch-transfer-parallelism
+                                                          true)]
         (doseq [{:keys [stream->buffer-map batch-stream]} uploading-batches]
           ;;Ensure the data is uploaded
           (drv/sync-streams batch-stream (compute-binding/stream network))
@@ -408,7 +409,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
             datatype (dtype/get-datatype (current-backend))
             ;;Replace the incoming stream buffers with the ones from the batching system.
             uploading-batches (dataset->uploading-batches network dataset batch-size
-                                                          batch-transfer-parallelism)
+                                                          batch-transfer-parallelism
+                                                          false)
 
             output-buffers (compute-binding/output-binding-buffers network
                                                                    batch-size
