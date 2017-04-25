@@ -246,6 +246,14 @@ executes to the event.")
     (resource/release evt)))
 
 
+(defn sync-streams
+  "Force wait-stream to wait for event-stream"
+  [event-stream wait-stream]
+  (let [evt (create-event event-stream)]
+    (sync-event wait-stream evt)
+    (resource/release evt)))
+
+
 (defn host-array->device-buffer
   "Synchronously make a device buffer with these elements in it."
   [stream upload-ary & {:keys [datatype]

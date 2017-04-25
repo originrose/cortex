@@ -15,6 +15,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [clojure.core.matrix.macros :refer [c-for]]
     [think.resource.core :as resource]
     [think.datatype.core :as dtype]
+    [think.parallel.core :as parallel]
     [cortex.dataset :as ds]
     [cortex.graph :as graph]
     [cortex.loss :as loss]
@@ -318,7 +319,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn load-batch!
-  [network batch batch-buffers]
+  [stream batch batch-buffers]
   (doseq [[k {:keys [device-array host-buffer]}] batch-buffers]
     (let [data (get batch k)
           data (if (map? data) (:data data) data)
@@ -327,17 +328,46 @@ Furthermore infer should be both wrapped in a resource context and completely re
         (throw (ex-info "Failed to load-batch!"
                         {:item-count item-count
                          :buffer-size (m/ecount host-buffer)}))))
-    (drv/copy-host->device (compute-binding/stream network)
+    (drv/copy-host->device stream
                            host-buffer 0
                            (math/device-buffer device-array) 0
                            (m/ecount host-buffer))))
 
+
+(defn- dataset->uploading-batches
+  [network dataset batch-size batch-transfer-parallelism]
+  (let [batch-transfer-parallelism (long (max batch-transfer-parallelism 1))
+        batches (->> (dataset-batches dataset batch-size)
+                     (map (partial graph/augment-streams (network/network->graph network))))
+        _ (when (empty? batches)
+                (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
+                                {:batch-size batch-size
+                                 :dataset-count (count dataset)})))
+        device (drv/current-device)
+        batch-buffer-seq (->> (range batch-transfer-parallelism)
+                              (mapv (fn [_]
+                                      (let [batch-buffers (batch-buffers network (first batches) true)]
+                                        {:batch-buffers batch-buffers
+                                         :stream->buffer-map (zipmap (keys batch-buffers)
+                                                                     (map :device-array (vals batch-buffers)))
+                                         :stream (drv/create-stream)}))))]
+    (->> (map (fn [batch batch-buffer]
+                (assoc batch-buffer :batch batch))
+              batches (->> (repeat batch-buffer-seq)
+                           (apply concat)))
+         (parallel/queued-pmap (- batch-transfer-parallelism 1)
+                               (fn [{:keys [batch-buffers stream->buffer-map stream batch]}]
+                                 (load-batch! stream batch batch-buffers)
+                                 {:stream->buffer-map stream->buffer-map
+                                  :batch-stream stream})))))
+
 (defn train
   "Train.  Returns a tuple of network and optimizer where both the network and optimizer's
   parameters are updated."
-  [network dataset & {:keys [batch-size context optimizer datatype]
+  [network dataset & {:keys [batch-size context optimizer datatype batch-transfer-parallelism]
                       :or {batch-size 10
-                           datatype :float}}]
+                           datatype :float
+                           batch-transfer-parallelism 2}}]
   (let [context (or context (compute-context :datatype datatype))]
     (with-compute-context context
       (let [optimizer (or optimizer (adam/adam))
@@ -347,17 +377,14 @@ Furthermore infer should be both wrapped in a resource context and completely re
                      batch-size
                      (traverse/training-traversal network)
                      {:optimizer optimizer})
-            batches (->> (dataset-batches dataset batch-size)
-                         (map (partial graph/augment-streams (network/network->graph network))))
-            batch-buffers (batch-buffers network (first batches) true)
-            stream (compute-binding/stream network)
-            stream->buffer-map (zipmap (keys batch-buffers)
-                                       (map :device-array (vals batch-buffers)))
-            network (assoc-in network [:compute-binding :stream->buffer-map]
-                              stream->buffer-map)]
-        (doseq [batch batches]
-          (load-batch! network batch batch-buffers)
-          (train-batch! network stream->buffer-map :optimize? true))
+            uploading-batches (dataset->uploading-batches network dataset batch-size
+                                                          batch-transfer-parallelism)]
+        (doseq [{:keys [stream->buffer-map batch-stream]} uploading-batches]
+          ;;Ensure the data is uploaded
+          (drv/sync-streams batch-stream (compute-binding/stream network))
+          (train-batch! network stream->buffer-map :optimize? true)
+          ;;Ensure the network is finished before we upload more things.
+          (drv/sync-streams (compute-binding/stream network) batch-stream))
         (compute-binding/save-to-network context network {:save-optimizer-parameters? true})))))
 
 
@@ -365,9 +392,10 @@ Furthermore infer should be both wrapped in a resource context and completely re
   "Run a network on a dataset.  The results are returned as a sequence of maps where the node
   :id is the key for each output value.  There is an option to include outputs required to
   generate the actual network loss."
-  [network dataset & {:keys [batch-size context datatype loss-outputs?]
+  [network dataset & {:keys [batch-size context datatype loss-outputs? batch-transfer-parallelism]
                       :or {batch-size 1
-                           datatype :float}
+                           datatype :float
+                           batch-transfer-parallelism 2}
                       :as options}]
   (let [context (or context (compute-context :datatype datatype))]
     (with-compute-context context
@@ -377,32 +405,28 @@ Furthermore infer should be both wrapped in a resource context and completely re
                      batch-size
                      (traverse/inference-traversal network)
                      {})
-            ;;In the case where the context was passed in we ignore the datatype argument
-            ;;else we run into problems pulling data off the gpu.
-
-            datatype (get context :datatype)
-            batches (->> (dataset-batches dataset batch-size)
-                         (map (partial graph/augment-streams (network/network->graph network))))
-            _ (when (empty? batches)
-                (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
-                                {:batch-size batch-size
-                                 :dataset-count (count dataset)})))
-
-            batch-buffers (batch-buffers network (first batches) false)
-            stream->buffer-map (zipmap (keys batch-buffers)
-                                       (map :device-array (vals batch-buffers)))
+            datatype (dtype/get-datatype (current-backend))
             ;;Replace the incoming stream buffers with the ones from the batching system.
+            uploading-batches (dataset->uploading-batches network dataset batch-size
+                                                          batch-transfer-parallelism)
 
-            network (compute-binding/update-traversal-buffers network stream->buffer-map :stream :buffer)
             output-buffers (compute-binding/output-binding-buffers network
                                                                    batch-size
                                                                    datatype
                                                                    (if loss-outputs?
                                                                      :training
                                                                      :inference))]
-        (->> batches
-             (mapcat (fn [next-batch]
-                       (load-batch! network next-batch batch-buffers)
-                       (compute-binding/do-traverse network :inference)
-                       (compute-binding/output-values network output-buffers)))
+        (->> uploading-batches
+             (mapcat (fn [{:keys [stream->buffer-map batch-stream]}]
+                       ;;Ensure data has finished before going on to next thing
+                       (drv/sync-streams batch-stream (compute-binding/stream network))
+                       (let [network (compute-binding/update-traversal-buffers network stream->buffer-map
+                                                                               :stream :buffer)]
+                         (compute-binding/do-traverse network :inference)
+                         ;;output-values has an assumed sync at this point.
+                         (let [retval (compute-binding/output-values network output-buffers)]
+                           ;;Ensure whatever output path is necessary has finished before we start uploading
+                           ;;more data.
+                           (drv/sync-streams (compute-binding/stream network) batch-stream)
+                           retval))))
              vec)))))
