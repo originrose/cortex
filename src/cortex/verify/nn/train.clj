@@ -101,7 +101,7 @@
     (execute/with-compute-context context
       (let [dataset CORN-DATASET
             labels (map :label dataset)
-            big-dataset (apply concat (repeat 2000 dataset))
+            big-dataset (apply concat (repeat 100 dataset))
             optimizer (adam/adam :alpha 0.01)
             network (corn-network)
             network (loop [network network
@@ -201,8 +201,8 @@
   (let [context (or context (execute/compute-context))]
     (execute/with-compute-context context
       (let [network (network/linear-network MNIST-NETWORK)
-            batch-size 100
-            test-dataset (take 2000 @mnist-test-dataset*)
+            batch-size 10
+            test-dataset (take 100 @mnist-test-dataset*)
             test-dataset-seq (->> (repeat 10 test-dataset)
                                   (map (fn [dataset]
                                          {:dataset dataset
@@ -210,14 +210,14 @@
             test-labels (map :label test-dataset)
 
             losses (time (->> test-dataset-seq
-                              (pmap (fn [{:keys [dataset stream]}]
-                                      (nn-backend/with-stream stream
-                                        (->> (execute/run network dataset
-                                               :context context
-                                               :batch-size batch-size)
-                                             ((fn [inferences]
-                                                (-> (percent= (map :label inferences) test-labels)
-                                                    (* 100))))))))
+                              (map (fn [{:keys [dataset stream]}]
+                                     (nn-backend/with-stream stream
+                                       (->> (execute/run network dataset
+                                              :context context
+                                              :batch-size batch-size)
+                                            ((fn [inferences]
+                                               (-> (percent= (map :label inferences) test-labels)
+                                                   (* 100))))))))
                               distinct
                               vec))]
         (is (= 1 (count losses)))

@@ -515,7 +515,7 @@ set this device before.  Set device must be called before any other cuda functio
                                          (host-ptr-as-buffer src#) src-offset#
                                          dest# dest-offset# n-elems#))])
 
-(extend Pointer
+(extend HostPointer
   marshal/PCopyToArray
   (->> (marshal/array-type-iterator copy-to-host-ptr-impl)
        (into {}))

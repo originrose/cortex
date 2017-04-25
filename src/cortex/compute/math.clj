@@ -160,13 +160,13 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   (batch-size [item] (.batch-size item)))
 
 
-(defn make-array-of-type
-  "Given a datatype and a specific amount of data then produce an array of that specific type."
+(defn make-java-array
+  "Given a datatype and a specific amount of data then produce an array.  If there is no fast path
+then an array of a given type is produced."
   [datatype data]
   (let [data (or (mp/as-double-array data)
                  data)]
-    (if (and (dtype/is-primitive-array? data)
-             (= (dtype/get-datatype data) datatype))
+    (if (dtype/is-primitive-array? data)
       data
       (dtype/make-array-of-type datatype (vec (m/eseq data))))))
 
@@ -206,9 +206,9 @@ argument for creating an array storing a batch of data."
   ([device stream datatype data batch-size]
    (let [batch-size (long batch-size)
          data-shape (m/shape data)
-         data-ary (make-array-of-type datatype data)
+         data-ary (make-java-array datatype data)
          ;;synchronous call.
-         data-ptr (drv/host-array->device-buffer device stream data-ary)
+         data-ptr (drv/host-array->device-buffer device stream data-ary :datatype datatype)
          n-elems (m/ecount data-ary)
          tensor (core-mat-shape->tensor data-shape batch-size)]
      (->DeviceArray data-ptr tensor)))

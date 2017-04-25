@@ -184,9 +184,9 @@ executes to the event.")
 
 (defn host-array->device-buffer
   "Synchronously make a device buffer with these elements in it."
-  [driver stream upload-ary]
-  (let [datatype (dtype/get-datatype upload-ary)
-        elem-count (m/ecount upload-ary)
+  [driver stream upload-ary & {:keys [datatype]
+                               :or {datatype (dtype/get-datatype upload-ary)}}]
+  (let [elem-count (m/ecount upload-ary)
         upload-buffer (allocate-host-buffer driver elem-count datatype)
         device-buffer (allocate-device-buffer driver elem-count datatype)]
     (dtype/copy! upload-ary 0 upload-buffer 0 elem-count)

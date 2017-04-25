@@ -21,6 +21,5 @@
 (def-double-float-test dataset-batch-size-mismatch
   (verify-train/dataset-batch-size-mismatch (create-context)))
 
-(deftest multithread-infer
-  (with-bindings {#'verify-utils/*datatype* :float}
-    (verify-train/multithread-infer (create-context))))
+(def-double-float-test multithread-infer
+  (verify-train/multithread-infer (create-context)))
