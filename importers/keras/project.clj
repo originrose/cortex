@@ -4,10 +4,9 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/hdf5 "0.1.2"]
+                 [thinktopic/hdf5 "0.1.3"]
                  [thinktopic/cortex "0.9.4-SNAPSHOT"]
-                 [cheshire "5.6.3"]
-                 [net.mikera/imagez "0.10.0"]]
+                 [cheshire "5.6.3"]]
   :plugins [[s3-wagon-private "1.1.2"]
             [lein-codox "0.10.2"]]
   :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
