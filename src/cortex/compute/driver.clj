@@ -64,7 +64,7 @@ optimized for the desired use case.  Default is one-time."))
 
 (defn allocate-host-buffer
   [driver elem-count elem-type & {:keys [usage-type]
-                                  :or {:usage-type :one-time}}]
+                                  :or {usage-type :one-time}}]
   (when-not (contains? #{:one-time :reusable} usage-type)
     (throw (ex-info "Usage type is not in expected set"
                     {:usage-type usage-type
@@ -207,7 +207,7 @@ executes to the event.")
 (defn sub-buffer
   "Create a view of a buffer which shares the backing store
   with the original.  Offset must be >= 0."
-  [impl device-buffer ^long offset ^long length]
+  [device-buffer ^long offset ^long length]
   (let [original-size (dtype/ecount device-buffer)
         new-max-length (- original-size offset)]
     (when-not (<= length new-max-length)

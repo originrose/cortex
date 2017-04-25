@@ -711,7 +711,7 @@ relies only on blockDim.x block.x and thread.x"
       @devices-atom))
 
 
-  (allocate-host-buffer [impl elem-count elem-type {:keys [usage-type]}]
+  (allocate-host-buffer-impl [impl elem-count elem-type {:keys [usage-type]}]
     (condp = usage-type
       :one-time
       (resource/track (jcpp-dtype/make-pointer-of-type elem-type elem-count))
@@ -721,17 +721,17 @@ relies only on blockDim.x block.x and thread.x"
 
 (extend-type CudaDevice
   drv/PDevice
-  (memory-info [impl]
+  (memory-info-impl [impl]
     (get-memory-info (get impl :device-id)))
 
-  (create-stream [impl]
+  (create-stream-impl [impl]
     (drv/unsafe-with-compute-device
      impl
      (let [retval (cuda$CUstream_st.)]
        (cuda-call (cuda/cudaStreamCreate retval))
        (->CudaStream impl (resource/track retval)))))
 
-  (allocate-device-buffer [impl ^long elem-count elem-type]
+  (allocate-device-buffer-impl [impl ^long elem-count elem-type]
     (drv/unsafe-with-compute-device
      impl
      (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
@@ -740,7 +740,7 @@ relies only on blockDim.x block.x and thread.x"
        (cuda-library-debug-print "Malloc: " (.address retval))
        (resource/track (->DevicePointer size retval)))))
 
-  (allocate-rand-buffer [impl elem-count]
+  (allocate-rand-buffer-impl [impl elem-count]
     (drv/allocate-device-buffer impl elem-count :float)))
 
 
@@ -1261,7 +1261,7 @@ relies only on blockDim.x block.x and thread.x"
 
 (defn driver
   []
-  (when (and (drv/current-device)
+  (when (and drv/*current-compute-device*
              (instance? CudaDevice (drv/current-device)))
     (throw (ex-info "CUDA driver created while CUDA device is bound"
                     {:current-device (drv/current-device)})))

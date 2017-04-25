@@ -13,7 +13,7 @@
             FloatBuffer DoubleBuffer Buffer]
            [com.github.fommil.netlib BLAS]
            [java.util Random]
-           [think.datatype ArrayView IntArrayView]))
+           [think.datatype ArrayViewBase IntArrayView]))
 
 
 (set! *warn-on-reflection* true)
@@ -196,18 +196,18 @@ Use with care; the synchonization primitives will just hang with this stream."
 
 (extend-type CPUDevice
   drv/PDevice
-  (memory-info [impl]
+  (memory-info-impl [impl]
     (get-memory-info))
 
-  (create-stream [impl]
+  (create-stream-impl [impl]
     (check-stream-error impl)
     (cpu-stream impl (:error-atom impl)))
 
-  (allocate-device-buffer [impl elem-count elem-type]
+  (allocate-device-buffer-impl [impl elem-count elem-type]
     (check-stream-error impl)
     (dtype/make-view elem-type elem-count))
 
-  (allocate-rand-buffer [impl elem-count]
+  (allocate-rand-buffer-impl [impl elem-count]
     (check-stream-error impl)
     (dtype/make-view :float elem-count)))
 
@@ -217,12 +217,12 @@ Use with care; the synchonization primitives will just hang with this stream."
   (get-devices [impl]
     @(get impl :devices))
 
-  (allocate-host-buffer [impl elem-count elem-type options]
+  (allocate-host-buffer-impl [impl elem-count elem-type options]
     (check-stream-error impl)
     (dtype/make-view elem-type elem-count)))
 
 
-(extend-type ArrayView
+(extend-type ArrayViewBase
   drv/PBuffer
   (sub-buffer-impl [buffer offset length]
     (dtype/->view buffer offset length))

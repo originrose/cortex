@@ -11,40 +11,42 @@
 
 (use-fixtures :each test-utils/test-wrapper)
 
-(def static-device (cpu/driver))
+(defn driver
+  []
+  (cpu/driver))
 
-(def-double-float-test simple-stream
-  (verify-driver/simple-stream static-device test-utils/*datatype*))
+(def-all-dtype-test simple-stream
+  (verify-driver/simple-stream (driver) test-utils/*datatype*))
 
 (def-double-float-test indexed-copy
-  (verify-driver/indexed-copy static-device test-utils/*datatype*))
+  (verify-driver/indexed-copy (driver) test-utils/*datatype*))
 
 (def-double-float-test gemm
-  (verify-driver/gemm static-device test-utils/*datatype*))
+  (verify-driver/gemm (driver) test-utils/*datatype*))
 
 (def-double-float-test sum
-  (verify-driver/sum static-device test-utils/*datatype*))
+  (verify-driver/sum (driver) test-utils/*datatype*))
 
 (def-double-float-test subtract
-  (verify-driver/subtract static-device test-utils/*datatype*))
+  (verify-driver/subtract (driver) test-utils/*datatype*))
 
 (def-double-float-test gemv
-  (verify-driver/gemv static-device test-utils/*datatype*))
+  (verify-driver/gemv (driver) test-utils/*datatype*))
 
 (def-double-float-test mul-rows
-  (verify-driver/mul-rows static-device test-utils/*datatype*))
+  (verify-driver/mul-rows (driver) test-utils/*datatype*))
 
 (def-double-float-test elem-mul
-  (verify-driver/elem-mul static-device :float))
+  (verify-driver/elem-mul (driver) :float))
 
 (def-double-float-test l2-constraint-scale
-  (verify-driver/l2-constraint-scale static-device test-utils/*datatype*))
+  (verify-driver/l2-constraint-scale (driver) test-utils/*datatype*))
 
 (def-double-float-test select
-  (verify-driver/select static-device test-utils/*datatype*))
+  (verify-driver/select (driver) test-utils/*datatype*))
 
 (def-double-float-test indirect-add
-  (verify-driver/indirect-add static-device test-utils/*datatype*))
+  (verify-driver/indirect-add (driver) test-utils/*datatype*))
 
 (def-double-float-test batched-offsetting
-  (verify-driver/batched-offsetting static-device test-utils/*datatype*))
+  (verify-driver/batched-offsetting (driver) test-utils/*datatype*))
