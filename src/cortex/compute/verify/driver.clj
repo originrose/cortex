@@ -231,11 +231,10 @@
   (backend-test-pre
    driver datatype
    (let [batched-data (->>
-                       (math/batched-data-to-per-input-data
-                                                            [(math/array stream datatype
+                       (math/batched-data-to-per-input-data [(math/array stream datatype
                                                                          (range 100) 10)])
                        (apply interleave)
-                       (map #(vec (math/to-double-array driver stream %)))
+                       (map #(vec (math/to-double-array stream %)))
                        flatten)]
      (is (m/equals (partition 10 (range 100))
             (partition 10 batched-data))))))

@@ -339,8 +339,8 @@ supports it then there may be a faster way to do this operation."
 
 (defn to-double-array
   "Copy an DeviceArray into a double array."
-  [device stream ^DeviceArray ary]
-  (device-array->array device stream :double ary))
+  [stream ^DeviceArray ary]
+  (device-array->array stream :double ary))
 
 
 (defn gemm
