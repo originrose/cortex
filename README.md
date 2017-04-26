@@ -43,17 +43,11 @@ Also, for an example of using cortex in a more real-world scenario please see:
 
  * Recurrence in all forms.  There is some work towards that direction in the compute branch and it is specifically designed to match the cudnn API for recurrence.  This is less important at this point than running some of the larger pre-trained models.
 
- * Graph-based description layer.  This will make doing things like res-nets and dense-nets easier and repeatable.
-
- * Better training - currently there are lots of things that don't train as well as we would like.  This could be because we are using Adam exclusively instead of sgd, it could be because of bugs in the code or it could be because we need different weight initialization.  In any case, building larger nets that train better is of course of critical importance.
-
  * Speaking of larger nets, multiple GPU support and multiple machine support (which could be helped by the above graph based description layer).
 
  * Profiling GPU system to make sure we are using as much GPU as possible in the single-gpu case.
 
- * Better data import/augmentation systems.  Basically inline augmentation of data so the net never sees the same training example twice.
-
- * Better data import/visualization support.  We need a solid panda-equivalent with some level of visualization and feature parity and it isn't clear the best way to get this.  Currently there are three different 'dataset' abstractions in clojure it isn't clear if any of them support the level of indirection and features that panda does.
+ * Better data import/visualization support.  We have geom and we have a clear definition of the datasets, now we need to put together the pieces and build some great visualizations as examples.
 
 
 ### Getting Started:
