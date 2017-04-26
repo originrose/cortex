@@ -63,14 +63,14 @@
 (defn cpu-stream
   ([device error-atom]
    (let [^CPUStream retval (->CPUStream device (async/chan 16) (async/chan) error-atom)]
-     (async/go
-       (loop [next-val (async/<! (:input-chan retval))]
+     (async/thread
+       (loop [next-val (async/<!! (:input-chan retval))]
          (when next-val
            (try
              (next-val)
              (catch Throwable e
                (reset! error-atom e)))
-           (recur (async/<! (:input-chan retval)))))
+           (recur (async/<!! (:input-chan retval)))))
        (async/close! (:exit-chan retval)))
      (resource/track retval)))
   ([device] (cpu-stream device (atom nil))))
