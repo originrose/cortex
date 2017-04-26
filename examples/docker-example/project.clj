@@ -1,7 +1,7 @@
-(defproject docker "0.9.4"
+(defproject docker "0.9.5-SNAPSHOT"
   :description "A simple example of how to run a cortex application in a docker container."
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/cortex "0.9.4"]
+                 [thinktopic/cortex "0.9.5-SNAPSHOT"]
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]]
 
   :main docker-example.core
