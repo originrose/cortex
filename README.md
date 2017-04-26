@@ -12,7 +12,7 @@ https://groups.google.com/forum/#!forum/clojure-cortex
 
 ## Usage
 
-Cortex has a 0.9.4 release meaning all libraries are released on clojars.  This is very preliminary and you should expect quite a few things to change
+Cortex has a 0.9.5 release meaning all libraries are released on clojars.  This is very preliminary and you should expect quite a few things to change
 over time but it should allow you to train some initial classifiers or regressions.  Note that the save format has not stabilized and although we do
 just save edn data in nippy format it may require some effort to bring versions of saved forward.  Once a future proof save format has been
 nailed down then we are a major step closer to 1.0.0.
