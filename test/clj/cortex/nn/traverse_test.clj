@@ -4,7 +4,6 @@
     [clojure.test :refer :all]
     [clojure.core.matrix :as m]
     [cortex.graph :as graph]
-    [cortex.dataset :as ds]
     [cortex.loss :as loss]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.layers :as layers]

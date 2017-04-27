@@ -16,7 +16,6 @@ Furthermore infer should be both wrapped in a resource context and completely re
     [think.resource.core :as resource]
     [think.datatype.core :as dtype]
     [think.parallel.core :as parallel]
-    [cortex.dataset :as ds]
     [cortex.graph :as graph]
     [cortex.loss :as loss]
     [cortex.util :as util]
