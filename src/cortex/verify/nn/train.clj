@@ -4,7 +4,6 @@
     [clojure.pprint :as pprint]
     [clojure.core.matrix :as m]
     [think.resource.core :as resource]
-    [cortex.dataset :as ds]
     [cortex.loss :as loss]
     [cortex.optimize :as opt]
     [cortex.optimize.adam :as adam]
@@ -209,16 +208,16 @@
                                           :stream (drv/create-stream)})))
             test-labels (map :label test-dataset)
 
-            losses (time (->> test-dataset-seq
-                              (pmap (fn [{:keys [dataset stream]}]
-                                      (nn-backend/with-stream stream
-                                        (->> (execute/run network dataset
-                                               :context context
-                                               :batch-size batch-size)
-                                             ((fn [inferences]
-                                                (-> (percent= (map :label inferences) test-labels)
-                                                    (* 100))))))))
-                              distinct
-                              vec))]
+            losses (->> test-dataset-seq
+                        (pmap (fn [{:keys [dataset stream]}]
+                                (nn-backend/with-stream stream
+                                  (->> (execute/run network dataset
+                                         :context context
+                                         :batch-size batch-size)
+                                       ((fn [inferences]
+                                          (-> (percent= (map :label inferences) test-labels)
+                                              (* 100))))))))
+                        distinct
+                        vec)]
         (is (= 1 (count losses)))
         (is (not= nil (first losses)))))))

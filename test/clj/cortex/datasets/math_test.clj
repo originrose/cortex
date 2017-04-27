@@ -1,10 +1,10 @@
 (ns cortex.datasets.math-test
   (:require [clojure.test :refer :all]
-            [cortex.datasets.util :as util]
             [clojure.core.matrix :as m]
-            [mikera.vectorz.matrix-api]))
+            [mikera.vectorz.matrix-api]
+            [cortex.util :as util]))
 
-(m/set-current-implementation :vectorz)  ;; use Vectorz as default matrix implementation
+(m/set-current-implementation :vectorz)
 
 
 (deftest normalize-test

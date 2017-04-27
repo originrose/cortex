@@ -2,7 +2,6 @@
   (:require [cortex.nn.layers :as layers]
             [cortex.nn.execute :as execute]
             [cortex.nn.network :as network]
-            [cortex.dataset :as ds]
             [cortex.verify.nn.data :refer [CORN-DATA CORN-LABELS]])
   (:gen-class))
 

@@ -4,7 +4,6 @@
     [think.resource.core :as resource]
     [cortex.util :as util]
     [cortex.graph :as graph]
-    [cortex.dataset :as ds]
     [cortex.loss :as loss]
     [cortex.optimize :as opt]
     [cortex.optimize.adam :as adam]
