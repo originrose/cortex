@@ -156,8 +156,20 @@
                                       :context context
                                       :batch-size running-batch-size
                                       :loss-outputs? true)
-                            loss-fn (execute/execute-loss-fn network results test-dataset)
+                            ;;Run multiple inferences in parallel to make sure this works across devices and to shake
+                            ;;out possible indeterminism in the system.
+                            loss-fns (->> (range 9)
+                                          (pmap (fn [_]
+                                                  (->> (execute/run network test-dataset
+                                                         :context context
+                                                         :batch-size running-batch-size
+                                                         :loss-outputs? true)
+                                                       ((fn [results]
+                                                          (execute/execute-loss-fn network results test-dataset))))))
+                                          distinct)
+                            loss-fn (first loss-fns)
                             score (percent= (map :label results) test-labels)]
+                        (is (= 1 (count loss-fns)))
                         (println (format "Score for epoch %s: %s" (inc epoch) score))
                         (println (loss/loss-fn->table-str loss-fn))
                         [network optimizer]))
