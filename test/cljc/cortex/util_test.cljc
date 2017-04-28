@@ -168,3 +168,7 @@
 (deftest sprintf-test
   (is (= (with-out-str (sprintf "%(d%n" [[1 -3 5] [-7 3]]))
          (format "[[1 (3) 5] [(7) 3]]%n"))))
+
+(deftest idx->one-hot-test
+  (is (= [1.0 0.0 0.0 0.0] (idx->one-hot 0 4)))
+  (is (thrown? clojure.lang.ExceptionInfo (idx->one-hot nil 4))))
