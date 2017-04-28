@@ -272,10 +272,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 ;; TODO: can we get rid of required keys here by pre-filtering the dataset (from the traversal leaves)?
 (defn batch-buffers
-  [network batch training?]
-  (let [driver (compute-binding/driver network)
-        stream (compute-binding/stream network)
-        datatype (compute-binding/datatype network)
+  [stream network batch training?]
+  (let [datatype (compute-binding/datatype network)
         required-keys (clojure.set/union
                        (->> (if training?
                               (network/graph-streams network :training)
@@ -308,7 +306,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
                                               datatype
                                               [item-size]
                                               batch-size)
-                 host-buffer (drv/allocate-host-buffer driver
+                 host-buffer (drv/allocate-host-buffer (drv/get-driver stream)
                                                        (* item-size batch-size)
                                                        datatype
                                                        :usage-type :reusable)]
@@ -345,11 +343,12 @@ Furthermore infer should be both wrapped in a resource context and completely re
         device (drv/current-device)
         batch-buffer-seq (->> (range batch-transfer-parallelism)
                               (mapv (fn [_]
-                                      (let [batch-buffers (batch-buffers network (first batches) training?)]
+                                      (let [stream (drv/create-stream)
+                                            batch-buffers (batch-buffers stream network (first batches) training?)]
                                         {:batch-buffers batch-buffers
                                          :stream->buffer-map (zipmap (keys batch-buffers)
                                                                      (map :device-array (vals batch-buffers)))
-                                         :stream (drv/create-stream)}))))]
+                                         :stream stream}))))]
     (->> (map (fn [batch batch-buffer]
                 (assoc batch-buffer :batch batch))
               batches (->> (repeat batch-buffer-seq)
