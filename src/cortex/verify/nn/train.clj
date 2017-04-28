@@ -137,9 +137,9 @@
       ;;functions below is rebuilding the entire cuda context which includes compiling kernels and
       ;;doing cuda init, neither of which is designed to be called more than once a program.
       (let [n-epochs 4
-            training-batch-size 10
+            training-batch-size 20
             running-batch-size 100
-            dataset (take 100 @mnist-training-dataset*)
+            dataset (take 200 @mnist-training-dataset*)
             test-dataset (take 100 @mnist-test-dataset*)
             test-labels (map :label test-dataset)
             network (network/linear-network MNIST-NETWORK)

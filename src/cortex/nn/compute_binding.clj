@@ -438,6 +438,9 @@
 
 
 (defn output-values
+  "Output the values from the network into a set of buffers.
+Laziness here means the network will do a side-effecty operation into the buffer
+before you are ready."
   [network output-buffers
    & {:keys [max-result-vector-size]
       :or {max-result-vector-size 100}}]
@@ -463,6 +466,7 @@
             ;;One sync for entire buffer set.
             (drv/sync-stream stream)
             (->> buf-seq
+                 ;;Laziness is not your friend here.
                  (mapv (fn [{:keys [host-buffer output-size double-buffers node-id]}]
                          (c-for [idx 0 (< idx batch-size) (inc idx)]
                                 (dtype/copy! host-buffer (long (* idx output-size))
@@ -473,7 +477,7 @@
                                             (vec buffer)
                                             buffer)})
                                double-buffers))))))
-         (apply map merge))))
+         (apply mapv merge))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
