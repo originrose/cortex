@@ -34,28 +34,28 @@
 
 (defn- file->observation
   "Given a file, returns an observation map (an element of a dataset)."
-  [image-aug-fn datatype colorspace num-classes ^File file]
-  (let [^String label-idx (-> (re-seq #"(\d)/[^/]+$" (.getPath file)) first last)
-        image (i/load-image file)]
-    {:data (image->observation-data image datatype colorspace image-aug-fn)
-     :labels (util/idx->one-hot (Integer. label-idx) num-classes)}))
+  [{:keys [class-name->index]} image-aug-fn datatype colorspace ^File file]
+  (try
+    {:data (image->observation-data (i/load-image file) datatype colorspace image-aug-fn)
+     :labels (util/idx->one-hot (class-name->index (.. file getParentFile getName))
+                                (count (keys class-name->index)))}
+    (catch Throwable _
+      (println "Problem converting file to observation:" (.getPath file)))))
 
 
 (defn create-dataset-from-folder
-  "Turns a folder of folders of images into a dataset (a sequence of maps). Colorspace can be :rgb or :gray."
-  [folder-name & {:keys [image-aug-fn datatype colorspace]
-                  :or {datatype :float
-                       colorspace :gray}}]
+  "Turns a folder of folders of png images into a dataset (a sequence of maps)."
+  [folder-name class-mapping & {:keys [image-aug-fn datatype colorspace]
+                                :or {datatype :float
+                                     colorspace :gray}}]
   (println "Building dataset from folder:" folder-name)
-  (let [f (io/as-file folder-name)
-        num-classes (->> (.listFiles f)
-                         (filter #(.isDirectory ^File %))
-                         (count))]
-    (->> (file-seq f)
-         (filter #(.endsWith (.getName ^File %) "png"))
-         (map (partial file->observation
-                       (and (.contains ^String folder-name "train")
-                            image-aug-fn)
-                       datatype
-                       colorspace
-                       num-classes)))))
+  (->> folder-name
+       (io/as-file)
+       (file-seq)
+       (filter #(.endsWith (.getName ^File %) "png"))
+       (map (partial file->observation
+                     class-mapping
+                     image-aug-fn
+                     datatype
+                     colorspace))
+       (remove nil?)))

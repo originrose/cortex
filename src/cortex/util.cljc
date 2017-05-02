@@ -71,6 +71,8 @@
   "Given an index and a count `p`, returns a one-hot encoded vector in
   `p`-dimensional space."
   [idx p]
+  (when (or (not idx) (not (< -1 idx p)))
+    (throw (ex-info "Bad idx->one-hot" {:idx idx :p p})))
   (assoc (vec (repeat p 0.0)) idx 1.0))
 
 ;;;; Timing

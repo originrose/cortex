@@ -137,9 +137,9 @@
       ;;functions below is rebuilding the entire cuda context which includes compiling kernels and
       ;;doing cuda init, neither of which is designed to be called more than once a program.
       (let [n-epochs 4
-            training-batch-size 10
+            training-batch-size 20
             running-batch-size 100
-            dataset (take 100 @mnist-training-dataset*)
+            dataset (take 200 @mnist-training-dataset*)
             test-dataset (take 100 @mnist-test-dataset*)
             test-labels (map :label test-dataset)
             network (network/linear-network MNIST-NETWORK)
@@ -156,8 +156,20 @@
                                       :context context
                                       :batch-size running-batch-size
                                       :loss-outputs? true)
-                            loss-fn (execute/execute-loss-fn network results test-dataset)
+                            ;;Run multiple inferences in parallel to make sure this works across devices and to shake
+                            ;;out possible indeterminism in the system.
+                            loss-fns (->> (range 9)
+                                          (pmap (fn [_]
+                                                  (->> (execute/run network test-dataset
+                                                         :context context
+                                                         :batch-size running-batch-size
+                                                         :loss-outputs? true)
+                                                       ((fn [results]
+                                                          (execute/execute-loss-fn network results test-dataset))))))
+                                          distinct)
+                            loss-fn (first loss-fns)
                             score (percent= (map :label results) test-labels)]
+                        (is (= 1 (count loss-fns)))
                         (println (format "Score for epoch %s: %s" (inc epoch) score))
                         (println (loss/loss-fn->table-str loss-fn))
                         [network optimizer]))

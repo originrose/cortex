@@ -139,16 +139,16 @@
    (let [training-folder (str dataset-folder "training")
          test-folder (str dataset-folder "test")
          [train-ds test-ds] [(-> training-folder
-                                 (experiment-util/create-dataset-from-folder :image-aug-fn (:image-aug-fn argmap))
+                                 (experiment-util/create-dataset-from-folder class-mapping
+                                                                             :image-aug-fn (:image-aug-fn argmap))
                                  (experiment-util/infinite-class-balanced-dataset))
                              (-> test-folder
-                                 (experiment-util/create-dataset-from-folder :image-aug-fn (:image-aug-fn argmap)))]]
+                                 (experiment-util/create-dataset-from-folder class-mapping))]]
      (classification/perform-experiment (initial-description image-size image-size num-classes)
                                         train-ds test-ds
                                         mnist-observation->image
                                         class-mapping
-                                        (merge argmap
-                                               (:image-aug-fn image-aug-pipeline))))))
+                                        argmap))))
 
 
 (defn train-forever-uberjar
@@ -173,7 +173,7 @@
   []
   (ensure-images-on-disk!)
   (let [observation (->> (str dataset-folder "test")
-                         (experiment-util/create-dataset-from-folder)
+                         (experiment-util/create-dataset-from-folder class-mapping)
                          (rand-nth))]
     (i/show (mnist-observation->image (:data observation)))
     {:answer (-> observation :labels util/max-index)
@@ -189,8 +189,8 @@
   "This is an example of how to use cortex to fine tune an existing network."
   []
   (ensure-images-on-disk!)
-  (let [train-ds (experiment-util/create-dataset-from-folder (str dataset-folder "training"))
-        test-ds (experiment-util/create-dataset-from-folder (str dataset-folder "test"))
+  (let [train-ds (experiment-util/create-dataset-from-folder (str dataset-folder "training") class-mapping)
+        test-ds (experiment-util/create-dataset-from-folder (str dataset-folder "test") class-mapping)
         mnist-network (util/read-nippy-file network-filename)
         initial-description (:initial-description mnist-network)
         ;; To figure out at which point you'd like to split the network,
