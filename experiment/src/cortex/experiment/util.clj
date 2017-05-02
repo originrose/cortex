@@ -24,27 +24,28 @@
 
 (defn- image->observation-data
   "Create an observation from input."
-  [image datatype image-aug-fn]
+  [image datatype colorspace image-aug-fn]
   (patch/image->patch (if image-aug-fn
                         (image-aug-fn image)
                         image)
                       :datatype datatype
-                      :colorspace :gray))
+                      :colorspace colorspace))
 
 
 (defn- file->observation
   "Given a file, returns an observation map (an element of a dataset)."
-  [image-aug-fn datatype num-classes ^File file]
+  [image-aug-fn datatype colorspace num-classes ^File file]
   (let [^String label-idx (-> (re-seq #"(\d)/[^/]+$" (.getPath file)) first last)
         image (i/load-image file)]
-    {:data (image->observation-data image datatype image-aug-fn)
+    {:data (image->observation-data image datatype colorspace image-aug-fn)
      :labels (util/idx->one-hot (Integer. label-idx) num-classes)}))
 
 
 (defn create-dataset-from-folder
-  "Turns a folder of folders of images into a dataset (a sequence of maps)."
-  [folder-name & {:keys [image-aug-fn datatype]
-                  :or {datatype :float}}]
+  "Turns a folder of folders of images into a dataset (a sequence of maps). Colorspace can be :rgb or :gray."
+  [folder-name & {:keys [image-aug-fn datatype colorspace]
+                  :or {datatype :float
+                       colorspace :gray}}]
   (println "Building dataset from folder:" folder-name)
   (let [f (io/as-file folder-name)
         num-classes (->> (.listFiles f)
@@ -56,4 +57,5 @@
                        (and (.contains ^String folder-name "train")
                             image-aug-fn)
                        datatype
+                       colorspace
                        num-classes)))))
