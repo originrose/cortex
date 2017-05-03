@@ -297,7 +297,7 @@
   (let [backend (backend network)
         core-m (fn [data]
                  (when data
-                   (backend/to-core-matrix backend data)))
+                   (backend/to-core-matrix backend data :save-format? true)))
         ->doubles (fn [host-buffer]
                     (when host-buffer
                       (let [retval (double-array (m/ecount host-buffer))]
