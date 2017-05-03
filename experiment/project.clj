@@ -1,7 +1,7 @@
-(defproject thinktopic/experiment "0.9.7"
+(defproject thinktopic/experiment "0.9.8-SNAPSHOT"
   :description "A higher-level library for performing experiments with cortex."
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/cortex "0.9.7"]
+                 [thinktopic/cortex "0.9.8-SNAPSHOT"]
                  [thinktopic/think.image "0.4.10"]
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)

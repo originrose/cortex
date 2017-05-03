@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## Unreleased
 
+
+## [0.9.7] - 2017-05-03
+## Bugs fixed
+- Dependencies updated do reduce and use latest version possible of most libraries.
+- thread colorspace into experiment so the mnist framework can be used for color images [#162](https://github.com/thinktopic/cortex/pull/162).
+
+
 ## [0.9.6] - 2017-04-28
 ### Bugs fixed
 - inferring and training were subtly [broken](https://github.com/thinktopic/cortex/pull/161).
