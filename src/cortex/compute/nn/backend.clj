@@ -93,8 +93,8 @@ computelayer/forward,backward."
   (math/assign! (get-stream) dest src))
 
 (defn to-core-matrix
-  [backend ary]
-  (math/to-core-matrix (get-stream) ary))
+  [backend ary & opts]
+  (apply math/to-core-matrix (get-stream) ary (math/shape ary) opts))
 
 (defn device-array->array
   [backend datatype device-ary]

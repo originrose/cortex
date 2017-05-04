@@ -5,6 +5,7 @@ These operations are expected to be provided and uniform across drivers and code
 in here should be 100% portable across different compute drivers."
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
+            [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
             [think.resource.core :as resource]))
@@ -300,27 +301,52 @@ argument for creating an array storing a batch of data."
   (let [[n-rows n-cols] (batch-shape ary)]
     (with-tensor ary (tensor 1 1 n-rows n-cols))))
 
+(defn- partition-data
+  [shape data]
+  (if (seq shape)
+    (reduce (fn [retval dimension]
+              (->> retval
+                   (partition dimension)
+                   (mapv vec)))
+            data
+            (reverse (drop 1 shape)))
+    (first data)))
+
+
+(defn shape
+  [^DeviceArray ary]
+  (if (is-tensor-1d-complete? (.tensor ary))
+    (shape-1d ary)
+    (shape-2d ary)))
+
 
 (defn to-core-matrix
   "Convert a device array to a core-matrix type.  This uses generic code and so if you know your backend
-supports it then there may be a faster way to do this operation."
-  ([stream ^DeviceArray ary shape]
+supports it then there may be a faster way to do this operation.
+:file-format? Save in a form that is slow in terms of core matrix but loadable from files of different
+versions of cortex (meaning only contains java base types)."
+  ([stream ^DeviceArray ary shape & {:keys [file-format?]
+                                     :or {file-format? false}}]
    (let [device (drv/get-device stream)
-         retval (m/new-array :vectorz shape)
-         ^doubles ret-ary (mp/as-double-array retval)
-         elem-count (alength ret-ary)
+         elem-count (dtype/ecount ary)
          host-buf (drv/allocate-host-buffer (drv/get-driver device) elem-count (dtype/get-datatype ary))]
      (drv/copy-device->host stream (.device-buffer ary) 0 host-buf 0 elem-count)
      (drv/sync-stream stream)
-     (dtype/copy! host-buf 0 ret-ary 0 elem-count)
-     (resource/release host-buf)
-     retval))
-  ;;Defaults to a 2d representation
-  ([stream ^DeviceArray ary]
-   (to-core-matrix stream ary
-                   (if (is-tensor-1d-complete? (.tensor ary))
-                     (shape-1d ary)
-                     (shape-2d ary)))))
+     (let [retval
+           (if file-format?
+             (let [ary-size (long (last shape))
+                   num-arrays (long (apply * 1 (drop-last shape)))
+                   double-array-data (-> (repeatedly num-arrays #(double-array ary-size))
+                                         vec)]
+               (c-for [idx 0 (< idx num-arrays) (inc idx)]
+                      (dtype/copy! host-buf (* idx ary-size) (get double-array-data idx) 0 ary-size))
+               (partition-data (drop-last shape) double-array-data))
+             (let [retval (m/new-array :vectorz shape)
+                   ^doubles ret-ary (mp/as-double-array retval)]
+               (dtype/copy! host-buf 0 ret-ary 0 elem-count)
+               retval))]
+       (resource/release host-buf)
+       retval))))
 
 
 (defn device-array->array
