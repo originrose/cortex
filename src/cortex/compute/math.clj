@@ -303,12 +303,14 @@ argument for creating an array storing a batch of data."
 
 (defn- partition-data
   [shape data]
-  (reduce (fn [retval dimension]
-            (->> retval
-                 (partition dimension)
-                 (mapv vec)))
-          data
-          (reverse (drop 1 shape))))
+  (if (seq shape)
+    (reduce (fn [retval dimension]
+              (->> retval
+                   (partition dimension)
+                   (mapv vec)))
+            data
+            (reverse (drop 1 shape)))
+    (first data)))
 
 
 (defn shape
@@ -334,7 +336,8 @@ versions of cortex (meaning only contains java base types)."
            (if file-format?
              (let [ary-size (long (last shape))
                    num-arrays (long (apply * 1 (drop-last shape)))
-                   double-array-data (repeatedly num-arrays #(double-array ary-size))]
+                   double-array-data (-> (repeatedly num-arrays #(double-array ary-size))
+                                         vec)]
                (c-for [idx 0 (< idx num-arrays) (inc idx)]
                       (dtype/copy! host-buf (* idx ary-size) (get double-array-data idx) 0 ary-size))
                (partition-data (drop-last shape) double-array-data))
