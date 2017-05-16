@@ -44,9 +44,9 @@
 
 
 (defn backend
-  [& {:keys [datatype driver device stream]
-      :or [datatype :double]}]
-  (let [driver (or driver (cpu-drv/driver))
+  [& {:keys [datatype driver device stream]}]
+  (let [datatype (or datatype :double)
+        driver (or driver (cpu-drv/driver))
         device (or device (drv/default-device driver))]
     (drv/unsafe-with-compute-device
      device
