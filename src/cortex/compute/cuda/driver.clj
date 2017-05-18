@@ -366,6 +366,38 @@ set this device before.  Set device must be called before any other cuda functio
 ;;Specialized pointers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defprotocol PToJavaCPPPointer
+  (->ptr-impl [item]))
+
+(defn ->ptr
+  (^Pointer [item] (->ptr-impl item))
+  (^Pointer [item offset] (jcpp-dtype/offset-pointer (->ptr-impl item) offset)))
+
+
+(defn- alias?
+  [lhs rhs]
+  (= (.address ^Pointer (->ptr lhs))
+     (.address ^Pointer (->ptr rhs))))
+
+
+(defn- in-range?
+  [^long x ^long y ^long num-y]
+  (and (<= y x)
+       (> (+ y num-y) x)))
+
+
+(defn- partially-alias?
+  [lhs rhs]
+  (let [lhs-start (.address ^Pointer (->ptr lhs))
+        rhs-start (.address ^Pointer (->ptr rhs))
+        lhs-byte-count (* (long (m/ecount lhs))
+                          (dtype/datatype->byte-size (dtype/get-datatype lhs)))
+        rhs-byte-count (* (long (m/ecount rhs))
+                          (dtype/datatype->byte-size (dtype/get-datatype rhs)))]
+    (or (in-range? lhs-start rhs-start rhs-byte-count)
+        (in-range? rhs-start lhs-start lhs-byte-count))))
+
+
 (defrecord DevicePointer [^long size ^Pointer ptr]
   resource/PResource
   (release-resource [item]
@@ -374,7 +406,8 @@ set this device before.  Set device must be called before any other cuda functio
     (cuda-library-debug-print "Free: " (.address ptr))
     (cuda-call (cuda/cudaFree ptr)))
   mp/PElementCount
-  (element-count [item] (quot size (dtype/datatype->byte-size (dtype/get-datatype ptr))))
+  (element-count [item] (quot size (dtype/datatype->byte-size
+                                    (dtype/get-datatype ptr))))
   dtype/PDatatype
   (get-datatype [item] (dtype/get-datatype ptr))
   drv/PBuffer
@@ -382,7 +415,11 @@ set this device before.  Set device must be called before any other cuda functio
     (->DevicePointer
      (* (dtype/datatype->byte-size (dtype/get-datatype ptr))
         (long length))
-     (drv/sub-buffer-impl ptr offset length))))
+     (drv/sub-buffer-impl ptr offset length)))
+  (alias? [lhs-dev-buffer rhs-dev-buffer]
+    (alias? lhs-dev-buffer rhs-dev-buffer))
+  (partially-alias? [lhs-dev-buffer rhs-dev-buffer]
+    (partially-alias? lhs-dev-buffer rhs-dev-buffer)))
 
 
 (defrecord PageLockedPointer [^long size ^Pointer ptr]
@@ -467,6 +504,19 @@ set this device before.  Set device must be called before any other cuda functio
     (jcpp-dtype/release-pointer item)))
 
 
+(extend-protocol PToJavaCPPPointer
+  Pointer
+  (->ptr-impl [item] item)
+  DevicePointer
+  (->ptr-impl [item] (.ptr ^DevicePointer item))
+  PageLockedPointer
+  (->ptr-impl [item] (.ptr ^PageLockedPointer item))
+  DeviceArray
+  (->ptr-impl [item] (->ptr-impl (math/device-buffer item)))
+  nil
+  (->ptr-impl [item] nil))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Launching Cuda Kernels
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -487,27 +537,6 @@ set this device before.  Set device must be called before any other cuda functio
   ^cuda$CUstream_st [item]
   (-> (drv/get-stream item)
       get-cuda-stream-impl))
-
-
-(defprotocol PToJavaCPPPointer
-  (->ptr-impl [item]))
-
-(extend-protocol PToJavaCPPPointer
-  Pointer
-  (->ptr-impl [item] item)
-  DevicePointer
-  (->ptr-impl [item] (.ptr ^DevicePointer item))
-  PageLockedPointer
-  (->ptr-impl [item] (.ptr ^PageLockedPointer item))
-  DeviceArray
-  (->ptr-impl [item] (->ptr-impl (math/device-buffer item)))
-  nil
-  (->ptr-impl [item] nil))
-
-(defn ->ptr
-  (^Pointer [item] (->ptr-impl item))
-  (^Pointer [item offset] (jcpp-dtype/offset-pointer (->ptr-impl item) offset)))
-
 
 (defprotocol PLongConversion
   (to-long [item]))
@@ -1062,31 +1091,6 @@ relies only on blockDim.x block.x and thread.x"
                      rand-buffer (long elem-count)))
        :else
        (throw (Exception. (str "Unrecognized distribution type: " distribution)))))))
-
-
-(defn- alias?
-  [lhs rhs]
-  (= (.address ^Pointer (->ptr lhs))
-     (.address ^Pointer (->ptr rhs))))
-
-
-(defn- in-range?
-  [^long x ^long y ^long num-y]
-  (and (<= y x)
-       (> (+ y num-y) x)))
-
-
-(defn- partially-alias?
-  [lhs rhs]
-  (let [lhs-start (.address ^Pointer (->ptr lhs))
-        rhs-start (.address ^Pointer (->ptr rhs))
-        lhs-byte-count (* (long (m/ecount lhs))
-                          (dtype/datatype->byte-size (dtype/get-datatype lhs)))
-        rhs-byte-count (* (long (m/ecount rhs))
-                          (dtype/datatype->byte-size (dtype/get-datatype rhs)))]
-    (or (in-range? lhs-start rhs-start rhs-byte-count)
-        (in-range? rhs-start lhs-start lhs-byte-count))))
-
 
 (extend-type CudaStream
   drv/PStream

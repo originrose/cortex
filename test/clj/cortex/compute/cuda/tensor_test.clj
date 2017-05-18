@@ -7,7 +7,9 @@
                      *datatype*
                      test-wrapper]]
             [clojure.test :refer :all]
-            [cortex.compute.cuda.driver :refer [driver]]))
+            [cortex.compute.cuda.driver :refer [driver]]
+            [cortex.compute.cuda.tensor-math]))
+
 
 (use-fixtures :each test-wrapper)
 

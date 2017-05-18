@@ -9,6 +9,7 @@
             [cortex.compute.cpu.driver :refer [driver]]
             [cortex.compute.cpu.tensor-math]))
 
+
 (use-fixtures :each test-wrapper)
 
 
