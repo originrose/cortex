@@ -4,10 +4,10 @@
             [cortex.tensor.math :as tm]
             [cortex.tensor.index-system :as is]
             [clojure.math.combinatorics :as combo]
-            [cortex.compute.cpu.stream :as cpu-stream]
+            [cortex.compute.cpu.driver :as cpu-driver]
             [think.parallel.core :as parallel]
             [clojure.core.matrix.macros :refer [c-for]])
-  (:import [cortex.compute.cpu.stream CPUStream]))
+  (:import [cortex.compute.cpu.driver CPUStream]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -411,14 +411,14 @@
 (extend-type CPUStream
   tm/TensorMath
   (assign-constant! [stream buffer index-system value n-elems]
-    (cpu-stream/with-stream-dispatch stream
+    (cpu-driver/with-stream-dispatch stream
       ((get (assign-constant-map) (dtype/get-datatype buffer))
        buffer index-system value n-elems)))
   (assign! [stream
             dest dest-idx-sys
             src src-idx-sys
             n-elems]
-    (cpu-stream/with-stream-dispatch stream
+    (cpu-driver/with-stream-dispatch stream
       ((get (assign!-map) [(dtype/get-datatype dest) (dtype/get-datatype src)])
        dest dest-idx-sys
        src src-idx-sys
@@ -428,7 +428,7 @@
                            dest dest-idx dest-alpha
                            scalar
                            n-elems operation reverse-operands?]
-    (cpu-stream/with-stream-dispatch stream
+    (cpu-driver/with-stream-dispatch stream
       ((get (binary-accum-constant-table) [(dtype/get-datatype dest) operation reverse-operands?])
        dest dest-idx dest-alpha
        scalar n-elems)))
@@ -438,7 +438,7 @@
                         x x-idx x-alpha
                         scalar
                         n-elems operation reverse-operands?]
-    (cpu-stream/with-stream-dispatch stream
+    (cpu-driver/with-stream-dispatch stream
       ((get (binary-op-constant-table) [(dtype/get-datatype dest) operation reverse-operands?])
        dest dest-idx
        x x-idx x-alpha
@@ -448,7 +448,7 @@
                   dest dest-idx dest-alpha
                   y y-idx y-alpha
                   n-elems operation reverse-operands?]
-    (cpu-stream/with-stream-dispatch stream
+    (cpu-driver/with-stream-dispatch stream
       ((get (binary-accum-table) [(dtype/get-datatype dest) operation reverse-operands?])
        dest dest-idx dest-alpha
        y y-idx y-alpha
@@ -459,7 +459,7 @@
                x x-idx x-alpha
                y y-idx y-alpha
                n-elems operation]
-    (cpu-stream/with-stream-dispatch stream
+    (cpu-driver/with-stream-dispatch stream
       ((get (binary-op-table) [(dtype/get-datatype dest) operation])
        dest dest-idx
        x x-idx x-alpha

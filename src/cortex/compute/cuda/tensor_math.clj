@@ -6,6 +6,7 @@
   (:import [cortex.compute.cuda.base CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer]))
 
+
 (defn- strategy-type->int
   ^Integer [index-system]
   (int
@@ -14,6 +15,7 @@
      :monotonically-increasing 1
      :monotonically-decreasing 2
      :indexed 3)))
+
 
 (defn- strategy->c-or-len
   ^Integer [index-system]
@@ -93,7 +95,8 @@
             n-elems]
     (let [lhs-dtype (dtype/get-datatype dest)
           rhs-dtype (dtype/get-datatype src)
-          assign-fn (cuda-base/get-or-create-fn stream :tensor-assign [lhs-dtype rhs-dtype]
+          assign-fn (cuda-base/get-or-create-fn stream :tensor-assign
+                                                [lhs-dtype rhs-dtype]
                                                 #(cuda-base/load-2-datatype-function
                                                   "tensor_assign"))]
       (apply cuda-base/launch-linear-kernel

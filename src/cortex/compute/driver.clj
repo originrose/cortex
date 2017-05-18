@@ -87,7 +87,13 @@ and a floating point buffer (cuda cuRand limitation)"))
 (defprotocol PBuffer
   "Interface to create sub-buffers out of larger contiguous buffers."
   (sub-buffer-impl [buffer offset length]
-    "Create a sub buffer that shares the backing store with the main buffer."))
+    "Create a sub buffer that shares the backing store with the main buffer.")
+  (alias? [lhs-dev-buffer rhs-dev-buffer]
+    "Do these two buffers alias each other?  Meaning do they start at the same address
+and overlap completely?")
+  (partially-alias? [lhs-dev-buffer rhs-dev-buffer]
+    "Do these two buffers partially alias each other?  Does some sub-range of their
+data overlap?"))
 
 
 (def ^:dynamic *current-compute-device* nil)
