@@ -464,4 +464,10 @@
        dest dest-idx
        x x-idx x-alpha
        y y-idx y-alpha
-       n-elems))))
+       n-elems)))
+  (gemm! [stream
+          c c-idx
+          trans-a? trans-b? alpha
+          a a-idx a-row-count a-col-count
+          b b-idx b-col-count
+          beta]))

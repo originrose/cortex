@@ -51,4 +51,12 @@ dest[idx] = alpha * dest[idx] op y[idx]")
                y y-idx y-alpha
                n-elems operation]
     "Binary operation where dest is not involved in the computation.
-dest[idx] = alpha * x[idx] op y[idx]"))
+dest[idx] = alpha * x[idx] op y[idx]")
+  (gemm! [stream
+          c c-idx c-colstride
+          trans-a? trans-b? alpha
+          a a-idx a-row-count a-col-count a-colstride
+          b b-idx b-col-count b-colstride
+          beta]
+    "Generalized matrix multiply.
+c = alpha * (trans-a? a) * (trans-b? b) + beta * c"))

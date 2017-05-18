@@ -1,18 +1,18 @@
 (ns cortex.tensor
   "Tensor library used to implement the basic math abstraction in cortex.  This abstraction is
-meant to provide a language in which to implement new things but that explicitly avoids access
-to certain parts of the comput ecosystem that the engine driving the ecosystem is expected
-to manage.  Clients should not, for instance, access the stream or the datatype directly.
-Currently the dimensions of tensors (like the dimensions of the graph) are hardcoded to
-[batch-size channels height width].
+  meant to provide a language in which to implement new things but that explicitly avoids access
+  to certain parts of the comput ecosystem that the engine driving the ecosystem is expected to
+  manage.  Clients should not, for instance, access the stream or the datatype directly.
+  Currently the dimensions of tensors (like the dimensions of the graph) are hardcoded to
+  [batch-size channels height width].
 
 There is an implicit assumption throughout this file that implementations will loop through
-smaller entities instead of throwing an exception if sizes don't match.  This allows for
-instance an efficient accumulation of a batch of gradients into a single summed buffer.
+  smaller entities instead of throwing an exception if sizes don't match.  This allows for
+  instance an efficient accumulation of a batch of gradients into a single summed buffer.
 
-It does mean, however, that certain conditions that would actually be error cases are
-harder to detect because one has to check for remainders being zero (which potentially
-could cause a divide by zero error) instead of just checking for equality.
+It does mean, however, that certain conditions that would actually be error cases are harder to
+  detect because one has to check for remainders being zero (which potentially could cause a
+  divide by zero error) instead of just checking for equality.
 
 Assignment has two forms
 y = x
@@ -27,22 +27,24 @@ result[idx] = a*x[idx] op b*y[idx]
 
 Op may be: [:+ :* :/].
 
-In the non-indexed cases the element counts of y or x may differ but they need to be commensurate meaning
-that the smaller evenly divides the larger.
-When writing to result it is important that result is as large as the largest.
+In the non-indexed cases the element counts of y or x may differ but they need to be
+  commensurate meaning that the smaller evenly divides the larger.  When writing to result it is
+  important that result is as large as the largest.
 
-For indexed cases we can't enforce really any constraints but if a location in result is written to more
-than once then the outcome is not defined; this is considered a programmatic error *!!that cannot be
-  detected at runtime!!*  Locations in Y may be written to more than once.
+For indexed cases we can't enforce really any constraints but if a location in result is written
+  to more than once then the outcome is not defined; this is considered a programmatic error
+  *!!that cannot be detected at runtime!!* Locations in Y may be written to more than once.
 
-In general we want as much error checking and analysis done in this file as opposed to at the implementation
-level (compute stream level) so that different implementations of this duplicate the least number of
-possible operations and so their edge cases agree to the extent possible.
+In general we want as much error checking and analysis done in this file as opposed to at the
+  implementation level (compute stream level) so that different implementations of this
+  duplicate the least number of possible operations and so their edge cases agree to the extent
+  possible.
 
 
-For indirect operations element count is num-indexes * num-columns.  After that they should obey the same rules
-if the element counts of various things do not match meaning the smaller should evenly divide the larger and
-if a separate result is provided it must be the size of the larger."
+For indirect operations element count is num-indexes * num-columns.  After that they should obey
+  the same rules if the element counts of various things do not match meaning the smaller should
+  evenly divide the larger and if a separate result is provided it must be the size of the
+  larger."
   (:require [cortex.compute.driver :as compute-drv]
             [think.datatype.core :as dtype]
             [clojure.core.matrix.protocols :as mp]
@@ -731,10 +733,11 @@ to non-gemm operations."
 (defn- ensure-basic-indexing
   "Basic indexing means monotonically increasing without indexed rows or any of the more
   advanced indexing system features"
-  [tensor]
-  (when-not-error (is/simple-monotonically-increasing? (tensor->index-system tensor))
-    "Cannot get rows from tensors unless they have basic indexing system"
-    {:index-system (tensor->index-system)}))
+  [& args]
+  (doseq [tensor args]
+   (when-not-error (is/simple-monotonically-increasing? (tensor->index-system tensor))
+     "tensor must have basic indexing"
+     {:index-system (tensor->index-system)})))
 
 
 (defn rows
@@ -933,9 +936,59 @@ to non-gemm operations."
 dest = alpha * x op beta * y.
 x or y may be a scalar, dest must not be.
 Datatypes must match."
-  [^Tensor dest alpha x beta y op]
+  ^Tensor [dest alpha x beta y op]
   (typed-binary-op dest alpha x beta y op)
   dest)
+
+
+(defn- trans-2d-shape
+  [trans-a? a]
+  (let [[rows cols] (tensor->2d-shape a)]
+    (if trans-a?
+      [cols rows]
+      [rows cols])))
+
+
+(defn gemm!
+  "C = alpha * (trans-a? A) * (trans-b? B) + beta * C."
+  ^Tensor [C trans-a? trans-b? alpha A B beta]
+  (ensure-datatypes (get-datatype C) A B)
+  (ensure-same-device C A B)
+  (ensure-basic-indexing C A B)
+  (when-not-error (or (= :double (get-datatype C))
+                      (= :float (get-datatype C)))
+    "Gemm is only defined for float and double tensors"
+    {:C-datatype (get-datatype C)})
+  (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? (tensor->2d-shape A))
+        [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? (tensor->2d-shape B))
+        [c-row-count c-col-count :as c-shape] (tensor->2d-shape C)
+        a-row-count (long a-row-count)
+        a-col-count (long a-col-count)
+        b-row-count (long b-row-count)
+        b-col-count (long b-col-count)
+        c-row-count (long c-row-count)
+        c-col-count (long c-col-count)]
+    (when-not-error (= a-col-count b-row-count)
+      (format "A %s col count doesn't match B %s row count" a-shape b-shape)
+      {:a-shape a-shape
+       :b-shape b-shape})
+    (when-not-error (= a-row-count c-row-count)
+      (format "C %s row count doesn't match A %s row count" c-shape a-shape)
+      {:a-shape a-shape
+       :c-shape c-shape})
+    (when-not-error (= b-col-count c-col-count)
+      (format "C %s col count doesn't match B %s col count" c-shape b-shape)
+      {:b-shape b-shape
+       :c-shape c-shape})
+    (tm/gemm! (check-stream)
+              (tensor->buffer C) (tensor->index-system C) (tensor->column-stride C)
+              trans-a? trans-b? alpha
+              (tensor->buffer A) (tensor->index-system A)
+              a-row-count a-col-count (tensor->column-stride A)
+              (tensor->buffer B) (tensor->index-system B)
+              b-col-count (tensor->column-stride B)
+              beta))
+  C)
 
 
 (extend-type Tensor
