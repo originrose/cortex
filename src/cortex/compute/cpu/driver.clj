@@ -11,8 +11,7 @@
             [think.parallel.core :as parallel]
             [cortex.compute.cpu.stream
              :refer [check-stream-error
-                     cpu-stream]
-             :as cpu-stream]
+                     cpu-stream]]
             ;;Including this just so the protocols get implemented.
             [cortex.compute.cpu.tensor-math])
   (:import [java.nio ByteBuffer IntBuffer ShortBuffer LongBuffer
