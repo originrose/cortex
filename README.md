@@ -12,7 +12,7 @@ https://groups.google.com/forum/#!forum/clojure-cortex
 
 ## Usage
 
-Cortex has a 0.5.0 release meaning all libraries are released on clojars.  This is very preliminary and I would expect quite a few things to change
+Cortex has a 0.9.8 release meaning all libraries are released on [clojars](https://clojars.org/thinktopic/cortex).  This is very preliminary and you should expect quite a few things to change
 over time but it should allow you to train some initial classifiers or regressions.  Note that the save format has not stabilized and although we do
 just save edn data in nippy format it may require some effort to bring versions of saved forward.  Once a future proof save format has been
 nailed down then we are a major step closer to 1.0.0.
@@ -26,13 +26,13 @@ Please see the various unit tests and examples for training a model.  Specifical
 [mnist verification](src/cortex/verify/nn/train.clj)
 
 Also, for an example of using cortex in a more real-world scenario please see:
-[mnist example](examples/suite-classification/src/suite_classification/core.clj).
+[mnist example](examples/mnist-classification/src/mnist_classification/core.clj).
 
 
 
 ### Existing Framework Comparisons
 
-* Stanford CS 231 [Lecture 12](http://cs231n.stanford.edu/slides/winter1516_lecture12.pdf) contains a detailed
+* Stanford CS 231 [Lecture 12](http://cs231n.stanford.edu/slides/2016/winter1516_lecture12.pdf) contains a detailed
   breakdown of Caffe, Torch, Theano, and TensorFlow.
 
 
@@ -43,17 +43,11 @@ Also, for an example of using cortex in a more real-world scenario please see:
 
  * Recurrence in all forms.  There is some work towards that direction in the compute branch and it is specifically designed to match the cudnn API for recurrence.  This is less important at this point than running some of the larger pre-trained models.
 
- * Graph-based description layer.  This will make doing things like res-nets and dense-nets easier and repeatable.
-
- * Better training - currently there are lots of things that don't train as well as we would like.  This could be because we are using Adam exclusively instead of sgd, it could be because of bugs in the code or it could be because we need different weight initialization.  In any case, building larger nets that train better is of course of critical importance.
-
  * Speaking of larger nets, multiple GPU support and multiple machine support (which could be helped by the above graph based description layer).
 
  * Profiling GPU system to make sure we are using as much GPU as possible in the single-gpu case.
 
- * Better data import/augmentation systems.  Basically inline augmentation of data so the net never sees the same training example twice.
-
- * Better data import/visualization support.  We need a solid panda-equivalent with some level of visualization and feature parity and it isn't clear the best way to get this.  Currently there are three different 'dataset' abstractions in clojure it isn't clear if any of them support the level of indirection and features that panda does.
+ * Better data import/visualization support.  We have geom and we have a clear definition of the datasets, now we need to put together the pieces and build some great visualizations as examples.
 
 
 ### Getting Started:
@@ -71,10 +65,10 @@ and installing cudnn available from here: https://developer.nvidia.com/cudnn pub
 
 The .zip contains some libraries that you will need to make available to the loader. I simply copied the library files to /usr/lib, though I'm sure there's a better way of doing this.
 
-Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 7.5, if you're running 8.0 you will need to use the following branch (basically specifies a different dep for the jni bindings -- o/w code is identical):
+Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 8.0, if you're running 8.0 you will need to use change the javacpp dependency in your project file.
 
-https://github.com/thinktopic/cortex/tree/cuda-8.0
 
+[mnist Example](https://github.com/thinktopic/cortex/blob/master/examples/mnist-classification/project.clj)
 
 #### Mac OS
 These instructions follow the gpu setup from [Tensor Flow](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#optional-setup-gpu-for-mac), i.e.:
@@ -111,8 +105,6 @@ lj:82:28)
 ```
 
 Make sure you have installed the appropriate CUDNN for your version of CUDA.
-
-If attempting a fresh install and run from `Master` you should also make sure to run `cortex/local-install.sh` before running an example (examples/suite-classification/trains.sh for example).
 
 ### See also:
 

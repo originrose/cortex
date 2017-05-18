@@ -1,6 +1,6 @@
 (ns cortex.core-matrix-backends
-  (:require [clojure.core.matrix :as m])
-  #?(:clj (:require [mikera.vectorz.matrix-api])))
+  (:require [clojure.core.matrix :as m]
+            #?(:clj [mikera.vectorz.matrix-api])))
 
 
 #?(:clj (def ^:dynamic *current-matrix-implementation* :vectorz)

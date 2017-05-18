@@ -6,13 +6,13 @@
    [cortex.compute.driver :as drv]
    [cortex.compute.cpu.backend :as cpu-backend]
    [cortex.compute.cpu.driver :as cpu-drv]
-   [cortex.compute.cpu.stream :as cpu-stream]
-   [cortex.compute.cuda.driver :as cuda-drv]
+   ;[cortex.compute.cuda.driver :as cuda-drv]
    [cortex.util :as util]
    [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
    [think.datatype.marshal :as marshal]
    [think.parallel.core :as parallel]
-   [cortex.compute.cuda.base :as cuda-base])
+   [cortex.graph :as graph]
+   [cortex.compute.nn.backend :as compute-backend])
   (:import
    [think.datatype ArrayView IntArrayView]))
 
@@ -47,15 +47,15 @@
 
 (defn- dispatch-to-gpu
   [stream dispatch-fn item-count & args]
-  (apply cuda-base/launch-linear-kernel
+  (require 'cortex.compute.cuda.driver)
+  (apply (resolve 'cortex.compute.cuda.driver/launch-linear-kernel)
          stream dispatch-fn item-count 0
          args))
 
 
 (defn- ->buffer
   ([backend array ^long offset]
-   (drv/sub-buffer (drv/get-driver backend)
-                   (math/device-buffer array)
+   (drv/sub-buffer (math/device-buffer array)
                    offset
                    (- (dtype/ecount array) offset)))
   ([backend buffer]
@@ -122,9 +122,9 @@
    alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
    gradient-alpha gradient parameters m v]
   (let [datatype (dtype/get-datatype backend)
-        stream (drv/get-stream backend)
+        stream (compute-backend/get-stream)
         item-count (dtype/ecount gradient)
-        ->d #(cuda-base/dtype-cast % datatype)]
+        ->d #(drv/dtype-cast % datatype)]
     (ensure-datatype datatype gradient parameters m v)
     (dev-dispatch-fn stream (get-in fn-map [datatype :fn]) item-count
                      (->d alpha) (->d beta1) (->d beta2) (->d epsilon)
@@ -147,14 +147,14 @@
                          gradient-alpha gradient parameters m v)))
 
 
-(defrecord Adam [backend optimizer step-fn param-count m v pow-beta1-t pow-beta2-t]
+(defrecord Adam [backend optimizer step-fn pow-beta1-t pow-beta2-t]
   PGradientOptimizer
-  (batch-update [this]
+  (batch-update [this optimizer-parameters]
     (let [{:keys [beta1 beta2]} optimizer]
       (-> this
           (update :pow-beta1-t #(* (double %) (double beta1)))
           (update :pow-beta2-t #(* (double %) (double beta2))))))
-  (compute-parameters! [this gradient-alpha offset gradient parameters]
+  (compute-parameters! [this {:keys [m v]} gradient-alpha offset gradient parameters]
     (let [{:keys [alpha beta1 beta2 epsilon]} optimizer]
       (step-fn offset
                alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
@@ -162,30 +162,33 @@
 
 
 (defn- setup-optimizer
-  [backend optimizer step-fn param-count]
-  (let [driver (drv/get-driver backend)
-        stream (drv/get-stream backend)
-        datatype (dtype/get-datatype backend)
-        m (math/new-array driver stream datatype [param-count])
-        v (math/new-array driver stream datatype [param-count])]
-    (->Adam backend optimizer step-fn param-count m v POW-BETA1-T POW-BETA2-T)))
+  [backend optimizer step-fn]
+  (->Adam backend optimizer step-fn POW-BETA1-T POW-BETA2-T))
 
 
 (defmethod create-optimizer [:cpu :adam]
-  [backend optimizer param-count]
+  [backend optimizer]
   (let [cpu-fns (datatype-buffer-cast-iterator create-cpu-adam-step-fn)]
     (setup-optimizer backend optimizer
-                     (adam-step-fn backend cpu-fns dispatch-to-cpu)
-                     param-count)))
+                     (adam-step-fn backend cpu-fns dispatch-to-cpu))))
 
 
 (defmethod create-optimizer [:cuda :adam]
-  [backend optimizer param-count]
+  [backend optimizer]
   ;; Load the compiled GPU kernel for floats and doubles
-  (let [cuda-fns (cuda-base/load-float-double-function "adam.fatbin" "adam_step")]
+  (let [cuda-fns ((resolve 'cortex.compute.cuda.driver/load-float-double-function) "adam.fatbin" "adam_step")]
     (setup-optimizer backend optimizer
-                     (adam-step-fn backend cuda-fns dispatch-to-gpu)
-                     param-count)))
+                     (adam-step-fn backend cuda-fns dispatch-to-gpu))))
+
+
+(defmethod graph/get-node-metadata :adam
+  [desc]
+  {:arguments
+   {:m {:initialization {:type :constant :value 0}
+        :type :parameter}
+    :v {:initialization {:type :constant :value 0}
+        :type :parameter}}
+   :passes #{:training}})
 
 (defn adam
   [& args]

@@ -4,7 +4,6 @@
     [clojure.pprint :as pprint]
     [clojure.core.matrix :as m]
     [think.resource.core :as resource]
-    [cortex.dataset :as ds]
     [cortex.loss :as loss]
     [cortex.optimize :as opt]
     [cortex.optimize.adam :as adam]
@@ -13,33 +12,17 @@
     [cortex.nn.execute :as execute]
     [cortex.nn.traverse :as traverse]
     [cortex.nn.network :as network]
-    [cortex.datasets.mnist :as mnist]))
-
-;; Data from: Dominick Salvator and Derrick Reagle
-;; Shaum's Outline of Theory and Problems of Statistics and Economics
-;; 2nd edition,  McGraw-Hill, 2002, pg 157
-
-;; Predict corn yield from fertilizer and insecticide inputs
-;; [corn, fertilizer, insecticide]
-(def CORN-DATA
-  [[6  4]
-   [10  4]
-   [12  5]
-   [14  7]
-   [16  9]
-   [18 12]
-   [22 14]
-   [24 20]
-   [26 21]
-   [32 24]])
+    [cortex.compute.driver :as drv]
+    [cortex.compute.nn.backend :as nn-backend]
+    [cortex.verify.nn.data
+     :refer [CORN-DATA CORN-LABELS CORN-DATASET
+             mnist-training-dataset*
+             mnist-test-dataset*]
+     :as data]))
 
 
-(def CORN-LABELS
-  [[40] [44] [46] [48] [52] [58] [60] [68] [74] [80]])
-
-
-(def mnist-network
-  [(layers/input 28 28 1 :id :input)
+(def MNIST-NETWORK
+  [(layers/input 28 28 1 :id :data)
    (layers/convolutional 5 0 1 20 :weights {:l2-regularization 1e-3})
    (layers/max-pooling 2 0 2)
    (layers/dropout 0.9)
@@ -49,38 +32,43 @@
    (layers/max-pooling 2 0 2)
    (layers/batch-normalization :l1-regularization 1e-4)
    (layers/linear 500 :l2-max-constraint 4.0)
-   (layers/relu :center-loss {:labels {:stream :labels}
+   (layers/relu :center-loss {:label-indexes {:stream :label}
+                              :label-inverse-counts {:stream :label}
+                              :labels {:stream :label}
                               :alpha 0.9
                               :lambda 1e-4})
    (layers/linear 10)
-   (layers/softmax :id :output)])
+   (layers/softmax :id :label)])
+
+(defn min-index
+  "Returns the index of the minimum value in a vector."
+  [v]
+  (let [length (count v)]
+    (loop [minimum (v 0)
+           min-index 0
+           i 1]
+      (if (< i length)
+        (let [value (v i)]
+          (if (< value minimum)
+            (recur value i (inc i))
+            (recur minimum min-index (inc i))))
+        min-index))))
 
 
+(defn max-index
+  "Returns the index of the maximum value in a vector."
+  [v]
+  (let [length (count v)]
+    (loop [maximum (v 0)
+           max-index 0
+           i 1]
+      (if (< i length)
+        (let [value (v i)]
+          (if (> value maximum)
+            (recur value i (inc i))
+            (recur maximum max-index (inc i))))
+        max-index))))
 
-(defonce training-data (future (mnist/training-data)))
-(defonce training-labels (future (mnist/training-labels)))
-(defonce test-data (future (mnist/test-data)))
-(defonce test-labels (future (mnist/test-labels)))
-
-
-(defn mnist-dataset
-  [& {:keys [data-transform-function]
-      :or {data-transform-function identity}}]
-  (let [data (mapv data-transform-function (concat @training-data @test-data))
-        labels (vec (concat @training-labels @test-labels))
-        num-training-data (count @training-data)
-        total-data (+ num-training-data (count @test-data))
-        training-split (double (/ num-training-data
-                                  total-data))
-        cv-split (- 1.0 training-split)]
-    (ds/in-memory-dataset {:data          {:data  data
-                                           :shape (ds/image-shape 1 28 28)}
-                                  :labels {:data  labels
-                                           :shape 10}}
-                          (ds/index-sets total-data
-                                                :training-split training-split
-                                                :cv-split cv-split
-                                                :randimize? false))))
 
 (defn- print-layer-weights
   [network]
@@ -92,92 +80,156 @@
   network)
 
 
-(defn- train-and-get-results
-  [context network input-bindings output-bindings
-   batch-size dataset optimizer disable-infer? infer-batch-type
-   n-epochs map-fn]
-  (let [output-id (ffirst output-bindings)]
-    (resource/with-resource-context
-      (network/print-layer-summary (-> network
-                                       network/linear-network
-                                       traverse/auto-bind-io
-                                       (traverse/add-training-traversal
-                                         (ds/stream-descriptions dataset))))
-      (as-> (network/linear-network network) net-or-seq
-            (execute/train context net-or-seq dataset input-bindings output-bindings
-                       :batch-size batch-size
-                       :optimizer optimizer
-                       :disable-infer? disable-infer?
-                       :infer-batch-type infer-batch-type)
-            (take n-epochs net-or-seq)
-            (map map-fn net-or-seq)
-            (last net-or-seq)
-            (execute/save-to-network context (get net-or-seq :network) {})
-            (execute/infer-columns context net-or-seq dataset input-bindings output-bindings
-                               :batch-size batch-size)
-            (get net-or-seq output-id)))))
+(defn corn-network
+  []
+  (->> [(layers/input 2 1 1 :id :data)
+        (layers/linear 1 :id :label)]
+       (network/linear-network)))
 
 
+(defn regression-error
+  [as bs]
+  (reduce +
+    (map (fn [[a] [b]]
+           (* (- a b) (- a b)))
+        as bs)))
 
 (defn test-corn
-  [context]
-  (let [epoch-counter (atom 0)
-        dataset (ds/in-memory-dataset
-                  {:data {:data CORN-DATA
-                          :shape 2}
-                   :labels {:data CORN-LABELS
-                            :shape 1}}
-                  (ds/index-sets (count CORN-DATA)
-                                 :training-split 1.0
-                                 :randomize? false))
+  [& [context]]
+  (let [context (or context (execute/compute-context))]
+    (execute/with-compute-context context
+      (let [dataset CORN-DATASET
+            labels (map :label dataset)
+            big-dataset (apply concat (repeat 100 dataset))
+            optimizer (adam/adam :alpha 0.01)
+            network (corn-network)
+            network (loop [network network
+                           optimizer optimizer
+                           epoch 0]
+                      (if (> 3 epoch)
+                        (let [{:keys [network optimizer]}
+                              (execute/train network big-dataset
+                                             :batch-size 1
+                                             :context context
+                                             :optimizer optimizer)
+                              results (map :label (execute/run network dataset :context context))
+                              err (regression-error results labels)]
+                          (recur network optimizer (inc epoch)))
+                        network))
+            results (map :label (execute/run network dataset :batch-size 10 :context context))
+            err (regression-error results labels)]
+        (is (> err 0.2))))))
 
-        loss-fn (loss/mse-loss)
-        input-bindings [(traverse/input-binding :input :data)]
-        output-bindings [(traverse/output-binding :output
-                                                  :stream :labels
-                                                  :loss loss-fn)]
-        batch-size 2
-        results (train-and-get-results context [(layers/input 2 1 1 :id :input)
-                                                (layers/linear 1 :id :output)]
-                                       input-bindings output-bindings batch-size
-                                       dataset
-                                       (adadelta/adadelta) true nil 5000 identity)
-        mse (loss/average-loss loss-fn results CORN-LABELS)]
-    (is (< mse 25))))
+
+(defn percent=
+  [a b]
+  (loss/evaluate-softmax a b))
 
 
 (defn train-mnist
-  [context]
-  (let [batch-size 10
-        n-epochs 4
-        epoch-counter (atom 0)
-        ;;Don't do this for real.
-        max-sample-count 100
-        loss-fn (loss/softmax-loss)
-        dataset (->> (mnist-dataset)
-                     (ds/take-n max-sample-count))
+  [& [context]]
+  (let [context (or context (execute/compute-context))]
+    (execute/with-compute-context context
+     ;;for the creation of the main cuda and cudnn contexts if necessary.  This also does all the
+      ;;dynamic compilation required thus making the loop below a bit tighter.
 
-        input-bindings [(traverse/input-binding :input :data)]
-        output-bindings [(traverse/output-binding :output
-                                                  :stream :labels
-                                                  :loss loss-fn)]
-        inference-batch-type :cross-validation
-        label-seq (ds/get-batches dataset batch-size inference-batch-type [:labels])
-        answers (->> (ds/batches->columnsv label-seq)
-                     :labels)
-        results (train-and-get-results context mnist-network input-bindings output-bindings batch-size
-                                       dataset (adam/adam) false inference-batch-type 4
-                                       (fn [{:keys [network inferences] :as entry}]
-                                         (let [loss-fn (execute/network->applied-loss-fn
-                                                        context network inferences
-                                                        (ds/get-batches dataset batch-size
-                                                                        inference-batch-type
-                                                                        (traverse/get-output-streams
-                                                                         network)))]
-                                          (println (format "Loss for epoch %s: %s%s\n\n"
-                                                           (get network :epoch-count)
-                                                           (apply + (map :value loss-fn))
-                                                           (loss/loss-fn->table-str loss-fn))))
-                                         entry))
-        score (loss/evaluate-softmax results answers)]
-    (is (> score 0.6))))
+      ;;Without the outer resource context and initial backend creation, each of the train/run
+      ;;functions below is rebuilding the entire cuda context which includes compiling kernels and
+      ;;doing cuda init, neither of which is designed to be called more than once a program.
+      (let [n-epochs 4
+            training-batch-size 20
+            running-batch-size 100
+            dataset (take 200 @mnist-training-dataset*)
+            test-dataset (take 100 @mnist-test-dataset*)
+            test-labels (map :label test-dataset)
+            network (network/linear-network MNIST-NETWORK)
+            _ (println (format "Training MNIST network for %s epochs..." n-epochs))
+            _ (network/print-layer-summary network (traverse/training-traversal network))
+            [network optimizer]
+            (reduce (fn [[network optimizer] epoch]
+                      (let [{:keys [network optimizer]}
+                            (execute/train network dataset
+                                           :context context
+                                           :batch-size training-batch-size
+                                           :optimizer optimizer)
+                            results (execute/run network test-dataset
+                                      :context context
+                                      :batch-size running-batch-size
+                                      :loss-outputs? true)
+                            ;;Run multiple inferences in parallel to make sure this works across devices and to shake
+                            ;;out possible indeterminism in the system.
+                            loss-fns (->> (range 9)
+                                          (pmap (fn [_]
+                                                  (->> (execute/run network test-dataset
+                                                         :context context
+                                                         :batch-size running-batch-size
+                                                         :loss-outputs? true)
+                                                       ((fn [results]
+                                                          (execute/execute-loss-fn network results test-dataset))))))
+                                          distinct)
+                            loss-fn (first loss-fns)
+                            score (percent= (map :label results) test-labels)]
+                        (is (= 1 (count loss-fns)))
+                        (println (format "Score for epoch %s: %s" (inc epoch) score))
+                        (println (loss/loss-fn->table-str loss-fn))
+                        [network optimizer]))
+                    [network nil]
+                    (range n-epochs))
+            results (->> (execute/run network test-dataset
+                           :batch-size running-batch-size :context context)
+                         (map :label))]
+        ;;Ensure the optimizer was updated
+        (is (= (clojure.set/intersection #{:m :v} (set (keys optimizer)))
+               #{:m :v}))
+        (is (> (percent= results test-labels) 0.6))))))
+
+
+(defn dataset-batch-size-mismatch
+  [& [context]]
+  (let [context (or context (execute/compute-context))]
+    (execute/with-compute-context context
+      (let [batch-size 5
+            dataset-count 17
+            dataset (for [_ (range dataset-count)]
+                      {:data (vec (repeatedly (* 28 28) rand))
+                       :label (assoc (vec (repeat 10 0)) (rand-int 10) 1.0)})
+            network (network/linear-network MNIST-NETWORK)
+            {network :network} (execute/train network dataset
+                                              :context context
+                                              :batch-size batch-size)
+            results (execute/run network dataset
+                      :context context
+                      :batch-size batch-size
+                      :loss-outputs? true)
+            loss-fn (execute/execute-loss-fn network results dataset)
+            result-count (count results)]
+        (is (not (zero? (rem dataset-count batch-size))))
+        (is (zero? (rem result-count batch-size)))))))
+
+
+(defn multithread-infer
+  [& [context]]
+  (let [context (or context (execute/compute-context))]
+    (execute/with-compute-context context
+      (let [network (network/linear-network MNIST-NETWORK)
+            batch-size 10
+            test-dataset (take 100 @mnist-test-dataset*)
+            test-dataset-seq (->> (repeat 10 test-dataset)
+                                  (map (fn [dataset]
+                                         {:dataset dataset
+                                          :stream (drv/create-stream)})))
+            test-labels (map :label test-dataset)
+
+            losses (->> test-dataset-seq
+                        (pmap (fn [{:keys [dataset stream]}]
+                                (nn-backend/with-stream stream
+                                  (->> (execute/run network dataset
+                                         :context context
+                                         :batch-size batch-size)
+                                       ((fn [inferences]
+                                          (-> (percent= (map :label inferences) test-labels)
+                                              (* 100))))))))
+                        distinct
+                        vec)]
+        (is (= 1 (count losses)))
+        (is (not= nil (first losses)))))))

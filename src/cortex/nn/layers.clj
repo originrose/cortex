@@ -12,52 +12,6 @@ constructors are all variable args with the extra arguments expected to be
 
 
 ;; Helpers
-
-(defn- ensure-single-output-dimensions
-  [previous node]
-  (let [output-dims (graph/node->output-dimensions previous)]
-   (when-not (or (= 1 (count output-dims))
-                 (= 1 (count (filter #(= (get node :id)
-                                         (get % :id))
-                                     output-dims))))
-     (throw (ex-info "Previous node has multiple output dimensions pertaining to this node."
-                     {:previous previous
-                      :node node
-                      :output-dimensions (graph/node->output-dimensions previous)}))))
-  (first (graph/node->output-dimensions previous)))
-
-
-(defn- carry-input-image-dims-forward
-  [previous item]
-  (assoc item :input-dimensions [(assoc
-                                  (ensure-single-output-dimensions previous item)
-                                  :id (get previous :id))]))
-
-
-(defn- carry-image-dims-forward
-  [previous item]
-  (let [input-dims (ensure-single-output-dimensions previous item)]
-    ;;For single input nodes it is still important to note the parent this input came from.
-    (assoc item :input-dimensions [(assoc input-dims :id (get previous :id))]
-           ;;But for single outputs the source is clear.
-          :output-dimensions [(dissoc input-dims :id)])))
-
-
-(defn- ensure-single-parent
-  [graph node previous-id-seq]
-  (when-not (= 1 (count previous-id-seq))
-    (throw (ex-info "Node only takes a single node of input."
-                    {:node node
-                     :previous previous-id-seq})))
-  (graph/get-node graph (first previous-id-seq)))
-
-
-(defn- default-build-fn
-  [graph node predecessor-ids successor-ids]
-  (let [previous (ensure-single-parent graph node predecessor-ids)]
-    (carry-image-dims-forward previous node)))
-
-
 (defn- default-layer-metadata
   []
   {:arguments {}
@@ -93,12 +47,7 @@ constructors are all variable args with the extra arguments expected to be
       (buf-init/initialize-buffer {:type :xavier
                                    :shape shape}))))
 
-(defmethod graph/build-node :default
-  [& args]
-  (apply default-build-fn args))
-
 ;; Input Layer
-
 (defmethod graph/build-node :input
   [graph node predecessor-seq _]
   (when-not (= 0 (count predecessor-seq))
@@ -110,19 +59,10 @@ constructors are all variable args with the extra arguments expected to be
       (throw (ex-info "Input nodes can only link to streams"
                       {:node node})))
     (if-let [stream-desc (get-in graph [:streams (get input-data :stream)])]
-      (let [channels (long (get stream-desc :channels))
-            width (long (get stream-desc :width))
-            height (long (get stream-desc :height))]
-        ; TODO: why does an input node have input-* anything?
-       (assoc node
-              :input-channels channels
-              :output-channels channels
-              :input-height height
-              :output-height height
-              :input-width width
-              :output-width width
-              :input-size (* channels width height)
-              :output-size (* channels width height)))
+      (let [io-dimension (assoc stream-desc :stream (get input-data :stream))]
+        (assoc node
+               :input-dimensions [io-dimension]
+               :output-dimensions [io-dimension]))
       (throw (ex-info "Failed to find stream to bind to input"
                       {:node node
                        :stream (get input-data :stream)})))))
@@ -165,8 +105,8 @@ constructors are all variable args with the extra arguments expected to be
 
 (defmethod graph/build-node :linear
   [graph node predecessor-id-seq successor-id-seq]
-  (-> (ensure-single-parent graph node predecessor-id-seq)
-      (carry-input-image-dims-forward node)))
+  (-> (graph/ensure-single-parent graph node predecessor-id-seq)
+      (graph/carry-input-dims-forward node)))
 
 
 (defmethod graph/get-node-metadata :linear
@@ -186,20 +126,19 @@ constructors are all variable args with the extra arguments expected to be
 ;; Softmax
 
 (defn softmax
-    "Define a softmax which may be multi-channelled.  The data is expected
+  "Define a softmax which may be multi-channelled.  The data is expected
   to be planar such that channel one has n-outputs followed in memory by
-channel 2 with n-outputs"
+  channel 2 with n-outputs"
   [& {:keys [output-channels]
       :or {output-channels 1}
       :as arg-map}]
-  [(merge {:type :softmax :output-channels 1}
-          arg-map)])
+  [(merge {:type :softmax} arg-map)])
 
 
 (defmethod graph/build-node :softmax
   [graph node predecessor-seq successor-ids]
-  (let [previous (ensure-single-parent graph node predecessor-seq)]
-   (-> (carry-input-image-dims-forward previous node)
+  (let [previous (graph/ensure-single-parent graph node predecessor-seq)]
+   (-> (graph/carry-input-dims-forward previous node)
        (assoc :output-size (graph/node->output-size previous)
               :output-channels (get node :output-channels 1)))))
 
@@ -264,12 +203,6 @@ If the input contains no channels then you get a scale factor per input paramete
   [(merge-args {:type :logistic} args)])
 
 
-(defn linear->logistic
-  [num-output & args]
-  (concat (apply linear num-output args)
-          (apply logistic args)))
-
-
 (defmethod graph/get-node-metadata :logistic
   [& args]
   (default-layer-metadata))
@@ -278,12 +211,6 @@ If the input contains no channels then you get a scale factor per input paramete
 (defn tanh
   [& args]
   [(merge-args {:type :tanh} args)])
-
-
-(defn linear->tanh
-  [num-output & args]
-  (concat (apply linear num-output args)
-          (apply tanh args)))
 
 
 (defmethod graph/get-node-metadata :tanh
@@ -320,17 +247,42 @@ no change to the input."
 
 ;; Composites
 
+(defn- seq-without-id
+  [coll]
+  (->> coll
+       (reduce (fn [[eax last-elt] elt]
+                 (if (or (= :id elt) (= :id last-elt))
+                   [eax elt]
+                   [(conj eax elt) elt]))
+               [[] nil])
+       (first)
+       (seq)))
+
 (defn linear->softmax
   [num-classes & args]
   (vec
-   (concat (apply linear num-classes args)
+   (concat (apply linear num-classes (seq-without-id args))
            (apply softmax args))))
 
 
 (defn linear->relu
   [num-output & args]
-  (concat (apply linear num-output args)
+  (concat (apply linear num-output (seq-without-id args))
           (apply relu args)))
+
+
+(defn linear->tanh
+  [num-output & args]
+  (concat (apply linear num-output (seq-without-id args))
+          (apply tanh args)))
+
+
+(defn linear->logistic
+  [num-output & args]
+  (concat (apply linear num-output (seq-without-id args))
+          (apply logistic args)))
+
+
 
 
 ;; Convolutional Layers
@@ -408,7 +360,7 @@ a few compatibility issues."
   [previous item ^long output-channels]
   (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y dimension-op]
          :or {dimension-op :floor}} item
-        output-dims (ensure-single-output-dimensions previous item)
+        output-dims (graph/ensure-single-output-dimensions previous item)
         input-width (long (:width output-dims))
         input-height (long (:height output-dims))
         input-channels (long (:channels output-dims))
@@ -428,7 +380,7 @@ a few compatibility issues."
     (throw (ex-info "Convolutional layers can only have floor dimension operation"
                     {:dimension-op (get node :dimension-op)
                      :node node})))
-  (build-convolutional-type-node (ensure-single-parent graph node predecessor-id-seq)
+  (build-convolutional-type-node (graph/ensure-single-parent graph node predecessor-id-seq)
                                  node (get node :num-kernels)))
 
 
@@ -457,9 +409,9 @@ a few compatibility issues."
 
 (defmethod graph/build-node :max-pooling
   [graph node predecessor-ids successor-ids]
-  (let [previous (ensure-single-parent graph node predecessor-ids)]
+  (let [previous (graph/ensure-single-parent graph node predecessor-ids)]
    (build-convolutional-type-node previous
-                                  node (get (ensure-single-output-dimensions previous node)
+                                  node (get (graph/ensure-single-output-dimensions previous node)
                                         :channels))))
 
 
@@ -540,7 +492,7 @@ This is for cudnn compatibility.")))
                     {:node node
                      :successors s-id-seq})))
   (let [input-dims (mapv #(-> (graph/get-node graph %)
-                              (ensure-single-output-dimensions node)
+                              (graph/ensure-single-output-dimensions node)
                               (assoc :id %))
                          p-id-seq)]
    (assoc node
@@ -571,7 +523,7 @@ input dimensions."
                     {:node node
                      :successors s-id-seq})))
   (let [input-dims (mapv #(-> (graph/get-node graph %)
-                              (ensure-single-output-dimensions node)
+                              (graph/ensure-single-output-dimensions node)
                               (assoc :id %))
                          p-id-seq)]
     (assoc node
@@ -594,8 +546,8 @@ input dimensions."
 
 (defmethod graph/build-node :split
   [graph node p-id-seq s-id-seq]
-  (let [previous (ensure-single-parent graph node p-id-seq)
-        input-dims (ensure-single-output-dimensions previous node)
+  (let [previous (graph/ensure-single-parent graph node p-id-seq)
+        input-dims (graph/ensure-single-output-dimensions previous node)
         output-dim-vec (if (empty? s-id-seq)
                          [input-dims]
                          (mapv #(assoc input-dims :id %)

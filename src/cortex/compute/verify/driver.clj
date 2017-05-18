@@ -8,48 +8,51 @@
 
 
 (defn simple-stream
-  [device datatype]
-  (let [stream (drv/create-stream device)
-        buf-a (drv/allocate-host-buffer device 10 datatype)
-        output-buf-a (drv/allocate-host-buffer device 10 datatype)
-        buf-b (drv/allocate-device-buffer device 10 datatype)
-        input-data (dtype/make-array-of-type datatype (range 10))
-        output-data (dtype/make-array-of-type datatype 10)]
-    (dtype/copy! input-data 0 buf-a 0 10)
-    (dtype/set-value! buf-a 0 100.0)
-    (dtype/copy! buf-a 0 output-data 0 10)
-    (drv/copy-host->device stream buf-a 0 buf-b 0 10)
-    (drv/memset stream buf-b 5 20.0 5)
-    (drv/copy-device->host stream buf-b 0 output-buf-a 0 10)
-    (drv/wait-for-event (drv/create-event stream))
-    (dtype/copy! output-buf-a 0 output-data 0 10)
-    (is (= [100.0 1.0 2.0 3.0 4.0 20.0 20.0 20.0 20.0 20.0]
-           (mapv double output-data)))))
+  [driver datatype]
+  (drv/with-compute-device
+    (drv/default-device driver)
+    (let [stream (drv/create-stream)
+          buf-a (drv/allocate-host-buffer driver 10 datatype)
+          output-buf-a (drv/allocate-host-buffer driver 10 datatype)
+          buf-b (drv/allocate-device-buffer 10 datatype)
+          input-data (dtype/make-array-of-type datatype (range 10))
+          output-data (dtype/make-array-of-type datatype 10)]
+      (dtype/copy! input-data 0 buf-a 0 10)
+      (dtype/set-value! buf-a 0 100.0)
+      (dtype/copy! buf-a 0 output-data 0 10)
+      (drv/copy-host->device stream buf-a 0 buf-b 0 10)
+      (drv/memset stream buf-b 5 20.0 5)
+      (drv/copy-device->host stream buf-b 0 output-buf-a 0 10)
+      (drv/sync-stream stream)
+      (dtype/copy! output-buf-a 0 output-data 0 10)
+      (is (= [100.0 1.0 2.0 3.0 4.0 20.0 20.0 20.0 20.0 20.0]
+             (mapv double output-data))))))
 
 (defn make-buffer-fn
-  [device stream datatype]
+  [stream datatype]
    (fn [elem-seq]
-     (drv/host-array->device-buffer device stream
+     (drv/host-array->device-buffer stream
                                     (dtype/make-array-of-type datatype elem-seq))))
 
 (defmacro backend-test-pre
-  [device datatype & body]
-  `(let [~'stream (drv/create-stream ~device)
-         ~'make-buffer (make-buffer-fn ~device ~'stream ~datatype)
-         ~'->array (fn [buffer#] (drv/device-buffer->host-array ~device ~'stream buffer#))]
-     ~@body
-     ))
+  [driver datatype & body]
+  `(drv/with-compute-device
+     (drv/default-device ~driver)
+     (let [~'stream (drv/create-stream)
+           ~'make-buffer (make-buffer-fn ~'stream ~datatype)
+           ~'->array (fn [buffer#] (drv/device-buffer->host-array ~'stream buffer#))]
+       ~@body)))
 
 
 (defn indexed-copy
-  [device datatype]
+  [driver datatype]
   (backend-test-pre
-   device datatype
+   driver datatype
    (let [n-elems 100
          src-data (make-buffer (range n-elems))
-         src-indexes (->> (math/array device stream :int (range n-elems))
+         src-indexes (->> (math/array stream :int (range n-elems))
                           (math/device-buffer))
-         dest-indexes (->> (math/array device stream :int (reverse (range n-elems)))
+         dest-indexes (->> (math/array stream :int (reverse (range n-elems)))
                            (math/device-buffer))
          dest-data (make-buffer n-elems)]
      (drv/indexed-copy stream src-data src-indexes dest-data dest-indexes 1)
@@ -57,8 +60,8 @@
                    (vec (->array dest-data)))))))
 
 (defn gemm
-  [device datatype]
-  (backend-test-pre device datatype
+  [driver datatype]
+  (backend-test-pre driver datatype
    (let [buf-a (make-buffer (flatten (repeat 4 (range 10))))
          buf-b (make-buffer (flatten (repeat 10 (range 5))))
          buf-c (make-buffer (repeat 20 0))
@@ -77,8 +80,8 @@
             (vec (map double (->array buf-c))))))))
 
 (defn sum
-  [device datatype]
-  (backend-test-pre device datatype
+  [driver datatype]
+  (backend-test-pre driver datatype
    (let [values (flatten (repeat 4 (range 10)))
          buf-a (make-buffer values)
          buf-b (make-buffer values)]
@@ -93,8 +96,8 @@
             (vec (map double (->array buf-b))))))))
 
 (defn subtract
-  [device datatype]
-  (backend-test-pre device datatype
+  [driver datatype]
+  (backend-test-pre driver datatype
    (let [values (flatten (repeat 4 (range 10)))
          buf-a (make-buffer values)
          buf-b (make-buffer values)
@@ -105,8 +108,8 @@
             (vec (map double (->array result))))))))
 
 (defn gemv
-  [device datatype]
-  (backend-test-pre device datatype
+  [driver datatype]
+  (backend-test-pre driver datatype
    (let [values (vec (range 10))
          buf-a (make-buffer (flatten (repeat 4 values)))
          buf-b (make-buffer (flatten values))
@@ -123,8 +126,8 @@
             (vec (map double (->array buf-c))))))))
 
 (defn mul-rows
-  [device datatype]
-  (backend-test-pre device datatype
+  [driver datatype]
+  (backend-test-pre driver datatype
    (let [values (vec (range 10))
          buf-a (make-buffer (flatten (repeat 4 values)))
          buf-b (make-buffer (range 4))
@@ -138,8 +141,8 @@
             (vec (map double (->array buf-c))))))))
 
 (defn elem-mul
-  [device datatype]
-  (backend-test-pre device datatype
+  [driver datatype]
+  (backend-test-pre driver datatype
    (let [values (vec (range 10))
          buf-a (make-buffer values)
          buf-b (make-buffer values)
@@ -155,8 +158,8 @@
      0.001))
 
 (defn l2-constraint-scale
-  [device datatype]
-  (backend-test-pre device datatype
+  [driver datatype]
+  (backend-test-pre driver datatype
    (let [values (mapv #(* % %) (range 10))
          buf-a (make-buffer values)
          answer [1 1 1 1 1 1 (/ 5 6) (/ 5 7) (/ 5 8) (/ 5 9)]]
@@ -166,9 +169,9 @@
 
 
 (defn select
-  [device datatype]
+  [driver datatype]
   (backend-test-pre
-   device datatype
+   driver datatype
    (let [n-elems 1000
          values (mapv #(- % 0.5) (repeatedly n-elems rand))
          buf-a (make-buffer values)
@@ -182,18 +185,18 @@
 
 
 (defn indirect-add
-  [device datatype]
+  [driver datatype]
   (backend-test-pre
-   device datatype
+   driver datatype
    (let [n-elems 1000
          vec-len 10
          n-vecs (/ n-elems vec-len)
          values (range n-elems)
          buf-a (make-buffer values)
-         src-indexes (->> (math/array device stream :int (range n-vecs))
+         src-indexes (->> (math/array stream :int (range n-vecs))
                           math/device-buffer)
          buf-b (make-buffer (/ n-elems 2))
-         dst-indexes (->> (math/array device stream :int (flatten (repeat 2 (range (/ n-vecs 2)))))
+         dst-indexes (->> (math/array stream :int (flatten (repeat 2 (range (/ n-vecs 2)))))
                           math/device-buffer)
          answer (->> values
                      (partition vec-len)
@@ -210,10 +213,10 @@
                         (mapv vec)))))
    (let [n-elems 10000
          buf-a (make-buffer (repeat n-elems 1))
-         src-indexes (->> (math/array device stream :int (range n-elems))
+         src-indexes (->> (math/array stream :int (range n-elems))
                           math/device-buffer)
          buf-b (make-buffer (repeat 4 0))
-         dst-indexes (->> (math/array device stream :int (flatten (repeat 2500 [0 1 2 3])))
+         dst-indexes (->> (math/array stream :int (flatten (repeat 2500 [0 1 2 3])))
                           math/device-buffer)
          answer [2500.0 2500.0 2500.0 2500.0]]
      (math/indirect-add stream 1.0 buf-a src-indexes
@@ -224,15 +227,14 @@
 
 
 (defn batched-offsetting
-  [device datatype]
+  [driver datatype]
   (backend-test-pre
-   device datatype
+   driver datatype
    (let [batched-data (->>
-                       (math/batched-data-to-per-input-data device
-                                                            [(math/array device stream datatype
+                       (math/batched-data-to-per-input-data [(math/array stream datatype
                                                                          (range 100) 10)])
                        (apply interleave)
-                       (map #(vec (math/to-double-array device stream %)))
+                       (map #(vec (math/to-double-array stream %)))
                        flatten)]
      (is (m/equals (partition 10 (range 100))
             (partition 10 batched-data))))))

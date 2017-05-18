@@ -8,6 +8,5 @@
 
 (use-fixtures :each test-utils/test-wrapper)
 
-(deftest center-loss
-  (verify-loss/center-loss (cpu.backend/backend test-utils/*datatype*)))
-
+(def-double-float-test center-loss
+  (verify-loss/center-loss (cpu.backend/backend :datatype test-utils/*datatype*)))

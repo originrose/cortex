@@ -44,34 +44,46 @@
 
 (defmethod get-node-metadata :default [node] {})
 
+
+(defn get-node-argument-keys
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       keys))
+
+
+(defn get-node-metadata-arguments
+  [node]
+  (->> (get-node-metadata node)
+       :arguments
+       (map (fn [[k v]]
+              (assoc v :key k)))))
+
+
 (defn get-node-argument
   [node arg-key]
   (let [learn-atten (get node :learning-attenuation 1.0)
         non-trainable? (get node :non-trainable? false)
-        retval (->> (get-node-metadata node)
-                    :arguments
-                    (#(get % arg-key)))]
-    (when-not retval
-      (throw (ex-info "Failed to find node argument"
+        node-defaults (:arguments (get-node-metadata node))
+        default-arg (get node-defaults arg-key)
+        default-arg (assoc default-arg :key arg-key)
+        arg (util/deep-merge default-arg (get node arg-key))]
+    (when-not default-arg
+      (throw (ex-info (str "Invalid node argument: " arg-key)
                       {:node node
-                       :argument-name arg-key
-                       :arguments (get (get-node-metadata node) :arguments)})))
-    (let [retval (->> (assoc retval :key arg-key)
-                      (util/deep-merge retval (get node arg-key)))
-          param-learn-atten (get retval :learning-attenuation learn-atten)]
-      (if (or (zero? param-learn-atten)
-              non-trainable?)
-        (assoc retval :gradients? false)
-        (assoc retval :learning-attenuation param-learn-atten)))))
+                       :arg arg-key
+                       :accepted-args (get (get-node-metadata node) :arguments)})))
+    (if (or (zero? (get arg :learning-attenuation learn-atten))
+            non-trainable?)
+      (assoc arg :gradients? false)
+      arg)))
 
 
 (defn get-node-arguments
   "Get the node arguments 'before' being merged with the node
 buffers."
   [node]
-  (->> (get-node-metadata node)
-       :arguments
-       keys
+  (->> (get-node-argument-keys node)
        (map #(get-node-argument node %))))
 
 
@@ -119,6 +131,10 @@ buffers."
   If any of the predecessors does not exist an error will be thrown.  Returns a pair
   of [graph node-id]"
   [graph node predecessor-id-seq]
+  (when-not (contains? graph :nodes)
+    (throw (ex-info "nil graph in add-node"
+                    {:graph graph
+                     :node node})))
   (when-not (every? (get graph :nodes) predecessor-id-seq)
     (throw (ex-info "Failed to find all predecessor id's in graph"
                     {:id-seq predecessor-id-seq
@@ -183,10 +199,67 @@ buffers."
     (get node :type)))
 
 
+(declare node->output-dimensions)
+
+
+(defn clear-dimension-identifiers
+  "Remove identifiers on dimensions.  This is used as a general tool when copying input
+  dimensions to output dimensions.  The identifiers on the input dimensions should be removed."
+  [dims]
+  (dissoc dims :id :stream))
+
+
+(defn ensure-single-output-dimensions
+  "Ensure a node has one output and get it's output dimensions."
+  [previous node]
+  (let [output-dims (node->output-dimensions previous)]
+   (when-not (or (= 1 (count output-dims))
+                 (= 1 (count (filter #(= (get node :id)
+                                         (get % :id))
+                                     output-dims))))
+     (throw (ex-info "Previous node has multiple output dimensions pertaining to this node."
+                     {:previous previous
+                      :node node
+                      :output-dimensions output-dims})))
+   (clear-dimension-identifiers (first output-dims))))
+
+
+
+(defn carry-input-dims-forward
+  [previous item]
+  (assoc item :input-dimensions [(assoc
+                                  (ensure-single-output-dimensions previous item)
+                                  :id (get previous :id))]))
+
+(defn carry-io-dims-forward
+  [previous item]
+  (let [input-dims (ensure-single-output-dimensions previous item)]
+    ;;For single input nodes it is still important to note the parent this input came from.
+    (assoc item :input-dimensions [(assoc input-dims :id (get previous :id))]
+           ;;But for single outputs the source is clear.
+           :output-dimensions [input-dims])))
+
+
+(defn ensure-single-parent
+  [graph node previous-id-seq]
+  (when-not (= 1 (count previous-id-seq))
+    (throw (ex-info "Node only takes a single node of input."
+                    {:node node
+                     :previous previous-id-seq})))
+  (get-node graph (first previous-id-seq)))
+
+
+(defn- default-build-fn
+  [graph node predecessor-ids successor-ids]
+  (let [previous (ensure-single-parent graph node predecessor-ids)]
+    (carry-io-dims-forward previous node)))
+
+
+
 ;;lots of nodes do not need to be built.
 (defmethod build-node :default
-  [graph node p-id-seq s-id-seq]
-  node)
+  [& args]
+  (apply default-build-fn args))
 
 
 (defn stream-descriptor
@@ -201,6 +274,14 @@ a vector of floats."
    (stream-descriptor 1 1 width)))
 
 
+(defn shape->stream-descriptor
+  [shape]
+  (condp = (count shape)
+    1 (stream-descriptor (first shape))
+    3 (let [[channels height width] shape]
+        (stream-descriptor channels height width))))
+
+
 (defn stream-descriptor->size
   ^long [shape-desc]
   (long (apply * (vals shape-desc))))
@@ -211,13 +292,18 @@ a vector of floats."
   (assoc-in graph [:streams stream-name] shape-descriptor))
 
 
-(defn stream->size
+(defn stream->descriptor
   [graph stream-name]
   (if-let [stream-shape (get-in graph [:streams stream-name])]
-    (stream-descriptor->size stream-shape)
+    stream-shape
     (throw (ex-info "Failed to find stream in graph"
                     {:stream stream-name
                      :available-streams (keys (get graph :streams))}))))
+
+
+(defn stream->size
+  [graph stream-name]
+  (stream-descriptor->size (stream->descriptor graph stream-name)))
 
 
 (defn get-node
@@ -241,9 +327,6 @@ a vector of floats."
       node)
     (assoc node :id (util/generate-id (name (get node :type))
                                       (set (keys (get graph :nodes)))))))
-
-
-
 
 
 (defn- edges
@@ -302,10 +385,9 @@ a vector of floats."
                    #(get p->c-map %)
                    :roots)
          (drop 1)
-         ;;Account for cases where the graph has multiple roots.
-         ;;by taking the last occurance of a multiply-occuring node.
-         ;;this ensures that a child will not get visited until after
-         ;;every parent has been visited.
+         ;;Account for cases where the graph has multiple roots.  by taking the last occurance
+         ;;of a multiply-occuring node.  this ensures that a child will not get visited until
+         ;;after every parent has been visited.
          reverse
          distinct
          reverse)))
@@ -417,7 +499,7 @@ that each id has an unambiguous mapping to a dimension."
 
 (defn dimensions->size
   ^long [dims]
-  (apply * (vals (dissoc dims :id))))
+  (apply * (vals (clear-dimension-identifiers dims))))
 
 
 (defn dimensions->shape
@@ -500,7 +582,12 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
 (defmethod get-argument-shape :node-argument
   [graph node argument]
   (let [target-node (get-node graph (get argument :node-id))
-        target-arg (get-node-argument graph node (get argument :argument))]
+        target-arg (get-node-argument target-node (get argument :argument))]
+    (when-not (and target-node target-arg)
+      (throw (ex-info "Failed to find node or node argument"
+                      {:node target-node
+                       :argument target-arg
+                       :src-argument argument})))
     (get-argument-shape graph target-node target-arg)))
 
 (defmethod get-argument-shape :stream-augmentation
@@ -530,6 +617,11 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   (buf-init/initialize-buffer (assoc initialization :shape shape)))
 
 
+(defn- smart-shape-compare
+  [shape1 shape2]
+  (= (drop-while #(= 1 %) shape1)
+     (drop-while #(= 1 %) shape2)))
+
 (defn- generate-parameter-argument-buffer
   "Given a parameter argument generate it's buffer."
   [node-id graph argument]
@@ -537,7 +629,7 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
         expected-shape (get-argument-shape graph node argument)]
     (if-let [existing-buffer (get-in graph [:buffers (get argument :buffer-id) :buffer])]
       (do
-        (when-not (= expected-shape (m/shape existing-buffer))
+        (when-not (smart-shape-compare expected-shape (m/shape existing-buffer))
           (throw (ex-info "Existing buffer does not match expected shape"
                           {:node-id node-id
                            :existing-shape (m/shape existing-buffer)
@@ -613,6 +705,7 @@ that do not already exist.  Returns a new graph."
        (into {})
        (merge stream-map)))
 
+
 (defmulti resolve-argument
   "Resolve a particular argument returning a map containing
 at least :buffer if not both :buffer and :gradient."
@@ -664,17 +757,16 @@ at least :buffer if not both :buffer and :gradient."
 
 
 (defn resolve-arguments
-  "Resolve the arguments to a particular node.
-It is expected the stream map contains the augmented data if necessary.
-Note that for uniformity the values are returned without modification.  This
-means the the format of the stream map and the node->output-map must be
-entries of the form of at least {:buffer data} instead of linking key directly
-to data.  This allows a uniform system both when doing auto-differentiation and
-when simply doing execution because when doing back propagation the entries must
-link to both {:buffer :gradient}."
+  "Resolve the arguments to a particular node.  It is expected the stream map contains the
+  augmented data if necessary.  Note that for uniformity the values are returned without
+  modification.  This means the the format of the stream map and the node->output-map must be
+  entries of the form of at least {:buffer data} instead of linking key directly to data.  This
+  allows a uniform system both when doing auto-differentiation and when simply doing execution
+  because when doing back propagation the entries must link to both {:buffer
+  :gradient}."
   [graph node stream-map node-id->output-map]
   (->> (get-node-arguments node)
-       (map (fn [{:keys [key type] :as argument}]
+       (mapv (fn [{:keys [key type] :as argument}]
               [key (resolve-argument graph node argument
                                      stream-map node-id->output-map)]))
        (into {})))
@@ -703,3 +795,73 @@ link to both {:buffer :gradient}."
     (throw (ex-info "Failed to find buffer for buffer id"
                     {:buffer-id buffer-id
                      :buffers (keys (get graph :buffers))}))))
+
+
+(defmulti generate-stream-definitions
+  "A stream definition is a pair of [stream shape].  Some nodes can generate this assuming
+  they are built (normal loss terms for example) but most nodes cannot say anything useful
+  for this step."
+  (fn [graph node]
+    (get node :type)))
+
+
+(defmethod generate-stream-definitions :default
+  [graph node]
+  [])
+
+
+(defn generate-leaf-streams
+  "Given the graph datastructure, generate streams for stream bindings. Node's generate streams
+  based on their output size and possibly based on some internal state defined in the node such
+  as a combination of the stream they are bound to and another node's output size."
+  [graph]
+  (->> (leaves graph)
+       (map #(get-node graph %))
+       (mapcat (partial generate-stream-definitions graph))
+       (reduce (fn [graph [stream shape]]
+                 (add-stream graph stream (shape->stream-descriptor shape)))
+               graph)))
+
+
+(defn filter-graph
+  "Given a graph and a predicate produce a new graph with only functions that match
+the predicate."
+  [graph pred]
+  (->> (get graph :nodes)
+       vals
+       (remove pred)
+       (map :id)
+       (reduce remove-node graph)))
+
+
+(defn graph->required-streams
+  "Run through nodes of graph and keep track of streams encountered.  Return the set of stream
+  names."
+  [graph]
+  (->> (get graph :nodes)
+       vals
+       (mapcat #(get-node-arguments %))
+       (filter #(= :stream (get % :type)))
+       (map :stream)
+       set))
+
+
+(defn graph->output-node-ids
+  "Run through nodes of graph and identify nodes are either leaves or that are bound in
+  arguments.  Only nodes that return truthy for predicate will be returned."
+  [graph pred]
+  (let [passing-leaves (->> (leaves graph)
+                            (map #(get-node graph %))
+                            (filter pred)
+                            (map :id))
+        ;;There is an inherent issue here in that losses (not loss gradients) are always
+        ;;calculated on the cpu.  This means we have to jump through hoops in order to get them
+        ;;evaulated during training (to measure loss).  This would be aleviated if loss terms
+        ;;are made part of the graph.
+        passing-args (->> (get graph :nodes)
+                          vals
+                          (mapcat #(get-node-arguments %))
+                          (filter #(= :node-output (get % :type)))
+                          (map :node-id)
+                          (filter (comp pred #(get-node graph %))))]
+    (set (concat passing-leaves passing-args))))

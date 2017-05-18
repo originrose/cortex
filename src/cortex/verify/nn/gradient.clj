@@ -5,7 +5,7 @@
             [cortex.nn.traverse :as traverse]
             [cortex.verify.utils :as utils]
             [cortex.verify.nn.layers :as verify-layers]
-            [cortex.verify.nn.train :as verify-train]
+            [cortex.verify.nn.data :as verify-data]
             [clojure.test :refer :all]
             [cortex.optimize :as opt]
             [cortex.loss :as loss]
@@ -42,16 +42,14 @@
 
 
 (defn generate-gradients
-  [context network input output epsilon batch-size]
-  (as-> (verify-layers/bind-test-network context network batch-size
-                                         (verify-layers/io-vec->stream->size-map
-                                          input output batch-size)
-                                         :bind-opts {:numeric-gradients? true}) network
-    (execute/generate-numeric-gradients context network
-                                   (merge (verify-layers/vec->stream-map input :data)
-                                          (verify-layers/vec->stream-map output :labels))
-                                   epsilon)
-    (verify-layers/unpack-bound-network context network :test)))
+  [context description input output epsilon batch-size labels-key]
+  (execute/with-compute-context context
+    (-> (network/linear-network description)
+        (execute/generate-numeric-gradients context batch-size
+                                            (merge (verify-layers/vec->stream-map input :data)
+                                                   (verify-layers/vec->stream-map output labels-key))
+                                            epsilon)
+        (verify-layers/unpack-network :test))))
 
 
 (defn get-gradients
@@ -72,12 +70,11 @@
   [context]
   (let [batch-size 2]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input 2)
-                         (layers/linear 1)])
-                       [(take batch-size verify-train/CORN-DATA)]
-                       [(take batch-size verify-train/CORN-LABELS)]
-                       1e-4 batch-size)
+                       [(layers/input 1 1 2 :id :data)
+                        (layers/linear 1 :id :test)]
+                       [(take batch-size verify-data/CORN-DATA)]
+                       [(take batch-size verify-data/CORN-LABELS)]
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -91,11 +88,10 @@
                                (gaussian/ensure-gaussian! 5 20)))
         output input]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input input-size)
-                         (layers/batch-normalization :ave-factor 1.0)])
+                       [(layers/input 1 1 input-size :id :data)
+                        (layers/batch-normalization :ave-factor 1.0 :id :test)]
                        [input] [output]
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -110,12 +106,12 @@
         input (flatten (repeat batch-size (range n-input)))
         output input]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input input-dim input-dim num-input-channels)
-                         (layers/local-response-normalization :k 1 :n lrn-n
-                                                              :alpha 1.0 :beta 0.75)])
+                       [(layers/input input-dim input-dim num-input-channels :id :data)
+                        (layers/local-response-normalization :k 1 :n lrn-n
+                                                             :alpha 1.0 :beta 0.75
+                                                             :id :test)]
                        [input] [output]
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -129,11 +125,10 @@
         input (flatten (repeat batch-size (repeat (quot n-input 2) [-1 1])))
         output input]
     (-> (get-gradients context
-                       (add-id-to-desc-list
-                        [(layers/input input-dim input-dim n-channels)
-                         (layers/prelu)])
+                       [(layers/input input-dim input-dim n-channels :id :data)
+                        (layers/prelu :id :test)]
                        [input] [output]
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -147,7 +142,11 @@
                                (range (* batch-size item-count
                                          num-inputs)))
                     (map #(partition item-count %))
-                    (mapv vec))
+                    (mapv vec)
+                    ((fn [input-val]
+                       {:right (first input-val)
+                        :left (second input-val)})))
+
         outputs [(repeat (* item-count num-inputs batch-size) 1)]]
     (-> (get-gradients context
                        [(layers/input item-count 1 1 :id :right)
@@ -155,7 +154,7 @@
                         (layers/concatenate :parents [:left :right]
                                             :id :test)]
                        inputs outputs
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 (defn split-gradient
@@ -164,15 +163,19 @@
         input-size 5
         num-outputs 2
         inputs [(mapv vec (partition input-size (range (* batch-size input-size))))]
-        outputs (repeat num-outputs (repeat (* input-size batch-size) 1))]
+        outputs (->> (repeat num-outputs (repeat (* input-size batch-size) 1))
+                     ((fn [output-vec]
+                        {:output-1 (first output-vec)
+                         :output-2 (second output-vec)})))]
     (-> (get-gradients context
                        [(layers/input input-size)
                         (layers/split :id :test)
-                        (layers/split)
-                        (layers/split :parents [:test])]
+                        (layers/split :id :output-1)
+                        (layers/split :parents [:test] :id :output-2)]
                        inputs outputs
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
+
 
 (defn join-+-gradient
   [context]
@@ -184,7 +187,11 @@
         inputs (->> (mapv #(->>
                             (take (* batch-size %) input-sequence)
                             (partition %))
-                          input-counts))
+                          input-counts)
+                    ((fn [input-vec]
+                       {:left (first input-vec)
+                        :middle (second input-vec)
+                        :third (nth input-vec 2)})))
         output-count (apply max input-counts)
         outputs [(->> (repeat (* batch-size output-count) 1)
                       (partition output-count))]]
@@ -195,7 +202,7 @@
                         (layers/join :parents [:left :middle :right]
                                      :id :test)]
                        inputs outputs
-                       1e-4 batch-size)
+                       1e-4 batch-size :test)
         check-gradients)))
 
 
@@ -209,7 +216,11 @@
         inputs (->> (mapv #(->>
                             (take (* batch-size %) input-sequence)
                             (partition %))
-                          input-counts))
+                          input-counts)
+                    ((fn [input-vec]
+                       {:left (first input-vec)
+                        :middle (second input-vec)
+                        :third (nth input-vec 2)})))
         output-count (apply max input-counts)
         outputs [(->> (repeat (* batch-size output-count) 1)
                       (partition output-count))]]
@@ -221,5 +232,5 @@
                                          :operation :*
                                          :id :test)]
                            inputs outputs
-                           1e-4 batch-size)
+                           1e-4 batch-size :test)
             check-gradients)))

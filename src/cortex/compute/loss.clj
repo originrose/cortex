@@ -30,7 +30,7 @@ buffer is expected to be entirely overwritten by operation."
     (let [v (get-in buffer-map [:output :buffer])
           gradient (get-in buffer-map [:output :gradient])
           target (get-in buffer-map [:labels :buffer])
-          stream (drv/get-stream backend)
+          stream (backend/get-stream)
           [batch-size output-size] (math/batch-shape v)
           alpha (/ 2.0 (double output-size))]
     (math/subtract stream
@@ -46,7 +46,7 @@ buffer is expected to be entirely overwritten by operation."
 
 (defn- calculate-cross-entropy-gradient
   [backend v target gradient]
-  (let [stream (drv/get-stream backend)
+  (let [stream (backend/get-stream)
         elem-count (m/ecount gradient)
         alpha 1.0]
     (math/subtract stream
@@ -72,7 +72,7 @@ buffer is expected to be entirely overwritten by operation."
 (defrecord L1RegularizationLoss [loss-term backend l1-buffer]
   PComputeLoss
   (compute-loss-gradient [this buffer-map]
-    (let [stream (drv/get-stream backend)
+    (let [stream (backend/get-stream)
           param-entry (loss/get-regularization-target loss-term buffer-map)
           param-buf (get param-entry :buffer)
           gradient (get param-entry :gradient)]
@@ -83,8 +83,7 @@ buffer is expected to be entirely overwritten by operation."
 
 (defmethod create-compute-loss-term :l1-regularization
   [backend network loss-term batch-size]
-  (let [driver (drv/get-driver backend)
-        datatype (dtype/get-datatype backend)
+  (let [datatype (dtype/get-datatype backend)
         graph (network/network->graph network)
         argument (graph/get-node-argument loss-term :output)
         term-size (->> (graph/get-argument-shape graph
@@ -95,16 +94,15 @@ buffer is expected to be entirely overwritten by operation."
                          :node-output)
                     (* term-size batch-size)
                     term-size)]
-    (->L1RegularizationLoss loss-term backend (drv/allocate-device-buffer driver
-                                                                          term-size
-                                                                          datatype))))
+    (->L1RegularizationLoss loss-term backend
+                            (drv/allocate-device-buffer term-size datatype))))
 
 
 (defrecord L2RegularizationLoss [loss-term backend]
   PComputeLoss
   (compute-loss-gradient [this buffer-map]
     (let [param-entry (loss/get-regularization-target loss-term buffer-map)
-          stream (drv/get-stream backend)
+          stream (backend/get-stream)
           target (math/device-buffer (get param-entry :buffer))
           gradient (math/device-buffer (get param-entry :gradient))]
       (math/sum stream 1.0 target 0.0 gradient gradient))))
@@ -125,7 +123,7 @@ buffer is expected to be entirely overwritten by operation."
           label-indexes (get-in buffer-map [:label-indexes :buffer])
           label-inverse-counts (get-in buffer-map [:label-inverse-counts :buffer])
           centers (get-in buffer-map [:centers :buffer])
-          stream (drv/get-stream backend)
+          stream (backend/get-stream)
           alpha (double (get loss-term :alpha))
           label-indexes (math/device-buffer label-indexes)
           monotonic-indexes (math/device-buffer monotonic-indexes)
@@ -149,7 +147,7 @@ buffer is expected to be entirely overwritten by operation."
       (math/subtract stream beta output-buffer beta batch-centers batch-centers)
 
       ;;scale subtracted quantities according to inverse counts
-      (math/mul-rows (drv/get-stream backend) batch-size n-elems
+      (math/mul-rows (backend/get-stream) batch-size n-elems
                      (math/device-buffer batch-centers) n-elems
                      (math/device-buffer label-inverse-counts) 1
                      (math/device-buffer batch-centers) n-elems)
@@ -169,12 +167,10 @@ buffer is expected to be entirely overwritten by operation."
         labels-shape (graph/get-argument-shape graph loss-term
                                                (graph/get-node-argument loss-term :labels))
         batch-centers (backend/new-array backend output-shape batch-size)
-        monotonic-indexes (math/array (drv/get-driver backend)
-                                      (drv/get-stream backend)
+        monotonic-indexes (math/array (backend/get-stream)
                                       :int
                                       (range batch-size))
-        label-indexes (math/new-array (drv/get-driver backend)
-                                      (drv/get-stream backend)
+        label-indexes (math/new-array (backend/get-stream)
                                       :int
                                       [batch-size])
         temp-centers (backend/new-array backend [(apply * labels-shape) (apply * output-shape)])]

@@ -104,6 +104,13 @@ threadsafe while (.position ptr offset) is not."
     retval))
 
 
+(defn set-pointer-limit-and-capacity
+  ^Pointer [^Pointer ptr ^long elem-count]
+  (.set ^Field limit-field ptr elem-count)
+  (.set ^Field capacity-field ptr elem-count)
+  ptr)
+
+
 (defn release-pointer
   [^Pointer ptr]
   (.close ptr)
@@ -160,6 +167,14 @@ threadsafe while (.position ptr offset) is not."
   marshal/PCopyToBuffer
   (->> (marshal/buffer-type-iterator copy-to-impl)
        (into {})))
+
+(extend-type Pointer
+  marshal/PTypeToCopyToFn
+  (get-copy-to-fn [dest dest-offset]
+    (marshal/get-copy-to-fn (as-buffer dest) dest-offset))
+  dtype/PCopyQueryIndirect
+  (get-indirect-copy-fn [dest dest-offset]
+    (marshal/get-copy-to-fn dest dest-offset)))
 
 
 (defn float->double-ary-time-test

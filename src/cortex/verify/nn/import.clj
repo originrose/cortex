@@ -2,6 +2,7 @@
   (:require [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.execute :as execute]
+            [cortex.nn.compute-binding :as compute-binding]
             [cortex.graph :as graph]
             [think.resource.core :as resource]
             [clojure.pprint :as pprint]
@@ -18,22 +19,20 @@
    (when-let [failures (seq (get network :verification-failures))]
      (throw (Exception. (format "Description verification failed:\n %s"
                                 (with-out-str (clojure.pprint/pprint failures))))))
-   (resource/with-resource-context
+   (execute/with-compute-context context
      (let [roots (graph/roots (network/network->graph network))
            leaves (graph/leaves (network/network->graph network))
-           input-bindings {(first roots) :data}
            input (get layer-id->output (first roots))
-           output-bindings (->> leaves
-                                (map #(vector % {}))
-                                (into {}))
+           batch-size 1
            network
-           (as-> (traverse/auto-bind-io network) network
-             (traverse/add-forward-traversal network {:data (m/ecount input)})
-             (assoc network :batch-size 1)
-             (execute/bind-context-to-network context network {})
-             (execute/traverse context network {:data input} :inference)
-             ;;save gradients at this point implies save io buffers
-             (execute/save-to-network context network {:save-gradients? true}))
+           (as-> network network
+             (compute-binding/bind-context-to-network network
+                                                      (execute/current-backend)
+                                                      batch-size (traverse/training-traversal network)
+                                                      {})
+               (compute-binding/traverse context network {(first roots) input} :inference)
+               ;;save gradients at this point implies save io buffers
+               (compute-binding/save-to-network context network {:save-gradients? true}))
            traversal (get-in network [:traversal :forward])
            io-buffers (get-in network [:traversal :buffers])]
        (->> traversal
