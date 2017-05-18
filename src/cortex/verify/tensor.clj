@@ -8,9 +8,11 @@
 
 (defmacro tensor-context
   [driver datatype & body]
-  `(with-bindings {#'ct/*stream* (drv/create-stream ~driver)
-                   #'ct/*datatype* ~datatype}
-     ~@body))
+  `(drv/with-compute-device
+     (drv/default-device ~driver)
+     (with-bindings {#'ct/*stream* (drv/create-stream)
+                     #'ct/*datatype* ~datatype}
+       ~@body)))
 
 
 (defn assign-constant!

@@ -474,9 +474,11 @@ that rerequires the items to have the same element count."
          n-elems (ecount tensor)
          device (tensor->device tensor)
          stream (check-stream)
-         host-buffer (compute-drv/allocate-host-buffer device n-elems
-                                                       (dtype/get-datatype tensor))]
-     (compute-drv/copy-device->host stream (tensor->buffer tensor) 0 host-buffer 0 n-elems)
+         host-buffer (compute-drv/allocate-host-buffer
+                      (compute-drv/get-driver device)
+                      n-elems (dtype/get-datatype tensor))]
+     (compute-drv/copy-device->host stream (tensor->buffer tensor)
+                                    0 host-buffer 0 n-elems)
      (compute-drv/wait-for-event (compute-drv/create-event stream))
      (dtype/copy! host-buffer 0 dest 0 n-elems)
      dest)))
@@ -513,13 +515,16 @@ will determine the shape of the outgoing tensor."
         data-shape (m/shape data)
         n-elems (long (apply * data-shape))
         device (compute-drv/get-device stream)
-        host-buffer (compute-drv/allocate-host-buffer device n-elems datatype)
-        dev-buffer (compute-drv/allocate-device-buffer device n-elems datatype)
+        host-buffer (compute-drv/allocate-host-buffer
+                     (compute-drv/get-driver device)
+                     n-elems datatype)
+        dev-buffer (compute-drv/allocate-device-buffer n-elems datatype
+                                                       :device device)
         dimensions (dimensions data-shape)]
     (dtype/copy-raw->item! data host-buffer 0)
     (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
     ;;The wait here is so that we can clean up the host buffer.
-    (compute-drv/wait-for-event (compute-drv/create-event stream))
+    (compute-drv/sync-stream stream)
     (resource/release host-buffer)
     (construct-tensor device dimensions dev-buffer)))
 
@@ -532,8 +537,8 @@ will determine the shape of the outgoing tensor."
         n-elems (long (apply * shape))
         stream (check-stream)
         device (compute-drv/get-device stream)
-        dev-buffer (compute-drv/allocate-device-buffer device n-elems datatype)
-        device (compute-drv/get-device stream)]
+        dev-buffer (compute-drv/allocate-device-buffer n-elems datatype
+                                                       :device device)]
     (when init-value
       (compute-drv/memset stream dev-buffer 0 0 n-elems))
     (construct-tensor device dimensions dev-buffer)))
@@ -554,7 +559,7 @@ will determine the shape of the outgoing tensor."
                       {:tensor-ecount tens-ecount
                        :offset offset
                        :new-length new-len})))
-    (let [new-buf (compute-drv/sub-buffer (tensor->device tensor) (tensor->buffer tensor) offset new-len)]
+    (let [new-buf (compute-drv/sub-buffer (tensor->buffer tensor) offset new-len)]
       (construct-tensor (tensor->device tensor) (dimensions [new-len]) new-buf))))
 
 
@@ -587,7 +592,7 @@ and the rest of the dimensions being squashed into n-rows."
                        :col-length col-length})))
     (let [start-offset (+ (* column-stride row-start) col-start)
           required-length (* row-length column-stride)
-          sub-buffer (compute-drv/sub-buffer device (tensor->buffer tensor)
+          sub-buffer (compute-drv/sub-buffer (tensor->buffer tensor)
                                              start-offset required-length)]
       (construct-tensor (tensor->device tensor)
               (dimensions [row-length col-length])
@@ -742,7 +747,7 @@ to non-gemm operations."
     (ensure-basic-indexing tensor)
     (mapv (fn [^long idx]
             (let [offset (* idx column-stride)
-                  new-buf (compute-drv/sub-buffer device buffer offset n-cols)]
+                  new-buf (compute-drv/sub-buffer buffer offset n-cols)]
               (construct-tensor device (dimensions [n-cols]) new-buf)))
           (range n-rows))))
 
@@ -758,7 +763,7 @@ to non-gemm operations."
         buf-ecount (ecount buffer)]
     (ensure-basic-indexing tensor)
     (mapv (fn [^long offset]
-            (let [new-buf (compute-drv/sub-buffer device buffer offset (- buf-ecount offset))]
+            (let [new-buf (compute-drv/sub-buffer buffer offset (- buf-ecount offset))]
               (construct-tensor device (dimensions [n-rows])
                                 (assoc (tensor->index-system tensor)
                                        :num-columns 1

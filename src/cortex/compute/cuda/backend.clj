@@ -1,6 +1,5 @@
 (ns cortex.compute.cuda.backend
-  (:require [cortex.compute.cuda.base :refer [->ptr value->ptr] :as cuda-base]
-            [cortex.compute.javacpp-datatype :as jcpp-dtype]
+  (:require [cortex.compute.javacpp-datatype :as jcpp-dtype]
             [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.compute.nn.layers :as compute-layers]
@@ -11,13 +10,13 @@
             [cortex.optimize :as opt]
             [think.datatype.core :as dtype]
             [think.resource.core :as resource]
-            [cortex.compute.cuda.driver :as cuda-drv])
+            [cortex.compute.cuda.driver :refer [->ptr value->ptr] :as cuda-drv])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
             cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
             cudnn$cudnnPoolingStruct cudnn$cudnnLRNStruct
             BytePointer IntPointer LongPointer DoublePointer Pointer PointerPointer
             SizeTPointer FloatPointer ShortPointer]
-           [cortex.compute.cuda.base CudaDriver CudaStream]
+           [cortex.compute.cuda.driver CudaDriver CudaStream]
            [cortex.compute.math DeviceArray]))
 
 
@@ -56,7 +55,7 @@
       retval#)))
 
 (defonce forward-algorithms
-  (cuda-base/reverse-hash-map
+  (cuda-drv/reverse-hash-map
    {"CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM"         0
     "CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM" 1
     "CUDNN_CONVOLUTION_FWD_ALGO_GEMM"                  2
@@ -66,7 +65,7 @@
 
 
 (defonce backward-filter-algorithms
-  (cuda-base/reverse-hash-map
+  (cuda-drv/reverse-hash-map
    {
     "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0"         0
     "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1"         1
@@ -76,7 +75,7 @@
 
 
 (defonce backward-data-algorithms
-  (cuda-base/reverse-hash-map
+  (cuda-drv/reverse-hash-map
    {
     "CUDNN_CONVOLUTION_BWD_DATA_ALGO_0"          0
     "CUDNN_CONVOLUTION_BWD_DATA_ALGO_1"          1
