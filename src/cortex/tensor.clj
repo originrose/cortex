@@ -107,14 +107,20 @@ if a separate result is provided it must be the size of the larger."
 
 (defn same-device?
   [& args]
-  (apply ensure-same-driver args))
+  (let [first-arg (first args)
+        main-device (compute-drv/get-device first-arg)]
+    (->> (rest args)
+         (map #(compute-drv/get-device %))
+         (every? #(identical? main-device %)))))
 
 
 (defn- ensure-same-device
   "Given a set of tensors, ensure they share the same device.  Only assignment of identical
 types is guaranteed to work across devices."
   [& args]
-  (apply ensure-same-driver args))
+  (when-not-error (apply same-device? args)
+    "Tensor argumenst are not all on same device"
+    {}))
 
 
 (defn dimensions
@@ -239,11 +245,13 @@ that rerequires the items to have the same element count."
   dest)
 
 ;;Tensors are a tuple of device (driver for now) dimensions and index system and buffer.
-(defrecord Tensor [driver dimensions index-system buffer]
+(defrecord Tensor [device dimensions index-system buffer]
   dtype/PDatatype
   (get-datatype [tensor] (dtype/get-datatype (:buffer tensor)))
+  compute-drv/PDeviceProvider
+  (get-device [tensor] device)
   compute-drv/PDriverProvider
-  (get-driver [tensor] driver)
+  (get-driver [tensor] (compute-drv/get-driver device))
   mp/PElementCount
   (element-count [tensor]
     (dimension-ecount dimensions))
@@ -299,9 +307,9 @@ that rerequires the items to have the same element count."
    (tensor->index-system tensor)))
 
 
-(defn- tensor->driver
+(defn- tensor->device
   [^Tensor tensor]
-  (compute-drv/get-driver tensor))
+  (compute-drv/get-device tensor))
 
 
 (defn tensor->buffer
@@ -336,20 +344,22 @@ that rerequires the items to have the same element count."
     (ensure-same-device dest src)
     (ensure-same-driver dest src)))
 
+
 (defn- check-partial-alias
-  [driver & args]
-  (let [partially-overlapping-args (->> args
-                                        (map #(tensor->buffer ^Tensor %))
-                                        (#(combo/combinations % 2))
-                                        (filter #(apply compute-drv/partially-alias? driver %))
-                                        seq)]
+  [& args]
+  (let [partially-overlapping-args
+        (->> args
+             (map #(tensor->buffer ^Tensor %))
+             (#(combo/combinations % 2))
+             (filter #(apply compute-drv/partially-alias? %))
+             seq)]
     (when-not-error (nil? partially-overlapping-args)
       "Partially overlapping arguments detected."
       {})))
 
 
 (defn construct-tensor
-  (^Tensor [driver dimensions index-system buffer]
+  (^Tensor [device dimensions index-system buffer]
    (let [buffer-ecount (ecount buffer)
          shape (dimensions->shape dimensions)
          column-stride (dimensions->column-stride dimensions index-system)
@@ -370,9 +380,9 @@ that rerequires the items to have the same element count."
         "Tensor buffer column-count is greater than supplied column stride"
         {:num-columns num-columns
          :column-stride column-stride})))
-   (->Tensor driver dimensions index-system buffer))
-  (^Tensor [driver dimensions buffer]
-   (->Tensor driver dimensions
+   (->Tensor device dimensions index-system buffer))
+  (^Tensor [device dimensions buffer]
+   (->Tensor device dimensions
              (is/monotonically-increasing (dimension-ecount dimensions))
              buffer)))
 
@@ -381,7 +391,7 @@ that rerequires the items to have the same element count."
   "Create a new tensor with new dimensions.  This is like an in place reinterpretation of the
   data."
   ^Tensor [^Tensor old-tensor new-dimensions]
-  (construct-tensor (.driver old-tensor) new-dimensions
+  (construct-tensor (.device old-tensor) new-dimensions
                     (tensor->index-system old-tensor)
                     (:buffer old-tensor)))
 
@@ -454,7 +464,7 @@ that rerequires the items to have the same element count."
                                        :datatype (dtype/get-datatype tensor)
                                        :init-value nil)]
         (mp/assign! retval tensor)
-        (construct-tensor (tensor->driver retval) (tensor->dimensions tensor)
+        (construct-tensor (tensor->device retval) (tensor->dimensions tensor)
                           (tensor->buffer retval)))))
 
 (defn copy-to-java-type
@@ -462,9 +472,9 @@ that rerequires the items to have the same element count."
   (resource/with-resource-context
    (let [tensor (make-dense src)
          n-elems (ecount tensor)
-         driver (tensor->driver tensor)
+         device (tensor->device tensor)
          stream (check-stream)
-         host-buffer (compute-drv/allocate-host-buffer driver n-elems
+         host-buffer (compute-drv/allocate-host-buffer device n-elems
                                                        (dtype/get-datatype tensor))]
      (compute-drv/copy-device->host stream (tensor->buffer tensor) 0 host-buffer 0 n-elems)
      (compute-drv/wait-for-event (compute-drv/create-event stream))
@@ -502,16 +512,16 @@ will determine the shape of the outgoing tensor."
   (let [stream (check-stream)
         data-shape (m/shape data)
         n-elems (long (apply * data-shape))
-        driver (compute-drv/get-driver stream)
-        host-buffer (compute-drv/allocate-host-buffer driver n-elems datatype)
-        dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
+        device (compute-drv/get-device stream)
+        host-buffer (compute-drv/allocate-host-buffer device n-elems datatype)
+        dev-buffer (compute-drv/allocate-device-buffer device n-elems datatype)
         dimensions (dimensions data-shape)]
     (dtype/copy-raw->item! data host-buffer 0)
     (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
     ;;The wait here is so that we can clean up the host buffer.
     (compute-drv/wait-for-event (compute-drv/create-event stream))
     (resource/release host-buffer)
-    (construct-tensor driver dimensions dev-buffer)))
+    (construct-tensor device dimensions dev-buffer)))
 
 
 (defn new-tensor
@@ -521,12 +531,12 @@ will determine the shape of the outgoing tensor."
   (let [dimensions (dimensions shape)
         n-elems (long (apply * shape))
         stream (check-stream)
-        driver (compute-drv/get-driver stream)
-        dev-buffer (compute-drv/allocate-device-buffer driver n-elems datatype)
-        driver (compute-drv/get-driver stream)]
+        device (compute-drv/get-device stream)
+        dev-buffer (compute-drv/allocate-device-buffer device n-elems datatype)
+        device (compute-drv/get-device stream)]
     (when init-value
       (compute-drv/memset stream dev-buffer 0 0 n-elems))
-    (construct-tensor driver dimensions dev-buffer)))
+    (construct-tensor device dimensions dev-buffer)))
 
 
 (defn subvector
@@ -544,8 +554,8 @@ will determine the shape of the outgoing tensor."
                       {:tensor-ecount tens-ecount
                        :offset offset
                        :new-length new-len})))
-    (let [new-buf (compute-drv/sub-buffer (tensor->driver tensor) (tensor->buffer tensor) offset new-len)]
-      (construct-tensor (tensor->driver tensor) (dimensions [new-len]) new-buf))))
+    (let [new-buf (compute-drv/sub-buffer (tensor->device tensor) (tensor->buffer tensor) offset new-len)]
+      (construct-tensor (tensor->device tensor) (dimensions [new-len]) new-buf))))
 
 
 (defn submatrix
@@ -560,7 +570,7 @@ and the rest of the dimensions being squashed into n-rows."
         n-rows (long n-rows)
         n-cols (long n-cols)
         column-stride (tensor->column-stride tensor)
-        driver (tensor->driver tensor)]
+        device (tensor->device tensor)]
     (when (< row-start 0)
       (throw (ex-info "Row start less than 0" {})))
     (when (< col-start 0)
@@ -577,9 +587,9 @@ and the rest of the dimensions being squashed into n-rows."
                        :col-length col-length})))
     (let [start-offset (+ (* column-stride row-start) col-start)
           required-length (* row-length column-stride)
-          sub-buffer (compute-drv/sub-buffer driver (tensor->buffer tensor)
+          sub-buffer (compute-drv/sub-buffer device (tensor->buffer tensor)
                                              start-offset required-length)]
-      (construct-tensor (tensor->driver tensor)
+      (construct-tensor (tensor->device tensor)
               (dimensions [row-length col-length])
               (assoc (tensor->index-system tensor)
                      :num-columns col-length
@@ -727,13 +737,13 @@ to non-gemm operations."
   [^Tensor tensor]
   (let [[n-rows n-cols] (tensor->2d-shape tensor)
         column-stride (tensor->column-stride tensor)
-        driver (tensor->driver tensor)
+        device (tensor->device tensor)
         buffer (tensor->buffer tensor)]
     (ensure-basic-indexing tensor)
     (mapv (fn [^long idx]
             (let [offset (* idx column-stride)
-                  new-buf (compute-drv/sub-buffer driver buffer offset n-cols)]
-              (construct-tensor driver (dimensions [n-cols]) new-buf)))
+                  new-buf (compute-drv/sub-buffer device buffer offset n-cols)]
+              (construct-tensor device (dimensions [n-cols]) new-buf)))
           (range n-rows))))
 
 
@@ -742,14 +752,14 @@ to non-gemm operations."
   [^Tensor tensor]
   (let [[n-rows n-cols] (tensor->2d-shape tensor)
         column-stride (tensor->column-stride tensor)
-        driver (tensor->driver tensor)
+        device (tensor->device tensor)
         buffer (tensor->buffer tensor)
         col-required-mem (* (- (long n-rows) 1) column-stride)
         buf-ecount (ecount buffer)]
     (ensure-basic-indexing tensor)
     (mapv (fn [^long offset]
-            (let [new-buf (compute-drv/sub-buffer driver buffer offset (- buf-ecount offset))]
-              (construct-tensor driver (dimensions [n-rows])
+            (let [new-buf (compute-drv/sub-buffer device buffer offset (- buf-ecount offset))]
+              (construct-tensor device (dimensions [n-rows])
                                 (assoc (tensor->index-system tensor)
                                        :num-columns 1
                                        :column-stride column-stride)
@@ -796,7 +806,7 @@ to non-gemm operations."
       "Src element count must evenly divide dest ecount."
       {:dest-ecount dest-ecount
        :src-ecount src-ecount})
-    (ensure-same-driver dest src)
+    (ensure-same-device dest src)
     (check-partial-alias dest src)
     (if (memcpy-semantics? dest src)
       (compute-drv/copy-device->device (check-stream)
@@ -849,15 +859,15 @@ to non-gemm operations."
   (ensure-ecounts-commensurate dest x)
   (ensure-datatypes (dtype/get-datatype dest) x)
   (let [y (* (double beta) (double y))
-        driver (tensor->driver dest)]
-    (if (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer x))
+        device (tensor->device dest)]
+    (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
       (tm/binary-accum-constant!
        (check-stream)
        (tensor->buffer dest) (tensor->index-system dest) alpha
        y
        (ecount dest) op reverse-operands?)
       (do
-        (check-partial-alias driver dest x)
+        (check-partial-alias dest x)
         (tm/binary-op-constant!
          (check-stream)
          (tensor->buffer dest) (tensor->index-system dest)
@@ -880,16 +890,16 @@ to non-gemm operations."
 
 (defmethod typed-binary-op [:tensor :tensor]
   [dest alpha x beta y op]
-  (let [driver (tensor->driver dest)]
-    (if (or (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer x))
-            (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer y)))
-      (let [x-alias? (compute-drv/alias? driver (tensor->buffer dest) (tensor->buffer x))
+  (let [device (tensor->device dest)]
+    (if (or (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
+            (compute-drv/alias? (tensor->buffer dest) (tensor->buffer y)))
+      (let [x-alias? (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
             [alpha beta y rev-ops?] (if x-alias?
                                       [alpha beta y false]
                                       [beta alpha x true])]
         (ensure-ecounts-commensurate dest y)
         (ensure-datatypes (get-datatype dest) y)
-        (check-partial-alias driver dest y)
+        (check-partial-alias dest y)
         (tm/binary-accum!
          (check-stream)
          (tensor->buffer dest) (tensor->index-system dest) alpha
@@ -901,7 +911,7 @@ to non-gemm operations."
         (ensure-ecounts-commensurate dest y)
         (ensure-ecounts-commensurate x y)
         (ensure-datatypes (get-datatype x) y dest)
-        (check-partial-alias driver dest x y)
+        (check-partial-alias dest x y)
         (tm/binary-op!
          (check-stream)
          (tensor->buffer dest) (tensor->index-system dest)

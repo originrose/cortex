@@ -1,9 +1,10 @@
 (ns cortex.compute.cuda.tensor-math
-  (:require [cortex.compute.cuda.base :as cuda-base]
+  (:require [cortex.compute.cuda.driver :as cuda-base]
             [think.datatype.core :as dtype]
             [cortex.tensor.math :as tm]
-            [cortex.tensor.index-system :as is])
-  (:import [cortex.compute.cuda.base CudaStream]
+            [cortex.tensor.index-system :as is]
+            [cortex.compute.driver :as drv])
+  (:import [cortex.compute.cuda.driver CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer]))
 
 
@@ -79,7 +80,7 @@
   tm/TensorMath
   (assign-constant! [stream buffer index-system value n-elems]
     (let [datatype (dtype/get-datatype buffer)
-          value (cuda-base/dtype-cast value datatype)
+          value (drv/dtype-cast value datatype)
           assign-fn (cuda-base/get-or-create-fn stream :tensor-assign-constant datatype
                                                 #(cuda-base/load-all-datatype-function
                                                   "tensor_assign_constant"))
@@ -117,7 +118,7 @@
                                                dest-dtype
                                                #(cuda-base/load-cas-datatype-function
                                                  "tensor_accum_constant"))
-          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
+          ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream binop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
@@ -137,7 +138,7 @@
                                                dest-dtype
                                                #(cuda-base/load-all-datatype-function
                                                  "tensor_binary_op_constant"))
-          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
+          ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream binop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
@@ -158,7 +159,7 @@
                                                dest-dtype
                                                #(cuda-base/load-cas-datatype-function
                                                  "tensor_binary_accum"))
-          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
+          ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream binop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
@@ -181,7 +182,7 @@
                                                dest-dtype
                                                #(cuda-base/load-all-datatype-function
                                                  "tensor_binary_op"))
-          ->dtype #(cuda-base/dtype-cast % dest-dtype)]
+          ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream binop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]

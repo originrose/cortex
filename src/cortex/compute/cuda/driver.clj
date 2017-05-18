@@ -308,6 +308,41 @@ set this device before.  Set device must be called before any other cuda functio
    (load-multiple-datatype-function fn-name [:double :float])))
 
 
+(defn load-2-datatype-function
+  [fn-name]
+  (try
+    (let [module (with-open [io-stream (io/input-stream
+                                        (io/resource (format "%s.fatbin" fn-name)))]
+                   (load-module io-stream))]
+      (->> (for [lhs-dtype dtype/datatypes
+                 rhs-dtype dtype/datatypes]
+             (let [fn-name (format "%s%s%s"
+                                   fn-name
+                                   (get datatype->suffixes-map lhs-dtype)
+                                   (get datatype->suffixes-map rhs-dtype))]
+               [[lhs-dtype rhs-dtype] {:fn (get-function module fn-name)
+                                       :fn-name fn-name}]))
+           (into {})))
+    (catch Throwable e
+      (throw (ex-info "Failed to load function"
+                      {:fn-name fn-name
+                       :error e})))))
+
+
+(defn cas-datatypes
+  "Get the array of datatypes for which cuda supports CAS operation."
+  []
+  [:double :float :int :long])
+
+
+(defn load-cas-datatype-function
+  "Load a function that is only valid for types which cuda supports CAS."
+  ([module-name fn-name]
+   (load-multiple-datatype-function module-name fn-name (cas-datatypes)))
+  ([fn-name]
+   (load-multiple-datatype-function fn-name (cas-datatypes))))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;Sub context creation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -321,7 +356,8 @@ set this device before.  Set device must be called before any other cuda functio
 (defn- rand-context
   ^curand$curandGenerator_st []
   (let [rand-context (curand$curandGenerator_st.)]
-    (curand-call (curand/curandCreateGenerator rand-context curand/CURAND_RNG_PSEUDO_DEFAULT))
+    (curand-call (curand/curandCreateGenerator rand-context
+                                               curand/CURAND_RNG_PSEUDO_DEFAULT))
     (resource/track rand-context)))
 
 

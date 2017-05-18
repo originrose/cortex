@@ -61,7 +61,7 @@
                 grad-sq-accum-view (cpu-backend/device-array->view grad-sq-accum)
                 dx-sq-accum-view (cpu-backend/device-array->view dx-sq-accum)
                 stream (:stream backend)]
-            (cpu-stream/with-stream-dispatch stream
+            (cpu-drv/with-stream-dispatch stream
               (typed-step-fn gradient-view param-view gradient-alpha param-offset
                              decay epsilon grad-sq-accum-view dx-sq-accum-view))))]
     (setup-optimizer backend optimizer step-fn)))

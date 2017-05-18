@@ -41,7 +41,7 @@
 
 (defn- dispatch-to-cpu
   [stream dispatch-fn item-count & args]
-  (cpu-stream/with-stream-dispatch stream
+  (cpu-drv/with-stream-dispatch stream
     (apply dispatch-fn args)))
 
 
