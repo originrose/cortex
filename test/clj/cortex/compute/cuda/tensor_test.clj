@@ -6,25 +6,29 @@
                      def-cas-dtype-test
                      *datatype*
                      test-wrapper]]
-            [clojure.test :refer :all]
-            [cortex.compute.cuda.driver :refer [driver]]
-            [cortex.compute.cuda.tensor-math]))
+            [clojure.test :refer :all]))
 
 
 (use-fixtures :each test-wrapper)
 
+(defn create-driver
+  []
+  (require '[cortex.compute.cuda.driver :as cuda-driver])
+  (require '[cortex.compute.cuda.tensor-math])
+  ((resolve 'cuda-driver/driver)))
+
 
 (def-all-dtype-test assign-constant!
-  (verify-tensor/assign-constant! (driver) *datatype*))
+  (verify-tensor/assign-constant! (create-driver) *datatype*))
 
 
 (def-all-dtype-test assign-marshal
-  (verify-tensor/assign-marshal (driver) *datatype*))
+  (verify-tensor/assign-marshal (create-driver) *datatype*))
 
 
 (def-cas-dtype-test binary-constant-op
-  (verify-tensor/binary-constant-op (driver) *datatype*))
+  (verify-tensor/binary-constant-op (create-driver) *datatype*))
 
 
 (def-cas-dtype-test binary-op
-  (verify-tensor/binary-op (driver) *datatype*))
+  (verify-tensor/binary-op (create-driver) *datatype*))
