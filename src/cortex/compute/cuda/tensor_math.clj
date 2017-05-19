@@ -3,9 +3,15 @@
             [think.datatype.core :as dtype]
             [cortex.tensor.math :as tm]
             [cortex.tensor.index-system :as is]
-            [cortex.compute.driver :as drv])
+            [cortex.compute.driver :as drv]
+            [cortex.compute.math-util :as cmu])
   (:import [cortex.compute.cuda.driver CudaStream]
-           [org.bytedeco.javacpp Pointer IntPointer]))
+           [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer
+            cublas cublas$cublasContext]))
+
+
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
 
 
 (defn- strategy-type->int
@@ -74,6 +80,69 @@
            rhs cuda_typename_expansion]
        (println (apply format "  DATATYPE_2_ITERATOR(%s,%s,%s,%s)\\"
                        (flatten [lhs rhs])))))))
+
+
+(defn- to-double-ptr
+  ^DoublePointer [obj]
+  (cuda-base/->ptr obj))
+
+
+(defn- to-float-ptr
+  ^FloatPointer [obj]
+  (cuda-base/->ptr obj))
+
+
+
+(defmacro ^:private blas-macro-iter
+  [inner-macro]
+  `{:double (~inner-macro to-double-ptr double cuda-base/value->double-ptr cublas/cublasDgemm_v2 cublas/cublasDgemv_v2)
+    :float (~inner-macro to-float-ptr float cuda-base/value->float-ptr cublas/cublasSgemm_v2 cublas/cublasSgemv_v2)})
+
+
+(defmacro ^:private blas-impl
+  [ptr-cast-fn scalar-cast-fn scalar-ptr-fn gemm-fn gemv-fn]
+  `{:gemm (fn [stream# trans-a?# trans-b?# a-row-count# a-col-count# b-col-count#
+               alpha# A# a-rowstride#
+               B# b-rowstride#
+               beta# C# c-rowstride#]
+            (cuda-base/blas-with-stream
+             stream#
+             (cuda-base/cublas-call
+              (~gemm-fn
+               ^cublas$cublasContext ~'cublas
+               (cuda-base/bool->blas-trans trans-a?#)
+               (cuda-base/bool->blas-trans trans-b?#)
+               (long a-row-count#) (long b-col-count#) (long a-col-count#)
+               (~scalar-ptr-fn alpha#)
+               (~ptr-cast-fn A#)
+               (int a-rowstride#)
+               (~ptr-cast-fn B#)
+               (int b-rowstride#)
+               (~scalar-ptr-fn beta#)
+               (~ptr-cast-fn C#)
+               (int c-rowstride#)))))
+    :gemv (fn [stream# trans-a?# a-row-count# a-col-count#
+               alpha# A# a-rowstride#
+               x# inc-x#
+               beta# y# inc-y#]
+            (cuda-base/blas-with-stream
+             stream#
+             (cuda-base/cublas-call
+              (~gemv-fn
+               ^cublas$cublasContext ~'cublas
+               (cuda-base/bool->blas-trans trans-a?#) (long a-row-count#) (long a-col-count#)
+               (~scalar-ptr-fn alpha#)
+               (~ptr-cast-fn A#)
+               (int a-rowstride#)
+               (~ptr-cast-fn x#)
+               (long inc-x#)
+               (~scalar-ptr-fn beta#)
+               (~ptr-cast-fn y#)
+               (long inc-y#)))))})
+
+
+(def ^:private blas-fn-map
+  (blas-macro-iter blas-impl))
 
 
 (extend-type CudaStream
@@ -195,4 +264,17 @@
                          [(->dtype y-alpha)]
                          (operation->cuda operation)
                          [n-elems])
-                 vec)))))
+                 vec))))
+
+  (gemm! [stream
+          C c-colstride
+          trans-a? trans-b? alpha
+          A a-row-count a-col-count a-colstride
+          B b-col-count b-colstride
+          beta]
+    (cmu/col->row-gemm
+     (partial (get-in blas-fn-map [(dtype/get-datatype C) :gemm]) stream)
+     trans-a? trans-b? a-row-count a-col-count b-col-count
+     alpha A a-colstride
+     B b-colstride
+     beta C c-colstride)))

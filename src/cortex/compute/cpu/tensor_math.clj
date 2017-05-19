@@ -6,11 +6,14 @@
             [clojure.math.combinatorics :as combo]
             [cortex.compute.cpu.driver :as cpu-driver]
             [think.parallel.core :as parallel]
-            [clojure.core.matrix.macros :refer [c-for]])
-  (:import [cortex.compute.cpu.driver CPUStream]))
+            [clojure.core.matrix.macros :refer [c-for]]
+            [cortex.compute.math-util :as cmu])
+  (:import [cortex.compute.cpu.driver CPUStream]
+           [com.github.fommil.netlib BLAS]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
+(set! *warn-on-reflection* true)
 
 
 (defn- classify-index-system
@@ -146,7 +149,7 @@
 
 (defn ^:private get-elem-idx->address
   ^ElemIdxToAddressFunction [index-system]
-  ((get (combination-map) (classify-index-system index-system)) index-system))
+`z  ((get (combination-map) (classify-index-system index-system)) index-system))
 
 
 (defmacro ^:private assign-constant-impl
@@ -407,6 +410,71 @@
      (binary-op-table))))
 
 
+(defmacro ^:private blas-macro-iter
+  [inner-macro]
+  `{:double (~inner-macro marshal/as-double-array-view double .dgemm .dgemv)
+    :float (~inner-macro marshal/as-float-array-view float .sgemm .sgemv)})
+
+
+(defmacro ^:private blas-impl
+  [cast-fn scalar-cast-fn gemm-op gemv-op]
+  `{:gemm (fn [trans-a?# trans-b?# a-row-count# a-col-count# b-col-count#
+               ;;Rowstride because blas is row-major (the tensor system is column-major)
+               alpha# A# a-rowstride#
+               B# b-rowstride#
+               beta# C# c-rowstride#]
+            (let [trans-a?# (cmu/bool->blas-trans trans-a?#)
+                  trans-b?# (cmu/bool->blas-trans trans-b?#)
+                  M# (long a-row-count#)
+                  N# (long b-col-count#)
+                  K# (long a-col-count#)
+                  alpha# (~scalar-cast-fn alpha#)
+                  beta# (~scalar-cast-fn beta#)
+                  A# (~cast-fn A#)
+                  B# (~cast-fn B#)
+                  C# (~cast-fn C#)
+                  A-offset# (.offset A#)
+                  B-offset# (.offset B#)
+                  C-offset# (.offset C#)
+                  A# (.data A#)
+                  B# (.data B#)
+                  C# (.data C#)]
+              (~gemm-op (BLAS/getInstance) trans-a?# trans-b?#
+               M# N# K#
+               alpha# A# A-offset# a-rowstride#
+               B# B-offset# b-rowstride#
+               beta# C# C-offset# c-rowstride#)))
+    :gemv (fn [trans-a?# a-row-count# a-col-count#
+               alpha# A# a-rowstride#
+               x# inc-x#
+               beta# y# inc-y#]
+            (let [a-rowstride# (long a-rowstride#)
+                  a-row-count# (long a-row-count#)
+                  a-col-count# (long a-col-count#)
+                  A# (~cast-fn A#)
+                  x# (~cast-fn x#)
+                  y# (~cast-fn y#)
+                  A-offset# (.offset A#)
+                  x-offset# (.offset x#)
+                  y-offset# (.offset y#)
+                  A# (.data A#)
+                  x# (.data x#)
+                  y# (.data y#)
+                  alpha# (~scalar-cast-fn alpha#)
+                  inc-x# (long inc-x#)
+                  beta# (~scalar-cast-fn beta#)
+                  inc-y# (long inc-y#)]
+              (~gemv-op (BLAS/getInstance)
+               (cmu/bool->blas-trans trans-a?#)
+               a-row-count# a-col-count#
+               alpha# A# A-offset# a-rowstride#
+               x# x-offset# inc-x#
+               beta# y# y-offset# inc-y#)))})
+
+
+(def ^:private blas-fn-map
+  (blas-macro-iter blas-impl))
+
 
 (extend-type CPUStream
   tm/TensorMath
@@ -465,9 +533,16 @@
        x x-idx x-alpha
        y y-idx y-alpha
        n-elems)))
+
   (gemm! [stream
-          c c-idx
+          C c-colstride
           trans-a? trans-b? alpha
-          a a-idx a-row-count a-col-count
-          b b-idx b-col-count
-          beta]))
+          A a-row-count a-col-count a-colstride
+          B b-col-count b-colstride
+          beta]
+    (cpu-driver/with-stream-dispatch stream
+      (cmu/col->row-gemm (get-in blas-fn-map [(dtype/get-datatype C) :gemm])
+                         trans-a? trans-b? a-row-count a-col-count b-col-count
+                         alpha A a-colstride
+                         B b-colstride
+                         beta C c-colstride))))

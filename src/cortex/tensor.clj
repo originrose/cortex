@@ -365,9 +365,10 @@ that rerequires the items to have the same element count."
    (let [buffer-ecount (ecount buffer)
          shape (dimensions->shape dimensions)
          column-stride (dimensions->column-stride dimensions index-system)
-         required-buffer-ecount (long
-                                 (apply * column-stride
-                                        (drop-last shape)))]
+         num-required-columns (max 0 (- (long (apply + 0 (drop-last shape)))
+                                        1))
+         required-buffer-ecount (long (+ (* column-stride num-required-columns)
+                                         (long (last shape))))]
 
      (when-not-error (<= required-buffer-ecount buffer-ecount)
        "Supplied buffer does not have enough capacity for declared dimensions"
@@ -593,7 +594,8 @@ and the rest of the dimensions being squashed into n-rows."
                        :col-start col-start
                        :col-length col-length})))
     (let [start-offset (+ (* column-stride row-start) col-start)
-          required-length (* row-length column-stride)
+          required-length (- (* row-length column-stride)
+                             col-start)
           sub-buffer (compute-drv/sub-buffer (tensor->buffer tensor)
                                              start-offset required-length)]
       (construct-tensor (tensor->device tensor)
@@ -959,8 +961,8 @@ Datatypes must match."
                       (= :float (get-datatype C)))
     "Gemm is only defined for float and double tensors"
     {:C-datatype (get-datatype C)})
-  (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? (tensor->2d-shape A))
-        [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? (tensor->2d-shape B))
+  (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? A)
+        [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? B)
         [c-row-count c-col-count :as c-shape] (tensor->2d-shape C)
         a-row-count (long a-row-count)
         a-col-count (long a-col-count)
@@ -981,12 +983,10 @@ Datatypes must match."
       {:b-shape b-shape
        :c-shape c-shape})
     (tm/gemm! (check-stream)
-              (tensor->buffer C) (tensor->index-system C) (tensor->column-stride C)
+              (tensor->buffer C) (tensor->column-stride C)
               trans-a? trans-b? alpha
-              (tensor->buffer A) (tensor->index-system A)
-              a-row-count a-col-count (tensor->column-stride A)
-              (tensor->buffer B) (tensor->index-system B)
-              b-col-count (tensor->column-stride B)
+              (tensor->buffer A) a-row-count a-col-count (tensor->column-stride A)
+              (tensor->buffer B) b-col-count (tensor->column-stride B)
               beta))
   C)
 

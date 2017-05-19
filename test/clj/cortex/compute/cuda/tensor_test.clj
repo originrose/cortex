@@ -32,3 +32,7 @@
 
 (def-cas-dtype-test binary-op
   (verify-tensor/binary-op (create-driver) *datatype*))
+
+
+(def-double-float-test gemm
+  (verify-tensor/gemm (create-driver) *datatype*))

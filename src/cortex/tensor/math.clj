@@ -52,11 +52,14 @@ dest[idx] = alpha * dest[idx] op y[idx]")
                n-elems operation]
     "Binary operation where dest is not involved in the computation.
 dest[idx] = alpha * x[idx] op y[idx]")
+
   (gemm! [stream
-          c c-idx c-colstride
+          c c-colstride
           trans-a? trans-b? alpha
-          a a-idx a-row-count a-col-count a-colstride
-          b b-idx b-col-count b-colstride
+          a a-row-count a-col-count a-colstride
+          b b-col-count b-colstride
           beta]
-    "Generalized matrix multiply.
+    "Generalized matrix multiply.  In this case we don't pass in the index system
+because gemm is not implemented in any system with anything like indirect addressing or
+any other of the index system features aside from column stride.
 c = alpha * (trans-a? a) * (trans-b? b) + beta * c"))

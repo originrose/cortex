@@ -27,3 +27,7 @@
 
 (def-double-float-test binary-op
   (verify-tensor/binary-op (driver) *datatype*))
+
+
+(def-double-float-test gemm
+  (verify-tensor/gemm (driver) *datatype*))

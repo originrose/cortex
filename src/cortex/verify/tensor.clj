@@ -129,3 +129,38 @@ for the cuda backend."
                                        (map #(* 2.0 %) (sub-fn elem-idx))))
                              [0 1 2])
                        (ct/to-double-array tens-c-small))))))))
+
+
+(defn gemm
+  ;;Test gemm, also test that submatrixes are working and defined correctly.
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [tens-a (ct/->tensor (partition 3 (range 9)))
+         tens-b (ct/->tensor (partition 3 (repeat 9 2)))
+         tens-c (ct/->tensor (partition 3 (repeat 9 10)))]
+     (ct/gemm! tens-c false false 1 tens-a tens-b 1)
+     (is (m/equals (ct/to-double-array tens-c)
+                   [16.0 16.0 16.0 34.0 34.0 34.0 52.0 52.0 52.0]))
+     (ct/gemm! tens-c false false 1 tens-a tens-b 0)
+     (is (m/equals (ct/to-double-array tens-c)
+                   [6.0 6.0 6.0 24.0 24.0 24.0 42.0 42.0 42.0]))
+     (ct/gemm! tens-c true false 1 tens-a tens-b 0)
+     (is (m/equals (ct/to-double-array tens-c)
+                   [18.0, 18.0, 18.0, 24.0, 24.0, 24.0, 30.0, 30.0, 30.0]))
+     (let [tens-a (ct/submatrix tens-a 0 2 0 2)
+           tens-b (ct/submatrix tens-b 0 2 0 2)
+           tens-c-sub (ct/submatrix tens-c 0 2 0 2)]
+       (ct/gemm! tens-c-sub false false 1 tens-a tens-b 0)
+       (is (m/equals (ct/to-double-array tens-c-sub)
+                     [2 2 14 14]))
+       (is (m/equals (ct/to-double-array tens-c)
+                     [2.0, 2.0, 18.0, 14.0, 14.0, 24.0, 30.0, 30.0, 30.0])))
+     (let [tens-a (ct/submatrix tens-a 1 2 1 2)
+           tens-b (ct/submatrix tens-b 0 2 0 2)
+           tens-c-sub (ct/submatrix tens-c 1 2 1 2)]
+       (ct/gemm! tens-c-sub false false 1 tens-a tens-b 1)
+       (is (m/equals (ct/to-double-array tens-c-sub)
+                     [32 42 60 60]))
+       (is (m/equals (ct/to-double-array tens-c)
+                     [2.0, 2.0, 18.0, 14.0, 32.0, 42.0, 30.0, 60.0, 60.0]))))))
