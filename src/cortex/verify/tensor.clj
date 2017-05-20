@@ -164,3 +164,25 @@ for the cuda backend."
                      [32 42 60 60]))
        (is (m/equals (ct/to-double-array tens-c)
                      [2.0, 2.0, 18.0, 14.0, 32.0, 42.0, 30.0, 60.0, 60.0]))))))
+
+
+(defn gemv
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [tens-a (ct/->tensor (partition 3 (range 12)))
+         tens-b (ct/->tensor (repeat 4 2))
+         tens-c (ct/->tensor (range 4))
+         tens-b-sub (ct/subvector tens-b 0 :length 3)]
+     (ct/gemv! tens-c false 1 tens-a tens-b 1)
+     (is (m/equals [6.0 25.0 44.0 63.0]
+                   (ct/to-double-array tens-c)))
+     (ct/gemv! tens-c false 1 tens-a tens-b 0)
+     (is (m/equals [6 24 42 60]
+                   (ct/to-double-array tens-c)))
+     (let [tens-c-sub (ct/subvector tens-c 0 :length 3)
+           ;;[1 4 7 10]
+           tens-a-col (second (ct/columns tens-a))]
+       (ct/gemv! tens-c-sub true 1 tens-a tens-a-col 0)
+       (is (m/equals [144.0 166.0 188.0]
+                     (ct/to-double-array tens-c-sub)))))))

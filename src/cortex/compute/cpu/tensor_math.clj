@@ -545,4 +545,15 @@
                          trans-a? trans-b? a-row-count a-col-count b-col-count
                          alpha A a-colstride
                          B b-colstride
-                         beta C c-colstride))))
+                         beta C c-colstride)))
+
+  (gemv! [stream
+          c inc-c
+          trans-a? alpha
+          A a-row-count a-col-count a-colstride
+          x inc-x
+          beta]
+    (cpu-driver/with-stream-dispatch stream
+      (cmu/col->row-gemv (get-in blas-fn-map [(dtype/get-datatype c) :gemv])
+                         trans-a? a-row-count a-col-count alpha
+                         A a-colstride x inc-x beta c inc-c))))

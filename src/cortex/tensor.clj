@@ -991,6 +991,48 @@ Datatypes must match."
   C)
 
 
+(defn- ensure-vector-indexable
+  "Ensure that a tensor can be indexed like a vector in blas-type methods.
+So either it is dense *or* num-columns is 1"
+  [& args]
+  (doseq [arg args]
+    (when-not-error (or (dense? arg)
+                        (= (tensor->num-columns arg) 1))
+      "Argument is not vector-indexable"
+      {:tensor arg})))
+
+
+(defn- blas-vector-increment
+  ^long [^Tensor tensor]
+  (if (dense? tensor)
+    1
+    (tensor->column-stride tensor)))
+
+
+(defn gemv!
+  "c = alpha * (trans-a? A) * x + beta * c"
+  ^Tensor [c trans-a? alpha A x beta]
+  (ensure-datatypes (get-datatype c) A x)
+  (ensure-same-device c A x)
+  (ensure-basic-indexing c A x)
+  (when-not-error (or (= :double (get-datatype c))
+                      (= :float (get-datatype c)))
+    "Gemm is only defined for float and double tensors"
+    {:C-datatype (get-datatype c)})
+  (ensure-vector-indexable x c)
+  (let [[a-row-count a-col-count] (tensor->2d-shape A)
+        inc-x (blas-vector-increment x)
+        inc-c (blas-vector-increment c)
+        a-colstride (tensor->column-stride A)]
+    (tm/gemv! (check-stream)
+              (tensor->buffer c) inc-c
+              trans-a? alpha
+              (tensor->buffer A) a-row-count a-col-count a-colstride
+              (tensor->buffer x) inc-x
+              beta))
+  c)
+
+
 (extend-type Tensor
   mp/PVectorView
   (as-vector [m]

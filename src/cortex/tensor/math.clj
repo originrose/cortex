@@ -62,4 +62,12 @@ dest[idx] = alpha * x[idx] op y[idx]")
     "Generalized matrix multiply.  In this case we don't pass in the index system
 because gemm is not implemented in any system with anything like indirect addressing or
 any other of the index system features aside from column stride.
-c = alpha * (trans-a? a) * (trans-b? b) + beta * c"))
+c = alpha * (trans-a? a) * (trans-b? b) + beta * c")
+  (gemv! [stream
+          c inc-c
+          trans-a? alpha
+          A a-row-count a-col-count a-colstride
+          x inc-x
+          beta]
+    "Generalized matrix*vector.  Similar to above, the index system isn't useful
+and could result in ambiguity.  So we pass in the striding specifically."))
