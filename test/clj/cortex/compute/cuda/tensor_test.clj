@@ -36,3 +36,7 @@
 
 (def-double-float-test gemm
   (verify-tensor/gemm (create-driver) *datatype*))
+
+
+(def-double-float-test gemv
+  (verify-tensor/gemv (create-driver) *datatype*))

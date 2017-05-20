@@ -130,7 +130,8 @@
              (cuda-base/cublas-call
               (~gemv-fn
                ^cublas$cublasContext ~'cublas
-               (cuda-base/bool->blas-trans trans-a?#) (long a-row-count#) (long a-col-count#)
+               (cuda-base/bool->blas-trans trans-a?#)
+               (long a-row-count#) (long a-col-count#)
                (~scalar-ptr-fn alpha#)
                (~ptr-cast-fn A#)
                (int a-rowstride#)
@@ -277,4 +278,15 @@
      trans-a? trans-b? a-row-count a-col-count b-col-count
      alpha A a-colstride
      B b-colstride
-     beta C c-colstride)))
+     beta C c-colstride))
+
+  (gemv! [stream
+          c inc-c
+          trans-a? alpha
+          A a-row-count a-col-count a-colstride
+          x inc-x
+          beta]
+    (cmu/col->row-gemv
+     (partial (get-in blas-fn-map [(dtype/get-datatype c) :gemv]) stream)
+     trans-a? a-row-count a-col-count alpha A a-colstride
+     x inc-x beta c inc-c)))
