@@ -477,3 +477,39 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
   [graph]
   (->> (generate-loss-function graph)
        (reduce graph/remove-node graph)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; censor loss
+(defn censor-loss
+  [& {:as arg-map}]
+  (merge {:type :censor-loss}
+         arg-map))
+
+(defmethod loss :censor-loss
+  [loss-term buffer-map]
+  (println "\n========================================")
+  (clojure.pprint/pprint loss-term)
+  (clojure.pprint/pprint buffer-map)
+  (let [output (get buffer-map :output)
+        labels (get buffer-map :labels)
+        delta (mapv (fn [o l]
+                      (if (Double/isNaN l)
+                        0
+                        (- o l)))
+                    output labels)]
+    (/ (double (m/magnitude-squared delta))
+       (m/ecount output))))
+
+(defmethod generate-loss-term :censor-loss
+  [k]
+  (generic-loss-term k))
+
+(defmethod graph/get-node-metadata :censor-loss
+  [loss-term]
+  {:arguments {:output {:gradients? true}
+               :labels {}}
+   :passes [:loss]})
+
+(defmethod graph/generate-stream-definitions :censor-loss
+  [graph censor-loss]
+  (generate-loss-term-stream-definitions graph censor-loss))

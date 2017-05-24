@@ -234,3 +234,26 @@
                            inputs outputs
                            1e-4 batch-size :test)
             check-gradients)))
+
+(defn censor-gradient
+  [context]
+  (let [batch-size 1
+        inputs [[4.0 6.0]]
+        outputs [[-0.5 Double/NaN]]
+        input-dim (count (first inputs))
+        output-dim (count (first outputs))
+        network [(layers/input input-dim 1 1 :id :data)
+                 (layers/linear output-dim
+                                :id :test
+                                :censor-loss {:labels {:type :stream
+                                                       :stream :test}})]
+        gradients (get-gradients context
+                                 network
+                                 inputs
+                                 outputs
+                                 1e-4
+                                 batch-size
+                                 :test)]
+    (println "\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+    (clojure.pprint/pprint gradients)
+    (check-gradients gradients)))

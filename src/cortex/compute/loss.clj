@@ -175,3 +175,36 @@ buffer is expected to be entirely overwritten by operation."
                                       [batch-size])
         temp-centers (backend/new-array backend [(apply * labels-shape) (apply * output-shape)])]
    (->CenterLoss loss-term backend batch-centers monotonic-indexes temp-centers)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; censor loss
+(defrecord CensorLoss [loss-term backend]
+  PComputeLoss
+  (compute-loss-gradient [this buffer-map]
+    (let [v (get-in buffer-map [:output :buffer])
+          gradient (get-in buffer-map [:output :gradient])
+          target (get-in buffer-map [:labels :buffer])
+          stream (backend/get-stream)
+          [batch-size output-size] (math/batch-shape v)
+          alpha (/ 2.0 (double output-size))
+          temp-buffer target ;; TODO: Where to get this from?
+          ]
+      (println "########################################")
+      (clojure.pprint/pprint
+       (.data (math/device-buffer target)))
+      (math/select stream
+                    (math/device-buffer target)
+                    (math/device-buffer temp-buffer)
+                    0.0 1.0)
+      (clojure.pprint/pprint
+       (.data (math/device-buffer temp-buffer)))
+      (println "########################################")
+      (math/subtract stream
+                     alpha (math/device-buffer v)
+                     alpha (math/device-buffer target)
+                     (math/device-buffer gradient)))))
+
+
+(defmethod create-compute-loss-term :censor-loss
+  [backend network loss-term batch-size]
+  (->CensorLoss loss-term backend))

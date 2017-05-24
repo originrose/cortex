@@ -10,3 +10,6 @@
 
 (def-double-float-test center-loss
   (verify-loss/center-loss (cpu.backend/backend :datatype test-utils/*datatype*)))
+
+(deftest censor-loss
+  (verify-loss/censor-loss (cpu.backend/backend :datatype test-utils/*datatype*)))
