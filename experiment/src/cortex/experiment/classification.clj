@@ -181,7 +181,6 @@
   (let [labels (execute/run new-network test-ds :batch-size batch-size)
         vec->label (vec->label-fn class-mapping)
         old-classification-accuracy (:classification-accuracy old-network)
-        _ (println "old class acc " old-classification-accuracy )
         classification-accuracy (double
                                  (/ (->> (map (fn [label observation]
                                                 (= (vec->label (:labels label))
