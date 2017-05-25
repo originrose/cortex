@@ -41,12 +41,10 @@ Used for inverse scaling of things that are summed per-batch by class."
 (defn labels->gradient-masks
   [batch-label-vec]
   (println "batch-label-vec" batch-label-vec)
-  #_(->> batch-label-vec
+  (->> batch-label-vec
        (mapv (fn [l]
-               (mapv #(if (Double/isNaN %) 0.0 %) l))))
-  (let [r (mapv #(if (Double/isNaN %) 0.0 %) batch-label-vec)]
-    (println "returning:" r)
-    r))
+               (mapv #(if (Double/isNaN %) 0.0 %) l)))))
+
 
 (defn labels->gradient-masks-augmentation
   [stream-arg-name]

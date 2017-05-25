@@ -251,8 +251,8 @@
         _ (println "Starting...")
         gradients (get-gradients context
                                  network
-                                 inputs
-                                 outputs
+                                 [inputs]
+                                 [outputs]
                                  1e-4
                                  batch-size
                                  :test)]
