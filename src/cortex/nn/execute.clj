@@ -161,25 +161,74 @@ Furthermore infer should be both wrapped in a resource context and completely re
   :ok)
 
 
+(defn- augment-streams-and-update-traversal
+  [network traversal dataset batch-size]
+ (let [batches (->> (dataset-batches dataset batch-size)
+                    (map (partial graph/augment-streams (network/network->graph network))))
+       _ (when (empty? batches)
+           (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
+                           {:batch-size batch-size
+                            :dataset-count (count dataset)})))
+       first-batch (first batches)
+       traversal
+       (update traversal :buffers
+               (fn [buffer-map]
+                 (->> buffer-map
+                      (map (fn [[k v]]
+                             ;;Is this an augmented buffer
+                             (if (get-in k [:stream :augmentation])
+                               (let [aug-key (get k :stream)
+                                     batch-entry (get first-batch aug-key)
+                                     elem-size (m/ecount (first batch-entry))]
+                                 (when-not batch-entry
+                                   (throw (ex-info "Failed to find dataset element for augmented key:"
+                                                   {:aug-key aug-key
+                                                    :dataset-keys (keys first-batch)})))
+                                 [k (assoc v :dimension {:width elem-size})])
+                               [k v])))
+                      (into {}))))]
+   {:traversal traversal
+    :batches batches}))
+
+
+(defn- batch->dataset
+  [batch-data]
+  (->> batch-data
+       (map (fn [[k v]]
+              (map #(hash-map k %) v)))
+       (apply interleave)
+       (partition (count batch-data))
+       (map #(apply merge %))))
+
+
 (defn generate-numeric-gradients
   "Run network forward and backward like 'forward-backward' but also calculate numeric
   gradients w/r/t the loss function and the provided answer.  This allows for gradient
   checking.  The data should be saved back to the network after the passes."
   [network context batch-size stream->input-map epsilon]
   (with-compute-context context
-    (let [network (compute-binding/bind-context-to-network
+    (let [{:keys [traversal batches]} (augment-streams-and-update-traversal
+                                       network
+                                       (traverse/training-traversal network
+                                                                    :keep-non-trainable? true)
+                                       (batch->dataset stream->input-map)
+                                       batch-size)
+          _ (clojure.pprint/pprint traversal)
+          _ (clojure.pprint/pprint batches)
+          network (compute-binding/bind-context-to-network
                    network
                    (current-backend)
                    batch-size
+                   traversal
                    ;;A lot of the gradient tests have no trainable nodes so we have to disable
                    ;;the backward pass optimization where we do not traverse nodes that contribute
                    ;;no useful gradients to the solution.
-                   (traverse/training-traversal network
-                                                :keep-non-trainable? true)
                    {:gradients? true
                     :numeric-gradients? true})
           ;;Generate all of the calculated gradients.
           parameters (compute-binding/parameters network)
+          ;;The first batch is the stream->input-map.  But now it is augmented.
+          stream->input-map (first batches)
           ;;Store the input buffers as traversal buffers
           network (compute-binding/update-traversal-buffers
                    network
@@ -334,12 +383,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
 (defn- dataset->uploading-batches
   [network dataset batch-size batch-transfer-parallelism training?]
   (let [batch-transfer-parallelism (long (max batch-transfer-parallelism 1))
-        batches (->> (dataset-batches dataset batch-size)
-                     (map (partial graph/augment-streams (network/network->graph network))))
-        _ (when (empty? batches)
-                (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
-                                {:batch-size batch-size
-                                 :dataset-count (count dataset)})))
+        batches dataset
         device (drv/current-device)
         batch-buffer-seq (->> (range batch-transfer-parallelism)
                               (mapv (fn [_]

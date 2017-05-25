@@ -247,7 +247,8 @@
                                 :id :test
                                 :censor-loss {:labels {:type :stream
                                                        :stream :test}
-                                              :gradient-masks {:stream :test}})]
+                                              :gradient-masks {:stream :test}
+                                              :gradient-multi-masks {:stream :test}})]
         _ (println "Starting...")
         gradients (get-gradients context
                                  network

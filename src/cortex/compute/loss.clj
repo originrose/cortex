@@ -185,16 +185,13 @@ buffer is expected to be entirely overwritten by operation."
           gradient (get-in buffer-map [:output :gradient])
           target (get-in buffer-map [:labels :buffer])
           gradient-masks (get-in buffer-map [:gradient-masks :buffer])
+          gradient-multi-masks (get-in buffer-map [:gradient-multi-masks :buffer])
           stream (backend/get-stream)
           [batch-size output-size] (math/batch-shape v)
           alpha (/ 2.0 (double output-size))]
 
-      #_(math/elem-mul stream
-                     1.0
-                     (math/device-buffer gradient-masks) 1
-                     (math/device-buffer target) 1
-                     (math/device-buffer target) 1)
       (println "before")
+      (drv/sync-stream stream)
       (println "v" (vec (.data (math/device-buffer v))) "\n"
                "target" (vec (.data (math/device-buffer target))) "\n"
                "gradient" (vec (.data (math/device-buffer gradient))) "\n"
@@ -203,6 +200,12 @@ buffer is expected to be entirely overwritten by operation."
                      alpha (math/device-buffer v)
                      alpha (math/device-buffer gradient-masks)
                      (math/device-buffer gradient))
+      (math/elem-mul stream
+                     1.0
+                     (math/device-buffer gradient-multi-masks) 1
+                     (math/device-buffer gradient) 1
+                     (math/device-buffer gradient) 1)
+      (drv/sync-stream stream)
       (println "a-fore")
       (println "v" (vec (.data (math/device-buffer v))) "\n"
                "target" (vec (.data (math/device-buffer target))) "\n"

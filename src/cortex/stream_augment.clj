@@ -40,7 +40,6 @@ Used for inverse scaling of things that are summed per-batch by class."
 ;; censor-loss
 (defn labels->gradient-masks
   [batch-label-vec]
-  (println "batch-label-vec" batch-label-vec)
   (->> batch-label-vec
        (mapv (fn [l]
                (mapv #(if (Double/isNaN %) 0.0 %) l)))))
@@ -51,3 +50,18 @@ Used for inverse scaling of things that are summed per-batch by class."
   {:type :stream-augmentation
    :stream stream-arg-name
    :augmentation :cortex.stream-augment/labels->gradient-masks})
+
+
+
+(defn labels->gradient-multi-masks
+  [batch-label-vec]
+  (->> batch-label-vec
+       (mapv (fn [l]
+               (mapv #(if (Double/isNaN %) 0.0 1) l)))))
+
+
+(defn labels->gradient-multi-masks-augmentation
+  [stream-arg-name]
+  {:type :stream-augmentation
+   :stream stream-arg-name
+   :augmentation :cortex.stream-augment/labels->gradient-multi-masks})
