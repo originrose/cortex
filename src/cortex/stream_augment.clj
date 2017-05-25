@@ -35,3 +35,21 @@ Used for inverse scaling of things that are summed per-batch by class."
   {:type :stream-augmentation
    :stream stream-arg-name
    :augmentation :cortex.stream-augment/labels->inverse-counts})
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; censor-loss
+(defn labels->gradient-masks
+  [batch-label-vec]
+  (println "batch-label-vec" batch-label-vec)
+  #_(->> batch-label-vec
+       (mapv (fn [l]
+               (mapv #(if (Double/isNaN %) 0.0 %) l))))
+  (let [r (mapv #(if (Double/isNaN %) 0.0 %) batch-label-vec)]
+    (println "returning:" r)
+    r))
+
+(defn labels->gradient-masks-augmentation
+  [stream-arg-name]
+  {:type :stream-augmentation
+   :stream stream-arg-name
+   :augmentation :cortex.stream-augment/labels->gradient-masks})

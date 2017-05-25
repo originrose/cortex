@@ -184,25 +184,30 @@ buffer is expected to be entirely overwritten by operation."
     (let [v (get-in buffer-map [:output :buffer])
           gradient (get-in buffer-map [:output :gradient])
           target (get-in buffer-map [:labels :buffer])
+          gradient-masks (get-in buffer-map [:gradient-masks :buffer])
           stream (backend/get-stream)
           [batch-size output-size] (math/batch-shape v)
-          alpha (/ 2.0 (double output-size))
-          temp-buffer target ;; TODO: Where to get this from?
-          ]
-      (println "########################################")
-      (clojure.pprint/pprint
-       (.data (math/device-buffer target)))
-      (math/select stream
-                    (math/device-buffer target)
-                    (math/device-buffer temp-buffer)
-                    0.0 1.0)
-      (clojure.pprint/pprint
-       (.data (math/device-buffer temp-buffer)))
-      (println "########################################")
+          alpha (/ 2.0 (double output-size))]
+
+      #_(math/elem-mul stream
+                     1.0
+                     (math/device-buffer gradient-masks) 1
+                     (math/device-buffer target) 1
+                     (math/device-buffer target) 1)
+      (println "before")
+      (println "v" (vec (.data (math/device-buffer v))) "\n"
+               "target" (vec (.data (math/device-buffer target))) "\n"
+               "gradient" (vec (.data (math/device-buffer gradient))) "\n"
+               "gradient-masks" (vec (.data (math/device-buffer gradient-masks))) "\n")
       (math/subtract stream
                      alpha (math/device-buffer v)
-                     alpha (math/device-buffer target)
-                     (math/device-buffer gradient)))))
+                     alpha (math/device-buffer gradient-masks)
+                     (math/device-buffer gradient))
+      (println "a-fore")
+      (println "v" (vec (.data (math/device-buffer v))) "\n"
+               "target" (vec (.data (math/device-buffer target))) "\n"
+               "gradient" (vec (.data (math/device-buffer gradient))) "\n"
+               "gradient-masks" (vec (.data (math/device-buffer gradient-masks))) "\n"))))
 
 
 (defmethod create-compute-loss-term :censor-loss

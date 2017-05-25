@@ -487,9 +487,6 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
 
 (defmethod loss :censor-loss
   [loss-term buffer-map]
-  (println "\n========================================")
-  (clojure.pprint/pprint loss-term)
-  (clojure.pprint/pprint buffer-map)
   (let [output (get buffer-map :output)
         labels (get buffer-map :labels)
         delta (mapv (fn [o l]
@@ -507,7 +504,8 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
 (defmethod graph/get-node-metadata :censor-loss
   [loss-term]
   {:arguments {:output {:gradients? true}
-               :labels {}}
+               :labels {}
+               :gradient-masks (stream-aug/labels->gradient-masks-augmentation :labels)}
    :passes [:loss]})
 
 (defmethod graph/generate-stream-definitions :censor-loss

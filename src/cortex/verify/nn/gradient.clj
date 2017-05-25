@@ -246,7 +246,9 @@
                  (layers/linear output-dim
                                 :id :test
                                 :censor-loss {:labels {:type :stream
-                                                       :stream :test}})]
+                                                       :stream :test}
+                                              :gradient-masks {:stream :test}})]
+        _ (println "Starting...")
         gradients (get-gradients context
                                  network
                                  inputs
@@ -254,6 +256,4 @@
                                  1e-4
                                  batch-size
                                  :test)]
-    (println "\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
-    (clojure.pprint/pprint gradients)
     (check-gradients gradients)))
