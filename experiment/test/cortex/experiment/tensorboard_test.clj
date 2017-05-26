@@ -45,9 +45,6 @@
    (layers/linear->tanh 1)
    (layers/logistic :id :labels)])
 
-;;channel on which metrics are broadcast
-;;(def list-chan (chan))
-
 (defn get-metric
   [metric-fn actl-label pred-label]
   (let [lfn #(mapv (comp first :labels) %)
@@ -123,9 +120,8 @@
     ;;wait for the listener to finish reading epoch-count events
     (<!! event-writer-chan)))
 
-(deftest logistic-test-listener
-  (try
-    (let [ds (shuffle (default-dataset))
+(deftest test-listener
+  (let [ds (shuffle (default-dataset))
           log-path "/tmp/tflogs/"
           ds-count (count ds)
           train-ds (take (int (* 0.9 ds-count)) ds)
@@ -139,48 +135,4 @@
                      path)
                   ["linear"
                    "linear_nobatchnorm" "relu" "tanh"]))
-      (is (true? true)))
-    (catch Exception e
-      (clojure.stacktrace/print-stack-trace e))))
-
-(comment
- ;;go trials
-  (let [c1 (chan)
-        num-msgs 5
-        t-out (async/timeout (* 4 100))
-        file-path "/tmp/k1"
-        _ (io/delete-file file-path true)
-        writer (go (dotimes [n num-msgs]
-                     (let [[v _] (alts! [c1])]
-                       (println "got v " v)
-                       (spit file-path v :append true))))
-        _ (dotimes [n 5]
-            (Thread/sleep (* 1 100))
-            (println "produced " n)
-            (>!! c1 n))
-        ;c2 (async/thread)
-]
-    (println " off ")
-    (<!! writer)
-    (println " done "  " "))
-
-  (with-open [fos (io/writer "/tmp/w")]
-    (let [c1 (chan)
-
-          t-out (async/timeout (* 4 100))
-          msgs (async/<!! (async/go-loop [vs []]
-                            (let [[v ch] (async/alts! [c1])]
-                              (println " got v " v " from " ch)
-                              (if (= 4 (count vs))
-                                (conj vs v)
-                                (recur (conj vs v))))))
-          c2 (async/thread
-               (do (dotimes [n 5]
-                     (Thread/sleep (* 1 100))
-                     (go (>! c1 n)))))]
-      (println " num " (count msgs))
-      (doseq [i msgs]
-        (.write fos i))
-      ;(async/close! c2)
-      msgs))
-  spit)
+      (is (.exists (io/file (str log-path "/linear/tfevents.linear.out"))))))
