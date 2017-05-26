@@ -189,28 +189,17 @@ buffer is expected to be entirely overwritten by operation."
           stream (backend/get-stream)
           [batch-size output-size] (math/batch-shape v)
           alpha (/ 2.0 (double output-size))]
-
-      (println "before")
-      (drv/sync-stream stream)
-      (println "v" (vec (.data (math/device-buffer v))) "\n"
-               "target" (vec (.data (math/device-buffer target))) "\n"
-               "gradient" (vec (.data (math/device-buffer gradient))) "\n"
-               "gradient-masks" (vec (.data (math/device-buffer gradient-masks))) "\n")
+      ;;Subtract the no-nan data from the item.
       (math/subtract stream
                      alpha (math/device-buffer v)
                      alpha (math/device-buffer gradient-masks)
                      (math/device-buffer gradient))
+      ;;Zero out gradients where the nan used to be.
       (math/elem-mul stream
                      1.0
                      (math/device-buffer gradient-multi-masks) 1
                      (math/device-buffer gradient) 1
-                     (math/device-buffer gradient) 1)
-      (drv/sync-stream stream)
-      (println "a-fore")
-      (println "v" (vec (.data (math/device-buffer v))) "\n"
-               "target" (vec (.data (math/device-buffer target))) "\n"
-               "gradient" (vec (.data (math/device-buffer gradient))) "\n"
-               "gradient-masks" (vec (.data (math/device-buffer gradient-masks))) "\n"))))
+                     (math/device-buffer gradient) 1))))
 
 
 (defmethod create-compute-loss-term :censor-loss

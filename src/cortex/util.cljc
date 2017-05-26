@@ -656,3 +656,13 @@ This functions does not always work if data is not a vectorz matrix"
         {:data data
          :means means
          :stddevs stddevs}))))
+
+
+(defn super-partition
+  "Given a sequence of counts and a sequence of data, partition the data using the counts
+in the first sequence."
+  [count-seq original-seq]
+  (when-let [next-count (first count-seq)]
+    (cons (take next-count original-seq)
+          (lazy-seq (super-partition (rest count-seq)
+                                     (drop next-count original-seq))))))
