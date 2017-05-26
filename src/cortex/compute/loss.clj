@@ -184,20 +184,20 @@ buffer is expected to be entirely overwritten by operation."
     (let [v (get-in buffer-map [:output :buffer])
           gradient (get-in buffer-map [:output :gradient])
           target (get-in buffer-map [:labels :buffer])
+          nan-zero-labels (get-in buffer-map [:nan-zero-labels :buffer])
           gradient-masks (get-in buffer-map [:gradient-masks :buffer])
-          gradient-multi-masks (get-in buffer-map [:gradient-multi-masks :buffer])
           stream (backend/get-stream)
           [batch-size output-size] (math/batch-shape v)
           alpha (/ 2.0 (double output-size))]
       ;;Subtract the no-nan data from the item.
       (math/subtract stream
                      alpha (math/device-buffer v)
-                     alpha (math/device-buffer gradient-masks)
+                     alpha (math/device-buffer nan-zero-labels)
                      (math/device-buffer gradient))
       ;;Zero out gradients where the nan used to be.
       (math/elem-mul stream
                      1.0
-                     (math/device-buffer gradient-multi-masks) 1
+                     (math/device-buffer gradient-masks) 1
                      (math/device-buffer gradient) 1
                      (math/device-buffer gradient) 1))))
 

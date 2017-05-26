@@ -254,8 +254,8 @@
                                        :id :test
                                        :censor-loss {:labels {:type :stream
                                                               :stream :test}
-                                                     :gradient-masks {:stream :test}
-                                                     :gradient-multi-masks {:stream :test}})]
+                                                     :nan-zero-labels {:stream :test}
+                                                     :gradient-masks {:stream :test}})]
                        [{:data inputs
                          :test outputs}]
                        1e-4

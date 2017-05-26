@@ -505,8 +505,8 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
   [loss-term]
   {:arguments {:output {:gradients? true}
                :labels {}
-               :gradient-masks (stream-aug/labels->gradient-masks-augmentation :labels)
-               :gradient-multi-masks (stream-aug/labels->gradient-multi-masks-augmentation :labels)}
+               :nan-zero-labels (stream-aug/labels->nan-zero-labels-augmentation :labels)
+               :gradient-masks (stream-aug/labels->nan-gradient-masks-augmentation :labels)}
    :passes [:loss]})
 
 (defmethod graph/generate-stream-definitions :censor-loss

@@ -38,30 +38,35 @@ Used for inverse scaling of things that are summed per-batch by class."
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; censor-loss
-(defn labels->gradient-masks
+(defn labels->nan-zero-labels
+  "Given a vector containing some 'nan' entries, output a new vector with each nan
+mapped to 0 and the identity function applied to each non-nan value."
   [batch-label-vec]
   (->> batch-label-vec
        (mapv (fn [l]
                (mapv #(if (Double/isNaN %) 0.0 %) l)))))
 
 
-(defn labels->gradient-masks-augmentation
+(defn labels->nan-zero-labels-augmentation
   [stream-arg-name]
   {:type :stream-augmentation
    :stream stream-arg-name
-   :augmentation :cortex.stream-augment/labels->gradient-masks})
+   :augmentation :cortex.stream-augment/labels->nan-zero-labels})
 
 
 
-(defn labels->gradient-multi-masks
+(defn labels->nan-gradient-masks
+  "Given a labels vector with nan entries, return a new vector
+that has 0 for each nan and one elsewhere.  This is used as a mask
+vector to ignore certain portions of the label (or network output)."
   [batch-label-vec]
   (->> batch-label-vec
        (mapv (fn [l]
                (mapv #(if (Double/isNaN %) 0.0 1) l)))))
 
 
-(defn labels->gradient-multi-masks-augmentation
+(defn labels->nan-gradient-masks-augmentation
   [stream-arg-name]
   {:type :stream-augmentation
    :stream stream-arg-name
-   :augmentation :cortex.stream-augment/labels->gradient-multi-masks})
+   :augmentation :cortex.stream-augment/labels->nan-gradient-masks})
