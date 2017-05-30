@@ -1,24 +1,24 @@
 (ns cortex.verify.nn.train
-  (:require
-    [clojure.test :refer :all]
-    [clojure.pprint :as pprint]
-    [clojure.core.matrix :as m]
-    [think.resource.core :as resource]
-    [cortex.loss :as loss]
-    [cortex.optimize :as opt]
-    [cortex.optimize.adam :as adam]
-    [cortex.optimize.adadelta :as adadelta]
-    [cortex.nn.layers :as layers]
-    [cortex.nn.execute :as execute]
-    [cortex.nn.traverse :as traverse]
-    [cortex.nn.network :as network]
-    [cortex.compute.driver :as drv]
-    [cortex.compute.nn.backend :as nn-backend]
-    [cortex.verify.nn.data
-     :refer [CORN-DATA CORN-LABELS CORN-DATASET
-             mnist-training-dataset*
-             mnist-test-dataset*]
-     :as data]))
+  (:require [clojure.test :refer :all]
+            [clojure.pprint :as pprint]
+            [clojure.core.matrix :as m]
+            [think.resource.core :as resource]
+            [cortex.loss.core :as loss]
+            [cortex.loss.softmax :as softmax]
+            [cortex.optimize :as opt]
+            [cortex.optimize.adam :as adam]
+            [cortex.optimize.adadelta :as adadelta]
+            [cortex.nn.layers :as layers]
+            [cortex.nn.execute :as execute]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.network :as network]
+            [cortex.compute.driver :as drv]
+            [cortex.compute.nn.backend :as nn-backend]
+            [cortex.verify.nn.data
+             :refer [CORN-DATA CORN-LABELS CORN-DATASET
+                     mnist-training-dataset*
+                     mnist-test-dataset*]
+             :as data]))
 
 
 (def MNIST-NETWORK
@@ -123,7 +123,7 @@
 
 (defn percent=
   [a b]
-  (loss/evaluate-softmax a b))
+  (softmax/evaluate-softmax a b))
 
 
 (defn train-mnist

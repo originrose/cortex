@@ -5,10 +5,15 @@ on them that pertails exactly to that implementation.  They are expected to be t
 of extra keys/information on the descriptions.  Because of this the description
 constructors are all variable args with the extra arguments expected to be
   keyword-value pairs and are assoc'd into the description map."
-  (:require [cortex.util :refer [merge-args arg-list->arg-map] :as util]
-            [cortex.loss :as loss]
+  (:require [cortex.util :refer [merge-args arg-list->arg-map]]
             [cortex.graph :as graph]
-            [cortex.buffer-initialization :as buf-init]))
+            [cortex.buffer-initialization :as buf-init]
+            [cortex.loss.core :as loss]
+            [cortex.loss.mse]
+            [cortex.loss.center]
+            [cortex.loss.softmax]
+            [cortex.loss.censor]
+            [cortex.loss.regularization]))
 
 
 ;; Helpers
