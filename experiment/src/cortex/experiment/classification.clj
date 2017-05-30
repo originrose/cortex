@@ -3,10 +3,10 @@
             [clojure.core.matrix :as m]
             [think.image.patch :as patch]
             [think.gate.core :as gate]
-            [cortex.util :as util]
-            [cortex.experiment.train :as experiment-train]
             [cortex.nn.network :as network]
-            [cortex.nn.execute :as execute]))
+            [cortex.nn.execute :as execute]
+            [cortex.experiment.train :as experiment-train]
+            [cortex.util :as util]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -171,13 +171,10 @@
   and new network and decide which is best. Here we calculate
   classification accuracy (a good metric for classification tasks) and
   use that both for reporting and comparing."
-  [confusion-matrix-atom classification-accuracy-atom observation->img-fn class-mapping
-   network-filename
-   ;; global arguments 
-   {:keys [batch-size context]}  
-   ;per-epoch arguments
-   {:keys [new-network old-network test-ds]}
-   ]
+  [confusion-matrix-atom classification-accuracy-atom observation->img-fn
+   class-mapping network-filename
+   {:keys [batch-size context]}
+   {:keys [new-network old-network test-ds]}]
   (let [labels (execute/run new-network test-ds :batch-size batch-size)
         vec->label (vec->label-fn class-mapping)
         old-classification-accuracy (:classification-accuracy old-network)
@@ -195,7 +192,7 @@
                              (double old-classification-accuracy)))
         updated-network (if best-network?
                           (let [best-network
-                            (assoc new-network 
+                            (assoc new-network
                               :classification-accuracy classification-accuracy)]
                             (reset-confusion-matrix confusion-matrix-atom
                                                     observation->img-fn
@@ -203,15 +200,12 @@
                                                     {:labels labels
                                                     :test-ds test-ds})
                             (experiment-train/save-network best-network network-filename))
-                            ;;seems dicey. if not the best-network, 
-                            ;;keeps returning the old network,which will result in the training being 
-                            ;;stuck in a sub-optimal state.
                             (assoc old-network :epoch-count (get new-network :epoch-count)))]
     (swap! classification-accuracy-atom conj classification-accuracy)
     (println "Classification accuracy:" classification-accuracy)
-    
     {:best-network? best-network?
      :network updated-network}))
+
 
 (defn- train-forever
   "Train forever. This function never returns."
@@ -231,8 +225,7 @@
                                                 class-mapping
                                                 network-filename)
                               :batch-size batch-size
-                              :force-gpu? force-gpu?
-                              )))
+                              :force-gpu? force-gpu?)))
 
 
 (defn- display-dataset-and-model
