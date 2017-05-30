@@ -8,30 +8,28 @@ implementation.  It is important to realize that training the network means esse
 a transformation from compute-graph -> compute-graph via some training process.
 Both train and infer should be wrapped in resource contexts; this is not done at this level.
 Furthermore infer should be both wrapped in a resource context and completely realized."
-  (:require
-    [clojure.pprint :as pprint]
-    [clojure.core.matrix :as m]
-    [clojure.set :as c-set]
-    [clojure.core.matrix.macros :refer [c-for]]
-    [think.resource.core :as resource]
-    [think.datatype.core :as dtype]
-    [think.parallel.core :as parallel]
-    [cortex.graph :as graph]
-    [cortex.loss :as loss]
-    [cortex.util :as util]
-    [cortex.optimize :as optimize]
-    [cortex.optimize.adam :as adam]
-    [cortex.nn.network :as network]
-    [cortex.nn.traverse :as traverse]
-    [cortex.nn.layers :as layers]
-    [cortex.compute.driver :as drv]
-    [cortex.compute.math :as math]
-    [cortex.compute.loss :as compute-loss]
-    [cortex.compute.cpu.backend :as cpu]
-    [cortex.compute.nn.layers :as compute-layers]
-    [cortex.compute.nn.backend :as backend]
-    [cortex.compute.nn.protocols :as compute-protocols]
-    [cortex.nn.compute-binding :as compute-binding]))
+  (:require [clojure.pprint :as pprint]
+            [clojure.core.matrix :as m]
+            [clojure.set :as c-set]
+            [clojure.core.matrix.macros :refer [c-for]]
+            [think.resource.core :as resource]
+            [think.datatype.core :as dtype]
+            [think.parallel.core :as parallel]
+            [cortex.graph :as graph]
+            [cortex.loss.core :as loss]
+            [cortex.util :as util]
+            [cortex.optimize :as optimize]
+            [cortex.optimize.adam :as adam]
+            [cortex.nn.network :as network]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.layers :as layers]
+            [cortex.compute.driver :as drv]
+            [cortex.compute.math :as math]
+            [cortex.compute.cpu.backend :as cpu]
+            [cortex.compute.nn.layers :as compute-layers]
+            [cortex.compute.nn.backend :as backend]
+            [cortex.compute.nn.protocols :as compute-protocols]
+            [cortex.nn.compute-binding :as compute-binding]))
 
 
 (defn- cuda-backend-fn
@@ -161,25 +159,81 @@ Furthermore infer should be both wrapped in a resource context and completely re
   :ok)
 
 
+(defn dataset-batches
+  "Paritions the dataset into batches and does the seq-of-maps ->
+  map-of-seqs transformation."
+  [dataset batch-size]
+  (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
+    (->> dataset
+         (partition batch-size)
+         (map #(apply merge-with conj initial-map %)))))
+
+
+(defn- augment-streams-and-update-traversal
+  "Use the graph to augment any incoming streams.  Then use the first item from the batch to get the
+element count from the augmented stream and update traversal buffers so their dimensions match the
+augmented element count for the traversal buffers that pertain augmented streams.  This is required
+because at this point augmented streams do not need to specify a shape, so the shape must be derived
+from the size of their result and the traversal information updated to take this into account."
+  [network traversal dataset batch-size]
+  (let [batches (->> (dataset-batches dataset batch-size)
+                     (map (partial graph/augment-streams (network/network->graph network))))
+        _ (when (empty? batches)
+            (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
+                            {:batch-size batch-size
+                             :dataset-count (count dataset)})))
+        first-batch (first batches)
+        traversal
+        (update traversal :buffers
+                (fn [buffer-map]
+                  (->> buffer-map
+                       (map (fn [[k v]]
+                              ;;Is this an augmented buffer
+                              (if (get-in k [:stream :augmentation])
+                                (let [aug-key (get k :stream)
+                                      batch-entry (get first-batch aug-key)]
+                                  (when-not batch-entry
+                                    (throw (ex-info "Failed to find dataset element for augmented key:"
+                                                    {:aug-key aug-key
+                                                     :dataset-keys (keys first-batch)})))
+                                  (let [elem-size (-> (if (map? batch-entry)
+                                                        (get batch-entry :data)
+                                                        batch-entry)
+                                                      first
+                                                      m/ecount)]
+                                   [k (assoc v :dimension {:width elem-size})]))
+                                [k v])))
+                       (into {}))))]
+    {:traversal traversal
+     :batches batches}))
+
+
 (defn generate-numeric-gradients
   "Run network forward and backward like 'forward-backward' but also calculate numeric
   gradients w/r/t the loss function and the provided answer.  This allows for gradient
   checking.  The data should be saved back to the network after the passes."
-  [network context batch-size stream->input-map epsilon]
+  [network context batch-size dataset epsilon]
   (with-compute-context context
-    (let [network (compute-binding/bind-context-to-network
+    (let [{:keys [traversal batches]} (augment-streams-and-update-traversal
+                                       network
+                                       (traverse/training-traversal network
+                                                                    :keep-non-trainable? true)
+                                       dataset
+                                       batch-size)
+          network (compute-binding/bind-context-to-network
                    network
                    (current-backend)
                    batch-size
+                   traversal
                    ;;A lot of the gradient tests have no trainable nodes so we have to disable
                    ;;the backward pass optimization where we do not traverse nodes that contribute
                    ;;no useful gradients to the solution.
-                   (traverse/training-traversal network
-                                                :keep-non-trainable? true)
                    {:gradients? true
                     :numeric-gradients? true})
           ;;Generate all of the calculated gradients.
           parameters (compute-binding/parameters network)
+          ;;The first batch is the stream->input-map.  But now it is augmented.
+          stream->input-map (first batches)
           ;;Store the input buffers as traversal buffers
           network (compute-binding/update-traversal-buffers
                    network
@@ -255,16 +309,6 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 
-(defn dataset-batches
-  "Paritions the dataset into batches and does the seq-of-maps ->
-  map-of-seqs transformation."
-  [dataset batch-size]
-  (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
-    (->> dataset
-         (partition batch-size)
-         (map #(apply merge-with conj initial-map %)))))
-
-
 (defn- augmented-stream-key?
   [k]
   (and (map? k) (:stream k) (:augmentation k)))
@@ -332,14 +376,8 @@ Furthermore infer should be both wrapped in a resource context and completely re
 
 
 (defn- dataset->uploading-batches
-  [network dataset batch-size batch-transfer-parallelism training?]
+  [network batches batch-size batch-transfer-parallelism training?]
   (let [batch-transfer-parallelism (long (max batch-transfer-parallelism 1))
-        batches (->> (dataset-batches dataset batch-size)
-                     (map (partial graph/augment-streams (network/network->graph network))))
-        _ (when (empty? batches)
-                (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
-                                {:batch-size batch-size
-                                 :dataset-count (count dataset)})))
         device (drv/current-device)
         batch-buffer-seq (->> (range batch-transfer-parallelism)
                               (mapv (fn [_]
@@ -369,13 +407,18 @@ Furthermore infer should be both wrapped in a resource context and completely re
   (let [context (or context (compute-context :datatype datatype))]
     (with-compute-context context
       (let [optimizer (or optimizer (adam/adam))
+            {:keys [traversal batches]} (augment-streams-and-update-traversal
+                                         network
+                                         (traverse/training-traversal network)
+                                         dataset
+                                         batch-size)
             network (compute-binding/bind-context-to-network
                      network
                      (current-backend)
                      batch-size
-                     (traverse/training-traversal network)
+                     traversal
                      {:optimizer optimizer})
-            uploading-batches (dataset->uploading-batches network dataset batch-size
+            uploading-batches (dataset->uploading-batches network batches batch-size
                                                           batch-transfer-parallelism
                                                           true)]
         (doseq [{:keys [stream->buffer-map batch-stream]} uploading-batches]
@@ -398,15 +441,20 @@ Furthermore infer should be both wrapped in a resource context and completely re
                       :as options}]
   (let [context (or context (compute-context :datatype datatype))]
     (with-compute-context context
-      (let [network (compute-binding/bind-context-to-network
+      (let [{:keys [traversal batches]} (augment-streams-and-update-traversal
+                                         network
+                                         (traverse/inference-traversal network)
+                                         dataset
+                                         batch-size)
+            network (compute-binding/bind-context-to-network
                      network
                      (current-backend)
                      batch-size
-                     (traverse/inference-traversal network)
+                     traversal
                      {})
             datatype (dtype/get-datatype (current-backend))
             ;;Replace the incoming stream buffers with the ones from the batching system.
-            uploading-batches (dataset->uploading-batches network dataset batch-size
+            uploading-batches (dataset->uploading-batches network batches batch-size
                                                           batch-transfer-parallelism
                                                           false)
 

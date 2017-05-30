@@ -1,17 +1,16 @@
 (ns cortex.nn.network
   "Translation from cortex layer vectors into actual network graphs."
-  (:require
-    [clojure.set :as c-set]
-    [clojure.pprint :as pprint]
-    [clojure.core.matrix :as m]
-    [clojure.core.matrix.macros :refer [c-for]]
-    [think.datatype.core :as dtype]
-    [cortex.graph :as graph]
-    [cortex.argument :as arg]
-    [cortex.loss :as loss]
-    [cortex.compute.driver :as drv]
-    [cortex.compute.math :as math]
-    [cortex.nn.layers :as layers])
+  (:require [clojure.set :as c-set]
+            [clojure.pprint :as pprint]
+            [clojure.core.matrix :as m]
+            [clojure.core.matrix.macros :refer [c-for]]
+            [think.datatype.core :as dtype]
+            [cortex.graph :as graph]
+            [cortex.argument :as arg]
+            [cortex.loss.core :as loss]
+            [cortex.compute.driver :as drv]
+            [cortex.compute.math :as math]
+            [cortex.nn.layers :as layers])
   (:import [java.util UUID]))
 
 

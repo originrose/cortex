@@ -1,10 +1,8 @@
 (ns cortex.loss-test
-  (:require [cortex.stream-augment :as stream-augment]
-            [cortex.loss :as loss]
-            [cortex.keyword-fn :as keyword-fn]
-            [clojure.core.matrix :as m]
-            [clojure.test :refer :all]))
-
+  (:require [clojure.test :refer :all]
+            [cortex.loss.core :as loss]
+            [cortex.loss.center :as center-loss]
+            [cortex.keyword-fn :as keyword-fn]))
 
 
 (deftest labes->indexes
@@ -12,7 +10,7 @@
                 [0 1 0 0]
                 [0 0 1 0]
                 [0 0 0 1]]
-        augment-fn (get (stream-augment/labels->indexes-augmentation :stream)
+        augment-fn (get (center-loss/labels->indexes-augmentation :stream)
                         :augmentation)]
     (is (= [0 1 2 3]
            (keyword-fn/call-keyword-fn augment-fn labels)))))
@@ -23,7 +21,7 @@
                 [0 0 1 0 0]
                 [1 0 0 0 0]
                 [0 0 0 1 0]]
-        augment-fn (get (stream-augment/labels->inverse-counts-augmentation :stream)
+        augment-fn (get (center-loss/labels->inverse-counts-augmentation :stream)
                         :augmentation)]
     (is (= [0.5 1.0 0.5 1.0]
            (keyword-fn/call-keyword-fn augment-fn labels)))))
