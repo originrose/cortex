@@ -4,7 +4,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/hdf5 "0.1.3"]
+                 [thinktopic/hdf5 "0.1.4-SNAPSHOT"]
                  [thinktopic/cortex "0.9.9-SNAPSHOT"]
                  [cheshire "5.6.3"]]
   :plugins [[s3-wagon-private "1.1.2"]
