@@ -1,15 +1,15 @@
 (ns cortex.verify.nn.gradient
-  (:require [cortex.nn.execute :as execute]
+  (:require [clojure.test :refer :all]
+            [clojure.core.matrix :as m]
+            [cortex.optimize :as opt]
+            [cortex.nn.execute :as execute]
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.verify.utils :as utils]
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.verify.nn.data :as verify-data]
-            [clojure.test :refer :all]
-            [cortex.optimize :as opt]
-            [cortex.loss :as loss]
-            [clojure.core.matrix :as m]
+            [cortex.loss.core :as loss]
             [cortex.gaussian :as gaussian]
             [cortex.util :as cortex-util]))
 

@@ -1,17 +1,16 @@
 (ns cortex.experiment.train
-  (:require
-    [clojure.java.io :as io]
-    [think.resource.core :as resource]
-    [cortex.util :as util]
-    [cortex.graph :as graph]
-    [cortex.loss :as loss]
-    [cortex.optimize :as opt]
-    [cortex.optimize.adam :as adam]
-    [cortex.nn.execute :as execute]
-    [cortex.nn.compute-binding :as compute-binding]
-    [cortex.nn.traverse :as traverse]
-    [cortex.nn.network :as network]
-    [think.parallel.core :as parallel])
+  (:require [clojure.java.io :as io]
+            [think.resource.core :as resource]
+            [think.parallel.core :as parallel]
+            [cortex.util :as util]
+            [cortex.graph :as graph]
+            [cortex.loss.core :as loss]
+            [cortex.optimize :as opt]
+            [cortex.optimize.adam :as adam]
+            [cortex.nn.execute :as execute]
+            [cortex.nn.compute-binding :as compute-binding]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.network :as network])
   (:import [java.io File]))
 
 (def default-network-filestem "trained-network")

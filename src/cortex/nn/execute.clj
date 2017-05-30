@@ -8,30 +8,28 @@ implementation.  It is important to realize that training the network means esse
 a transformation from compute-graph -> compute-graph via some training process.
 Both train and infer should be wrapped in resource contexts; this is not done at this level.
 Furthermore infer should be both wrapped in a resource context and completely realized."
-  (:require
-    [clojure.pprint :as pprint]
-    [clojure.core.matrix :as m]
-    [clojure.set :as c-set]
-    [clojure.core.matrix.macros :refer [c-for]]
-    [think.resource.core :as resource]
-    [think.datatype.core :as dtype]
-    [think.parallel.core :as parallel]
-    [cortex.graph :as graph]
-    [cortex.loss :as loss]
-    [cortex.util :as util]
-    [cortex.optimize :as optimize]
-    [cortex.optimize.adam :as adam]
-    [cortex.nn.network :as network]
-    [cortex.nn.traverse :as traverse]
-    [cortex.nn.layers :as layers]
-    [cortex.compute.driver :as drv]
-    [cortex.compute.math :as math]
-    [cortex.compute.loss :as compute-loss]
-    [cortex.compute.cpu.backend :as cpu]
-    [cortex.compute.nn.layers :as compute-layers]
-    [cortex.compute.nn.backend :as backend]
-    [cortex.compute.nn.protocols :as compute-protocols]
-    [cortex.nn.compute-binding :as compute-binding]))
+  (:require [clojure.pprint :as pprint]
+            [clojure.core.matrix :as m]
+            [clojure.set :as c-set]
+            [clojure.core.matrix.macros :refer [c-for]]
+            [think.resource.core :as resource]
+            [think.datatype.core :as dtype]
+            [think.parallel.core :as parallel]
+            [cortex.graph :as graph]
+            [cortex.loss.core :as loss]
+            [cortex.util :as util]
+            [cortex.optimize :as optimize]
+            [cortex.optimize.adam :as adam]
+            [cortex.nn.network :as network]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.layers :as layers]
+            [cortex.compute.driver :as drv]
+            [cortex.compute.math :as math]
+            [cortex.compute.cpu.backend :as cpu]
+            [cortex.compute.nn.layers :as compute-layers]
+            [cortex.compute.nn.backend :as backend]
+            [cortex.compute.nn.protocols :as compute-protocols]
+            [cortex.nn.compute-binding :as compute-binding]))
 
 
 (defn- cuda-backend-fn
