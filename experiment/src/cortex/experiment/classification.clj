@@ -3,10 +3,10 @@
             [clojure.core.matrix :as m]
             [think.image.patch :as patch]
             [think.gate.core :as gate]
-            [cortex.util :as util]
-            [cortex.experiment.train :as experiment-train]
             [cortex.nn.network :as network]
-            [cortex.nn.execute :as execute]))
+            [cortex.nn.execute :as execute]
+            [cortex.experiment.train :as experiment-train]
+            [cortex.util :as util]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -171,9 +171,10 @@
   and new network and decide which is best. Here we calculate
   classification accuracy (a good metric for classification tasks) and
   use that both for reporting and comparing."
-  [batch-size confusion-matrix-atom classification-accuracy-atom observation->img-fn class-mapping
-   ;; TODO: no need for context here
-   context new-network old-network test-ds]
+  [confusion-matrix-atom classification-accuracy-atom observation->img-fn
+   class-mapping network-filename
+   {:keys [batch-size context]}
+   {:keys [new-network old-network test-ds]}]
   (let [labels (execute/run new-network test-ds :batch-size batch-size)
         vec->label (vec->label-fn class-mapping)
         old-classification-accuracy (:classification-accuracy old-network)
@@ -188,17 +189,22 @@
                                     (count test-ds)))
         best-network? (or (nil? old-classification-accuracy)
                           (> (double classification-accuracy)
-                             (double old-classification-accuracy)))]
+                             (double old-classification-accuracy)))
+        updated-network (if best-network?
+                          (let [best-network
+                            (assoc new-network
+                              :classification-accuracy classification-accuracy)]
+                            (reset-confusion-matrix confusion-matrix-atom
+                                                    observation->img-fn
+                                                    class-mapping
+                                                    {:labels labels
+                                                    :test-ds test-ds})
+                            (experiment-train/save-network best-network network-filename))
+                            (assoc old-network :epoch-count (get new-network :epoch-count)))]
     (swap! classification-accuracy-atom conj classification-accuracy)
-    (if best-network?
-      (reset-confusion-matrix confusion-matrix-atom
-                              observation->img-fn
-                              class-mapping
-                              {:labels labels
-                               :test-ds test-ds}))
     (println "Classification accuracy:" classification-accuracy)
     {:best-network? best-network?
-     :network (assoc new-network :classification-accuracy classification-accuracy)}))
+     :network updated-network}))
 
 
 (defn- train-forever
@@ -208,15 +214,16 @@
       :or {batch-size 128
            confusion-matrix-atom (atom {})
            classification-accuracy-atom (atom {})}}]
-  (let [network (network/linear-network initial-description)]
+  (let [network (network/linear-network initial-description)
+        network-filename (str experiment-train/default-network-filestem ".nippy")]
     (experiment-train/train-n network
                               train-ds test-ds
                               :test-fn (partial test-fn
-                                                batch-size
                                                 confusion-matrix-atom
                                                 classification-accuracy-atom
                                                 observation->image-fn
-                                                class-mapping)
+                                                class-mapping
+                                                network-filename)
                               :batch-size batch-size
                               :force-gpu? force-gpu?)))
 
