@@ -76,7 +76,7 @@ These instructions follow the gpu setup from [Tensor Flow](https://github.com/te
 Install coreutils and cuda:
 
     $ brew install coreutils
-    $ brew tap caskroom/cask
+    $ brew tap caskroom/drivers
     $ brew cask install cuda
 
 Add CUDA Tool kit to bash profile
