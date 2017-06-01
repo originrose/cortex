@@ -3,14 +3,11 @@
 maps with {:type :shape} and then whatever extra information is required to perform
 the initialization."
   (:require [clojure.core.matrix :as m]
+            [clojure.core.matrix.linear :as lin-alg]
+            [clojure.core.matrix.random :as m-random]
+            [clojure.core.matrix.operators :as m-ops]
             [cortex.core-matrix-backends :as b]
             [cortex.gaussian :as gaussian]))
-
-
-(defonce weight-initialization-types
-  [:xavier
-   :bengio-glorot
-   :relu])
 
 
 (defn- weight-initialization-variance
@@ -31,17 +28,22 @@ the initialization."
   http://andyljones.tumblr.com/post/110998971763/an-explanation-of-xavier-initialization.
   Initialization defaults to xavier."
   ([^long n-output ^long n-input initialization-type]
-   (let [mean 0.0
-         variance (weight-initialization-variance n-input n-output initialization-type)]
-     ;;Java's gaussian generated does not generate great gaussian values for small
-     ;;values of n (mean and variance will be > 20% off).  Even for large-ish (100-1000)
-     ;;ones the variance is usually off by around 10%.
-     (b/array (vec (repeatedly n-output
-                               #(gaussian/ensure-gaussian! (double-array
-                                                            (vec (repeatedly
-                                                                  n-input
-                                                                  gaussian/rand-gaussian)))
-                                                           mean variance))))))
+   (if (= initialization-type :orthogonal)
+     (if (< n-input n-output)
+       (throw (ex-info "Orthogonal weight initialization requires (>= input dim output dim)."
+                       {:input-dim n-input
+                        :output-dim n-output}))
+       (b/array (take n-output (m-ops/* (Math/sqrt 2)
+                                        (:Q (lin-alg/qr (m-random/sample-normal [n-input n-input])))))))
+     (let [mean     0.0
+           variance (weight-initialization-variance n-input n-output initialization-type)]
+       ;;Java's gaussian generated does not generate great gaussian values for small
+       ;;values of n (mean and variance will be > 20% off).  Even for large-ish (100-1000)
+       ;;ones the variance is usually off by around 10%.
+       (b/array (vec (repeatedly n-output
+                                 #(gaussian/ensure-gaussian!
+                                    (double-array (vec (repeatedly n-input gaussian/rand-gaussian)))
+                                    mean variance)))))))
   ([^long n-output ^long n-input]
    (if (= 1 n-output n-input)
      (b/array [[0]])
@@ -90,6 +92,10 @@ the initialization."
 
 
 (defmethod initialize-buffer :relu
+  [init-item]
+  (do-weight-initialization init-item))
+
+(defmethod initialize-buffer :orthogonal
   [init-item]
   (do-weight-initialization init-item))
 
