@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.compute.cpu.backend :as cpu-backend]
+            [cortex.compute.cpu.tensor-math]
             [cortex.nn.execute :as execute]
             [cortex.compute.verify.utils
              :refer [def-double-float-test]

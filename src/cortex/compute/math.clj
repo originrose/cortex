@@ -8,7 +8,8 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [cortex.tensor :as ct]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -483,3 +484,18 @@ and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 ou
        (apply interleave)
        (partition (count data-array-seq))
        vec))
+
+
+(defn array->cortex-tensor
+  [^DeviceArray ary]
+  (let [ary-tens (.tensor ary)
+        tens-shape (->> [:batch-size :channel-count :height :width]
+                        (map #(get ary-tens % 1))
+                        (drop-while #(= 1 %))
+                        vec)
+        tens-shape (if (= 0 (count tens-shape))
+                     [1]
+                     tens-shape)]
+    (ct/construct-tensor (drv/current-device)
+                         (ct/dimensions tens-shape)
+                         (device-buffer ary))))

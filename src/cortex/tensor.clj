@@ -77,8 +77,8 @@ For indirect operations element count is num-indexes * num-columns.  After that 
 
 (defmacro with-stream
   [stream & body]
-  (with-bindings {#'*stream* stream}
-    ~@body))
+  `(with-bindings {#'*stream* ~stream}
+     ~@body))
 
 
 (defn check-stream
@@ -445,7 +445,7 @@ that rerequires the items to have the same element count."
 (defn as-batch-matrix
   "As a 2d matrix of shape [least-rapidly-changing-dimension everything-else]"
   ^Tensor [^Tensor tensor]
-  (reinterpret-tensor tensor (tensor->batch-shape tensor)))
+  (reinterpret-tensor tensor (dimensions (tensor->batch-shape tensor))))
 
 
 (defn as-2d-matrix
