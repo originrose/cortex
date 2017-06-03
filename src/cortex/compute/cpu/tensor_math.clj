@@ -235,7 +235,7 @@
 
 
 (def ^:private operations
-  [:+ :- :* :/])
+  [:+ :- :* :/ :max :min])
 
 
 (defmacro ^:private perform-operation-impl
@@ -244,7 +244,10 @@
     :+ `(+ ~x ~y)
     :- `(- ~x ~y)
     :/ `(/ ~x ~y)
-    :* `(* ~x ~y)))
+    :* `(* ~x ~y)
+    ;;Math/max and friends aren't defined for all primitives leading to reflection warnings.
+    :max `(if (> ~x ~y) ~x ~y)
+    :min `(if (< ~x ~y) ~x ~y)))
 
 
 (defmacro ^:private perform-op-rev-ops

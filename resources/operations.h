@@ -3,6 +3,17 @@
 
 
 namespace tensor { namespace operations {
+
+    template<typename dtype>
+    __device__ inline dtype op_max(dtype lhs, dtype rhs) {
+      return lhs > rhs ? lhs : rhs;
+    }
+
+    template<typename dtype>
+    __device__ inline dtype op_min(dtype lhs, dtype rhs) {
+      return lhs < rhs ? lhs : rhs;
+    }
+
     struct operation_type
     {
       enum _enum
@@ -11,6 +22,8 @@ namespace tensor { namespace operations {
 	subtract,
 	multiply,
 	divide,
+	min,
+	max,
       };
     };
 
@@ -32,6 +45,10 @@ namespace tensor { namespace operations {
 	  return lhs * rhs;
 	case operation_type::divide:
 	  return reverse_operands ? rhs / lhs : lhs / rhs;
+	case operation_type::max:
+	  return reverse_operands ? op_max(lhs, rhs) : op_max(rhs, lhs);
+	case operation_type::min:
+	  return reverse_operands ? op_min(lhs, rhs) : op_min(rhs, lhs);
 	};
 	return (dtype) 0;
       }

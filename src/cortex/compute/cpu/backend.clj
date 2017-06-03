@@ -13,7 +13,8 @@
     [cortex.compute.nn.layers :as compute-layers]
     [cortex.compute.nn.protocols :as compute-protocols]
     [cortex.compute.nn.backend :as nn-backend]
-    [think.resource.core :as resource])
+    [think.resource.core :as resource]
+    [cortex.compute.cpu.tensor-math])
   (:import
     [java.util Arrays]
     [java.util.concurrent ForkJoinPool Callable Future]
