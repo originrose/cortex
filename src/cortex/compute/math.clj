@@ -60,7 +60,7 @@ could be x or y.")
 Used for scaling the rows of a matrix.")
   (elem-mul [stream alpha a inc-a b inc-b res inc-res]
     "res  = alpha* a * b.  This is an elementwise multiply where result is expected
-to be same length as a and b.")
+to be same length as a and b. The inc params are related to strides.")
 
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     "Given a vector that contains x^2,

@@ -1,17 +1,15 @@
 (ns cortex.experiment.train
-  (:require
-    [clojure.java.io :as io]
-    [think.resource.core :as resource]
-    [cortex.util :as util]
-    [cortex.graph :as graph]
-    [cortex.loss :as loss]
-    [cortex.optimize :as opt]
-    [cortex.optimize.adam :as adam]
-    [cortex.nn.execute :as execute]
-    [cortex.nn.compute-binding :as compute-binding]
-    [cortex.nn.traverse :as traverse]
-    [cortex.nn.network :as network]
-    [think.parallel.core :as parallel])
+  (:require [clojure.java.io :as io]
+            [think.parallel.core :as parallel]
+            [cortex.optimize :as opt]
+            [cortex.optimize.adam :as adam]
+            [cortex.nn.execute :as execute]
+            [cortex.nn.compute-binding :as compute-binding]
+            [cortex.nn.network :as network]
+            [cortex.nn.traverse :as traverse]
+            [cortex.graph :as graph]
+            [cortex.util :as util]
+            [cortex.loss.core :as loss])
   (:import [java.io File]))
 
 (def default-network-filestem "trained-network")
@@ -36,10 +34,10 @@
 
 
 (defn default-network-test-fn
-  "Given the context, old network, the new network and a test dataset,
-  return a map indicating if the new network is indeed the best one
-  and the network with enough information added to make comparing
-  networks possible.
+  "Test functions take two map arguments, one with global information and one
+  with information local to the epoch. The job of a test function is to return a
+  map indicating if the new network is indeed the best one and the network with
+  enough information added to make comparing networks possible.
     {:best-network? boolean
      :network (assoc new-network :whatever information-needed-to-compare).}"
   ;; TODO: No need for context here.
@@ -56,28 +54,24 @@
         loss-fn (execute/execute-loss-fn new-network labels test-ds)
         loss-val (apply + (map :value loss-fn))
         current-best-loss (if-let [best-loss (get old-network :cv-loss)]
-                            ;; TODO: Is there a bug here? What if the best-loss isn't sequential?
                             (when (sequential? best-loss)
                               (apply + (map :value best-loss))))
         best-network? (or (nil? current-best-loss)
                           (< (double loss-val)
                              (double current-best-loss)))
-        updated-network (assoc new-network :cv-loss loss-fn)]
-    (println " saving current network iteration ")
+        updated-network (assoc new-network :cv-loss loss-fn)
+        epoch (get new-network :epoch-count)]
     (save-network updated-network network-filename)
-    
-    (println (format "Loss for epoch %s: %s" (get new-network :epoch-count) loss-val))
+    (println (format "Loss for epoch %s: %s" epoch loss-val))
     (when-not simple-loss-print?
       (println (loss/loss-fn->table-str loss-fn)))
     {:best-network? best-network?
      :network updated-network}))
 
 (defn- per-epoch-fn
-  [test-network-fn training-context epoch-args] 
-  (let [test-results (test-network-fn training-context epoch-args)
-        {:keys [network]} test-results]
-    network))
-
+  [test-fn training-context epoch-args]
+  (let [test-results (test-fn training-context epoch-args)]
+    (:network test-results)))
 
 (defn backup-trained-network
   [network-filestem]
@@ -197,8 +191,7 @@
                                      :context context)
             training-context {:batch-size batch-size :context context}
             test-fn  (or test-fn
-                         (partial default-network-test-fn simple-loss-print? 
-                                  network-filename))
+                         (partial default-network-test-fn simple-loss-print? network-filename))
             epoch-eval-fn (partial per-epoch-fn test-fn training-context)]
         (println "Training network:")
         (network/print-layer-summary network (traverse/training-traversal network))

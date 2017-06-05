@@ -56,7 +56,7 @@ the initialization."
 
 (defn ->constant-initializer
   [init-value]
-  {:type :constnat
+  {:type :constant
    :value (double init-value)})
 
 

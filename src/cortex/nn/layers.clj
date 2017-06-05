@@ -5,10 +5,15 @@ on them that pertails exactly to that implementation.  They are expected to be t
 of extra keys/information on the descriptions.  Because of this the description
 constructors are all variable args with the extra arguments expected to be
   keyword-value pairs and are assoc'd into the description map."
-  (:require [cortex.util :refer [merge-args arg-list->arg-map] :as util]
-            [cortex.loss :as loss]
+  (:require [cortex.util :refer [merge-args arg-list->arg-map]]
             [cortex.graph :as graph]
-            [cortex.buffer-initialization :as buf-init]))
+            [cortex.buffer-initialization :as buf-init]
+            [cortex.loss.core :as loss]
+            [cortex.loss.mse]
+            [cortex.loss.center]
+            [cortex.loss.softmax]
+            [cortex.loss.censor]
+            [cortex.loss.regularization]))
 
 
 ;; Helpers
@@ -34,7 +39,7 @@ constructors are all variable args with the extra arguments expected to be
 
 ;;This type of initialization finds the next activation in the graph and then
 ;;decides what to do from there.
-(defmethod graph/initialize-graph-parameter-buffer :weight-initialization
+(defmethod graph/initialize-graph-parameter-buffer :auto-weight-initialization
   [graph node argument shape initialization]
   (let [activation-set #{:tanh :relu :logistic}
         next-activation (->> (graph/relative-dfs-seq graph (get node :id))
@@ -46,6 +51,21 @@ constructors are all variable args with the extra arguments expected to be
                                    :shape shape})
       (buf-init/initialize-buffer {:type :xavier
                                    :shape shape}))))
+
+(defmethod graph/initialize-graph-parameter-buffer :relu
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :relu
+                               :shape shape}))
+
+(defmethod graph/initialize-graph-parameter-buffer :xavier
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :xavier
+                               :shape shape}))
+
+(defmethod graph/initialize-graph-parameter-buffer :bengio-glorot
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :bengio-glorot
+                               :shape shape}))
 
 ;; Input Layer
 (defmethod graph/build-node :input
@@ -114,7 +134,7 @@ constructors are all variable args with the extra arguments expected to be
   {:arguments
    {:weights {:type :parameter
               :shape-fn :cortex.nn.layers/linear-weight-parameter-shape
-              :initialization {:type :weight-initialization}
+              :initialization {:type :auto-weight-initialization}
               :gradients? true}
     :bias {:type :parameter
            :shape-fn :cortex.nn.layers/linear-bias-parameter-shape
@@ -389,7 +409,7 @@ a few compatibility issues."
   {:arguments
    {:weights {:type :parameter
               :shape-fn :cortex.nn.layers/convolutional-weight-parameter-shape
-              :initialization {:type :weight-initialization}
+              :initialization {:type :auto-weight-initialization}
               :gradients? true}
     :bias {:type :parameter
            :shape-fn :cortex.nn.layers/convolutional-bias-parameter-shape

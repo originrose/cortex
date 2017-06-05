@@ -2,7 +2,6 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as s]
             [clojure.test :refer :all]
-            [cortex.loss :as loss]
             [cortex.nn.layers :as layers]
             [tfevent-sink.event-io :as eio]
             [cortex.nn.execute :as execute]
