@@ -57,6 +57,11 @@ constructors are all variable args with the extra arguments expected to be
   (buf-init/initialize-buffer {:type :relu
                                :shape shape}))
 
+(defmethod graph/initialize-graph-parameter-buffer :orthogonal
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :orthogonal
+                               :shape shape}))
+
 (defmethod graph/initialize-graph-parameter-buffer :xavier
   [graph node argument shape initialization]
   (buf-init/initialize-buffer {:type :xavier
