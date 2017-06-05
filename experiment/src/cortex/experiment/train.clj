@@ -40,11 +40,12 @@
   enough information added to make comparing networks possible.
     {:best-network? boolean
      :network (assoc new-network :whatever information-needed-to-compare).}"
+  ;; TODO: No need for context here.
   [simple-loss-print? network-filename
-   ;; Global context
-   {:keys [batch-size context]}
-   ;; Per-epoch context
-   {:keys [new-network old-network test-ds]}]
+   ;; global arguments 
+   {:keys [batch-size context]}  
+   ;per-epoch arguments
+   {:keys [new-network old-network test-ds]} ] 
   (let [batch-size (long batch-size)
         labels (execute/run new-network test-ds
                  :batch-size batch-size
@@ -60,7 +61,6 @@
                              (double current-best-loss)))
         updated-network (assoc new-network :cv-loss loss-fn)
         epoch (get new-network :epoch-count)]
-    (println "Saving current network on epoch:" epoch)
     (save-network updated-network network-filename)
     (println (format "Loss for epoch %s: %s" epoch loss-val))
     (when-not simple-loss-print?
@@ -68,12 +68,10 @@
     {:best-network? best-network?
      :network updated-network}))
 
-
 (defn- per-epoch-fn
   [test-fn training-context epoch-args]
   (let [test-results (test-fn training-context epoch-args)]
     (:network test-results)))
-
 
 (defn backup-trained-network
   [network-filestem]
@@ -112,9 +110,9 @@
          retval)))
     (create-n-callable-fn item epoch-count)))
 
-
 (defn- recur-train-network
   [network train-ds-fn test-ds-fn optimizer train-fn epoch-eval-fn]
+  ;[{:keys [network train-ds-fn test-ds-fn optimizer train-fn epoch-eval-fn] :as recur-args}]
   (let [train-data (train-ds-fn)
         test-data (test-ds-fn)
         old-network network]

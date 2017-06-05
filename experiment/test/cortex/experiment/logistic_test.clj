@@ -45,5 +45,5 @@
         input-data [{:data [5000.0 10.0]} {:data [5.0 100000.0]}]
         [[should-def] [shouldnt-def]] (->> (execute/run trained-network input-data)
                                            (map :labels))]
-    (is (> should-def 0.97))
+    (is (> should-def 0.96))
     (is (< shouldnt-def 0.02))))

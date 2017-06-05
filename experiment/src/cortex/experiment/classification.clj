@@ -200,12 +200,15 @@
                                                     {:labels labels
                                                     :test-ds test-ds})
                             (experiment-train/save-network best-network network-filename))
+                            ;;seems dicey. if not the best-network, 
+                            ;;keeps returning the old network,which will result in the training being 
+                            ;;stuck in a sub-optimal state.
                             (assoc old-network :epoch-count (get new-network :epoch-count)))]
     (swap! classification-accuracy-atom conj classification-accuracy)
     (println "Classification accuracy:" classification-accuracy)
+    
     {:best-network? best-network?
      :network updated-network}))
-
 
 (defn- train-forever
   "Train forever. This function never returns."
@@ -225,7 +228,8 @@
                                                 class-mapping
                                                 network-filename)
                               :batch-size batch-size
-                              :force-gpu? force-gpu?)))
+                              :force-gpu? force-gpu?
+                              )))
 
 
 (defn- display-dataset-and-model
