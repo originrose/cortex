@@ -12,6 +12,7 @@
 
   :main mnist-classification.main
   :aot [mnist-classification.main]
+  :jvm-opts ["-Xmx2000m"]
   :uberjar-name "classify-example.jar"
 
   :clean-targets ^{:protect false} [:target-path
