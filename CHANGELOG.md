@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 ### Added
 - "Censor" loss to prevent propagating gradients when labels are unknown
 - model-upgrader project to upgrade models from older versions of cortex
+- orthogonal weight initialization [#178](https://github.com/thinktopic/cortex/pull/178)
+- tensorboard view [#172](https://github.com/thinktopic/cortex/pull/172)
 
 ### Changed
 - Loss functions are moved to their individual files to be consistent with optimizer layout
