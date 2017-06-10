@@ -136,42 +136,16 @@
                                                                              :image-aug-fn (:image-aug-fn argmap))
                                  (experiment-util/infinite-class-balanced-dataset))
                              (-> test-folder
-                                 (experiment-util/create-dataset-from-folder class-mapping))]
-         ;listener (classification/create-listener mnist-observation->image
-         ;                                         class-mapping
-         ;                                         argmap)
-         tboardlistener (classification/create-tensorboard-listener 
-                          {:file-path "/tmp/tflogs/run1.tfevents.out"})]
-     (classification/perform-experiment2
+                                 (experiment-util/create-dataset-from-folder class-mapping)) ]
+         listener (if-let [file-path (:tensorboard-output argmap)]
+                    (classification/create-tensorboard-listener 
+                          {:file-path file-path})
+                      (classification/create-listener mnist-observation->image
+                                                  class-mapping
+                                                  argmap))]
+     (classification/perform-experiment
       (initial-description image-size image-size num-classes)
-      train-ds test-ds tboardlistener))))
-
-(comment
-   (ensure-images-on-disk!)
-   (def training-folder (str dataset-folder "training"))
-   (def test-folder (str dataset-folder "test"))
-   (def k [(-> training-folder
-                                 (experiment-util/create-dataset-from-folder class-mapping)
-                                 (experiment-util/infinite-class-balanced-dataset))
-                             (-> test-folder
-                                 (experiment-util/create-dataset-from-folder class-mapping))])
-
-  (def  train-ds  (first k))
-  (def  test-ds (second k))
-  (def tboardlistener (classification/create-tensorboard-listener 
-                          {:file-path "/tmp/tflogs/run1.tfevents.out"}))
-  (def eval-fn (tboardlistener
-      (initial-description image-size image-size num-classes)
-      train-ds test-ds))
-  (try
-  (let [network (network/linear-network initial-description)]
-    (train/train-n network train-ds test-ds
-                              :test-fn eval-fn
-                              :epoch-count 10
-                              :force-gpu? false))
-  (catch Exception e
-    (clojure.stacktrace/print-stack-trace e)))  
-  )
+      train-ds test-ds listener))))
 
 (defn train-forever-uberjar
   ([] (train-forever-uberjar {}))
