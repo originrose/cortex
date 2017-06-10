@@ -166,7 +166,7 @@
   "Take an arbitrary test image and label it."
   []
   (ensure-images-on-disk!)
-  (let [observation (->> (str dataset-folder "test")
+  (let [observation (-> (str dataset-folder "test")
                          (experiment-util/create-dataset-from-folder class-mapping)
                          (rand-nth))]
     (i/show (mnist-observation->image (:data observation)))
