@@ -3,7 +3,7 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/cortex "0.9.10-SNAPSHOT"]
                  [thinktopic/think.image "0.4.10"]
-                 [org.shark8me/tfevent-sink "0.1.2"]
+                 [org.shark8me/tfevent-sink "0.1.3"]
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)
                  ;;you need to get simple servers up and running easily.
