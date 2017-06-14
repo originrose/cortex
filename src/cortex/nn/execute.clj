@@ -11,6 +11,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
   (:require [clojure.pprint :as pprint]
             [clojure.core.matrix :as m]
             [clojure.set :as c-set]
+            [clojure.java.io :as io]
             [clojure.core.matrix.macros :refer [c-for]]
             [think.resource.core :as resource]
             [think.datatype.core :as dtype]
@@ -37,12 +38,20 @@ Furthermore infer should be both wrapped in a resource context and completely re
   (fn []
     (try
       (require 'cortex.compute.cuda.backend)
-      ((resolve 'cortex.compute.cuda.backend/backend) :datatype datatype)
+      (if-let [backend-fn (resolve 'cortex.compute.cuda.backend/backend)]
+        (backend-fn :datatype datatype)
+        (throw (ex-info "cortex.compute.cuda.backend function compilation failed. Please ensure that CudNN is installed." {})))
       (catch Throwable e
         (if force-cuda?
           (throw (ex-info "Unable to initialize CUDA back-end for GPU support."
                           {:error e}))
           (do
+            (let [error-path (str (System/getProperty "user.home") "/.cortex/last-error")]
+              (io/make-parents error-path)
+              (spit error-path (with-out-str (pprint/pprint {:message (.getMessage e)
+                                                             :str (str e)
+                                                             :data (ex-data e)
+                                                             :stacktrace (map str (.getStackTrace e))}))))
             (println "CUDA backend creation failed, reverting to CPU")
             (cpu/backend :datatype datatype)))))))
 
