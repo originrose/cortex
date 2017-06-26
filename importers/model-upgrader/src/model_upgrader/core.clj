@@ -36,7 +36,6 @@
 
 (defn- remove-vectorz-from-buffer
   [buffer]
-  (println buffer)
   (let [shape (m/shape buffer)
         ary-size (long (last shape))
         num-arrays (long (apply * 1 (drop-last shape)))

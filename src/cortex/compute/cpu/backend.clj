@@ -358,8 +358,11 @@
          batch-stride# (long ~batch-stride)]
      (parallel-for
       elem-idx# batch-stride#
-      (let [inv-std-dev# (Math/sqrt (/ 1.0
-                                       (v-aget variances-ary# elem-idx#)))
+      (let [variance# (v-aget variances-ary# elem-idx#)
+            ;;Account for if the variance is zero.
+            inv-std-dev# (~cast-fn (if (> variance# (~cast-fn Float/MIN_VALUE))
+                                     (Math/sqrt (/ 1.0 variance#))
+                                     (~cast-fn 1.0)))
             mean# (v-aget means-ary# elem-idx#)
             scale# (v-aget scale-ary# elem-idx#)
             shift# (v-aget bias-ary# elem-idx#)]

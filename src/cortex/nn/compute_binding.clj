@@ -600,17 +600,18 @@ traversal with the inputs and outputs mapped to specific buffers."
 
 (defmethod perform-pass :default
   [pass-direction network pass-function {:keys [incoming id outgoing]}]
-  (comment
-    (let [backend (backend network)
-          to-double #(vec (backend/to-double-array backend %))]
-      (clojure.pprint/pprint (mapv (fn [{:keys [buffer gradient]}]
-                                     [:incoming {:buffer (to-double buffer)}])
-                                   incoming))))
-  (let [id->output-map (generate-node-id->output-map network)]
-    (pass-function
-     (get-in network [:compute-binding :nodes id])
-     (resolve-node-arguments network id id->output-map)
-     incoming outgoing)))
+  (let [id->output-map (generate-node-id->output-map network)
+        retval (pass-function
+                (get-in network [:compute-binding :nodes id])
+                (resolve-node-arguments network id id->output-map)
+                incoming outgoing)]
+    ;;If you get a network that is producing NAN's, then this may be a decent way to find it fast.
+    (comment
+      (let [double-data (vec (backend/to-double-array (backend network) (get (first outgoing) :buffer)))]
+        (when (seq (filter #(Double/isNaN %) double-data))
+          (println "NAN detected on layer" id)
+          (clojure.pprint/pprint (vec (take 200 double-data))))))
+    retval))
 
 
 
