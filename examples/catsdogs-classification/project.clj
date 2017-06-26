@@ -1,7 +1,7 @@
-(defproject mnist-classification "0.9.10"
+(defproject mnist-classification "0.9.11-SNAPSHOT"
   :description "An example of using experiment/classification on mnist."
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/experiment "0.9.10"]
+                 [thinktopic/experiment "0.9.11-SNAPSHOT"]
                  [org.clojure/tools.cli "0.3.5"]
 
                  ; to manipulate images
