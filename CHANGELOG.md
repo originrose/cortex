@@ -4,10 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
-## [0.9.9] Unreleased
+## [0.9.11] Unreleased
+
+## [0.9.10]
 ### Bugs fixed
 - Small fix to ensure compilation in clojure-1.9 works properly
+- Batch normalization could produce NAN in some cases.
 
+## [0.9.9]
 ### Added
 - "Censor" loss to prevent propagating gradients when labels are unknown
 - model-upgrader project to upgrade models from older versions of cortex
