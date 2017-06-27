@@ -142,15 +142,6 @@
                                         :layer mod-item})))))
                             model-vector))))))
 
-(defn hdf5-child-map
-  "For a node, return the children from that node as values corresponding to
-  parent node name (as keyword) keys."
-  [node]
-  (into {} (map (fn [node-child]
-                  [(keyword (hdf5/get-name node-child))
-                   node-child])
-                (hdf5/get-children node))))
-
 (defn- reshape-time-test
   []
   (let [n-rows 100
@@ -330,7 +321,7 @@
                  (graph/get-node node-id))
         weight-node (get id->weight-map (:id node))]
     (if (and weight-node (seq (hdf5/get-children weight-node)))
-      (let [weight-map (hdf5-child-map weight-node)
+      (let [weight-map (hdf5/child-map weight-node)
             ;;Is this any more robust than just assuming first child is weights
             ;;and second child is bias?
             weight-id (keyword (str (name (:id node)) "_W"))
@@ -376,8 +367,8 @@
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
         id->weight-map (if weight-entry
-                   (hdf5-child-map weight-entry)
-                   (hdf5-child-map weight-file))
+                   (hdf5/child-map weight-entry)
+                   (hdf5/child-map weight-file))
         network (network/linear-network desc-seq)
         network (reduce (partial reshape-weights id->weight-map)
                         network
@@ -402,7 +393,7 @@
 (defn- outputs->output-map
   "Read the layer outputs from a file."
   [layer-outputs]
-  (let [by-id (hdf5-child-map layer-outputs)]
+  (let [by-id (hdf5/child-map layer-outputs)]
     (apply merge (for [[lyr-id hdf5-node] by-id]
                    (let [clj-data (-> hdf5-node hdf5/->clj)
                          raw-data (get clj-data :data)
@@ -474,7 +465,7 @@
   stored in there."
   [output-file]
   (-> (hdf5/open-file output-file)
-      hdf5-child-map
+      hdf5/child-map
       :test_image
       hdf5/->clj
       :data))
@@ -485,7 +476,7 @@
   [h5-filepath]
   (let [lyr-map (-> h5-filepath
                     hdf5/open-file
-                    hdf5-child-map
+                    hdf5/child-map
                     :layer_outputs)]
     (outputs->output-map lyr-map)))
 
