@@ -12,10 +12,11 @@ https://groups.google.com/forum/#!forum/clojure-cortex
 
 ## Usage
 
-Cortex has a 0.9.9 release meaning all libraries are released on [clojars](https://clojars.org/thinktopic/cortex).  This is very preliminary and you should expect quite a few things to change
+`[thinktopic/cortex 0.9.10]`
+
+All libraries are released on [clojars](https://clojars.org/thinktopic/cortex).  Cortex is not 1.0 yet preliminary and you should expect quite a few things to change
 over time but it should allow you to train some initial classifiers or regressions.  Note that the save format has not stabilized and although we do
-just save edn data in nippy format it may require some effort to bring versions of saved forward.  Once a future proof save format has been
-nailed down then we are a major step closer to 1.0.0.
+just save edn data in nippy format it may require some effort to bring versions of saved forward.
 
 ## Cortex Design
 
