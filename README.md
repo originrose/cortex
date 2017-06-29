@@ -121,6 +121,11 @@ lj:82:28)
 
 Make sure you have installed the appropriate CUDNN for your version of CUDA.
 
+#### Windows
+
+Some preliminary information about getting gpu-acceleration working on windows is available here:
+https://groups.google.com/forum/#!topic/clojure-cortex/hNFW1T_2PZc
+
 ### See also:
 
 [Roadmap](docs/ROADMAP.md)
