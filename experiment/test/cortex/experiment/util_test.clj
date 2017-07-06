@@ -7,3 +7,10 @@
         inf-ds (util/infinite-dataset ds)]
     (is (< (count (take 10 ds)) 10))
     (is (= (count (take 10 inf-ds)) 10))))
+
+(deftest one-hot-encoding-test
+  (let [ds [{:a :left} {:a :middle} {:a :top} {:a :left}]
+        encoded-ds (util/one-hot-encoding ds [:a])]
+    (is (= (count ds) (count encoded-ds)))
+    (is (= 3 (count (first encoded-ds))))
+    (is (= (first encoded-ds) (last encoded-ds)))))
