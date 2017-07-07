@@ -26,7 +26,7 @@
   "Given a dataset and a list of categorical features, returns a new dataset with these
   features encoded into one-hot indicators
   E.g. (one-hot-encoding [{:a :left} {:a :right} {:a :top}] [:a])
-         => [{:a_0 1 :a_1 0 :a_2 0} {:a_0 0 :a_1 1 :a_2 0} {:a_0: 0 :a_1 0 :a_2 1}]"
+         => [{:a_0 1 :a_1 0 :a_2 0} {:a_0 0 :a_1 1 :a_2 0} {:a_0 0 :a_1 0 :a_2 1}]"
   [dataset features]
   (reduce (fn [mapseq key]
             (let [classes (set (map key mapseq))
