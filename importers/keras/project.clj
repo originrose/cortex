@@ -1,11 +1,11 @@
-(defproject thinktopic/cortex-keras "0.9.11-SNAPSHOT"
+(defproject thinktopic/cortex-keras "0.9.11"
   :description "Import of keras models into cortex descriptions"
   :url "http://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/hdf5 "0.1.3"]
-                 [thinktopic/cortex "0.9.11-SNAPSHOT"]
+                 [thinktopic/cortex "0.9.11"]
                  [cheshire "5.6.3"]]
   :plugins [[s3-wagon-private "1.1.2"]
             [lein-codox "0.10.2"]]
