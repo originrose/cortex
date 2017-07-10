@@ -1,7 +1,7 @@
-(defproject mnist-classification "0.9.11"
+(defproject mnist-classification "0.9.12-SNAPSHOT"
   :description "An example of using experiment/classification on mnist."
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/experiment "0.9.11"]
+                 [thinktopic/experiment "0.9.12-SNAPSHOT"]
                  [org.clojure/tools.cli "0.3.5"]
                  [thinktopic/think.image "0.4.8"]
                  ;;If you need cuda 8...
