@@ -9,8 +9,17 @@
     (is (= (count (take 10 inf-ds)) 10))))
 
 (deftest one-hot-encoding-test
-  (let [ds [{:a :left} {:a :middle} {:a :top} {:a :left}]
-        encoded-ds (util/one-hot-encoding ds [:a])]
-    (is (= (count ds) (count encoded-ds)))
-    (is (= 3 (count (first encoded-ds))))
-    (is (= (first encoded-ds) (last encoded-ds)))))
+  (let [ds [{:a "left"} {:a "middle"} {:a "right"}]
+        encoded-ds (util/one-hot-encoding ds [:a])
+        ;; reverse ("decode") the encoding into key
+        decoded-ds-str (util/reverse-one-hot encoded-ds [:a]
+                                             :as-string? true)
+        decoded-ds-symbol (util/reverse-one-hot encoded-ds [:a]
+                                                :as-string? false)]
+    (is (= '({:a_left 1, :a_middle 0, :a_right 0}
+             {:a_left 0, :a_middle 1, :a_right 0}
+             {:a_left 0, :a_middle 0, :a_right 1})
+           encoded-ds))
+    (is (= ds decoded-ds-str))
+    (is (= [{:a :left} {:a :middle} {:a :right}]
+           decoded-ds-symbol))))

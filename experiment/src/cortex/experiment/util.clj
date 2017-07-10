@@ -1,5 +1,6 @@
 (ns cortex.experiment.util
   (:require [clojure.java.io :as io]
+            [clojure.string :as s]
             [mikera.image.core :as i]
             [think.image.patch :as patch]
             [cortex.util :as util])
@@ -13,8 +14,7 @@
   the position in class-names.
   E.g.  (label->vec [:a :b :c :d] :b) => [0 1 0 0]"
   [class-names label]
-  (let [num-classes (count class-names)
-        src-vec (vec (repeat num-classes 0))
+  (let [src-vec (vec (repeat (count class-names) 0))
         label-idx (.indexOf class-names label)]
     (when (= -1 label-idx)
       (throw (ex-info "Label not in classes for label->one-hot"
@@ -25,18 +25,40 @@
 (defn one-hot-encoding
   "Given a dataset and a list of categorical features, returns a new dataset with these
   features encoded into one-hot indicators
-  E.g. (one-hot-encoding [{:a :left} {:a :right} {:a :top}] [:a])
-         => [{:a_0 1 :a_1 0 :a_2 0} {:a_0 0 :a_1 1 :a_2 0} {:a_0 0 :a_1 0 :a_2 1}]"
+  E.g. (one-hot-encoding [{:a :left} {:a :right}] [:a])
+         => [{:a_left 1 :a_right 0} {:a_left 0 :a_right 1}]"
   [dataset features]
   (reduce (fn [mapseq key]
-            (let [classes (set (map key mapseq))
-                  new-keys (for [i (range (count classes))]
-                             (keyword (str (name key) "_" i)))] ; a_0, a_1, a_2, etc.
-              (map (fn [elem] (->> (label->one-hot (vec classes) (key elem))
+            (let [classes (vec (set (map key mapseq)))
+                  new-keys (for [c classes]
+                             (keyword (str (name key) "_" (name c))))]
+              (map (fn [elem] (->> (label->one-hot classes (key elem))
                                    (zipmap new-keys)
                                    (merge (dissoc elem key))))
                    mapseq)))
           dataset features))
+
+
+(defn reverse-one-hot
+  "Given a one-hot-encoded dataset and a list of original features that were encoded,
+  reverses the encoding and returns the dataset with the original features
+
+  If not :as-string?, values of the original feature are returned as keywords"
+  [encoded-ds features & {:keys [as-string?]
+                          :or {as-string? true}}]
+  (reduce (fn [mapseq key]
+            (let [encoded-classes (filter #(s/starts-with? (name %) (str (name key) "_"))
+                                          (keys (first mapseq)))]
+              (map (fn [elem]
+                     (let [pos-class (first (filter #(= 1 (% elem)) encoded-classes))
+                           new-val (s/replace (name pos-class) (str (name key) "_") "")
+                           formatted-new-val (if as-string?
+                                               new-val
+                                               (keyword new-val))]
+                       (merge (apply dissoc elem encoded-classes)
+                              {key formatted-new-val})))
+                   mapseq)))
+          encoded-ds features))
 
 
 ;; General training utils
