@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex "0.9.9-SNAPSHOT"
+(defproject thinktopic/cortex "0.9.12-SNAPSHOT"
   :description "A neural network toolkit for Clojure."
   :url "https://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
@@ -11,7 +11,7 @@
                  ;[org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ;;The dataset abstraction uses parallel and optionally resource management.
-                 [thinktopic/think.parallel "0.3.6"]
+                 [thinktopic/think.parallel "0.3.7"]
                  [thinktopic/think.resource "1.2.1"]]
 
   :java-source-paths ["java"]

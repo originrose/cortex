@@ -6,6 +6,17 @@
   (:import [java.io File]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; General training utils
+(defn infinite-dataset
+  "Given a finite dataset, generate an infinite sequence of maps partitioned
+  by :epoch-size"
+  [map-seq & {:keys [epoch-size]
+              :or {epoch-size 1024}}]
+  (->> (repeatedly #(shuffle map-seq))
+       (mapcat identity)
+       (partition epoch-size)))
+
+
 ;; Classification dataset utils
 (defn infinite-class-balanced-dataset
   "Given a dataset, returns an infinite sequence of maps perfectly

@@ -529,30 +529,31 @@ set this device before.  Set device must be called before any other cuda functio
    shared-mem-size
    & kernel-args]
   (check-stream-device stream)
-  (let [^cuda$CUfunc_st kern-fn kern-fn
-        grid-dim-x (long grid-dim-x)
-        grid-dim-y (long grid-dim-y)
-        grid-dim-z (long grid-dim-z)
-        block-dim-x (long block-dim-x)
-        block-dim-y (long block-dim-y)
-        block-dim-z (long block-dim-z)
-        shared-mem-size (long shared-mem-size)
-        ;;Really stupid loop but I can't figure any other way of doing it.
-        ^"[Lorg.bytedeco.javacpp.Pointer;" ptr-array
-        (into-array Pointer (map (fn [karg]
-                                   (let [karg (long (to-long karg))
-                                         ^longs data-ary (make-array Long/TYPE 1)]
-                                     (aset data-ary 0 karg)
-                                     (LongPointer. data-ary)))
-                                 kernel-args))
-        arg-pointer (PointerPointer. ptr-array)]
-    (cuda-call (cuda/cuLaunchKernel kern-fn
-                                    grid-dim-x grid-dim-y grid-dim-z
-                                    block-dim-x block-dim-y block-dim-z
-                                    shared-mem-size
-                                    ^cuda$CUstream_st (get-cuda-stream stream)
-                                    arg-pointer
-                                    nil))))
+  (resource/with-resource-context
+    (let [^cuda$CUfunc_st kern-fn kern-fn
+          grid-dim-x              (long grid-dim-x)
+          grid-dim-y              (long grid-dim-y)
+          grid-dim-z              (long grid-dim-z)
+          block-dim-x             (long block-dim-x)
+          block-dim-y             (long block-dim-y)
+          block-dim-z             (long block-dim-z)
+          shared-mem-size         (long shared-mem-size)
+          ;;Really stupid loop but I can't figure any other way of doing it.
+          ^"[Lorg.bytedeco.javacpp.Pointer;" ptr-array
+                                  (into-array Pointer (map (fn [karg]
+                                                             (let [karg            (long (to-long karg))
+                                                                   ^longs data-ary (make-array Long/TYPE 1)]
+                                                               (aset data-ary 0 karg)
+                                                               (resource/track (LongPointer. data-ary))))
+                                                           kernel-args))
+          ^PointerPointer arg-pointer             (resource/track (PointerPointer. ptr-array))]
+      (cuda-call (cuda/cuLaunchKernel kern-fn
+                                      grid-dim-x grid-dim-y grid-dim-z
+                                      block-dim-x block-dim-y block-dim-z
+                                      shared-mem-size
+                                      ^cuda$CUstream_st (get-cuda-stream stream)
+                                      arg-pointer
+                                      nil)))))
 
 
 (defn launch-linear-kernel

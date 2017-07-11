@@ -1,4 +1,4 @@
-(defproject model-upgrader "0.9.9-SNAPSHOT"
+(defproject model-upgrader "0.9.12-SNAPSHOT"
   :description "Upgrade a cortex model to the most recent version."
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
@@ -7,4 +7,6 @@
                  [com.taoensso/nippy "2.13.0"]
                  [thinktopic/think.datatype "0.3.10"]
                  ;;Last version of vectorz library that we saved to the file.
-                 [net.mikera/vectorz-clj "0.45.0"]])
+                 [net.mikera/vectorz-clj "0.45.0"]]
+
+  :main model-upgrader.core)
