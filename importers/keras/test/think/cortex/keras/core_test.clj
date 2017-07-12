@@ -14,10 +14,10 @@
 
 (deftest match-padding-correct
   "Verify that we get the correct padding value for same or valid padding."
-  (is (= [2 2] (keras/match-padding {:padding "same" :kernel-size [5 5]})))
-  (is (= [1 1] (keras/match-padding {:padding "same" :kernel-size [3 3]})))
-  (is (= [3 3] (keras/match-padding {:padding "same" :kernel-size [7 7]})))
-  (is (= [0 0] (keras/match-padding {:padding "valid" :kernel-size [3 3]}))))
+  (is (= [2 2] (keras/match-padding {:padding "same" :kernel_size [5 5]})))
+  (is (= [1 1] (keras/match-padding {:padding "same" :kernel_size [3 3]})))
+  (is (= [3 3] (keras/match-padding {:padding "same" :kernel_size [7 7]})))
+  (is (= [0 0] (keras/match-padding {:padding "valid" :kernel_size [3 3]}))))
 
 
 (deftest keras-json-load
@@ -40,7 +40,7 @@
   "Ensure that the model we read in from Keras can actually be built, and
   that built result is correct."
   (let [model-desc (keras/keras-json->cortex-desc simple_archf)
-        built-net   (network/linear-network model-desc)]
+        built-net (network/linear-network model-desc)]
     (is (= 422154 (graph/parameter-count (network/network->graph built-net))))))
 
 
@@ -51,7 +51,7 @@
     ;; all outputs are double arrays
     (is (every? #(instance? (Class/forName "[D") %) out-arrs))
     ;; just one spot check on dims of an output for now
-    (is (= [12544] (m/shape (:convolution2d_2 outputs))))))
+    (is (= [12544] (m/shape (:conv2d_2 outputs))))))
 
 
 (deftest verify-simple-mnist

@@ -34,6 +34,7 @@
     ;; else covers "valid" padding
     [0 0]))
 
+(defn testfn [] (println "hi"))
 
 (defmulti model-item->desc
   "Multimethod that dispatches on keyword version of Keras model item key
@@ -109,15 +110,26 @@
 
 (defmethod model-item->desc :BatchNormalization
   [{:keys [config]}]
-  (assoc (layers/batch-normalization :ave-factor (:epsilon config)
-                                     :epsilon (:momentum config))
-         :id (keyword (:name config))))
+  (layers/batch-normalization :ave-factor (:epsilon config)
+                              :epsilon (:momentum config)
+                              :id (keyword (:name config))))
 
-;; (defmethod model-item->desc :Add
-;;   [{:keys [config]}]
-;;   (nil))
+(defmethod model-item->desc :AveragePooling2D
+  [{:keys [config]}]
+  )
 
-;; ----------------------------------------------------------------------
+
+(defmethod model-item->desc :Add
+  [layer]
+  (let [parent-ids (->> (get layer :inbound_nodes) ;; => [["bn2a_branch2c" 0 0 nil] ["bn2a_branch1" 0 0 nil]]
+                        (mapv #(keyword (first %))))
+        name (get-in layer [:config :name])]
+    [(layers/split :parents parent-ids
+                   :id (keyword (str name "-split")))
+     (layers/join :parents parent-ids :operation :+
+                  :id (keyword (str name "-join")))]))
+
+
 (defn- keras-model->simple-description
   "Returns a simple (unbuilt) model description given the hashmap literal
   representation of a Keras JSON model description."
@@ -127,8 +139,8 @@
                  ;; else "Model", e.g. Keras pretrained applications for ResNet, VGG16m etc.
                  (get-in model [:config :layers]))
         [_ width height n-channels] (get-in model [0 :config :batch_input_shape])
-        ;;move zeropadding into convolution modules
         model-vector (reduce (fn [model-vector {:keys [class_name config] :as current}]
+                               ;;move zeropadding into convolution modules
                                (if (and (= (keyword class_name) :Conv2D)
                                         (= (keyword (get (last model-vector) :class_name))
                                            :ZeroPadding2D))
@@ -137,7 +149,10 @@
                                                   #(merge (get (last model-vector)
                                                                :config)
                                                           %)))
-                                 (conj model-vector current)))
+                                 ;;drop input layer (we create our own)
+                                 (if (= (keyword class_name) :InputLayer)
+                                   model-vector
+                                   (conj model-vector current))))
                              [] model)]
     ;;TODO models with a single channel input and figure out planar vs. interleaved
     (vec
@@ -147,7 +162,7 @@
                                  (model-item->desc mod-item)
                                  (catch Exception e
                                    (throw
-                                     (ex-info (str "Layer not yet supported: " (:class_name model))
+                                     (ex-info (str "Layer not yet supported: " (keyword (:class_name mod-item)))
                                               {:exception e
                                                :layer mod-item})))))
                              model-vector))))))
@@ -330,6 +345,10 @@
                  network/network->graph
                  (graph/get-node node-id))
         weight-node (get id->weight-map (:id node))]
+    (println "---------------------------------------")
+    (println (take 10 id->weight-map))
+    (println)
+    (println weight-node)
     (if (and weight-node (seq (hdf5/get-children weight-node)))
       (let [weight-map (hdf5/child-map weight-node)
             ;;Is this any more robust than just assuming first child is weights
@@ -342,10 +361,12 @@
                                   [weight-ds bias-ds]
                                   (let [children (hdf5/get-children weight-node)]
                                     [(first children) (second children)]))]
+        (println "**************")
+        (println weight-map)
         (when-not (and weight-ds bias-ds)
           (throw (Exception.
-                  (format "Failed to find weights and bias: wanted %s, found %s"
-                          [weight-id bias-id] (keys weight-map)))))
+                   (format "Failed to find weights and bias: wanted %s, found %s"
+                           [weight-id bias-id] (keys weight-map)))))
         (println "loading weights/bias for" (:id node))
         (let [weight-clj (hdf5/->clj weight-ds)
               weight-raw-data (:data weight-clj)
