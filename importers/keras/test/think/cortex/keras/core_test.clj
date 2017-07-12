@@ -14,11 +14,10 @@
 
 (deftest match-padding-correct
   "Verify that we get the correct padding value for same or valid padding."
-  (is (= [2 2] (keras/match-padding {:border_mode "same" :nb_col 5 :nb_row 5})))
-  (is (= [1 1] (keras/match-padding {:border_mode "same" :nb_col 3 :nb_row 3})))
-  (is (= [3 3] (keras/match-padding {:border_mode "same" :nb_col 7 :nb_row 7})))
-  (is (= [0 0] (keras/match-padding {:border_mode "valid" :nb_col 3 :nb_row 3})))
-  (is (= [1 2] (keras/match-padding {:padding [1 2]}))))
+  (is (= [2 2] (keras/match-padding {:padding "same" :kernel-size [5 5]})))
+  (is (= [1 1] (keras/match-padding {:padding "same" :kernel-size [3 3]})))
+  (is (= [3 3] (keras/match-padding {:padding "same" :kernel-size [7 7]})))
+  (is (= [0 0] (keras/match-padding {:padding "valid" :kernel-size [3 3]}))))
 
 
 (deftest keras-json-load
@@ -28,7 +27,7 @@
         model-desc  (keras/keras-json->cortex-desc simple_archf)]
     ;; these are known properties of simple model, if model changes,
     ;; update this part of test.
-    (is (= "1.1.2" (:keras_version keras-model)))
+    (is (= "2.0.6" (:keras_version keras-model)))
     (is (= 11 (count (:config keras-model)) (count model-desc)))
     ;; within intersection of layer types both keras and cortex use,
     ;; the models should each contain those in the same order.

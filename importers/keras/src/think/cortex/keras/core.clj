@@ -29,12 +29,10 @@
   "Maps from Keras padding descriptors to Cortex pad-x and pad-y values. Fn is
   public for test purposes."
   [config]
-  (cond
-    (:padding config)                 (:padding config)
-    (= (:border_mode config) "same")  [(quot (:nb_col config) 2)
-                                       (quot (:nb_row config) 2)]
+  (if (= (:padding config) "same")
+    (mapv #(quot % 2) (:kernel_size config))
     ;; else covers "valid" padding
-    :else                             [0 0]))
+    [0 0]))
 
 
 (defmulti model-item->desc
@@ -44,22 +42,21 @@
     (keyword (:class_name item))))
 
 
-(defmethod model-item->desc :Convolution2D
+(defmethod model-item->desc :Conv2D
   [{:keys [config]}]
-  (let [[stride-x stride-y] (get config :subsample [1 1])
+  (let [[stride-x stride-y] (get config :strides [1 1])
         [pad-x pad-y] (match-padding config)
-        kernel-x (long (get config :nb_col))
-        kernel-y (long (get config :nb_row))
-        kernel-count (long (get config :nb_filter))
+        [kernel-x kernel-y] (:kernel_size config)
+        kernel-count (long (:filters config))
         id (keyword (get config :name))
         activation (keyword (get config :activation))
         conv-desc (layers/convolutional-type-layer
-                   :convolutional
-                   kernel-x kernel-y pad-x pad-y stride-x stride-y kernel-count :floor)
+                    :convolutional
+                    kernel-x kernel-y pad-x pad-y stride-x stride-y kernel-count :floor)
         conv-desc (assoc conv-desc :id id)]
-    (when-not (= (:dim_ordering config) "tf")
+    (when (and (:dim_ordering config) (not= (:dim_ordering config) "tf")) ;; not used in newer Keras models
       (throw
-       (Exception. "Please convert model to 'tf' weights.  'th' weights are not supported.")))
+        (Exception. "Please convert model to 'tf' weights.  'th' weights are not supported.")))
     (if (and activation
              (not= activation :linear))
       [(assoc conv-desc :embedded-activation true) {:type activation :id (keyword (str (:name config) "-activation")) :embedded id}]
@@ -82,11 +79,12 @@
   {:type (keyword (:activation config)) :id (keyword (:name config))})
 
 
+;; Not checked with new models
 (defmethod model-item->desc :Dropout
   ;; Cortex uses keep probability, Keras uses drop probability.
   [{:keys [config]}]
   (assoc (first
-          (layers/dropout (- 1.0 (:p config))))
+           (layers/dropout (- 1.0 (:p config))))
          :id (keyword (:name config))))
 
 (defmethod model-item->desc :Flatten
@@ -96,7 +94,7 @@
 
 (defmethod model-item->desc :Dense
   [{:keys [config]}]
-  (let [output-size (long (:output_dim config))
+  (let [output-size (long (:units config))
         activation (keyword (get config :activation "linear"))
         id (keyword (:name config))
         retval (-> (first (layers/linear output-size))
@@ -109,17 +107,29 @@
       [retval])))
 
 
+(defmethod model-item->desc :BatchNormalization
+  [{:keys [config]}]
+  (assoc (layers/batch-normalization :ave-factor (:epsilon config)
+                                     :epsilon (:momentum config))
+         :id (keyword (:name config))))
+
+;; (defmethod model-item->desc :Add
+;;   [{:keys [config]}]
+;;   (nil))
+
+;; ----------------------------------------------------------------------
 (defn- keras-model->simple-description
   "Returns a simple (unbuilt) model description given the hashmap literal
   representation of a Keras JSON model description."
   [model]
   (let [model  (if (= (:class_name model) "Sequential")
                  (:config model)
-                 (vec model))
+                 ;; else "Model", e.g. Keras pretrained applications for ResNet, VGG16m etc.
+                 (get-in model [:config :layers]))
         [_ width height n-channels] (get-in model [0 :config :batch_input_shape])
         ;;move zeropadding into convolution modules
         model-vector (reduce (fn [model-vector {:keys [class_name config] :as current}]
-                               (if (and (= (keyword class_name) :Convolution2D)
+                               (if (and (= (keyword class_name) :Conv2D)
                                         (= (keyword (get (last model-vector) :class_name))
                                            :ZeroPadding2D))
                                  (conj (vec (drop-last model-vector))
@@ -131,16 +141,16 @@
                              [] model)]
     ;;TODO models with a single channel input and figure out planar vs. interleaved
     (vec
-     (flatten (concat (layers/input width height n-channels)
-                      (mapv (fn [mod-item]
-                              (try
-                                (model-item->desc mod-item)
-                                (catch Exception e
-                                  (throw
-                                    (ex-info "Layer not yet supported."
-                                       {:exception e
-                                        :layer mod-item})))))
-                            model-vector))))))
+      (flatten (concat (layers/input width height n-channels)
+                       (mapv (fn [mod-item]
+                               (try
+                                 (model-item->desc mod-item)
+                                 (catch Exception e
+                                   (throw
+                                     (ex-info (str "Layer not yet supported: " (:class_name model))
+                                              {:exception e
+                                               :layer mod-item})))))
+                             model-vector))))))
 
 (defn- reshape-time-test
   []
