@@ -453,6 +453,48 @@
                (m/eseq input-gradient)))))))
 
 
+(defn pool-layer-avg
+  [context]
+  (execute/with-compute-context context
+    (let [batch-size 10
+          num-input 16
+          num-channels 4
+          input (flatten (repeat batch-size (repeat num-input 1)))
+          output-gradient (flatten (repeat (* batch-size num-channels) [1 2 3 4 5 6 7 8 9]))
+          {:keys [output input-gradient]}
+          (forward-backward-test [(layers/input 2 2 num-channels)
+                                  (layers/max-pooling 2 1 1 :pool-op :avg)]
+                                 context
+                                 batch-size
+                                 input
+                                 output-gradient)]
+      (is (= (map double (flatten (repeat (* batch-size num-channels) [0.25 0.5 0.25 0.5 1.0 0.5 0.25 0.5 0.25])))
+             (m/eseq output)))
+      (is (= (map double (flatten (repeat (* batch-size num-channels) [3 4 6 7])))
+             (m/eseq input-gradient))))))
+
+
+(defn pool-layer-avg-exc-pad
+  [context]
+  (execute/with-compute-context context
+    (let [batch-size 10
+          num-input 16
+          num-channels 4
+          input (flatten (repeat batch-size (repeat num-input 1)))
+          output-gradient (flatten (repeat (* batch-size num-channels) [1 2 3 4 5 6 7 8 9]))
+          {:keys [output input-gradient]}
+          (forward-backward-test [(layers/input 2 2 num-channels)
+                                  (layers/max-pooling 2 1 1 :pool-op :avg-exc-pad)]
+                                 context
+                                 batch-size
+                                 input
+                                 output-gradient)]
+      (is (= (map double (flatten (repeat (* batch-size num-channels) [1 1 1 1 1 1 1 1 1])))
+             (m/eseq output)))
+      (is (= (map double (flatten (repeat (* batch-size num-channels) [5.25 8.25 14.25 17.25])))
+             (m/eseq input-gradient))))))
+
+
 (defn count-zeros
   [item-seq]
   (count (filter #(= 0.0 (double %)) item-seq)))
