@@ -560,11 +560,14 @@ input dimensions."
   (let [input-dims (mapv #(-> (graph/get-node graph %)
                               (graph/ensure-single-output-dimensions node)
                               (assoc :id %))
-                         p-id-seq)]
+                         p-id-seq)
+        input-dims-set (set (map #(dissoc % :id) input-dims))]
     (assoc node
            :input-dimensions input-dims
-           :output-dimensions [(graph/create-node-dimensions
-                                (apply max (map graph/dimensions->size input-dims)))])))
+           :output-dimensions (if (= 1 (count input-dims-set))
+                                [(first input-dims-set)]
+                                [(graph/create-node-dimensions
+                                  (apply max (map graph/dimensions->size input-dims)))]))))
 
 
 (defmethod graph/get-node-metadata :join
