@@ -114,6 +114,7 @@
                               :epsilon (:epsilon config)
                               :id (keyword (:name config))))
 
+
 (defmethod model-item->desc :AveragePooling2D
   ;; Currently uses a max-pool, TODO switch to ave-pool once implemented
   [{:keys [config]}]
@@ -121,8 +122,9 @@
         [stride-x stride-y] (:strides config)
         layer             (layers/convolutional-type-layer :max-pooling
                                                            kernel-x kernel-y 0 0
-                                                           stride-x stride-y 0 :ceil)
-        layer-id            (keyword (str (:name config) "-TOFIX"))]
+                                                           stride-x stride-y 0 :ceil
+                                                           :pool-op :avg)
+        layer-id            (keyword (str (:name config)))]
     (assoc layer :id layer-id)))
 
 
@@ -133,7 +135,7 @@
   [layer]
   (let [inbound-nodes (->> (get-in layer [:inbound_nodes 0]) ;; => [["bn2a_branch2c" 0 0 nil] ["bn2a_branch1" 0 0 nil]]
                            (mapv #(keyword (first %))))
-        {split-parent true prev-layer false} (group-by #(= % (:previous_layer layer))
+        {prev-layer true split-parent false} (group-by #(= % (:previous_layer layer))
                                                        inbound-nodes)
         layer-name (get-in layer [:config :name])
         split-id (keyword (str (name (get split-parent 0)) "-split"))]
@@ -171,26 +173,42 @@
                                  (= (keyword class_name) :InputLayer)
                                  model-vector
 
-                                 ;;on "Add" layers, assoc previous layer (so it can be ignored as a parent for skips)
+                                 ;;on "Add" layers, assoc previous layer (so skip can figure out its shortcut parent)
                                  (= (keyword class_name) :Add)
                                  (let [prev (get-in (last model-vector) [:config :name])]
                                    (conj model-vector (assoc current :previous_layer (keyword prev))))
 
                                  :else
                                  (conj model-vector current)))
-                             [] model)]
-    ;;TODO models with a single channel input and figure out planar vs. interleaved
-    (vec
-      (flatten (concat (layers/input width height n-channels)
-                       (mapv (fn [mod-item]
-                               (try
-                                 (model-item->desc mod-item)
-                                 (catch Exception e
-                                   (throw
-                                     (ex-info (str "Layer not yet supported: " (keyword (:class_name mod-item)))
-                                              {:exception e
-                                               :layer mod-item})))))
-                             model-vector))))))
+                             [] model)
+        ;;TODO models with a single channel input and figure out planar vs. interleaved
+        cortex-layers (vec
+                        (flatten (concat (layers/input width height n-channels)
+                                         (mapv (fn [mod-item]
+                                                 (try
+                                                   (model-item->desc mod-item)
+                                                   (catch Exception e
+                                                     (throw
+                                                       (ex-info (str "Layer not yet supported: " (keyword (:class_name mod-item)))
+                                                                {:exception e
+                                                                 :layer mod-item})))))
+                                               model-vector))))]
+    ;; fairly annoying backtracking, works but TODO think of better algorithm
+    (reduce (fn [cortex-desc {:keys [id type parents] :as current}]
+              ;; if split layer, find layer that inherits from split and assoc split as parent
+              (if (= type :split)
+                (let [parent (first (filter #(= (:id %) (get parents 0)) cortex-desc))
+                      idx-parent (.indexOf cortex-desc parent)
+                      idx-split-child (+ idx-parent 1)]
+                  (when (= idx-parent -1)
+                    (throw (Exception.
+                             (format ("Could not find parents of split layer %s") id))))
+                  (conj (assoc-in cortex-desc [idx-split-child :parents] [id])
+                        current))
+                ;; else just add current
+                (conj cortex-desc current)))
+            [] cortex-layers)))
+
 
 (defn- reshape-time-test
   []
@@ -374,23 +392,22 @@
     ;; (println "---------------------------------------")
     ;; (println id->weight-map)
     ;; (println (:id node))
-    ;; (println weight-node)
+    (println weight-node)
     (if (and weight-node (seq (hdf5/get-children weight-node)))
-      (let [weight-map (hdf5/child-map weight-node)
+      (let [weight-map (hdf5/child-map ((:id node) (hdf5/child-map weight-node)))
             ;;Is this any more robust than just assuming first child is weights
             ;;and second child is bias?
-            weight-id (keyword (str (name (:id node)) "_W"))
-            bias-id (keyword (str (name (:id node)) "_b"))
-            weight-ds (get weight-map weight-id)
-            bias-ds (get weight-map bias-id)
+            weight-ds (get weight-map :kernel:0)
+            bias-ds (get weight-map :bias:0)
             [weight-ds bias-ds] (if (and weight-ds bias-ds)
                                   [weight-ds bias-ds]
                                   (let [children (hdf5/get-children weight-node)]
                                     [(first children) (second children)]))]
+        ;; (println weight-map)
         (when-not (and weight-ds bias-ds)
           (throw (Exception.
                    (format "Failed to find weights and bias: wanted %s, found %s"
-                           [weight-id bias-id] (keys weight-map)))))
+                           [:kernel:0 :bias:0] (keys weight-map)))))
         (println "loading weights/bias for" (:id node))
         (let [weight-clj (hdf5/->clj weight-ds)
               weight-raw-data (:data weight-clj)

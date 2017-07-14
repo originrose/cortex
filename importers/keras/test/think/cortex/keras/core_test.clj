@@ -11,6 +11,8 @@
 (def simple_weightf "models/simple_mnist.h5")
 (def simple_outf "models/simple_mnist_output.h5")
 
+(def resnet_archf "models/resnet50.json")
+(def resnet_weightf "models/resnet50.h5")
 
 (deftest match-padding-correct
   "Verify that we get the correct padding value for same or valid padding."
@@ -20,7 +22,7 @@
   (is (= [0 0] (keras/match-padding {:padding "valid" :kernel_size [3 3]}))))
 
 
-(deftest keras-json-load
+(deftest mnist-keras-json-load
   "This test ensures that we get back a model we can load into a valid cortex
   description."
   (let [keras-model (keras/read-json-model simple_archf)
@@ -36,7 +38,7 @@
            (rest (map :id model-desc))))))
 
 
-(deftest network-builds
+(deftest mnist-network-builds
   "Ensure that the model we read in from Keras can actually be built, and
   that built result is correct."
   (let [model-desc (keras/keras-json->cortex-desc simple_archf)
@@ -44,7 +46,7 @@
     (is (= 422154 (graph/parameter-count (network/network->graph built-net))))))
 
 
-(deftest read-outputs-correctly
+(deftest mnist-read-outputs-correctly
   "Ensures that we read in output arrays for all layers that have them."
   (let [outputs  (keras/network-output-file->layer-outputs simple_outf)
         out-arrs (for [[lyr arr] outputs] arr)]
@@ -59,3 +61,37 @@
   where frameworks start to differ. A failure here indicates a very basic
   problem in the Keras importer."
   (is (keras/import-model simple_archf simple_weightf simple_outf)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ResNet50 testing
+
+(deftest resnet-json-load
+  "This test ensures that we get back a model we can load into a valid cortex
+  description."
+  (let [keras-model (keras/read-json-model resnet_archf)
+        model-desc  (keras/keras-json->cortex-desc resnet_archf)]
+    ;; these are known properties of resnet model, if model changes,
+    ;; update this part of test.
+    (is (= "2.0.6" (:keras_version keras-model)))
+    (is (= 192 (count model-desc)))
+
+    ;; overlapping layers in keras and cortex should match,
+    ;; in the same order
+    (is (= (remove #(or (.contains ^String (str %) "flatten")
+                        (.contains ^String (str %) "input")
+                        (.contains ^String (str %) "add"))
+                   (map #(keyword (:name %)) (get-in keras-model [:config :layers])))
+           (->> (rest model-desc) ;; drop first nil (input)
+                (remove #(or (= (:type %) :split) ;; filter out splits and joins
+                             (= (:type %) :join)
+                             ;; filter out last activation layer (own layer in cortex, not in keras)
+                             (clojure.string/ends-with? (name (:id %)) "activation")
+                             ))
+                (map :id))))
+
+    ;; check that for each "Add", there is one split and one join
+    (is (= 16
+           (count (filter #(= (:class_name %) "Add") (get-in keras-model [:config :layers])))
+           (count (filter #(= (:type %) :split) model-desc))
+           (count (filter #(= (:type %) :join) model-desc))))))
