@@ -349,3 +349,17 @@ opposed to networks), but consider:
                                    [k (layer->buffer-shape network layer k)])))))
          (pprint/print-table (concat ["type" "input" "output"] parameter-keys)))
     (println "Parameter count:" (graph/parameter-count (:compute-graph network)))))
+
+
+(defn find-network-fail
+  "Sometimes we get descriptions that are quite large that fail to build.  This is a debugging tool
+to pair down the description until it builds which helps to quickly find the failure."
+  [network-desc]
+  (->> (range 10 (count network-desc))
+       (map #(take % network-desc))
+       (take-while #(try
+                      (linear-network %)
+                      (catch Throwable e
+                        nil)))
+       last
+       count))

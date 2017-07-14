@@ -423,13 +423,23 @@ a few compatibility issues."
    :passes #{:training :inference}})
 
 
-;; Pooling Layers
-
 (defn max-pooling
-  ([kernel-dim pad stride & args]
-   [(apply convolutional-type-layer :max-pooling
-           kernel-dim kernel-dim pad pad
-           stride stride 0 :ceil args)]))
+  "Max pooling with one of three possible pooling operations (:pool-op):
+:max - default, take the max excluding padding.
+:avg - Take the average including padding.
+:avg-exc-pad - Take the average excluding padding."
+  [kernel-dim pad stride & args]
+  (let [retval (-> (apply convolutional-type-layer :max-pooling
+                          kernel-dim kernel-dim pad pad
+                          stride stride 0 :ceil args)
+                   (#(if (contains? % :pool-op)
+                       %
+                       (assoc % :pool-op :max))))]
+    (when-not (get #{:max :avg :avg-exc-pad} (get retval :pool-op))
+      (throw (ex-info "Max pooling layers have three possible pool operations:"
+                      {:possible-operation-set #{:max :avg :avg-exc-pad}
+                       :pool-op (get retval :pool-op)})))
+    [retval]))
 
 
 (defmethod graph/build-node :max-pooling
@@ -550,11 +560,14 @@ input dimensions."
   (let [input-dims (mapv #(-> (graph/get-node graph %)
                               (graph/ensure-single-output-dimensions node)
                               (assoc :id %))
-                         p-id-seq)]
+                         p-id-seq)
+        input-dims-set (set (map #(dissoc % :id) input-dims))]
     (assoc node
            :input-dimensions input-dims
-           :output-dimensions [(graph/create-node-dimensions
-                                (apply max (map graph/dimensions->size input-dims)))])))
+           :output-dimensions (if (= 1 (count input-dims-set))
+                                [(first input-dims-set)]
+                                [(graph/create-node-dimensions
+                                  (apply max (map graph/dimensions->size input-dims)))]))))
 
 
 (defmethod graph/get-node-metadata :join
