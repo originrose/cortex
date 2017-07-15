@@ -7,7 +7,7 @@
                :tags [:clojure :optimization :gradient-descent
                       :machine-learning :exploratory :mathematica
                       :repl]}
-  :dependencies [[org.clojure/clojure "1.8.0"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
                  [thinktopic/cortex "0.9.12-SNAPSHOT"]
                  [net.mikera/vectorz-clj "0.45.0"]
                  [net.mikera/core.matrix "0.57.0"]
