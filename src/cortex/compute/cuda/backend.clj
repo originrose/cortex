@@ -11,7 +11,7 @@
             [think.datatype.core :as dtype]
             [think.resource.core :as resource]
             [cortex.compute.cuda.driver :refer [->ptr value->ptr] :as cuda-drv]
-            [cortx.compute.cuda.tensor-math])
+            [cortex.compute.cuda.tensor-math])
   (:import [org.bytedeco.javacpp cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
             cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
             cudnn$cudnnPoolingStruct cudnn$cudnnLRNStruct
