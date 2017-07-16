@@ -61,7 +61,6 @@
                                       (+ 0.5 (m/mget ds-data y x)))))))
     (image/array-> retval data-bytes)))
 
-
 (defn- save-image!
   "Save a dataset image to disk."
   [output-dir [idx {:keys [data label]}]]
@@ -87,9 +86,7 @@
 (defonce test-dataset
   (timed-get-dataset mnist/test-dataset "mnist test"))
 
-
 (def dataset-folder "mnist/")
-
 
 (defonce ensure-images-on-disk!
   (memoize
@@ -101,7 +98,6 @@
                  (map-indexed vector test-dataset)))
      :done)))
 
-
 (defn- image-aug-pipeline
   "Uses think.image augmentation to vary training inputs."
   [image]
@@ -112,13 +108,11 @@
                           false)
         (image-aug/inject-noise (* 0.25 (rand))))))
 
-
 (defn- mnist-observation->image
   "Creates a BufferedImage suitable for web display from the raw data
   that the net expects."
   [observation]
   (patch/patch->image observation image-size))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; The classification experiment system needs a way to go back and forth from
@@ -126,7 +120,6 @@
 (def class-mapping
   {:class-name->index (zipmap (map str (range 10)) (range))
    :index->class-name (zipmap (range) (map str (range 10)))})
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Main entry point. In general, a classification experiment trains a net
@@ -143,20 +136,22 @@
                                                                              :image-aug-fn (:image-aug-fn argmap))
                                  (experiment-util/infinite-class-balanced-dataset))
                              (-> test-folder
-                                 (experiment-util/create-dataset-from-folder class-mapping))]]
-     (classification/perform-experiment (initial-description image-size image-size num-classes)
-                                        train-ds test-ds
-                                        mnist-observation->image
-                                        class-mapping
-                                        argmap))))
-
+                                 (experiment-util/create-dataset-from-folder class-mapping)) ]
+         listener (if-let [file-path (:tensorboard-output argmap)]
+                    (classification/create-tensorboard-listener 
+                          {:file-path file-path})
+                      (classification/create-listener mnist-observation->image
+                                                  class-mapping
+                                                  argmap))]
+     (classification/perform-experiment
+      (initial-description image-size image-size num-classes)
+      train-ds test-ds listener))))
 
 (defn train-forever-uberjar
   ([] (train-forever-uberjar {}))
   ([argmap]
    (println "Training forever from uberjar.")
    (train-forever argmap)))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Once a net is trained (and the trained model is saved to a nippy file), it
@@ -167,12 +162,11 @@
 (def network-filename
   (str train/default-network-filestem ".nippy"))
 
-
 (defn label-one
   "Take an arbitrary test image and label it."
   []
   (ensure-images-on-disk!)
-  (let [observation (->> (str dataset-folder "test")
+  (let [observation (-> (str dataset-folder "test")
                          (experiment-util/create-dataset-from-folder class-mapping)
                          (rand-nth))]
     (i/show (mnist-observation->image (:data observation)))
@@ -181,7 +175,6 @@
                  (first)
                  (:labels)
                  (util/max-index))}))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Advanced techniques

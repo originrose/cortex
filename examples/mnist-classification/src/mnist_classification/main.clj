@@ -10,6 +10,9 @@
    [ "-l" nil
     :long-opt "--live-updates"
     :id :live-updates?
+    :default false]
+   ["-t" "--tensorboard-output value" "Output metrics to tensorboard"
+    :id :tensorboard-output 
     :default false]])
 
 (defn -main

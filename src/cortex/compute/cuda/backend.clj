@@ -730,12 +730,16 @@ Backward Data: %s %d"
         cudnn-dtype (dtype->cudnn datatype)
         input-tensor (layer-input->image-tensor layer batch-size datatype)
         output-tensor (layer-output->image-tensor layer batch-size datatype)
-        output-dims (int-array 4)]
+        output-dims (int-array 4)
+        pool-op (get layer :pool-op :max)]
     (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
     (resource/track pooling-desc)
     (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
                  pooling-desc
-                 cudnn/CUDNN_POOLING_MAX
+                 (condp = pool-op
+                   :max cudnn/CUDNN_POOLING_MAX
+                   :avg cudnn/CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING
+                   :avg-exc-pad cudnn/CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING)
                  cudnn/CUDNN_PROPAGATE_NAN
                  (:kernel-height layer) (:kernel-width layer)
                  (:pad-y layer) (:pad-x layer)

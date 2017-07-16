@@ -37,3 +37,6 @@
 
 (deftest join-*-gradient
   (verify-gradient/join-*-gradient (create-context)))
+
+(deftest censor-gradient
+  (verify-gradient/censor-gradient (create-context)))

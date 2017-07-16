@@ -61,6 +61,14 @@
                                                :buffer])))))))
 
 
+(deftest specify-weight-initialization
+  (doseq [weight-initialization-type [:relu :xavier :bengio-glorot :orthogonal]]
+    (let [built-network (network/linear-network [(layers/input 20 20 3 :id :data)
+                                                 (layers/convolutional 2 0 1 2 :weights {:initialization {:type weight-initialization-type}})])]
+      (is (= weight-initialization-type
+             (get-in built-network [:compute-graph :nodes :convolutional-1 :weights :initialization :type]))))))
+
+
 (deftest build-concatenate
   (let [network (network/linear-network [(layers/input 25 25 10 :id :right)
                                         (layers/input 500 1 1 :parents [] :id :left)

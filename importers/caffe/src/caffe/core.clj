@@ -264,7 +264,7 @@ whitespace = #'\\s*'")
   (resource/with-resource-context
     (let [file-node (hdf5/open-file fname)
           file-children (hdf5/child-map file-node)
-         prototxt (->> (:model_prototxt file-children)
+          prototxt (->> (:model_prototxt file-children)
                         (hdf5/->clj)
                         :data
                         first

@@ -1,4 +1,4 @@
-(ns cortex.loss
+(ns cortex.loss.core
   "Definitions and implementations of cortex loss function terms.  A loss term is a function
 that takes a map of arguments and returns a single double number.  The loss function for a
 network is a weighted summation across a vector of terms.  The weight on any term is :lambda
@@ -17,12 +17,8 @@ The loss term can state which of it's arguments it produces gradients for when a
 gradients. This makes it a little easier for implementations to manage gradients when
 evaluating loss terms."
   (:require [clojure.core.matrix :as m]
-            [clojure.pprint :as pprint]
-            [cortex.util :refer [arg-list->arg-map merge-args
-                                 generate-id max-index]]
-            [cortex.graph :as graph]
-            [cortex.argument :as arg]
-            [cortex.stream-augment :as stream-aug]))
+            [cortex.util :refer [merge-args]]
+            [cortex.graph :as graph]))
 
 
 (defn loss-metadata
@@ -134,13 +130,6 @@ generating the loss terms from analyzing the graph nodes."
       (assoc retval :lambda (double loss-val)))))
 
 
-(defn generic-loss-term
-  "Generate a generic loss term from a loss type"
-  [loss-type]
-  {:type loss-type
-   :lambda (get-loss-lambda {:type loss-type})})
-
-
 (defmulti loss
   "Implement a specific loss based on the type of the loss function.  They are passed map
 containing the buffer coming from the network.
@@ -173,129 +162,6 @@ containing the buffer coming from the network.
    args))
 
 
-(defmethod graph/get-node-metadata :mse-loss
-  [loss-term]
-  {:arguments {:output {:gradients? true}
-               :labels {}}
-   :passes [:loss]})
-
-
-(defmethod loss :mse-loss
-  [loss-term buffer-map]
-  (let [v (get buffer-map :output)
-        target (get buffer-map :labels)]
-   (/ (double (m/magnitude-squared (m/sub v target)))
-      (m/ecount v))))
-
-
-(defmethod generate-loss-term :mse-loss
-  [item-key]
-  (generic-loss-term item-key))
-
-
-(defn- generate-loss-term-stream-definitions
-  "Some loss terms have a constraint that the stream ecount must match the node's
-output ecount.  For those loss terms generating a stream definition is possible."
-  [graph loss-term]
-  (let [arguments (graph/get-node-arguments loss-term)
-        node-output (-> (filter #(= :node-output (get % :type)) arguments)
-                        first)
-        stream-input (-> (filter #(= :stream (get % :type)) arguments)
-                         first)]
-    (if (and node-output stream-input)
-      (let [stream-name (get stream-input :stream)
-            node-id (get node-output :node-id)
-            output-node (graph/get-node graph node-id)
-            output-size (graph/node->output-size output-node)]
-        ;;Return one stream definition and one output size
-        [[stream-name [output-size]]])
-      [])))
-
-
-(defmethod graph/generate-stream-definitions :mse-loss
-  [graph mse-loss]
-  (generate-loss-term-stream-definitions graph mse-loss))
-
-
-(defn softmax-loss
-  "Softmax loss.  Applied to a node and a softmax (1-hot encoded) output stream."
-  [& args]
-  (merge-args
-   {:type :softmax-loss}
-   args))
-
-
-(defmethod graph/get-node-metadata :softmax-loss
-  [loss-term]
-  {:arguments {:output {:gradients? true}
-               :labels {}}
-   :passes [:loss]})
-
-
-(defmethod graph/generate-stream-definitions :softmax-loss
-  [graph loss-term]
-  (generate-loss-term-stream-definitions graph loss-term))
-
-(defn log-likelihood-softmax-loss
-  ^double [softmax-output answer]
-  (let [answer-num (m/esum (m/mul softmax-output answer))]
-    (- (Math/log answer-num))))
-
-
-(defmethod loss :softmax-loss
-  [loss-term buffer-map]
-  (let [output-channels (long (get loss-term :output-channels 1))
-        v (get buffer-map :output)
-        target (get buffer-map :labels)]
-      (if (= output-channels 1)
-        (log-likelihood-softmax-loss v target)
-        (let [n-pixels (quot (long (m/ecount v)) output-channels)]
-          (loop [pix 0
-                 sum 0.0]
-            (if (< pix n-pixels)
-              (recur (inc pix)
-                     (double (+ sum
-                                (log-likelihood-softmax-loss
-                                 (m/subvector v (* pix output-channels) output-channels)
-                                 (m/subvector target (* pix output-channels) output-channels)))))
-              (double (/ sum n-pixels))))))))
-
-
-(defmethod generate-loss-term :softmax-loss
-  [item-key]
-  (generic-loss-term item-key))
-
-
-(defn softmax-result-to-unit-vector
-  [result]
-  (let [zeros (apply vector (repeat (first (m/shape result)) 0))]
-    (assoc zeros (max-index (into [] (seq result))) 1.0)))
-
-
-(defn softmax-results-to-unit-vectors
-  [results]
-  (let [zeros (apply vector (repeat (first (m/shape (first results))) 0))]
-    (mapv #(assoc zeros (max-index (into [] (seq  %))) 1.0)
-          results)))
-
-
-(defn evaluate-softmax
-  "Provide a percentage correct for softmax.  This is much easier to interpret than
-the actual log-loss of the softmax unit."
-  [guesses answers]
-  (if (or (not (pos? (count guesses)))
-          (not (pos? (count answers)))
-          (not= (count guesses) (count answers)))
-    (throw (Exception. (format "evaluate-softmax: guesses [%d] and answers [%d] count must both be positive and equal."
-                               (count guesses)
-                               (count answers)))))
-  (let [results-answer-seq (mapv vector
-                                 (softmax-results-to-unit-vectors guesses)
-                                 answers)
-        correct (count (filter #(m/equals (first %) (second %)) results-answer-seq))]
-    (double (/ correct (count results-answer-seq)))))
-
-
 (defn l1-regularization
   "Penalize the network for the sum of the absolute values of a given buffer.
 This pushes all entries of the buffer at a constant rate towards zero and is purported
@@ -305,42 +171,6 @@ parameter or to a node in which case it will be applied to the node's output buf
   (merge-args
    {:type :l1-regularization}
    args))
-
-
-(defn get-regularization-target
-  "Get the target buffer for this regularization term.  It could either be a node
-output or a particular node parameter."
-  [loss-term buffer-map]
-  (get buffer-map :output))
-
-
-(defmethod loss :l1-regularization
-  [loss-term buffer-map]
-  (-> (get-regularization-target loss-term buffer-map)
-      m/abs
-      m/esum))
-
-
-(defn- reg-loss-metadata
-  "Regularizer-type loss functions can be applied to either a node in which case there
-will be no parameter entry in the loss function and the output of the node is assumed
-or to a parameter buffer (like weights) in which case the function should have a parameter
-entry in addition to a node-id."
-  [loss-term]
-  {:arguments {:output {:gradients? true}}
-   :passes [:loss]
-   :lambda 0.001})
-
-
-
-(defmethod graph/get-node-metadata :l1-regularization
-  [loss-term]
-  (reg-loss-metadata loss-term))
-
-
-(defmethod generate-loss-term :l1-regularization
-  [item-key]
-  (generic-loss-term item-key))
 
 
 (defn l2-regularization
@@ -354,22 +184,10 @@ node in which case it will be applied to the node's output buffer."
    args))
 
 
-(defmethod graph/get-node-metadata :l2-regularization
-  [loss-term]
-  (reg-loss-metadata loss-term))
-
-(defmethod generate-loss-term :l2-regularization
-  [item-key]
-  (generic-loss-term item-key))
-
-
-(defmethod loss :l2-regularization
-  [loss-term buffer-map]
-  ;;divide by 2 to make the gradient's work out correctly.
-  (/ (-> (get-regularization-target loss-term buffer-map)
-         m/as-vector
-         m/magnitude)
-     2.0))
+(defn censor-loss
+  [& {:as arg-map}]
+  (merge {:type :censor-loss}
+         arg-map))
 
 
 (defn center-loss
@@ -390,57 +208,18 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
          arg-map))
 
 
-(defmethod loss :center-loss
-  [loss-term buffer-map]
-  ;;Penalize the network for outputing something a distance from the center
-  ;;associated with this label.
-  (let [centers (get buffer-map :centers)
-        output (get buffer-map :output)
-        label (get buffer-map :labels)]
-    ;;Divide by 2 to eliminate the *2 in the derivative.
-    (/ (-> (max-index label)
-           (#(m/get-row centers %))
-           (#(m/sub output %))
-           m/magnitude)
-       2.0)))
-
-
-(defn get-center-loss-center-buffer-shape
-  "Get the shape of the per-class centroids of the network."
-  [graph loss-term argument]
-  (let [output-shape (graph/get-argument-shape graph loss-term
-                                               (graph/get-node-argument loss-term :output))
-        labels-shape (graph/get-argument-shape graph loss-term
-                                               (graph/get-node-argument loss-term :labels))
-        output-size (long (apply * output-shape))
-        labels-size (long (apply * labels-shape))]
-    ;;We keep track of stream-size centers each of node output size.
-    [labels-size output-size]))
-
-
-(defmethod graph/get-node-metadata :center-loss
-  [loss-term]
-  {:arguments {:output {:gradients? true}
-               :labels {:type :stream}
-               :label-indexes (stream-aug/labels->indexes-augmentation :labels)
-               :label-inverse-counts (stream-aug/labels->inverse-counts-augmentation :labels)
-               :centers {:type :parameter
-                         :shape-fn :cortex.loss/get-center-loss-center-buffer-shape
-                         :initialization {:type :constant
-                                          :value 0}}}
-   :lambda 0.1
-   :passes [:loss]})
-
-
-(defmethod generate-loss-term :center-loss
-  [item-key]
-  (center-loss))
+(defn softmax-loss
+  "Softmax loss.  Applied to a node and a softmax (1-hot encoded) output stream."
+  [& args]
+  (merge-args
+   {:type :softmax-loss}
+   args))
 
 
 (defn loss-fn->table-str
   [loss-fn]
   (with-out-str
-    (pprint/print-table
+    (clojure.pprint/print-table
       [:type :value :lambda :node-id :argument]
                         (mapv (fn [loss-term]
                                 (assoc loss-term
@@ -469,11 +248,3 @@ http://ydwen.github.io/papers/WenECCV16.pdf"
                      :input-dimensions
                      :output-dimensions))
        vec))
-
-
-
-(defn remove-existing-loss-terms
-  "Remove any loss terms from the graph."
-  [graph]
-  (->> (generate-loss-function graph)
-       (reduce graph/remove-node graph)))

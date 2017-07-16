@@ -1,14 +1,13 @@
 (ns cortex.nn.traverse-test
-  (:require
-    [clojure.data :as data]
-    [clojure.test :refer :all]
-    [clojure.core.matrix :as m]
-    [cortex.graph :as graph]
-    [cortex.loss :as loss]
-    [cortex.nn.traverse :as traverse]
-    [cortex.nn.layers :as layers]
-    [cortex.nn.network :as network]
-    [cortex.verify.nn.data :refer [CORN-DATA CORN-LABELS]]))
+  (:require [clojure.test :refer :all]
+            [clojure.data :as data]
+            [clojure.core.matrix :as m]
+            [cortex.graph :as graph]
+            [cortex.loss.core :as loss]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.layers :as layers]
+            [cortex.nn.network :as network]
+            [cortex.verify.nn.data :refer [CORN-DATA CORN-LABELS]]))
 
 
 (def mnist-basic
@@ -110,10 +109,10 @@
              {:stream :data} {:dimension {:channels 1, :height 28, :width 28}}
              {:stream :output} {:dimension {:channels 1, :height 1, :width 10}}
              {:stream {:stream :output,
-                       :augmentation :cortex.stream-augment/labels->inverse-counts}} {:dimension {}},
+                       :augmentation :cortex.loss.center/labels->inverse-counts}} {:dimension {}},
              {:stream
               {:stream :output,
-               :augmentation :cortex.stream-augment/labels->indexes}} {:dimension {}}}
+               :augmentation :cortex.loss.center/labels->indexes}} {:dimension {}}}
             (get training-traversal :buffers))))
     ;;Using set below to make the output order independent.  Loss terms are added so the definition
     ;;of the loss function is independent of order.

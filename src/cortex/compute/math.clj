@@ -66,9 +66,8 @@ compare-and-set type implementation because result could be x or y.")
     "given a matrix and vector, multiply each row by the corresponding element in the vector.
 Place result in C.  Used for scaling the rows of a matrix.")
   (elem-mul [stream alpha a inc-a b inc-b res inc-res]
-    "res = alpha* a * b.  This is an elementwise multiply where result is expected to be same
-length as a and b.")
-
+    "res  = alpha* a * b.  This is an elementwise multiply where result is expected
+to be same length as a and b. The inc params are related to strides.")
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     "Given a vector that contains x^2,
 a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")

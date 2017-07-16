@@ -27,7 +27,8 @@ or specific neural network layers"
          ~'min-x (- 0 ~'pad-x)
          ~'min-y (- 0 ~'pad-y)
          ~'max-x (+ ~'input-width ~'pad-x)
-         ~'max-y (+ ~'input-height ~'pad-y)]
+         ~'max-y (+ ~'input-height ~'pad-y)
+         ~'kernel-num-elems (* ~'kernel-width ~'kernel-height)]
      (c-for
       [~'chan 0 (< ~'chan ~'num-in-channels) (inc ~'chan)]
       (let [~'chan-input-offset (* ~'chan ~'input-planar-stride)
@@ -52,7 +53,21 @@ or specific neural network layers"
   [& body]
   `(let [~'chan-conv-offset (* ~'chan ~'output-channel-stride)
          ~'output-offset (+ (* ~'out-y ~'output-width)
-                            ~'out-x)]
+                            ~'out-x)
+         ;;positive values for how far out we are into the padding
+         input-over-x# (max 0 (- (+ ~'input-rel-x ~'kernel-width)
+                                 ~'input-width))
+         input-over-y# (max 0 (- (+ ~'input-rel-y ~'kernel-height)
+                                 ~'input-height))
+         ;;Negative values for how far before the 0 idx we are.
+         input-under-x# (min ~'input-rel-x 0)
+         input-under-y# (min ~'input-rel-y 0)
+         ;;Width of the kernel excluding padding
+         ~'exc-pad-width (max 0 (+ (- ~'kernel-width input-over-x#)
+                                   input-under-x#))
+         ~'exc-pad-height (max 0 (+ (- ~'kernel-height input-over-y#)
+                                    input-under-y#))
+         ~'exc-pad-kernel-num-elems (* ~'exc-pad-width ~'exc-pad-height)]
      (c-for
       [~'k-y 0 (< ~'k-y ~'kernel-height) (inc ~'k-y)]
       (c-for
