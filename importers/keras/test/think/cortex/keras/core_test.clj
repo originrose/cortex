@@ -13,6 +13,7 @@
 
 (def resnet_archf "models/resnet50.json")
 (def resnet_weightf "models/resnet50.h5")
+(def resnet_outf "models/resnet50_output.h5")
 
 (deftest match-padding-correct
   "Verify that we get the correct padding value for same or valid padding."
@@ -95,3 +96,15 @@
            (count (filter #(= (:class_name %) "Add") (get-in keras-model [:config :layers])))
            (count (filter #(= (:type %) :split) model-desc))
            (count (filter #(= (:type %) :join) model-desc))))))
+
+
+(deftest resnet-builds
+  "Test if we can build the right network from the resnet Cortex description."
+  (let [model-desc (keras/keras-json->cortex-desc resnet_archf)
+        resnet (network/linear-network model-desc)]
+    (is (= 51932520 (graph/parameter-count (network/network->graph resnet))))))
+
+
+
+(deftest verify-resnet
+  (is (keras/import-model resnet_archf resnet_weightf resnet_outf)))

@@ -34,7 +34,6 @@
     ;; else covers "valid" padding
     [0 0]))
 
-(defn testfn [] (println "hi"))
 
 (defmulti model-item->desc
   "Multimethod that dispatches on keyword version of Keras model item key
@@ -198,7 +197,7 @@
               ;; if split layer, find layer that inherits from split and assoc split as parent
               (if (= type :split)
                 (let [parent (first (filter #(= (:id %) (get parents 0)) cortex-desc))
-                      idx-parent (.indexOf cortex-desc parent)
+                      idx-parent (.indexOf ^java.util.List cortex-desc parent)
                       idx-split-child (+ idx-parent 1)]
                   (when (= idx-parent -1)
                     (throw (Exception.
@@ -208,6 +207,13 @@
                 ;; else just add current
                 (conj cortex-desc current)))
             [] cortex-layers)))
+
+;; for each join seen, look at parents
+;; for each parent, build list of itself + ancestry, such that the current node and immediate parents come first
+;;   -- stop when you reach a 2 parents (another join) or a parent that is a split
+;; for the parents, find first common parent (intersection)
+;; add split layer beneath that common parent, pointing to the parent
+;; find that common parent's predecessors in the ancestry list, and assoc those predecessors (children) a :parent of the :split
 
 
 (defn- reshape-time-test
@@ -247,34 +253,34 @@
 (defn- strides-idx->dim-indexes
   [strides ^long idx]
   (let [num-strides (count strides)]
-   (loop [retval []
-          leftover idx
-          stride-idx 0]
-     (if (< stride-idx num-strides)
-       (let [stride (long (strides stride-idx))
-             next-item (quot leftover stride)
-             next-leftover (rem leftover stride)]
-         (recur (if-not (= 0 stride-idx)
-                  (conj retval next-item)
-                  retval) next-leftover (inc stride-idx)))
-       (conj retval leftover)))))
+    (loop [retval []
+           leftover idx
+           stride-idx 0]
+      (if (< stride-idx num-strides)
+        (let [stride (long (strides stride-idx))
+              next-item (quot leftover stride)
+              next-leftover (rem leftover stride)]
+          (recur (if-not (= 0 stride-idx)
+                   (conj retval next-item)
+                   retval) next-leftover (inc stride-idx)))
+        (conj retval leftover)))))
 
 
 (defn- strides-idx->dim-indexes!
   [^ints strides ^long idx ^ints retval]
   (let [num-strides (alength strides)]
-   (loop [leftover idx
-          stride-idx 0]
-     (if (< stride-idx num-strides)
-       (let [stride (aget strides stride-idx)
-             next-item (quot leftover stride)
-             next-leftover (rem leftover stride)]
-         (when-not (= 0 stride-idx)
-           (aset retval (dec stride-idx) next-item))
-         (recur next-leftover (inc stride-idx)))
-       (do
-         (aset retval (dec stride-idx) (int leftover))
-         retval)))))
+    (loop [leftover idx
+           stride-idx 0]
+      (if (< stride-idx num-strides)
+        (let [stride (aget strides stride-idx)
+              next-item (quot leftover stride)
+              next-leftover (rem leftover stride)]
+          (when-not (= 0 stride-idx)
+            (aset retval (dec stride-idx) next-item))
+          (recur next-leftover (inc stride-idx)))
+        (do
+          (aset retval (dec stride-idx) (int leftover))
+          retval)))))
 
 
 (defn- strides-dim-indexes->idx
@@ -377,76 +383,124 @@
     (if (> (get-in (graph/node->input-dimensions node) [0 :channels]) 1)
       (let [{:keys [channels width height]} (first (graph/node->input-dimensions node))
             output-size (graph/node->output-size node)]
-       [width height channels output-size])
+        [width height channels output-size])
       [(graph/node->input-size node)
        (graph/node->output-size node)])))
 
 (defn- reshape-weights
   "check and possibly reshape weights for a given node."
   [id->weight-map network node-id]
+  (println "----------------------")
+  (println node-id)
+  (println (keys (:compute-graph network)))
   (let [node (-> network
                  network/network->graph
                  (graph/get-node node-id))
         weight-node (get id->weight-map (:id node))]
-    ;;testing
-    ;; (println "---------------------------------------")
-    ;; (println id->weight-map)
-    ;; (println (:id node))
-    (println weight-node)
+    ;; if node has parameters (e.g. conv, dense, batch-norm, as opposed to max-pooling)
     (if (and weight-node (seq (hdf5/get-children weight-node)))
-      (let [weight-map (hdf5/child-map ((:id node) (hdf5/child-map weight-node)))
-            ;;Is this any more robust than just assuming first child is weights
-            ;;and second child is bias?
-            weight-ds (get weight-map :kernel:0)
-            bias-ds (get weight-map :bias:0)
-            [weight-ds bias-ds] (if (and weight-ds bias-ds)
-                                  [weight-ds bias-ds]
-                                  (let [children (hdf5/get-children weight-node)]
-                                    [(first children) (second children)]))]
-        ;; (println weight-map)
-        (when-not (and weight-ds bias-ds)
-          (throw (Exception.
-                   (format "Failed to find weights and bias: wanted %s, found %s"
-                           [:kernel:0 :bias:0] (keys weight-map)))))
-        (println "loading weights/bias for" (:id node))
-        (let [weight-clj (hdf5/->clj weight-ds)
-              weight-raw-data (:data weight-clj)
-              weight-double-data (ensure-doubles weight-raw-data)
-              keras-dims (node->keras-dims node)
-              graph (network/network->graph network)
-              weights-arg (graph/get-node-argument node :weights)
-              bias-arg (graph/get-node-argument node :bias)
-              weights (-> (if (= 4 (count keras-dims))
-                            (reshape-data weight-double-data keras-dims [3 2 0 1])
-                            (reshape-data weight-double-data keras-dims [1 0]))
-                          (to-core-matrix (graph/get-argument-shape graph node weights-arg)))]
-          (-> network
-              (assoc-in [:compute-graph :buffers
-                         (get weights-arg :buffer-id)
-                         :buffer]
-                        weights)
-              (assoc-in [:compute-graph :buffers
-                         (get bias-arg :buffer-id)
-                         :buffer]
-                        (ensure-doubles (:data (hdf5/->clj bias-ds)))))))
+      (let [weight-map (hdf5/child-map ((:id node) (hdf5/child-map weight-node)))]
+        (if (contains? weight-map :kernel:0)
+          ;; conv/dense layer?
+          (let  [weight-ds (get weight-map :kernel:0)
+                 bias-ds (get weight-map :bias:0)
+                 [weight-ds bias-ds] (if (and weight-ds bias-ds)
+                                       [weight-ds bias-ds]
+                                       (let [children (hdf5/get-children weight-node)]
+                                         [(first children) (second children)]))]
+            ;; (println weight-map)
+            (when-not (and weight-ds bias-ds)
+              (throw (Exception.
+                       (format "Failed to find weights and bias: wanted %s, found %s"
+                               [:kernel:0 :bias:0] (keys weight-map)))))
+            (println "loading weights/bias for" (:id node))
+            (let [weight-clj (hdf5/->clj weight-ds)
+                  weight-raw-data (:data weight-clj)
+                  weight-double-data (ensure-doubles weight-raw-data)
+                  keras-dims (node->keras-dims node)
+                  graph (network/network->graph network)
+                  weights-arg (graph/get-node-argument node :weights)
+                  bias-arg (graph/get-node-argument node :bias)
+                  weights (-> (if (= 4 (count keras-dims))
+                                (reshape-data weight-double-data keras-dims [3 2 0 1])
+                                (reshape-data weight-double-data keras-dims [1 0]))
+                              (to-core-matrix (graph/get-argument-shape graph node weights-arg)))]
+              (-> network
+                  (assoc-in [:compute-graph :buffers
+                             (get weights-arg :buffer-id)
+                             :buffer]
+                            weights)
+                  (assoc-in [:compute-graph :buffers
+                             (get bias-arg :buffer-id)
+                             :buffer]
+                            (ensure-doubles (:data (hdf5/->clj bias-ds)))))))
+          ;; else, is batch-norm layer
+          (let [bias-ds (get weight-map :beta:0)
+                scale-ds (get weight-map :gamma:0)
+                mean-ds (get weight-map :moving_mean:0)
+                variance-ds (get weight-map :moving_variance:0)]
+            (println "In batch-norm calculations")
+            (when-not (and bias-ds scale-ds mean-ds variance-ds)
+              (throw (Exception.
+                       (format "Failed to find batch-norm params: wanted %s, found %s"
+                               [:beta:0 :gamma:0 :moving_mean:0 :moving_variance:0] (keys weight-map)))))
+            (let [params (mapv #(hdf5/->clj %) [bias-ds scale-ds mean-ds variance-ds])
+                  double-params (mapv #(ensure-doubles (:data %)) params) ;; vector of 4 param vectors: [[<offset params>] [<gamma params>] ...]
+                  ;; temp hack
+                  channel-height (get-in node [:input-dimensions 0 :height])
+                  channel-width (get-in node [:input-dimensions 0 :width])
+                  expanded-params (mapv (fn [param-vec]
+                                          (->> param-vec
+                                               (mapcat #(repeat (* channel-height channel-width) %))))
+                                        double-params)
+                  [bias-arg scale-arg means-arg variances-arg] (mapv #(graph/get-node-argument node %)
+                                                                     [:bias :scale :means :variances])]
+              (println channel-height)
+              (println channel-width)
+              (println (count (first expanded-params)))
+              (println (* (count (:data (first params))) channel-height channel-width))
+              (-> network
+                  (assoc-in [:compute-graph :buffers
+                             (get bias-arg :buffer-id)
+                             :buffer]
+                            (get expanded-params 0))
+                  (assoc-in [:compute-graph :buffers
+                             (get scale-arg :buffer-id)
+                             :buffer]
+                            (get expanded-params 1))
+                  (assoc-in [:compute-graph :buffers
+                             (get means-arg :buffer-id)
+                             :buffer]
+                            (get expanded-params 2))
+                  (assoc-in [:compute-graph :buffers
+                             (get variances-arg :buffer-id)
+                             :buffer]
+                            (get expanded-params 3)))))
+          ;; network
+          ))
       network)))
 
+;; (def bn (f (:bn_conv1 (f (:bn_conv1 top-level)))))
+;; (def beta (hdf5/->clj (:beta:0 bn)))
+;; (def conv (f (:conv1 (f (:conv1 top-level)))))
+;; (def weights (hdf5/->clj (:kernel:0 conv)))
+
 (defn- description->network
-       "Given a simple list of descriptors load the weights and return a network."
-       [desc-seq weight-file]
-       (let [weight-entry (first (filter (fn [node]
+  "Given a simple list of descriptors load the weights and return a network."
+  [desc-seq weight-file]
+  (let [weight-entry (first (filter (fn [node]
                                       (= (hdf5/get-name node)
                                          "model_weights"))
                                     (hdf5/get-children weight-file)))
         id->weight-map (if weight-entry
-                   (hdf5/child-map weight-entry)
-                   (hdf5/child-map weight-file))
+                         (hdf5/child-map weight-entry)
+                         (hdf5/child-map weight-file))
         network (network/linear-network desc-seq)
         network (reduce (partial reshape-weights id->weight-map)
                         network
                         (graph/dfs-seq (network/network->graph network)))]
-            ;;Generate parameters and check that all our shapes are correct.
-            (update network :compute-graph graph/generate-parameters)))
+    ;;Generate parameters and check that all our shapes are correct.
+    (update network :compute-graph graph/generate-parameters)))
 
 
 (defn description-weight-file->network
@@ -454,6 +508,7 @@
   versions of the model description, and the name of the hdf5 file which stores the
   weights, loads the weights for the model.  Returns a built network."
   [desc-seq weights-fname]
+  (println "==========================================================")
   (resource/with-resource-context
     (description->network desc-seq (hdf5/open-file weights-fname))))
 
