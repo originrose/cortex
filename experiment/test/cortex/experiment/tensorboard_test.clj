@@ -155,7 +155,7 @@
                                        {:epoch-count epoch-count})))
 
 (deftest test-perform-experiment
-  (let [train-fn (get-trainer train-and-eval)
+  (let [train-fn (get-trainer perform-experiment-eval)
         log-path "/tmp/tflogs/"
         pathname "linear-bn"]
     (mapv train-fn [linear-with-batch-norm]

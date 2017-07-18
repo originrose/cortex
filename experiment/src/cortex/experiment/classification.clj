@@ -200,11 +200,10 @@
 (defn- train-forever
   "Train forever. This function never returns."
   [initial-description train-ds test-ds
-   {:keys [batch-size force-gpu? eval-fn] :or {batch-size 128}
-    :as train-args}]
+   train-args]
   (let [network (network/linear-network initial-description)]
-    (apply (partial (experiment-train/train-n network
-                                              train-ds test-ds))
+    (apply (partial experiment-train/train-n network
+                    train-ds test-ds)
            (-> train-args seq flatten))))
 
 (defn- display-dataset-and-model
@@ -313,5 +312,4 @@
   ([initial-description train-ds test-ds listener train-args]
    (let [test-fn (listener initial-description train-ds test-ds)]
      (train-forever initial-description train-ds test-ds
-                    {:test-fn test-fn}
-                    train-args))))
+                    (assoc train-args :test-fn test-fn)))))
