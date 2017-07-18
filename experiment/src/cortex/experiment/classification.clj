@@ -200,13 +200,12 @@
 (defn- train-forever
   "Train forever. This function never returns."
   [initial-description train-ds test-ds
-   {:keys [batch-size force-gpu? eval-fn] :or {batch-size 128}}]
+   {:keys [batch-size force-gpu? eval-fn] :or {batch-size 128}
+    :as train-args}]
   (let [network (network/linear-network initial-description)]
-    (experiment-train/train-n network
-                              train-ds test-ds
-                              :test-fn eval-fn
-                              :batch-size batch-size
-                              :force-gpu? force-gpu?)))
+    (apply (partial (experiment-train/train-n network
+                                              train-ds test-ds))
+           (-> train-args seq flatten))))
 
 (defn- display-dataset-and-model
   "Starts the web server that gives real-time training updates."
@@ -301,10 +300,18 @@
 
 (defn perform-experiment
   "Main entry point:
-    - initial-description: A cortex nerual net description to train.
+    - initial-description: A cortex neural net description to train.
     - train-ds: A dataset (sequence of maps) with keys `:data`, `:labels`, used for training.
     - test-ds: A dataset (sequence of maps) with keys `:data`, `:labels`, used for testing.
- " ([initial-description train-ds test-ds listener]
-   (let [eval-fn (listener initial-description train-ds test-ds)]
+    - listener: a function which takes 3 arguments: initial-description, train-ds and test-ds
+              and returns a function that is executed per epoch. It could be used
+              to evaluate status of training (e.g. for early stopping) or to save the network.
+    - train-args: a map of optional arguments such as a force-gpu?. See cortex.experiment.train/train-n for the full list of arguments
+  "
+  ([initial-description train-ds test-ds listener]
+   (perform-experiment initial-description train-ds test-ds listener {}))
+  ([initial-description train-ds test-ds listener train-args]
+   (let [test-fn (listener initial-description train-ds test-ds)]
      (train-forever initial-description train-ds test-ds
-                     {:eval-fn eval-fn}))))
+                    {:test-fn test-fn}
+                    train-args))))
