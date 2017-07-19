@@ -34,6 +34,11 @@
     ;; else covers "valid" padding
     [0 0]))
 
+(defn- inbound-nodes->parents
+  [keras-inbound-nodes]
+  (->> (get keras-inbound-nodes 0)
+       (mapv #(keyword (first %)))))
+
 
 (defmulti model-item->desc
   "Multimethod that dispatches on keyword version of Keras model item key
@@ -43,7 +48,7 @@
 
 
 (defmethod model-item->desc :Conv2D
-  [{:keys [config]}]
+  [{:keys [config inbound_nodes]}]
   (let [[stride-x stride-y] (get config :strides [1 1])
         [pad-x pad-y] (match-padding config)
         [kernel-x kernel-y] (:kernel_size config)
@@ -53,7 +58,9 @@
         conv-desc (layers/convolutional-type-layer
                     :convolutional
                     kernel-x kernel-y pad-x pad-y stride-x stride-y kernel-count :floor)
-        conv-desc (assoc conv-desc :id id)]
+        conv-desc (if inbound_nodes
+                    (assoc conv-desc :id id :parents  (inbound-nodes->parents inbound_nodes))
+                    (assoc conv-desc :id id))]
     (when (and (:dim_ordering config) (not= (:dim_ordering config) "tf")) ;; not used in newer Keras models
       (throw
         (Exception. "Please convert model to 'tf' weights.  'th' weights are not supported.")))
@@ -64,28 +71,37 @@
 
 
 (defmethod model-item->desc :MaxPooling2D
-  [{:keys [config]}]
+  [{:keys [config inbound_nodes]}]
   (let [[kernel-x kernel-y] (:pool_size config)
         [stride-x stride-y] (:strides config)
         layer             (layers/convolutional-type-layer :max-pooling
                                                            kernel-x kernel-y 0 0
                                                            stride-x stride-y 0 :ceil)
         layer-id            (-> config :name keyword)]
-    (assoc layer :id layer-id)))
+    (if inbound_nodes
+      (assoc layer :id layer-id :parents (inbound-nodes->parents inbound_nodes))
+      (assoc layer :id layer-id))))
 
 
 (defmethod model-item->desc :Activation
-  [{:keys [config]}]
-  {:type (keyword (:activation config)) :id (keyword (:name config))})
+  [{:keys [config inbound_nodes]}]
+  (let [layer {:type (keyword (:activation config))
+               :id (keyword (:name config))}]
+    (if inbound_nodes
+      (assoc layer :parents (inbound-nodes->parents inbound_nodes))
+      layer)))
 
 
 ;; Not checked with new models
 (defmethod model-item->desc :Dropout
   ;; Cortex uses keep probability, Keras uses drop probability.
-  [{:keys [config]}]
-  (assoc (first
-           (layers/dropout (- 1.0 (:p config))))
-         :id (keyword (:name config))))
+  [{:keys [config inbound_nodes]}]
+  (let [layer (assoc (first
+                       (layers/dropout (- 1.0 (:p config))))
+                     :id (keyword (:name config)))]
+    (if inbound_nodes
+      (assoc-in layer [0 :parents] (inbound-nodes->parents inbound_nodes))
+      layer)))
 
 (defmethod model-item->desc :Flatten
   ;; Cortex doesn't require a flatten in its model description.
@@ -93,12 +109,15 @@
   [])
 
 (defmethod model-item->desc :Dense
-  [{:keys [config]}]
+  [{:keys [config inbound_nodes]}]
   (let [output-size (long (:units config))
         activation (keyword (get config :activation "linear"))
         id (keyword (:name config))
         retval (-> (first (layers/linear output-size))
-                   (assoc :id id))]
+                   (assoc :id id))
+        retval (if inbound_nodes
+                 (assoc retval :parents (inbound-nodes->parents inbound_nodes))
+                 retval)]
     (if-not (= activation :linear)
       [(assoc retval :embedded-activation true)
        {:type activation
@@ -108,15 +127,17 @@
 
 
 (defmethod model-item->desc :BatchNormalization
-  [{:keys [config]}]
-  (layers/batch-normalization :ave-factor (:momentum config)
-                              :epsilon (:epsilon config)
-                              :id (keyword (:name config))))
+  [{:keys [config inbound_nodes]}]
+  (let [layer (layers/batch-normalization :ave-factor (:momentum config)
+                                          :epsilon (:epsilon config)
+                                          :id (keyword (:name config)))]
+    (if inbound_nodes
+      (assoc-in layer [0 :parents] (inbound-nodes->parents inbound_nodes))
+      layer)))
 
 
 (defmethod model-item->desc :AveragePooling2D
-  ;; Currently uses a max-pool, TODO switch to ave-pool once implemented
-  [{:keys [config]}]
+  [{:keys [config inbound_nodes]}]
   (let [[kernel-x kernel-y] (:pool_size config)
         [stride-x stride-y] (:strides config)
         layer             (layers/convolutional-type-layer :max-pooling
@@ -124,28 +145,22 @@
                                                            stride-x stride-y 0 :ceil
                                                            :pool-op :avg)
         layer-id            (keyword (str (:name config)))]
-    (assoc layer :id layer-id)))
+    (if inbound_nodes
+      (assoc layer :id layer-id
+             :parents (inbound-nodes->parents inbound_nodes))
+      (assoc layer :id layer-id))))
 
 
 (defmethod model-item->desc :Add
-  ;; Takes two inbound nodes (one immediate parent and one skip parent,
-  ;; and creates a split layer for the skip parent
-  ;; and a join layer for the immediate parent + the split layer
-  [layer]
-  (let [inbound-nodes (->> (get-in layer [:inbound_nodes 0]) ;; => [["bn2a_branch2c" 0 0 nil] ["bn2a_branch1" 0 0 nil]]
-                           (mapv #(keyword (first %))))
-        {prev-layer true split-parent false} (group-by #(= % (:previous_layer layer))
-                                                       inbound-nodes)
-        layer-name (get-in layer [:config :name])
-        split-id (keyword (str (name (get split-parent 0)) "-split"))]
-    ;;testing
-    ;; (println inbound-nodes)
-    ;; (println split-parent)
-    ;; (println (conj prev-layer split-id))
-    [(layers/split :parents split-parent
-                   :id split-id)
-     (layers/join :parents (conj prev-layer split-id) :operation :+
-                  :id (keyword (str layer-name "-join")))]))
+  [{:keys [config inbound_nodes]}]
+  (let [parents (inbound-nodes->parents inbound_nodes)]
+    (layers/join :parents parents :operation :+
+                 :id (keyword (str (:name config))))))
+
+
+(defn- get-layer-by-id
+  [layers id]
+  (first (filter #(= (:id %) id) layers)))
 
 
 (defn- keras-model->simple-description
@@ -154,7 +169,7 @@
   [model]
   (let [model  (if (= (:class_name model) "Sequential")
                  (:config model)
-                 ;; else "Model", e.g. Keras pretrained applications for ResNet, VGG16m etc.
+                 ;; else "Model" structure, e.g. Keras pretrained applications for ResNet, VGG16m etc.
                  (get-in model [:config :layers]))
         [_ width height n-channels] (get-in model [0 :config :batch_input_shape])
         model-vector (reduce (fn [model-vector {:keys [class_name config] :as current}]
@@ -192,28 +207,48 @@
                                                                 {:exception e
                                                                  :layer mod-item})))))
                                                model-vector))))]
-    ;; fairly annoying backtracking, works but TODO think of better algorithm
-    (reduce (fn [cortex-desc {:keys [id type parents] :as current}]
-              ;; if split layer, find layer that inherits from split and assoc split as parent
-              (if (= type :split)
-                (let [parent (first (filter #(= (:id %) (get parents 0)) cortex-desc))
-                      idx-parent (.indexOf ^java.util.List cortex-desc parent)
-                      idx-split-child (+ idx-parent 1)]
-                  (when (= idx-parent -1)
-                    (throw (Exception.
-                             (format ("Could not find parents of split layer %s") id))))
-                  (conj (assoc-in cortex-desc [idx-split-child :parents] [id])
-                        current))
-                ;; else just add current
-                (conj cortex-desc current)))
-            [] cortex-layers)))
 
-;; for each join seen, look at parents
-;; for each parent, build list of itself + ancestry, such that the current node and immediate parents come first
-;;   -- stop when you reach a 2 parents (another join) or a parent that is a split
-;; for the parents, find first common parent (intersection)
-;; add split layer beneath that common parent, pointing to the parent
-;; find that common parent's predecessors in the ancestry list, and assoc those predecessors (children) a :parent of the :split
+    ;; filter through join layers and 1) add corresponding split layers 2) redirect approp. layers to point to split as parent
+    (reduce (fn [cortex-desc {:keys [id type parents] :as current}]
+              (if (= type :join)
+                ;; split point is first common parent of the join's two branches
+                (let [parent-layers (map #(get-layer-by-id cortex-desc %) parents)
+                      ancestries (map (fn [parent-layer]
+                                        (loop [ancestor-list [] cur parent-layer]
+                                          ;; stop looking for ancestors when: reached another join layer, or reached input (end)
+                                          (if (or (= (:type cur) :join)
+                                                  (= (:type cur) :input))
+                                            ancestor-list
+                                            (recur (conj ancestor-list cur)
+                                                   (get-layer-by-id cortex-desc (get (:parents cur) 0)))))) parent-layers)
+                      split-parent (first (remove nil? (for [a (first ancestries)
+                                                             b (last ancestries)]
+                                                         (if (= a b) a nil))))]
+                  (when (> (count ancestries) 2)
+                    (throw (Exception.
+                             (format ("Cannot support joins of more than two parents. Parents: %s") parents))))
+
+                  ;; insert split layer and redirect :parents for its new children
+                  (let [parent-id (:id split-parent)
+                        split-layer (layers/split :parents [parent-id]
+                                                  :id (keyword (str (name parent-id) "-split")))
+                        split-layer (get split-layer 0)
+                        split-children (filter (fn [layer] (some #(= parent-id %) (:parents layer))) cortex-desc)
+                        split-children-idx (map #(.indexOf ^java.util.List cortex-desc %) split-children)
+                        join-layer (if (some #(= parent-id %) (:parents current))
+                                     (update current :parents (fn [old-parents]
+                                                                (conj (remove #(= parent-id %) old-parents)
+                                                                      (:id split-layer))))
+                                     current)]
+                    (conj (reduce (fn [desc split-child-idx]
+                                    (assoc-in desc [split-child-idx :parents] [(:id split-layer)]))
+                                  cortex-desc split-children-idx)
+                          split-layer join-layer)))
+                ;; ensure inbound_node parent actually exists in Cortex (e.g. not flatten or zero-padding)
+                (if (some #(= (get (:parents current) 0) (:id %)) cortex-desc)
+                  (conj cortex-desc current)
+                  (conj cortex-desc (dissoc current :parents)))))
+            [] cortex-layers)))
 
 
 (defn- reshape-time-test
@@ -392,7 +427,6 @@
   [id->weight-map network node-id]
   (println "----------------------")
   (println node-id)
-  (println (keys (:compute-graph network)))
   (let [node (-> network
                  network/network->graph
                  (graph/get-node node-id))
@@ -408,12 +442,10 @@
                                        [weight-ds bias-ds]
                                        (let [children (hdf5/get-children weight-node)]
                                          [(first children) (second children)]))]
-            ;; (println weight-map)
             (when-not (and weight-ds bias-ds)
               (throw (Exception.
                        (format "Failed to find weights and bias: wanted %s, found %s"
                                [:kernel:0 :bias:0] (keys weight-map)))))
-            (println "loading weights/bias for" (:id node))
             (let [weight-clj (hdf5/->clj weight-ds)
                   weight-raw-data (:data weight-clj)
                   weight-double-data (ensure-doubles weight-raw-data)
@@ -439,7 +471,6 @@
                 scale-ds (get weight-map :gamma:0)
                 mean-ds (get weight-map :moving_mean:0)
                 variance-ds (get weight-map :moving_variance:0)]
-            (println "In batch-norm calculations")
             (when-not (and bias-ds scale-ds mean-ds variance-ds)
               (throw (Exception.
                        (format "Failed to find batch-norm params: wanted %s, found %s"
@@ -459,6 +490,7 @@
               (println channel-width)
               (println (count (first expanded-params)))
               (println (* (count (:data (first params))) channel-height channel-width))
+
               (-> network
                   (assoc-in [:compute-graph :buffers
                              (get bias-arg :buffer-id)
@@ -476,14 +508,9 @@
                              (get variances-arg :buffer-id)
                              :buffer]
                             (get expanded-params 3)))))
-          ;; network
           ))
       network)))
 
-;; (def bn (f (:bn_conv1 (f (:bn_conv1 top-level)))))
-;; (def beta (hdf5/->clj (:beta:0 bn)))
-;; (def conv (f (:conv1 (f (:conv1 top-level)))))
-;; (def weights (hdf5/->clj (:kernel:0 conv)))
 
 (defn- description->network
   "Given a simple list of descriptors load the weights and return a network."

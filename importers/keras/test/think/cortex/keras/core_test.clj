@@ -102,7 +102,7 @@
   "Test if we can build the right network from the resnet Cortex description."
   (let [model-desc (keras/keras-json->cortex-desc resnet_archf)
         resnet (network/linear-network model-desc)]
-    (is (= 51932520 (graph/parameter-count (network/network->graph resnet))))))
+    (is (= 65681768 (graph/parameter-count (network/network->graph resnet))))))
 
 
 
