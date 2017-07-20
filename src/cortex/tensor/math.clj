@@ -72,12 +72,12 @@ c = alpha * (trans-a? a) * (trans-b? b) + beta * c")
     "Generalized matrix*vector.  Similar to above, the index system isn't useful
 and could result in ambiguity.  So we pass in the striding specifically.")
   (batch-normalize-eltwise! [stream
-                             output input means variances scale bias
+                             output input means variances scale bias epsilon
                              batch-count element-count]
     "output = ((input - mean) / (sqrt variance)) * scale + bias.
 Apply operation elementwise across batch-count batches.")
   (batch-normalize-spatial! [stream
-                             output input means variances scale bias
+                             output input means variances scale bias epsilon
                              batch-count channel-count element-count]
     "Same idea as batch-normalize-eltwise but apply across channels across batches meaning
 there will channel-count of means, variances, scale, and bias.  Input, output can be

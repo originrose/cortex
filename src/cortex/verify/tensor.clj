@@ -189,4 +189,41 @@ for the cuda backend."
 
 
 (defn batch-normalize
-  [driver datatype])
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   ;;eltwise
+   (let [input (ct/->tensor (partition 3 (range 12)))
+         output (ct/new-tensor [4 3])
+         means (ct/->tensor (repeat 3 1))
+         ;;Ensure to include a variance of 0 to sniff out behavior in edge case
+         variances (ct/->tensor (range 0 3))
+         scale (ct/->tensor (repeat 3 3))
+         bias (ct/->tensor (repeat 3 4))]
+     ;;Use a large epsilon to ensure the cpu version treats the epsilon identical
+     ;;as the gpu version
+     (ct/batch-normalize! output input means variances scale bias 1e-2)
+     (is (m/equals [-26.0, 4.0, 6.116036847575795, 64.0, 12.955334711889902,
+                    12.46414739030318, 154.0, 21.910669423779805, 18.812257933030565,
+                    244.0, 30.86600413566971, 25.16036847575795]
+                   (ct/to-double-array output)
+                   1e-4)))
+   ;;spatial
+   (let [input (ct/->tensor (partition 3 (partition 4 (range 24))))
+         output (ct/new-tensor [2 3 4])
+         means (ct/->tensor (repeat 3 1))
+         ;;Ensure to include a variance of 0
+         variances (ct/->tensor (range 0 3))
+         scale (ct/->tensor (repeat 3 3))
+         bias (ct/->tensor (repeat 3 4))]
+     ;;Use a large epsilon to ensure the cpu version treats the epsilon identical
+     ;;as the gpu version
+     (ct/batch-normalize! output input means variances scale bias 1e-2)
+     (is (m/equals [-26.0, 4.0, 34.0, 64.0, 12.955334711889902, 15.94044628251987,
+                    18.925557853149837, 21.910669423779805, 18.812257933030565,
+                    20.92829478060636, 23.044331628182157, 25.16036847575795, 334.0,
+                    364.0, 394.0, 424.0, 48.77667355944951, 51.76178513007948,
+                    54.74689670070945, 57.73200827133942, 44.204700103940105,
+                    46.3207369515159, 48.436773799091696, 50.55281064666749]
+                   (ct/to-double-array output)
+                   1e-4)))))

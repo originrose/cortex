@@ -1034,7 +1034,7 @@ So either it is dense *or* num-columns is 1"
 
 
 (defn batch-normalize!
-  "output = ((input - mean) / (sqrt variance)) * scale + bias.
+  "output = ((input - mean) / (sqrt (variance + epsilon)) * scale + bias.
 
 Operation needs at least 2 dimensions for input, while means, variances, scale, bias
 are all going to be interpreted as vectors.  Output shape must match input shape exactly.
@@ -1046,10 +1046,13 @@ dimension.
 second to last dimensions is considered the channels member and means, variances, scale, and
 bias are all 'channels' size in length and the normalization are applied in an channel-wise
 operation.  Batch size is then considered everything before the last two dimensions."
-  [output input means variances scale bias]
+  [output input means variances scale bias epsilon]
   (ensure-datatypes (get-datatype output) input means variances scale bias)
   (ensure-same-device output input means variances scale bias)
   (ensure-basic-indexing output input means variances scale bias)
+  (when-not-error (> (double epsilon) 1e-5)
+    "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
+    {:epsilon epsilon})
   (when-not-error (or (= :double (get-datatype input))
                       (= :float (get-datatype input)))
       "batch-normalization is only defined for float and double tensors"
@@ -1093,6 +1096,7 @@ operation.  Batch size is then considered everything before the last two dimensi
                                        (tensor->buffer variances)
                                        (tensor->buffer scale)
                                        (tensor->buffer bias)
+                                       epsilon
                                        (first input-shape)
                                        (second input-shape)))
       (let [batch-count (long (apply * (drop-last 2 input-shape)))
@@ -1110,6 +1114,7 @@ operation.  Batch size is then considered everything before the last two dimensi
                                      (tensor->buffer variances)
                                      (tensor->buffer scale)
                                      (tensor->buffer bias)
+                                     epsilon
                                      batch-count
                                      channel-count
                                      element-count)))))

@@ -479,6 +479,87 @@
   (blas-macro-iter blas-impl))
 
 
+(defmacro batch-normalize-eltwise-impl
+  [datatype]
+  `(fn [output# input# means# variances# scale# bias# epsilon# batch-count# element-count#]
+     (let [batch-count# (long batch-count#)
+           element-count# (long element-count#)
+           input-ary# (datatype->view-cast-fn ~datatype input#)
+           means-ary# (datatype->view-cast-fn ~datatype means#)
+           variances-ary# (datatype->view-cast-fn ~datatype variances#)
+           scale-ary# (datatype->view-cast-fn ~datatype scale#)
+           bias-ary# (datatype->view-cast-fn ~datatype bias#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)
+           epsilon# (datatype->cast-fn ~datatype epsilon#)]
+       (parallel/parallel-for
+        elem-idx# element-count#
+        (let [variance# (dtype/v-aget variances-ary# elem-idx#)
+              ;;Account for if the variance is zero.
+              inv-std-dev# (datatype->cast-fn ~datatype (Math/sqrt (/ 1.0
+                                                                     (+ variance# epsilon#))))
+              mean# (dtype/v-aget means-ary# elem-idx#)
+              scale# (dtype/v-aget scale-ary# elem-idx#)
+              shift# (dtype/v-aget bias-ary# elem-idx#)]
+          (c-for
+           [batch-idx# 0 (< batch-idx# batch-count#) (inc batch-idx#)]
+           (let [item-offset# (+ (* batch-idx# element-count#) elem-idx#)
+                 x-hat# (* (- (dtype/v-aget input-ary# item-offset#) mean#)
+                           inv-std-dev#)]
+             (dtype/v-aset output-ary# item-offset#
+                           (+ (* x-hat# scale#) shift#)))))))))
+
+
+(defmacro batch-normalize-spatial-impl
+  [datatype]
+  `(fn [output# input# means# variances# scale# bias# epsilon#
+        batch-count# channel-count# element-count#]
+     (let [batch-count# (long batch-count#)
+           element-count# (long element-count#)
+           channel-count# (long channel-count#)
+           input-ary# (datatype->view-cast-fn ~datatype input#)
+           means-ary# (datatype->view-cast-fn ~datatype means#)
+           variances-ary# (datatype->view-cast-fn ~datatype variances#)
+           scale-ary# (datatype->view-cast-fn ~datatype scale#)
+           bias-ary# (datatype->view-cast-fn ~datatype bias#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)
+           epsilon# (datatype->cast-fn ~datatype epsilon#)
+           batch-stride# (* channel-count# element-count#)]
+       (parallel/parallel-for
+        channel-idx# channel-count#
+        (let [variance# (dtype/v-aget variances-ary# channel-idx#)
+              ;;Account for if the variance is zero.
+              inv-std-dev# (datatype->cast-fn ~datatype (Math/sqrt (/ 1.0
+                                                                     (+ variance# epsilon#))))
+              mean# (dtype/v-aget means-ary# channel-idx#)
+              scale# (dtype/v-aget scale-ary# channel-idx#)
+              shift# (dtype/v-aget bias-ary# channel-idx#)
+              channel-offset# (* channel-idx# element-count#)]
+          (c-for
+           [batch-idx# 0 (< batch-idx# batch-count#) (inc batch-idx#)]
+           (let [batch-offset# (+ (* batch-idx# batch-stride#) channel-offset#)]
+            (c-for
+             [elem-idx# 0 (< elem-idx# element-count#) (inc elem-idx#)]
+             (let [item-offset# (+ batch-offset# elem-idx#)
+                   x-hat# (* (- (dtype/v-aget input-ary# item-offset#) mean#)
+                             inv-std-dev#)]
+               (dtype/v-aset output-ary# item-offset#
+                             (+ (* x-hat# scale#) shift#)))))))))))
+
+
+(defonce cpu-nn-ops-types [:float :double])
+
+
+(defmacro cpu-nn-ops-macro
+  []
+  (->> (for [ops-type cpu-nn-ops-types]
+         [ops-type {:batch-normalize-eltwise! `(batch-normalize-eltwise-impl ~ops-type)
+                    :batch-normalize-spatial! `(batch-normalize-spatial-impl ~ops-type)}])
+       (into {})))
+
+
+(def cpu-nn-ops (cpu-nn-ops-macro))
+
+
 (extend-type CPUStream
   tm/TensorMath
   (assign-constant! [stream buffer index-system value n-elems]
@@ -500,7 +581,8 @@
                            scalar
                            n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-accum-constant-table) [(dtype/get-datatype dest) operation reverse-operands?])
+      ((get (binary-accum-constant-table) [(dtype/get-datatype dest) operation
+                                           reverse-operands?])
        dest dest-idx dest-alpha
        scalar n-elems)))
 
@@ -559,4 +641,20 @@
     (cpu-driver/with-stream-dispatch stream
       (cmu/col->row-gemv (get-in blas-fn-map [(dtype/get-datatype c) :gemv])
                          trans-a? a-row-count a-col-count alpha
-                         A a-colstride x inc-x beta c inc-c))))
+                         A a-colstride x inc-x beta c inc-c)))
+
+  (batch-normalize-eltwise! [stream
+                             output input means variances scale bias epsilon
+                             batch-count element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-eltwise!])
+       output input means variances scale bias epsilon
+       batch-count element-count)))
+
+  (batch-normalize-spatial! [stream
+                             output input means variances scale bias epsilon
+                             batch-count channel-count element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-spatial!])
+       output input means variances scale bias epsilon
+       batch-count channel-count element-count))))

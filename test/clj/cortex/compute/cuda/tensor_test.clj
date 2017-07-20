@@ -40,3 +40,7 @@
 
 (def-double-float-test gemv
   (verify-tensor/gemv (create-driver) *datatype*))
+
+
+(def-double-float-test batch-normalize
+  (verify-tensor/batch-normalize (create-driver) *datatype*))

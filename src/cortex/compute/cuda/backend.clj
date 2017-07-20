@@ -99,6 +99,7 @@
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability rand-buffer elem-count backend])
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]))
 
+
 (defn backend->fn
   [impl fn-name datatype]
   (get-in impl [:network-functions fn-name datatype :fn]))
@@ -106,13 +107,16 @@
 
 (extend-type DoublePointer
   PCUDAOptimizeMethod
-  (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
+  (cuda-prepare-bernoulli-dropout! [mult-buffer probability
+                                    ^FloatPointer rand-buffer elem-count backend]
     (cuda-drv/launch-linear-kernel (nn-backend/get-stream)
-                                   (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
+                                   (backend->fn backend :prepare-bernoulli-dropout :double)
+                                   elem-count 0
                                    mult-buffer rand-buffer (double probability) elem-count))
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]
     (cuda-drv/launch-linear-kernel (nn-backend/get-stream)
-                                   (backend->fn backend :prepare-gaussian-dropout :double) elem-count 0
+                                   (backend->fn backend :prepare-gaussian-dropout :double)
+                                   elem-count 0
                                    mult-buffer rand-buffer elem-count)))
 
 
