@@ -1033,6 +1033,87 @@ So either it is dense *or* num-columns is 1"
   c)
 
 
+(defn batch-normalize!
+  "output = ((input - mean) / (sqrt variance)) * scale + bias.
+
+Operation needs at least 2 dimensions for input, while means, variances, scale, bias
+are all going to be interpreted as vectors.  Output shape must match input shape exactly.
+
+- If there are 2 dimensions, do an elementwise operation where the means, variances, scale,
+and bias are all expected to be the trailing dimension in size.  Batch size is the leading
+dimension.
+- If there are more than 2 dimensions, then apply a 'spatial' normalization such that the
+second to last dimensions is considered the channels member and means, variances, scale, and
+bias are all 'channels' size in length and the normalization are applied in an channel-wise
+operation.  Batch size is then considered everything before the last two dimensions."
+  [output input means variances scale bias]
+  (ensure-datatypes (get-datatype output) input means variances scale bias)
+  (ensure-same-device output input means variances scale bias)
+  (ensure-basic-indexing output input means variances scale bias)
+  (when-not-error (or (= :double (get-datatype input))
+                      (= :float (get-datatype input)))
+      "batch-normalization is only defined for float and double tensors"
+      {:input-datatype (get-datatype input)})
+  ;;For cudnn operations the data must be packed at the moment.  This isn't a hard requirement
+  ;;but cudnn has per-operation constraints that take some research to divine out.
+  (ensure-vector-indexable output input means variances scale bias)
+  (let [means (as-row-vector means)
+        variances (as-row-vector variances)
+        scale (as-row-vector scale)
+        bias (as-row-vector bias)
+        input-shape (shape input)
+        means-shape (shape means)]
+    (when-not-error (> (count input-shape) 1)
+      "Input shape needs at least 2 dimensions"
+      {:input-shape (shape input)})
+    (when-not-error (= input-shape
+                       (shape output))
+      "Tensor input and output shapes do not match"
+      {:input-shape input-shape
+       :output-shape (shape output)})
+    (when-not-error (and (= means-shape (shape variances))
+                         (= means-shape (shape scale))
+                         (= means-shape (shape bias)))
+      "means, variances, scale, bias must have same shape"
+      {:means-shape means-shape
+       :variances-shape (shape variances)
+       :scale-shape (shape scale)
+       :bias-shape (shape bias)})
+    (case (count input-shape)
+      2 (do
+          (when-not-error (= (second input-shape)
+                             (first means-shape))
+            "Means, variances, scale, bias must match input element count."
+            {:input-shape input-shape
+             :means-shape means-shape})
+          (tm/batch-normalize-eltwise! (check-stream)
+                                       (tensor->buffer output)
+                                       (tensor->buffer input)
+                                       (tensor->buffer means)
+                                       (tensor->buffer variances)
+                                       (tensor->buffer scale)
+                                       (tensor->buffer bias)
+                                       (first input-shape)
+                                       (second input-shape)))
+      (let [batch-count (long (apply * (drop-last 2 input-shape)))
+            [channel-count element-count] (take-last 2 input-shape)]
+        (when-not-error (= (long channel-count)
+                           (long (first means-shape)))
+          "means, variances, scale bias size must match input channel count"
+          {:input-shape input-shape
+           :input-channel-count channel-count
+           :means-element-count (first means-shape)})
+        (tm/batch-normalize-spatial! (check-stream)
+                                     (tensor->buffer output)
+                                     (tensor->buffer input)
+                                     (tensor->buffer means)
+                                     (tensor->buffer variances)
+                                     (tensor->buffer scale)
+                                     (tensor->buffer bias)
+                                     batch-count
+                                     channel-count
+                                     element-count)))))
+
 (extend-type Tensor
   mp/PVectorView
   (as-vector [m]

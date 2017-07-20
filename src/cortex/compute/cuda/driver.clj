@@ -16,8 +16,12 @@
             Pointer PointerPointer FloatPointer ShortPointer
             SizeTPointer
             cuda$CUmod_st cuda$CUctx_st cuda$CUfunc_st cuda$CUstream_st
-            cuda$CUevent_st cublas cublas$cublasContext
-            curand curand$curandGenerator_st]
+            cuda$CUevent_st
+            cublas cublas$cublasContext
+            curand curand$curandGenerator_st
+            cudnn cudnn$cudnnContext cudnn$cudnnTensorStruct
+            cudnn$cudnnActivationStruct cudnn$cudnnConvolutionStruct cudnn$cudnnFilterStruct
+            cudnn$cudnnPoolingStruct cudnn$cudnnLRNStruct]
            [java.nio.charset StandardCharsets]
            [java.io ByteArrayInputStream ByteArrayOutputStream]
            [cortex.compute.math DeviceArray]))
@@ -166,6 +170,68 @@ set this device before.  Set device must be called before any other cuda functio
           (throw (Exception. (format "cuRAND error: %s" (curand-error-to-string retval#)))))
         retval#))))
 
+(defonce cublas-errors
+  (mapv vec (partition 2 ["CUBLAS_STATUS_SUCCESS"          0
+                          "CUBLAS_STATUS_NOT_INITIALIZED"  1
+                          "CUBLAS_STATUS_ALLOC_FAILED"     3
+                          "CUBLAS_STATUS_INVALID_VALUE"    7
+                          "CUBLAS_STATUS_ARCH_MISMATCH"    8
+                          "CUBLAS_STATUS_MAPPING_ERROR"    11
+                          "CUBLAS_STATUS_EXECUTION_FAILED"  13
+                          "CUBLAS_STATUS_INTERNAL_ERROR"   14
+                          "CUBLAS_STATUS_NOT_SUPPORTED"    15
+                          "CUBLAS_STATUS_LICENSE_ERROR"    16])))
+
+(defn cublas-error-to-string
+  [blas-error]
+  (ffirst (filter #(= (second %) blas-error) cublas-errors)))
+
+
+(defmacro cudnn-call
+  [& body]
+  `(do
+     (ensure-device)
+     (let [retval# (do ~@body)]
+      (when-not (= retval# cudnn/CUDNN_STATUS_SUCCESS)
+        (throw (Exception.
+                (format "Cudnn error: %s" (.getString (cudnn/cudnnGetErrorString retval#))))))
+      retval#)))
+
+(defonce convolution-forward-algorithms
+  (reverse-hash-map
+   {"CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM"         0
+    "CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM" 1
+    "CUDNN_CONVOLUTION_FWD_ALGO_GEMM"                  2
+    "CUDNN_CONVOLUTION_FWD_ALGO_DIRECT"                3
+    "CUDNN_CONVOLUTION_FWD_ALGO_FFT"                   4
+    "CUDNN_CONVOLUTION_FWD_ALGO_FFT_TILING"            5}))
+
+
+(defonce convolution-backward-filter-algorithms
+  (reverse-hash-map
+   {
+    "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0"         0
+    "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1"         1
+    "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT"       2
+    "CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3"         3
+    }))
+
+
+(defonce convolution-backward-data-algorithms
+  (reverse-hash-map
+   {
+    "CUDNN_CONVOLUTION_BWD_DATA_ALGO_0"          0
+    "CUDNN_CONVOLUTION_BWD_DATA_ALGO_1"          1
+    "CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT"        2
+    "CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING" 3
+    }))
+
+(defn cudnn-context
+  []
+  (let [retval (cudnn$cudnnContext.)]
+    (cudnn-call (cudnn/cudnnCreate retval))
+    (resource/track retval)))
+
 
 (defn zero-term-array-to-string
   [^"[B" byte-ary]
@@ -232,7 +298,27 @@ set this device before.  Set device must be called before any other cuda functio
     (cublas-call (cublas/cublasDestroy_v2 ctx)))
   curand$curandGenerator_st
   (release-resource [ctx]
-    (curand-call (curand/curandDestroyGenerator ctx))))
+    (curand-call (curand/curandDestroyGenerator ctx)))
+  cudnn$cudnnContext
+  (release-resource [item] (cudnn-call (cudnn/cudnnDestroy item)))
+  cudnn$cudnnTensorStruct
+  (release-resource [tensor]
+    (cudnn-call (cudnn/cudnnDestroyTensorDescriptor tensor)))
+  cudnn$cudnnActivationStruct
+  (release-resource [act-struct]
+    (cudnn-call (cudnn/cudnnDestroyActivationDescriptor act-struct)))
+  cudnn$cudnnConvolutionStruct
+  (release-resource [item]
+    (cudnn-call (cudnn/cudnnDestroyConvolutionDescriptor item)))
+  cudnn$cudnnFilterStruct
+  (release-resource [item]
+    (cudnn-call (cudnn/cudnnDestroyFilterDescriptor item)))
+  cudnn$cudnnPoolingStruct
+  (release-resource [item]
+    (cudnn-call (cudnn/cudnnDestroyPoolingDescriptor item)))
+  cudnn$cudnnLRNStruct
+  (release-resource [item]
+    (cudnn-call (cudnn/cudnnDestroyLRNDescriptor item))))
 
 
 
@@ -336,7 +422,7 @@ set this device before.  Set device must be called before any other cuda functio
 
 
 (defn load-cas-datatype-function
-  "Load a function that is only valid for types which cuda supports CAS."
+  "Load a function that is only valid for types which cuda supports CAS (compare-and-swap)."
   ([module-name fn-name]
    (load-multiple-datatype-function module-name fn-name (cas-datatypes)))
   ([fn-name]
@@ -649,6 +735,7 @@ relies only on blockDim.x block.x and thread.x"
                        device-functions
                        ^cublas$cublasContext cublas
                        ^curand$curandGenerator_st curand
+                       ^cudnn$cudnnContext cudnn
                        resource-context])
 (defrecord CudaStream [^CudaDevice device ^cuda$CUstream_st stream])
 
@@ -693,15 +780,17 @@ relies only on blockDim.x block.x and thread.x"
 (defn- create-cuda-device
   [driver device-id properties]
   (set-cuda-device {:device-id device-id})
-  (let [retval (->CudaDevice device-id properties (atom nil) nil nil (atom nil))
+  (let [retval (->CudaDevice device-id properties (atom nil) nil nil nil (atom nil))
         [retval res-ctx] (resource/return-resource-context
                           (with-bindings {#'drv/*current-compute-device* retval}
-                            ;;Most of these functions require a device to be active in order to work.
+                            ;;Most of these functions require a device to be active in order to
+                            ;;work.
                             (-> retval
                                 (assoc :cublas (blas-context)
                                        :curand (rand-context)
-                                       ;;Use a function here instead of the object so that we can
-                                       ;;actually analyze the device in the repl.
+                                       :cudnn (cudnn-context)
+                                       ;;Use a function here instead of the object so that we
+                                       ;;can actually analyze the device in the repl.
                                        :driver-fn (constantly driver))
                                 ((fn [retval]
                                    (reset! (get retval :device-functions)
@@ -731,6 +820,10 @@ relies only on blockDim.x block.x and thread.x"
   (.curand (current-cuda-device)))
 
 
+(defn get-cudnn
+  ^cudnn$cudnnContext []
+  (.cudnn (current-cuda-device)))
+
 
 (defmacro blas-with-stream
   "Setting the blas stream is not threadsafe so we have to lock the object
@@ -755,7 +848,15 @@ relies only on blockDim.x block.x and thread.x"
        ~@body)))
 
 
-(def ^:dynamic *use-page-locked-memory* true)
+(defmacro cudnn-with-stream
+  "See comments for blas-with-stream; same conditions hold."
+  [stream & body]
+  `(let [stream# ~stream
+         ^cudnn$cudnnContext ~'cudnn-context (get-cudnn)]
+     (check-stream-device stream#)
+     (locking ~'cudnn-context
+       (cudnn-call (cudnn/cudnnSetStream ~'cudnn-context (get-cuda-stream stream#)))
+       ~@body)))
 
 (extend-type CudaDriver
   drv/PDriver
@@ -1299,6 +1400,84 @@ relies only on blockDim.x block.x and thread.x"
     (cuda-call (cuda/cudaEventSynchronize evt))))
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Generalized CUDNN Bindings
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(defn get-tensor
+  [^cudnn$cudnnTensorStruct tensor]
+  (let [num-dims 4
+        dtype (int-array 1)
+        num-dims-return (int-array 1)
+        dims (int-array num-dims)
+        strides (int-array num-dims)]
+    (cudnn-call (cudnn/cudnnGetTensorNdDescriptor tensor num-dims dtype
+                                                  num-dims-return dims strides))
+    {:data-type (aget dtype 0)
+     :dims dims
+     :strides strides}))
+
+
+(defn set-tensor
+  [desc tensor-format dtype n c h w]
+  (cudnn-call (cudnn/cudnnSetTensor4dDescriptor desc tensor-format dtype n c h w))
+  desc)
+
+(def datatype-cudnn
+  [[:double cudnn/CUDNN_DATA_DOUBLE]
+   [:float cudnn/CUDNN_DATA_FLOAT]])
+
+(def datatype->cudnn-map
+  (into {} datatype-cudnn))
+
+
+(def cudnn->datatype-map
+  (clojure.set/map-invert datatype->cudnn-map))
+
+
+(defn dtype->cudnn
+  [dtype]
+  (get datatype->cudnn-map dtype))
+
+
+(defn cudnn->dtype
+  [cudnn-datatype]
+  (get cudnn->datatype-map cudnn-datatype))
+
+(defn tensor
+  (^cudnn$cudnnTensorStruct [dtype tensor-format n c h w]
+   (let [retval (cudnn$cudnnTensorStruct.)]
+     (cudnn-call (cudnn/cudnnCreateTensorDescriptor retval))
+     (set-tensor retval tensor-format (dtype->cudnn dtype) n c h w)
+     (resource/track retval)))
+  (^cudnn$cudnnTensorStruct [dtype n c h w]
+   (tensor dtype cudnn/CUDNN_TENSOR_NCHW n c h w))
+  (^cudnn$cudnnTensorStruct [n c h w]
+   (tensor :double cudnn/CUDNN_TENSOR_NCHW n c h w)))
+
+
+(extend-type cudnn$cudnnTensorStruct
+  dtype/PDatatype
+  (get-datatype [tensor]
+    (let [tensor-data (get-tensor tensor)
+          tensor-dtype (:data-type tensor-data)]
+      (cudnn->dtype tensor-dtype))))
+
+
+(defn activation-description
+  "example args: cudnn/CUDNN_ACTIVATION_RELU, cudnn/CUDNN_PROPAGATE_NAN, 0.0"
+  (^cudnn$cudnnActivationStruct [mode relu-nan-opt relu-ceiling]
+    (let [retval (cudnn$cudnnActivationStruct.)]
+      (do (cudnn-call (cudnn/cudnnCreateActivationDescriptor retval))
+          (cudnn-call (cudnn/cudnnSetActivationDescriptor
+                       retval mode relu-nan-opt relu-ceiling)))
+      (resource/track retval)))
+  (^cudnn$cudnnActivationStruct [mode]
+   (activation-description mode cudnn/CUDNN_PROPAGATE_NAN 0.0)))
+
+
 (defn driver
   []
   (when (and drv/*current-compute-device*
@@ -1306,3 +1485,6 @@ relies only on blockDim.x block.x and thread.x"
     (throw (ex-info "CUDA driver created while CUDA device is bound"
                     {:current-device (drv/current-device)})))
   (->CudaDriver (atom nil)))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

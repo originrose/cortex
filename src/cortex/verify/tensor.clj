@@ -186,3 +186,7 @@ for the cuda backend."
        (ct/gemv! tens-c-sub true 1 tens-a tens-a-col 0)
        (is (m/equals [144.0 166.0 188.0]
                      (ct/to-double-array tens-c-sub)))))))
+
+
+(defn batch-normalize
+  [driver datatype])
