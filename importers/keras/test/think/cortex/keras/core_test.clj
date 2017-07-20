@@ -17,10 +17,12 @@
 
 (deftest match-padding-correct
   "Verify that we get the correct padding value for same or valid padding."
-  (is (= [2 2] (keras/match-padding {:padding "same" :kernel_size [5 5]})))
   (is (= [1 1] (keras/match-padding {:padding "same" :kernel_size [3 3]})))
   (is (= [3 3] (keras/match-padding {:padding "same" :kernel_size [7 7]})))
-  (is (= [0 0] (keras/match-padding {:padding "valid" :kernel_size [3 3]}))))
+  (is (= [0 0] (keras/match-padding {:padding "valid" :kernel_size [3 3]})))
+  (is (= [2 2] (keras/match-padding {:padding [2 2] :kernel_size [5 5]})))
+  (is (= [3 3] (keras/match-padding {:padding [[3 3] [3 3]] :kernel_size [5 5]})))
+  (is (thrown? Exception (keras/match-padding {:padding [[3 2] [3 5]] :kernel_size [5 5]}))))
 
 
 (deftest mnist-keras-json-load

@@ -29,10 +29,26 @@
   "Maps from Keras padding descriptors to Cortex pad-x and pad-y values. Fn is
   public for test purposes."
   [config]
-  (if (= (:padding config) "same")
-    (mapv #(quot % 2) (:kernel_size config))
-    ;; else covers "valid" padding
-    [0 0]))
+  (let [pad (:padding config)]
+    (cond
+      (vector? pad)
+      (cond
+        ;; padding is one-level and symmetric, e.g. [2 2]
+        (integer? (first pad)) pad
+        ;; padding is nested but symmetric, e.g. [[3 3] [3 3]]
+        (and (= (first (first pad)) (last (first pad)))
+             (= (first (last pad)) (last (last pad))))
+        [(first (first pad)) (first (last pad))]
+        ;; padding is nested and asymmetric, e.g. [[3 2] [3 2]] => left and right not the same
+        :else
+        (throw (Exception. (format ("No support for asymmetric padding yet: %s") pad))))
+
+      (= (:padding config) "same")  (mapv #(quot % 2) (:kernel_size config))
+
+      ;; else covers "valid" padding
+      :else
+      [0 0])))
+
 
 (defn- inbound-nodes->parents
   [keras-inbound-nodes]
@@ -179,10 +195,9 @@
                                       (= (keyword (get (last model-vector) :class_name))
                                          :ZeroPadding2D))
                                  (conj (vec (drop-last model-vector))
-                                       (update-in current [:config]
-                                                  #(merge (get (last model-vector)
-                                                               :config)
-                                                          %)))
+                                       (assoc-in current [:config :padding]
+                                                 (get-in (last model-vector) [:config :padding])))
+
                                  ;;drop input layer (we create our own)
                                  (= (keyword class_name) :InputLayer)
                                  model-vector
@@ -425,7 +440,6 @@
 (defn- reshape-weights
   "check and possibly reshape weights for a given node."
   [id->weight-map network node-id]
-  (println "----------------------")
   (println node-id)
   (let [node (-> network
                  network/network->graph
@@ -486,10 +500,17 @@
                                         double-params)
                   [bias-arg scale-arg means-arg variances-arg] (mapv #(graph/get-node-argument node %)
                                                                      [:bias :scale :means :variances])]
-              (println channel-height)
-              (println channel-width)
-              (println (count (first expanded-params)))
-              (println (* (count (:data (first params))) channel-height channel-width))
+              ;; (println channel-height)
+              ;; (println channel-width)
+              ;; (println (count (first expanded-params)))
+              ;; (println (* (count (:data (first params))) channel-height channel-width))
+
+              ;; (reduce (fn [network param-kv]
+              ;;           (assoc-in network [:compute-graph :buffers
+              ;;                              (get (key param-kv) :buffer-id)
+              ;;                              :buffer]
+              ;;                     (get expanded-params (val param-kv))))
+              ;;         network (zipmap [bias-arg scale-arg means-arg variances-arg] [0 1 2 3]))
 
               (-> network
                   (assoc-in [:compute-graph :buffers
@@ -556,12 +577,12 @@
 
 
 (defn- network->nodes
-       "Given a network return a list of nodes in forward pass order"
-       [network]
+  "Given a network return a list of nodes in forward pass order"
+  [network]
   (let [forward-pass (-> (traverse/training-traversal network)
                          :forward)]
-            (->> (map :id forward-pass)
-                 (map #(get-in network [:compute-graph :nodes %])))))
+    (->> (map :id forward-pass)
+         (map #(get-in network [:compute-graph :nodes %])))))
 
 (defn- associate-layer-outputs
   "Output a layer output per desc associated with that desc.
@@ -579,6 +600,7 @@
                  (cond
                    (:embedded node) [node (get output-map (:embedded node))]
                    (= :input (:type node))     [node nil]
+                   (= :split (:type node))     [node nil]
                    :else (throw (ex-info "No matching output for layer!"
                                          {:cause :missing-output
                                           :layer node
