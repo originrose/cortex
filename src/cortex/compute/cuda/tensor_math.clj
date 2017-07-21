@@ -4,7 +4,8 @@
             [cortex.tensor.math :as tm]
             [cortex.tensor.index-system :as is]
             [cortex.compute.driver :as drv]
-            [cortex.compute.math-util :as cmu])
+            [cortex.compute.math-util :as cmu]
+            [think.resource.core :as resource])
   (:import [cortex.compute.cuda.driver CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer
             cublas cublas$cublasContext
@@ -298,48 +299,113 @@
                              output input means variances scale bias epsilon
                              batch-count
                              element-count]
-
-    (let [datatype (dtype/get-datatype input)
-          io-tensor (cuda-base/tensor datatype batch-count 1 1 element-count)
-          var-tensor (cuda-base/tensor datatype 1 1 1 element-count)]
-      (cuda-base/cudnn-with-stream
-       stream
-       (cuda-base/cudnn-call
-        (cudnn/cudnnBatchNormalizationForwardInference
-         cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
-         (value->ptr 1.0 datatype) ;;alpha
-         (value->ptr 0.0 datatype) ;;beta
-         io-tensor
-         (->ptr input)
-         io-tensor
-         (->ptr output)
-         var-tensor
-         (->ptr scale)
-         (->ptr bias)
-         (->ptr means)
-         (->ptr variances)
-         (double epsilon))))))
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input)
+            io-tensor (cuda-base/tensor datatype batch-count 1 1 element-count)
+            var-tensor (cuda-base/tensor datatype 1 1 1 element-count)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnBatchNormalizationForwardInference
+           cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           io-tensor
+           (->ptr input)
+           io-tensor
+           (->ptr output)
+           var-tensor
+           (->ptr scale)
+           (->ptr bias)
+           (->ptr means)
+           (->ptr variances)
+           (double epsilon)))))))
 
   (batch-normalize-spatial! [stream
                              output input means variances scale bias epsilon
                              batch-count channel-count element-count]
-    (let [datatype (dtype/get-datatype input)
-          io-tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)
-          var-tensor (cuda-base/tensor datatype 1 channel-count 1 1)]
-      (cuda-base/cudnn-with-stream
-       stream
-       (cuda-base/cudnn-call
-        (cudnn/cudnnBatchNormalizationForwardInference
-         cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
-         (value->ptr 1.0 datatype) ;;alpha
-         (value->ptr 0.0 datatype) ;;beta
-         io-tensor
-         (->ptr input)
-         io-tensor
-         (->ptr output)
-         var-tensor
-         (->ptr scale)
-         (->ptr bias)
-         (->ptr means)
-         (->ptr variances)
-         (double epsilon)))))))
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input)
+            io-tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)
+            var-tensor (cuda-base/tensor datatype 1 channel-count 1 1)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnBatchNormalizationForwardInference
+           cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           io-tensor
+           (->ptr input)
+           io-tensor
+           (->ptr output)
+           var-tensor
+           (->ptr scale)
+           (->ptr bias)
+           (->ptr means)
+           (->ptr variances)
+           (double epsilon)))))))
+
+  (batch-normalize-update-and-apply-eltwise! [stream
+                                              output input
+                                              batch-means batch-variances
+                                              running-means running-variances
+                                              average-factor
+                                              scale bias epsilon
+                                              batch-count element-count]
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input)
+            io-tensor (cuda-base/tensor datatype batch-count 1 1 element-count)
+            var-tensor (cuda-base/tensor datatype 1 1 1 element-count)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnBatchNormalizationForwardTraining
+           cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           io-tensor
+           (->ptr input)
+           io-tensor
+           (->ptr output)
+           var-tensor
+           (->ptr scale)
+           (->ptr bias)
+           (double average-factor)
+           (->ptr running-means)
+           (->ptr running-variances)
+           (double epsilon)
+           (->ptr batch-means)
+           (->ptr batch-variances)))))))
+
+  (batch-normalize-update-and-apply-spatial! [stream
+                                              output input
+                                              batch-means batch-variances
+                                              running-means running-variances
+                                              average-factor
+                                              scale bias epsilon
+                                              batch-count channel-count element-count]
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input)
+            io-tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)
+            var-tensor (cuda-base/tensor datatype 1 channel-count 1 1)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnBatchNormalizationForwardTraining
+           cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           io-tensor
+           (->ptr input)
+           io-tensor
+           (->ptr output)
+           var-tensor
+           (->ptr scale)
+           (->ptr bias)
+           (double average-factor)
+           (->ptr running-means)
+           (->ptr running-variances)
+           (double epsilon)
+           (->ptr batch-means)
+           (->ptr batch-variances))))))))

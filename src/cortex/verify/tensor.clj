@@ -227,3 +227,84 @@ for the cuda backend."
                     46.3207369515159, 48.436773799091696, 50.55281064666749]
                    (ct/to-double-array output)
                    1e-4)))))
+
+(defn batch-normalize-update-and-apply
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   ;;eltwise
+   (let [input (ct/->tensor (partition 3 (range 12)))
+         output (ct/new-tensor [4 3])
+         means (ct/->tensor (repeat 3 1))
+         ;;Ensure to include a variance of 0 to sniff out behavior in edge case
+         variances (ct/->tensor (range 0 3))
+         running-means (ct/->tensor (repeat 3 2))
+         running-variances (ct/->tensor (repeat 3 4))
+         ave-factor 0.8
+         scale (ct/->tensor (repeat 3 3))
+         bias (ct/->tensor (repeat 3 4))]
+     ;;Use a large epsilon to ensure the cpu version treats the epsilon identical
+     ;;as the gpu version
+     (ct/batch-normalize-update-and-apply! output input means variances
+                                           running-means running-variances ave-factor
+                                           scale bias 1e-2)
+     (is (m/equals [-0.023134696804511745, -0.023134696804511745, -0.023134696804511745,
+                    2.6589551010651626, 2.6589551010651626, 2.6589551010651626,
+                    5.341044898934837, 5.341044898934837, 5.341044898934837,
+                    8.023134696804512, 8.023134696804512, 8.023134696804512]
+                   (ct/to-double-array output)
+                   1e-4))
+     (is (m/equals [4.5, 5.5, 6.5]
+                   (ct/to-double-array means)
+                   1e-4))
+     ;;NVIDIA stores the batch variances in an odd 1/sqrt form.  This allows them to
+     ;;compute the answer slightly faster but it means the actual meaning of the
+     ;;variances variable is obscured.  Thus we cannot reliably test the batch-variances
+     ;;variable across implementations.  If you want per-batch variances then you need
+     ;;to set the average factor to 1.0.
+     (comment
+       (is (m/equals [0.29800997754107494, 0.29800997754107494, 0.29800997754107494]
+                     (ct/to-double-array variances)
+                     1e-4)))
+     (is (m/equals [4.0, 4.8, 5.6000000000000005]
+                   (ct/to-double-array running-means)
+                   1e-4))
+     (is (m/equals [12.8, 12.8, 12.8]
+                   (ct/to-double-array running-variances)
+                   1e-4)))
+   ;;spatial
+   (let [input (ct/->tensor (partition 3 (partition 4 (range 24))))
+         output (ct/new-tensor [2 3 4])
+         means (ct/->tensor (repeat 3 1))
+         ;;Ensure to include a variance of 0
+         variances (ct/->tensor (range 0 3))
+         running-means (ct/->tensor (repeat 3 2))
+         running-variances (ct/->tensor (repeat 3 4))
+         ave-factor 0.8
+         scale (ct/->tensor (repeat 3 3))
+         bias (ct/->tensor (repeat 3 4))]
+     ;;Use a large epsilon to ensure the cpu version treats the epsilon identical
+     ;;as the gpu version
+     (ct/batch-normalize-update-and-apply! output input means variances
+                                           running-means running-variances
+                                           ave-factor scale bias 1e-2)
+     (is (m/equals
+          [0.3139510961275713, 0.8054242833105618, 1.2968974704935523,
+           1.7883706576765428, 0.3139510961275713, 0.8054242833105618,
+           1.2968974704935523, 1.7883706576765428, 0.3139510961275713,
+           0.8054242833105618, 1.2968974704935523, 1.7883706576765428,
+           6.211629342323457, 6.703102529506448, 7.194575716689438,
+           7.686048903872429, 6.211629342323457, 6.703102529506448,
+           7.194575716689438, 7.686048903872429, 6.211629342323457,
+           6.703102529506448, 7.194575716689438, 7.686048903872429]
+          (ct/to-double-array output)
+          1e-4))
+     (is (m/equals [7.5, 11.5, 15.5]
+                   (ct/to-double-array means)
+                   1e-4))
+     (is (m/equals [6.4, 9.6, 12.8]
+                   (ct/to-double-array running-means)
+                   1e-4))
+     (is (m/equals [34.857142857142854, 34.857142857142854, 34.857142857142854]
+                   (ct/to-double-array running-variances)
+                   1e-4)))))

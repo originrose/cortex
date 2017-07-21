@@ -1033,6 +1033,60 @@ So either it is dense *or* num-columns is 1"
   c)
 
 
+(defn- batch-normalize-setup
+  "The various batch normalize calls all have a setup of setup rules.  This checks all
+preconditions and then returns the type of batch normalization required (spatial vs. eltwise)."
+  [io-args mean-var-bias-scale-args epsilon]
+  (let [all-args (concat io-args mean-var-bias-scale-args)
+        input-shape (shape (first io-args))
+        input (first io-args)]
+    (apply ensure-datatypes (get-datatype (first all-args)) all-args)
+    (apply ensure-same-device all-args)
+    (apply ensure-basic-indexing all-args)
+    (when-not-error (> (double epsilon) 1e-5)
+      "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
+      {:epsilon epsilon})
+    (when-not-error (or (= :double (get-datatype input))
+                        (= :float (get-datatype input)))
+      "batch-normalization is only defined for float and double tensors"
+      {:input-datatype (get-datatype input)})
+    ;;For cudnn operations the data must be packed at the moment.  This isn't a hard requirement
+    ;;but cudnn has per-operation constraints that take some research to divine out.
+    (apply ensure-vector-indexable mean-var-bias-scale-args)
+    (let [mvbs-args (mapv as-row-vector mean-var-bias-scale-args)
+          means-shape (shape (first mvbs-args))
+          io-shapes (mapv shape io-args)
+          mvbs-shapes (mapv shape mvbs-args)]
+      (when-not-error (> (count input-shape) 1)
+        "Input shape needs at least 2 dimensions"
+        {:input-shape (shape input)})
+      (when-not-error (= 1 (count (distinct io-shapes)))
+        "Tensor input and output shapes do not match"
+        {:io-shapes io-shapes})
+      (when-not-error (= 1 (count (distinct mvbs-shapes)))
+        "means, variances, scale, bias must have same shape"
+        {:mean-var-bias-scale-shapes mvbs-shapes})
+      (case (count input-shape)
+        2 (do
+            (when-not-error (= (second input-shape)
+                               (first means-shape))
+              "Means, variances, scale, bias must match input element count."
+              {:input-shape input-shape
+               :means-shape means-shape})
+            {:type :eltwise
+             :mvbs-args mvbs-args})
+        (let [batch-count (long (apply * (drop-last 2 input-shape)))
+              [channel-count element-count] (take-last 2 input-shape)]
+          (when-not-error (= (long channel-count)
+                             (long (first means-shape)))
+            "means, variances, scale bias size must match input channel count"
+            {:input-shape input-shape
+             :input-channel-count channel-count
+             :means-element-count (first means-shape)})
+          {:type :spatial
+           :mvbs-args mvbs-args})))))
+
+
 (defn batch-normalize!
   "output = ((input - mean) / (sqrt (variance + epsilon)) * scale + bias.
 
@@ -1047,77 +1101,93 @@ second to last dimensions is considered the channels member and means, variances
 bias are all 'channels' size in length and the normalization are applied in an channel-wise
 operation.  Batch size is then considered everything before the last two dimensions."
   [output input means variances scale bias epsilon]
-  (ensure-datatypes (get-datatype output) input means variances scale bias)
-  (ensure-same-device output input means variances scale bias)
-  (ensure-basic-indexing output input means variances scale bias)
-  (when-not-error (> (double epsilon) 1e-5)
-    "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
-    {:epsilon epsilon})
-  (when-not-error (or (= :double (get-datatype input))
-                      (= :float (get-datatype input)))
-      "batch-normalization is only defined for float and double tensors"
-      {:input-datatype (get-datatype input)})
-  ;;For cudnn operations the data must be packed at the moment.  This isn't a hard requirement
-  ;;but cudnn has per-operation constraints that take some research to divine out.
-  (ensure-vector-indexable output input means variances scale bias)
-  (let [means (as-row-vector means)
-        variances (as-row-vector variances)
-        scale (as-row-vector scale)
-        bias (as-row-vector bias)
-        input-shape (shape input)
-        means-shape (shape means)]
-    (when-not-error (> (count input-shape) 1)
-      "Input shape needs at least 2 dimensions"
-      {:input-shape (shape input)})
-    (when-not-error (= input-shape
-                       (shape output))
-      "Tensor input and output shapes do not match"
-      {:input-shape input-shape
-       :output-shape (shape output)})
-    (when-not-error (and (= means-shape (shape variances))
-                         (= means-shape (shape scale))
-                         (= means-shape (shape bias)))
-      "means, variances, scale, bias must have same shape"
-      {:means-shape means-shape
-       :variances-shape (shape variances)
-       :scale-shape (shape scale)
-       :bias-shape (shape bias)})
-    (case (count input-shape)
-      2 (do
-          (when-not-error (= (second input-shape)
-                             (first means-shape))
-            "Means, variances, scale, bias must match input element count."
-            {:input-shape input-shape
-             :means-shape means-shape})
-          (tm/batch-normalize-eltwise! (check-stream)
-                                       (tensor->buffer output)
-                                       (tensor->buffer input)
-                                       (tensor->buffer means)
-                                       (tensor->buffer variances)
-                                       (tensor->buffer scale)
-                                       (tensor->buffer bias)
-                                       epsilon
-                                       (first input-shape)
-                                       (second input-shape)))
+  (let [{:keys [type mvbs-args]} (batch-normalize-setup [output input]
+                                                        [means variances scale bias]
+                                                        epsilon)
+        [means variances scale bias] mvbs-args
+        input-shape (shape input)]
+    (condp = type
+      :eltwise (tm/batch-normalize-eltwise! (check-stream)
+                                            (tensor->buffer output)
+                                            (tensor->buffer input)
+                                            (tensor->buffer means)
+                                            (tensor->buffer variances)
+                                            (tensor->buffer scale)
+                                            (tensor->buffer bias)
+                                            epsilon
+                                            (first input-shape)
+                                            (second input-shape))
+      :spatial (let [batch-count (long (apply * (drop-last 2 input-shape)))
+                     [channel-count element-count] (take-last 2 input-shape)]
+                 (tm/batch-normalize-spatial! (check-stream)
+                                              (tensor->buffer output)
+                                              (tensor->buffer input)
+                                              (tensor->buffer means)
+                                              (tensor->buffer variances)
+                                              (tensor->buffer scale)
+                                              (tensor->buffer bias)
+                                              epsilon
+                                              batch-count
+                                              channel-count
+                                              element-count)))))
+
+(defn batch-normalize-update-and-apply!
+  "Calculate the per-batch stats and use those to ensure the output is normal.
+  Update the running means and variances using ave-factor like such:
+  running * (1 - ave-factor) + batch * ave-factor.
+  See documentation batch-normalize!
+
+!!!- NVIDIA stores the batch variances in an odd 1/sqrt form.  This probably allows them to
+  compute the answer slightly faster but it means the actual meaning of the batch variances
+  variable is obscured.  Thus we cannot reliably test the batch-variances variable across
+  implementations.  If you want per-batch variances then you need to set the average factor to
+  0.0 and then read out the running variances."
+  [output input
+   batch-means batch-variances
+   running-means running-variances
+   ave-factor
+   scale bias epsilon]
+  (let [{:keys [type mvbs-args]} (batch-normalize-setup [output input]
+                                                        [batch-means batch-variances
+                                                         running-means running-variances
+                                                         scale bias]
+                                                        epsilon)
+        [batch-means batch-variances
+         running-means running-variances
+         scale bias]             mvbs-args
+        input-shape              (shape input)]
+    (condp = type
+      :eltwise
+      (tm/batch-normalize-update-and-apply-eltwise! (check-stream)
+                                                    (tensor->buffer output)
+                                                    (tensor->buffer input)
+                                                    (tensor->buffer batch-means)
+                                                    (tensor->buffer batch-variances)
+                                                    (tensor->buffer running-means)
+                                                    (tensor->buffer running-variances)
+                                                    ave-factor
+                                                    (tensor->buffer scale)
+                                                    (tensor->buffer bias)
+                                                    epsilon
+                                                    (first input-shape)
+                                                    (second input-shape))
+      :spatial
       (let [batch-count (long (apply * (drop-last 2 input-shape)))
             [channel-count element-count] (take-last 2 input-shape)]
-        (when-not-error (= (long channel-count)
-                           (long (first means-shape)))
-          "means, variances, scale bias size must match input channel count"
-          {:input-shape input-shape
-           :input-channel-count channel-count
-           :means-element-count (first means-shape)})
-        (tm/batch-normalize-spatial! (check-stream)
-                                     (tensor->buffer output)
-                                     (tensor->buffer input)
-                                     (tensor->buffer means)
-                                     (tensor->buffer variances)
-                                     (tensor->buffer scale)
-                                     (tensor->buffer bias)
-                                     epsilon
-                                     batch-count
-                                     channel-count
-                                     element-count)))))
+        (tm/batch-normalize-update-and-apply-spatial! (check-stream)
+                                                      (tensor->buffer output)
+                                                      (tensor->buffer input)
+                                                      (tensor->buffer batch-means)
+                                                      (tensor->buffer batch-variances)
+                                                      (tensor->buffer running-means)
+                                                      (tensor->buffer running-variances)
+                                                      ave-factor
+                                                      (tensor->buffer scale)
+                                                      (tensor->buffer bias)
+                                                      epsilon
+                                                      batch-count
+                                                      channel-count
+                                                      element-count)))))
 
 (extend-type Tensor
   mp/PVectorView

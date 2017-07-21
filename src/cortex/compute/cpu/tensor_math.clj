@@ -1,5 +1,5 @@
 (ns cortex.compute.cpu.tensor-math
-  (:require [think.datatype.core :as dtype]
+  (:require [think.datatype.core :refer [v-aget v-aset] :as dtype]
             [think.datatype.marshal :as marshal]
             [cortex.tensor.math :as tm]
             [cortex.tensor.index-system :as is]
@@ -48,7 +48,7 @@
              ~length)
         1)
     :indexed
-    `(dtype/v-aget ~indexes (rem ~index-idx
+    `(v-aget ~indexes (rem ~index-idx
                                  ~length))))
 
 
@@ -163,7 +163,7 @@
             value# (~dtype-cast-fn value#)]
         (parallel/parallel-for
          idx# n-elems#
-         (dtype/v-aset buffer# (.idx_to_address idx->address# idx#) value#))))))
+         (v-aset buffer# (.idx_to_address idx->address# idx#) value#))))))
 
 
 (def ^:private assign-constant-map
@@ -214,10 +214,10 @@
            n-elems# (long n-elems#)]
        (parallel/parallel-for
         idx# n-elems#
-        (dtype/v-aset dest# (.idx_to_address dest-idx->address# idx#)
+        (v-aset dest# (.idx_to_address dest-idx->address# idx#)
                       (datatype->cast-fn
                        ~lhs-dtype
-                       (dtype/v-aget src# (.idx_to_address src-idx->address# idx#))))))))
+                       (v-aget src# (.idx_to_address src-idx->address# idx#))))))))
 
 
 (defmacro ^:private generate-all-marshalling-assign-fns
@@ -269,11 +269,11 @@
            dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)]
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [dest-idx# (.idx_to_address dest-idx->address# idx#)]
-                (dtype/v-aset dest# dest-idx#
+                (v-aset dest# dest-idx#
                               (datatype->cast-fn
                                ~datatype
                                (perform-op-rev-ops ~operation ~reverse-operands?
-                                                   (* (dtype/v-aget dest# dest-idx#) dest-alpha#)
+                                                   (* (v-aget dest# dest-idx#) dest-alpha#)
                                                    scalar#))))))))
 
 
@@ -309,11 +309,11 @@
         idx# (long n-elems#)
         (let [dest-idx# (.idx_to_address dest-idx->address# idx#)
               x-idx# (.idx_to_address x-idx->address# idx#)]
-          (dtype/v-aset dest# dest-idx#
+          (v-aset dest# dest-idx#
                         (datatype->cast-fn
                          ~datatype
                          (perform-op-rev-ops ~operation ~reverse-operands?
-                                             (* (dtype/v-aget x# x-idx#) x-alpha#)
+                                             (* (v-aget x# x-idx#) x-alpha#)
                                              scalar#))))))))
 
 
@@ -347,12 +347,12 @@
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [dest-idx# (.idx_to_address dest-idx->address# idx#)
                     y-idx# (.idx_to_address y-idx->address# idx#)]
-                (dtype/v-aset dest# dest-idx#
+                (v-aset dest# dest-idx#
                               (datatype->cast-fn
                                ~datatype
                                (perform-op-rev-ops ~operation ~reverse-operands?
-                                                   (* (dtype/v-aget dest# dest-idx#) dest-alpha#)
-                                                   (* (dtype/v-aget y# y-idx#) y-alpha#)))))))))
+                                                   (* (v-aget dest# dest-idx#) dest-alpha#)
+                                                   (* (v-aget y# y-idx#) y-alpha#)))))))))
 
 
 (defmacro binary-accum-table
@@ -391,12 +391,12 @@
         (let [dest-idx# (.idx_to_address dest-idx->address# idx#)
               x-idx# (.idx_to_address x-idx->address# idx#)
               y-idx# (.idx_to_address y-idx->address# idx#)]
-          (dtype/v-aset dest# dest-idx#
+          (v-aset dest# dest-idx#
                         (datatype->cast-fn
                          ~datatype
                          (perform-operation-impl ~operation
-                                                 (* (dtype/v-aget x# x-idx#) x-alpha#)
-                                                 (* (dtype/v-aget y# y-idx#) y-alpha#)))))))))
+                                                 (* (v-aget x# x-idx#) x-alpha#)
+                                                 (* (v-aget y# y-idx#) y-alpha#)))))))))
 
 
 (defmacro binary-op-table
@@ -493,19 +493,19 @@
            epsilon# (datatype->cast-fn ~datatype epsilon#)]
        (parallel/parallel-for
         elem-idx# element-count#
-        (let [variance# (dtype/v-aget variances-ary# elem-idx#)
+        (let [variance# (v-aget variances-ary# elem-idx#)
               ;;Account for if the variance is zero.
               inv-std-dev# (datatype->cast-fn ~datatype (Math/sqrt (/ 1.0
                                                                      (+ variance# epsilon#))))
-              mean# (dtype/v-aget means-ary# elem-idx#)
-              scale# (dtype/v-aget scale-ary# elem-idx#)
-              shift# (dtype/v-aget bias-ary# elem-idx#)]
+              mean# (v-aget means-ary# elem-idx#)
+              scale# (v-aget scale-ary# elem-idx#)
+              shift# (v-aget bias-ary# elem-idx#)]
           (c-for
            [batch-idx# 0 (< batch-idx# batch-count#) (inc batch-idx#)]
            (let [item-offset# (+ (* batch-idx# element-count#) elem-idx#)
-                 x-hat# (* (- (dtype/v-aget input-ary# item-offset#) mean#)
+                 x-hat# (* (- (v-aget input-ary# item-offset#) mean#)
                            inv-std-dev#)]
-             (dtype/v-aset output-ary# item-offset#
+             (v-aset output-ary# item-offset#
                            (+ (* x-hat# scale#) shift#)))))))))
 
 
@@ -526,13 +526,13 @@
            batch-stride# (* channel-count# element-count#)]
        (parallel/parallel-for
         channel-idx# channel-count#
-        (let [variance# (dtype/v-aget variances-ary# channel-idx#)
+        (let [variance# (v-aget variances-ary# channel-idx#)
               ;;Account for if the variance is zero.
               inv-std-dev# (datatype->cast-fn ~datatype (Math/sqrt (/ 1.0
                                                                      (+ variance# epsilon#))))
-              mean# (dtype/v-aget means-ary# channel-idx#)
-              scale# (dtype/v-aget scale-ary# channel-idx#)
-              shift# (dtype/v-aget bias-ary# channel-idx#)
+              mean# (v-aget means-ary# channel-idx#)
+              scale# (v-aget scale-ary# channel-idx#)
+              shift# (v-aget bias-ary# channel-idx#)
               channel-offset# (* channel-idx# element-count#)]
           (c-for
            [batch-idx# 0 (< batch-idx# batch-count#) (inc batch-idx#)]
@@ -540,10 +540,164 @@
             (c-for
              [elem-idx# 0 (< elem-idx# element-count#) (inc elem-idx#)]
              (let [item-offset# (+ batch-offset# elem-idx#)
-                   x-hat# (* (- (dtype/v-aget input-ary# item-offset#) mean#)
+                   x-hat# (* (- (v-aget input-ary# item-offset#) mean#)
                              inv-std-dev#)]
-               (dtype/v-aset output-ary# item-offset#
+               (v-aset output-ary# item-offset#
                              (+ (* x-hat# scale#) shift#)))))))))))
+
+
+(defmacro sum-double-var
+  "macro to sum a double accumulator.  Note that we are careful
+  to avoid adding the first calculated answer to 0.0 as if that answer is very small
+  we would introduce roundoff error immediately.  So we need a slightly more complex loop
+  in order to avoid adding a small number to 0."
+  [idx-var num-iters stmt]
+  `(double
+    (if (= 0 ~num-iters)
+      0.0
+      (loop [sum-var# (let [~idx-var 0] ~stmt)
+             ~idx-var 1]
+        (if (< ~idx-var ~num-iters)
+          (recur (+ sum-var# ~stmt) (inc ~idx-var))
+          sum-var#)))))
+
+
+(defmacro batch-normalize-update-eltwise-impl
+  [datatype]
+  `(fn [input#
+        batch-means# batch-variances#
+        running-means# running-variances#
+        average-factor#
+        batch-count# element-count#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           batch-means-ary# (datatype->view-cast-fn ~datatype batch-means#)
+           batch-variances-ary# (datatype->view-cast-fn ~datatype batch-variances#)
+           running-means-ary# (datatype->view-cast-fn ~datatype running-means#)
+           running-variances-ary# (datatype->view-cast-fn ~datatype running-variances#)
+           ave-factor# (datatype->cast-fn ~datatype average-factor#)
+           ave-lerp# (- (datatype->cast-fn ~datatype 1.0) ave-factor#)
+           batch-count# (long batch-count#)
+           element-count# (long element-count#)]
+       (parallel/parallel-for
+        elem-idx# element-count#
+        (let [variance# (v-aget running-variances-ary# elem-idx#)
+              mean# (v-aget running-means-ary# elem-idx#)
+              batch-count-val# (double batch-count#)
+              var-batch-count# (max 1.0 (- batch-count-val# 1.0))
+              new-mean# (datatype->cast-fn
+                         ~datatype
+                         (/ (sum-double-var batch-idx# batch-count#
+                                            (v-aget input-ary#
+                                                    (+ elem-idx#
+                                                       (* batch-idx# element-count#))))
+                            batch-count-val#))
+
+              new-var# (sum-double-var
+                        batch-idx# batch-count#
+                        (let [mean-diff# (- new-mean#
+                                            (v-aget input-ary#
+                                                    (+ elem-idx#
+                                                       (* batch-idx#
+                                                          element-count#))))]
+                          (* mean-diff# mean-diff#)))]
+          (v-aset batch-means-ary# elem-idx#
+                  new-mean#)
+          (v-aset batch-variances-ary# elem-idx#
+                  (datatype->cast-fn ~datatype
+                                     (/ new-var#
+                                        batch-count-val#)))
+          (v-aset running-means-ary# elem-idx#
+                  (+ (* mean# ave-lerp#) (* new-mean# ave-factor#)))
+          (v-aset running-variances-ary# elem-idx#
+                  (+ (* variance# ave-lerp#) (* (datatype->cast-fn ~datatype
+                                                                   (/ new-var#
+                                                                      var-batch-count#))
+                                                ave-factor#))))))))
+
+(defmacro nested-sum-double-var
+  "summation across two variables.  Sum var set to initial value, not zero."
+  [outer-idx outer-count inner-idx inner-count stmt]
+  `(double
+    (if (or (= 0 ~outer-count)
+            (= 0 ~inner-count))
+      0.0
+      (let [initial-value# (double
+                            (let [~outer-idx 0
+                                  ~inner-idx 0]
+                              ~stmt))]
+        (loop [sum-var# initial-value#
+               ~outer-idx 0]
+          (if (< ~outer-idx ~outer-count)
+            (recur
+             (double
+              (loop [sum-var# sum-var#
+                     ~inner-idx (if (= 0 ~outer-idx)
+                                  1
+                                  0)]
+                (if (< ~inner-idx ~inner-count)
+                  (recur (+ sum-var# ~stmt)
+                         (inc ~inner-idx))
+                  sum-var#)))
+             (inc ~outer-idx))
+            sum-var#))))))
+
+
+(defmacro batch-normalize-update-spatial-impl
+  [datatype]
+  `(fn [input#
+        batch-means# batch-variances#
+        running-means# running-variances#
+        average-factor#
+        batch-count# channel-count# element-count#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           batch-means-ary# (datatype->view-cast-fn ~datatype batch-means#)
+           batch-variances-ary# (datatype->view-cast-fn ~datatype batch-variances#)
+           running-means-ary# (datatype->view-cast-fn ~datatype running-means#)
+           running-variances-ary# (datatype->view-cast-fn ~datatype running-variances#)
+           ave-factor# (datatype->cast-fn ~datatype average-factor#)
+           ave-lerp# (- (datatype->cast-fn ~datatype 1.0) ave-factor#)
+           batch-count# (long batch-count#)
+           channel-count# (long channel-count#)
+           element-count# (long element-count#)
+           batch-stride# (* channel-count# element-count#)
+           batch-var-div# (max 1.0 (double (* batch-count# element-count#)))
+           running-var-div# (max 1.0 (- batch-var-div# 1.0))]
+       (parallel/parallel-for
+        channel-idx# channel-count#
+        (let [variance# (v-aget running-variances-ary# channel-idx#)
+              mean# (v-aget running-means-ary# channel-idx#)
+              channel-offset# (* channel-idx# element-count#)
+              new-mean# (datatype->cast-fn
+                         ~datatype
+                         (/ (nested-sum-double-var
+                             batch-idx# batch-count#
+                             elem-idx# element-count#
+                             (v-aget input-ary#
+                                     (+ elem-idx# channel-offset#
+                                        (* batch-idx# batch-stride#))))
+                            batch-var-div#))
+
+              new-var# (nested-sum-double-var
+                        batch-idx# batch-count#
+                        elem-idx# element-count#
+                        (let [mean-diff# (- new-mean#
+                                            (v-aget input-ary#
+                                                    (+ elem-idx# channel-offset#
+                                                       (* batch-idx# batch-stride#))))]
+                          (* mean-diff# mean-diff#)))]
+          (v-aset batch-means-ary# channel-idx#
+                  new-mean#)
+          (v-aset batch-variances-ary# channel-idx#
+                  (datatype->cast-fn ~datatype
+                                     (/ new-var#
+                                        batch-var-div#)))
+          (v-aset running-means-ary# channel-idx#
+                  (+ (* mean# ave-lerp#) (* new-mean# ave-factor#)))
+          (v-aset running-variances-ary# channel-idx#
+                  (+ (* variance# ave-lerp#) (* (datatype->cast-fn ~datatype
+                                                                   (/ new-var#
+                                                                      running-var-div#))
+                                                ave-factor#))))))))
 
 
 (defonce cpu-nn-ops-types [:float :double])
@@ -552,8 +706,11 @@
 (defmacro cpu-nn-ops-macro
   []
   (->> (for [ops-type cpu-nn-ops-types]
-         [ops-type {:batch-normalize-eltwise! `(batch-normalize-eltwise-impl ~ops-type)
-                    :batch-normalize-spatial! `(batch-normalize-spatial-impl ~ops-type)}])
+         [ops-type
+          {:batch-normalize-eltwise! `(batch-normalize-eltwise-impl ~ops-type)
+           :batch-normalize-spatial! `(batch-normalize-spatial-impl ~ops-type)
+           :batch-normalize-update-eltwise! `(batch-normalize-update-eltwise-impl ~ops-type)
+           :batch-normalize-update-spatial! `(batch-normalize-update-spatial-impl ~ops-type)}])
        (into {})))
 
 
@@ -657,4 +814,40 @@
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-spatial!])
        output input means variances scale bias epsilon
+       batch-count channel-count element-count)))
+
+  (batch-normalize-update-and-apply-eltwise! [stream
+                                              output input
+                                              batch-means batch-variances
+                                              running-means running-variances
+                                              average-factor
+                                              scale bias epsilon
+                                              batch-count element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-update-eltwise!])
+       input
+       batch-means batch-variances
+       running-means running-variances
+       average-factor
+       batch-count element-count)
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-eltwise!])
+       output input batch-means batch-variances scale bias epsilon
+       batch-count element-count)))
+
+  (batch-normalize-update-and-apply-spatial! [stream
+                                              output input
+                                              batch-means batch-variances
+                                              running-means running-variances
+                                              average-factor
+                                              scale bias epsilon
+                                              batch-count channel-count element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-update-spatial!])
+       input
+       batch-means batch-variances
+       running-means running-variances
+       average-factor
+       batch-count channel-count element-count)
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-spatial!])
+       output input batch-means batch-variances scale bias epsilon
        batch-count channel-count element-count))))

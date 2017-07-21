@@ -39,3 +39,7 @@
 
 (def-double-float-test batch-normalize!
   (verify-tensor/batch-normalize (driver) *datatype*))
+
+
+(def-double-float-test batch-normalize-update-and-apply
+  (verify-tensor/batch-normalize-update-and-apply (driver) *datatype*))

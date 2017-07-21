@@ -82,4 +82,23 @@ Apply operation elementwise across batch-count batches.")
     "Same idea as batch-normalize-eltwise but apply across channels across batches meaning
 there will channel-count of means, variances, scale, and bias.  Input, output can be
 considered vectors of [batch-count channel-count element-count] in length.  Put another way,
-each mean is applied to all elements in a particular channel across all batches."))
+each mean is applied to all elements in a particular channel across all batches.")
+   (batch-normalize-update-and-apply-eltwise! [stream
+                                               output input
+                                               batch-means batch-variances
+                                               running-means running-variances
+                                               average-factor
+                                               scale bias epsilon
+                                               batch-count element-count]
+    "Calculate the batch means and variances using population stats (1-N divisor).  These get
+stored in batch-means, batch-variances.  Use these to do the batch normalization.  Compute
+running means, variances using a running average
+(existing * ave-factor + new * (1 - ave-factor).")
+  (batch-normalize-update-and-apply-spatial! [stream
+                                              output input
+                                              batch-means batch-variances
+                                              running-means running-variances
+                                              average-factor
+                                              scale bias epsilon
+                                              batch-count channel-count element-count]
+    "Spatial version.  See batch-normalize-spatial!"))
