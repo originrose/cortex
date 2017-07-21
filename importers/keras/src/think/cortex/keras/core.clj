@@ -92,7 +92,7 @@
         [stride-x stride-y] (:strides config)
         layer             (layers/convolutional-type-layer :max-pooling
                                                            kernel-x kernel-y 0 0
-                                                           stride-x stride-y 0 :ceil)
+                                                           stride-x stride-y 0 :floor)
         layer-id            (-> config :name keyword)]
     (if inbound_nodes
       (assoc layer :id layer-id :parents (inbound-nodes->parents inbound_nodes))
@@ -440,7 +440,6 @@
 (defn- reshape-weights
   "check and possibly reshape weights for a given node."
   [id->weight-map network node-id]
-  (println node-id)
   (let [node (-> network
                  network/network->graph
                  (graph/get-node node-id))
@@ -500,36 +499,14 @@
                                         double-params)
                   [bias-arg scale-arg means-arg variances-arg] (mapv #(graph/get-node-argument node %)
                                                                      [:bias :scale :means :variances])]
-              ;; (println channel-height)
-              ;; (println channel-width)
-              ;; (println (count (first expanded-params)))
-              ;; (println (* (count (:data (first params))) channel-height channel-width))
 
-              ;; (reduce (fn [network param-kv]
-              ;;           (assoc-in network [:compute-graph :buffers
-              ;;                              (get (key param-kv) :buffer-id)
-              ;;                              :buffer]
-              ;;                     (get expanded-params (val param-kv))))
-              ;;         network (zipmap [bias-arg scale-arg means-arg variances-arg] [0 1 2 3]))
-
-              (-> network
-                  (assoc-in [:compute-graph :buffers
-                             (get bias-arg :buffer-id)
-                             :buffer]
-                            (get expanded-params 0))
-                  (assoc-in [:compute-graph :buffers
-                             (get scale-arg :buffer-id)
-                             :buffer]
-                            (get expanded-params 1))
-                  (assoc-in [:compute-graph :buffers
-                             (get means-arg :buffer-id)
-                             :buffer]
-                            (get expanded-params 2))
-                  (assoc-in [:compute-graph :buffers
-                             (get variances-arg :buffer-id)
-                             :buffer]
-                            (get expanded-params 3)))))
-          ))
+              (reduce (fn [network param-kv]
+                        (assoc-in network [:compute-graph :buffers
+                                           (get (key param-kv) :buffer-id)
+                                           :buffer]
+                                  (get expanded-params (val param-kv))))
+                      network (zipmap [bias-arg scale-arg means-arg variances-arg] [0 1 2 3]))
+              ))))
       network)))
 
 
