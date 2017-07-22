@@ -25,6 +25,7 @@
   [(layers/input 28 28 1 :id :data)
    (layers/convolutional 5 0 1 20 :weights {:l2-regularization 1e-3})
    (layers/max-pooling 2 0 2)
+   (layers/batch-normalization :mode :spatial)
    (layers/dropout 0.9)
    (layers/relu)
    (layers/local-response-normalization)

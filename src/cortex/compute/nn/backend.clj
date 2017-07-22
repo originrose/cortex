@@ -50,22 +50,11 @@ some specific data from a description.  Most layers need to implement
 computelayer/forward,backward."
   (create [backend layer batch-size]))
 
-
 (defprotocol PDropout
   ;;Flat distribution -> scaled 1 or 0 multiplicative buffer.
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer])
   ;;Gaussian distribution copied to mult buffer.
   (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]))
-
-
-(defprotocol PBatchNormalization
-  (batch-norm-inference! [backend input running-means running-variances scale bias output epsilon])
-  (batch-norm-forward! [backend input
-                        running-means running-variances batch-means batch-variances
-                        scale bias output average-factor epsilon])
-  (batch-norm-backward! [backend input batch-means batch-variances scale bias output
-                         scale-gradient bias-gradient input-gradient output-gradient
-                         epsilon]))
 
 (defn array
   ([backend data items-per-batch]

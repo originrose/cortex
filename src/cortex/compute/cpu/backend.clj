@@ -77,15 +77,6 @@
   (cpu-avg-exc-pad-pooling-backward [input output input-gradient output-gradient conv-config])
   (cpu-prepare-bernoulli-dropout [mult-buffer rand-buffer probability])
   (cpu-prepare-gaussian-dropout [mult-buffer rand-buffer])
-  (cpu-bn-calc [input running-means running-variances
-                scale bias output batch-size batch-stride])
-  (cpu-update-means-variances [input
-                               running-means running-variances
-                               saved-means saved-variances
-                               batch-size batch-stride ave-factor epsilon])
-  (cpu-bn-backward [input saved-means saved-variances scale bias output
-                    scale-gradient bias-gradient input-gradient
-                    output-gradient batch-size batch-stride])
   (cpu-lrn-forward [input output input-tensor n k alpha beta])
   (cpu-lrn-backward [input output-gradient input-gradient input-tensor n k alpha beta]))
 
@@ -392,33 +383,6 @@
                     (~cast-fn (v-aget rand-ary# idx#))))))
 
 
-(defmacro cpu-bn-calc-impl
-  [input means variances scale bias output batch-size batch-stride cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         means-ary# (ArrayView/toView ~means)
-         variances-ary# (ArrayView/toView ~variances)
-         scale-ary# (ArrayView/toView ~scale)
-         bias-ary# (ArrayView/toView ~bias)
-         output-ary# (ArrayView/toView ~output)
-         batch-size# (long ~batch-size)
-         batch-stride# (long ~batch-stride)]
-     (parallel/parallel-for
-      elem-idx# batch-stride#
-      (let [variance# (v-aget variances-ary# elem-idx#)
-            ;;Account for if the variance is zero.
-            inv-std-dev# (~cast-fn (if (> variance# (~cast-fn Float/MIN_VALUE))
-                                     (Math/sqrt (/ 1.0 variance#))
-                                     (~cast-fn 1.0)))
-            mean# (v-aget means-ary# elem-idx#)
-            scale# (v-aget scale-ary# elem-idx#)
-            shift# (v-aget bias-ary# elem-idx#)]
-        (c-for
-         [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
-         (let [item-offset# (+ (* batch-idx# batch-stride#) elem-idx#)
-               x-hat# (* (- (v-aget input-ary# item-offset#) mean#)
-                         inv-std-dev#)]
-           (v-aset output-ary# item-offset#
-                   (+ (* x-hat# scale#) shift#))))))))
 
 (defmacro sum-double-var
   "Carefully written macro to sum a double variable.  Note that we are careful
@@ -434,148 +398,6 @@ in order to avoid adding a small number to 0."
           (if (< ~idx-var ~num-iters)
             (recur (+ sum-var# ~stmt) (inc ~idx-var))
             sum-var#)))))
-
-(defmacro cpu-update-means-variances-impl
-  [input running-means running-variances
-   saved-means saved-variances
-   batch-size batch-stride ave-factor epsilon cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         running-means-ary# (ArrayView/toView ~running-means)
-         running-variances-ary# (ArrayView/toView ~running-variances)
-         saved-means-ary# (ArrayView/toView ~saved-means)
-         saved-variances-ary# (ArrayView/toView ~saved-variances)
-         batch-size# (long ~batch-size)
-         batch-stride# (long ~batch-stride)
-         ave-factor# (~cast-fn ~ave-factor)
-         ave-lerp# (- (~cast-fn 1.0) ave-factor#)
-         epsilon# (~cast-fn ~epsilon)]
-     (parallel/parallel-for elem-idx# batch-stride#
-      (let [variance# (v-aget running-variances-ary# elem-idx#)
-            mean# (v-aget running-means-ary# elem-idx#)
-            input-idx# elem-idx#
-            batch-size-val# (double batch-size#)
-            var-batch-size# (max 1.0 (- batch-size-val# 1.0))
-            new-mean# (~cast-fn
-                       (/ (sum-double-var batch-idx# batch-size#
-                                          (v-aget input-ary#
-                                                  (+ input-idx#
-                                                     (* batch-idx# batch-stride#))))
-                          batch-size-val#))
-
-            new-var# (double
-                      (+
-                       epsilon#
-                       (sum-double-var batch-idx# batch-size#
-                                       (let [mean-diff# (- new-mean#
-                                                           (v-aget input-ary#
-                                                                   (+ input-idx#
-                                                                      (* batch-idx#
-                                                                         batch-stride#))))]
-                                         (* mean-diff# mean-diff#)))))]
-        (v-aset saved-means-ary# elem-idx# new-mean#)
-        (v-aset saved-variances-ary# elem-idx# (~cast-fn
-                                                (/ new-var#
-                                                   batch-size-val#)))
-        (v-aset running-means-ary# elem-idx#
-                (+ (* mean# ave-lerp#) (* new-mean# ave-factor#)))
-        (v-aset running-variances-ary# elem-idx#
-                (+ (* variance# ave-lerp#) (* (~cast-fn (/ new-var#
-                                                           var-batch-size#))
-                                              ave-factor#)))))))
-
-(defmacro cpu-bn-backward-impl [input means variances scale bias output
-                                scale-gradient bias-gradient input-gradient
-                                output-gradient batch-size batch-stride cast-fn]
-  `(let [batch-size# (long ~batch-size)
-         batch-stride# (long ~batch-stride)
-         pow-factor# (~cast-fn (/ -3.0 2.0))]
-     (parallel/parallel-for
-      elem-idx# batch-stride#
-      (let [input-ary# (ArrayView/toView ~input elem-idx#)
-            means-ary# (ArrayView/toView ~means elem-idx#)
-            variances-ary# (ArrayView/toView ~variances elem-idx#)
-            scale-ary# (ArrayView/toView ~scale elem-idx#)
-            bias-ary# (ArrayView/toView ~bias elem-idx#)
-            output-ary# (ArrayView/toView ~output elem-idx#)
-            scale-gradient-ary# (ArrayView/toView ~scale-gradient elem-idx#)
-            bias-gradient-ary# (ArrayView/toView ~bias-gradient elem-idx#)
-            input-gradient-ary# (ArrayView/toView ~input-gradient elem-idx#)
-            output-gradient-ary# (ArrayView/toView ~output-gradient elem-idx#)
-            scale# (v-aget scale-ary# 0)
-            inv-variance# (/ 1.0
-                             (v-aget variances-ary# 0))
-            inv-std-dev# (Math/sqrt inv-variance#)
-            mean# (v-aget means-ary# 0)
-            d-x-hat-d-out-ary# input-gradient-ary#
-            d-var# (~cast-fn (* -0.5 (Math/pow (/ 1.0 inv-variance#) pow-factor#)))]
-        ;;(println 1)
-        ;;These sums are somewhat inefficient but the math is so complicated
-        ;;that I want to lay it out without combining loops.
-        (v-aset bias-gradient-ary# 0
-                (~cast-fn (sum-double-var
-                           batch-idx# batch-size#
-                           (let [batch-offset# (* batch-idx# batch-stride#)]
-                             (v-aget output-gradient-ary# batch-offset#)))))
-        ;;(println 2)
-        (v-aset scale-gradient-ary# 0
-                (~cast-fn (sum-double-var
-                           batch-idx# batch-size#
-                           (let [batch-offset# (* batch-idx# batch-stride#)]
-                             (* (v-aget output-gradient-ary# batch-offset#)
-                                (* (- (v-aget input-ary# batch-offset#)
-                                      mean#)
-                                   inv-std-dev#))))))
-        ;;(println 3)
-        ;;run through get get d-x-hat/d-output.  Store in input-gradient
-        (c-for [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
-               (let [batch-offset# (* batch-idx# batch-stride#)]
-                 (v-aset d-x-hat-d-out-ary# batch-offset#
-                       (* scale# (v-aget output-gradient-ary# batch-offset#)))))
-        ;;(println 4)
-        ;;Input gradient calculation...
-        (let [d-var-d-out# (~cast-fn
-                            (sum-double-var
-                             batch-idx# batch-size#
-                             (let [batch-offset# (* batch-idx# batch-stride#)]
-                               (* (v-aget d-x-hat-d-out-ary# batch-offset#)
-                                  (- (v-aget input-ary# batch-offset#)
-                                     mean#)
-                                  d-var#))))
-              d-mean-d-out# (~cast-fn
-                             (+ (sum-double-var
-                                 batch-idx# batch-size#
-                                 (let [batch-offset# (* batch-idx# batch-stride#)]
-                                   (* (- (v-aget d-x-hat-d-out-ary# batch-offset# ))
-                                      inv-std-dev#)))
-                                (* d-var-d-out#
-                                   (/ (sum-double-var
-                                       batch-idx# batch-size#
-                                       (let [batch-offset# (* batch-idx# batch-stride#)]
-                                         (* -2.0
-                                            (- (v-aget input-ary# batch-offset#)
-                                               mean#))))
-                                      batch-size#))))]
-          ;;(println 5)
-          ;;final input gradient calculation
-          (c-for
-           [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
-           (let [batch-offset# (* batch-idx# batch-stride#)
-                 d-x-hat-d-out# (v-aget d-x-hat-d-out-ary# batch-offset#)
-                 input-var# (v-aget input-ary# batch-offset#)
-                 one-over-batch-size# (/ 1.0 batch-size#)
-                 sum-part-1# (* d-x-hat-d-out# inv-std-dev#)
-                 sum-part-2# (* d-var-d-out# 2.0 (- input-var# mean#) one-over-batch-size#)
-                 sum-part-3# (* d-mean-d-out# one-over-batch-size#)]
-             (comment (when (= 0 elem-idx#)
-                        (clojure.pprint/pprint
-                         [[:sum-part-1 sum-part-1#]
-                          [:sum-part-2 sum-part-2#]
-                          [:sum-part-3 sum-part-3#]])))
-             (v-aset input-gradient-ary# batch-offset#
-                     (~cast-fn (+ (+ sum-part-1# sum-part-3#) sum-part-2#)))))
-
-          ;;(println "backward finished")
-          )))))
 
 
 (defmacro a-pluseq
@@ -846,26 +668,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability double))
   (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
     (cpu-prepare-gaussian-impl mult-buffer rand-buffer double))
-  (cpu-bn-calc [^DoubleArrayView input ^DoubleArrayView means ^DoubleArrayView variances
-                ^DoubleArrayView scale ^DoubleArrayView bias ^DoubleArrayView output
-                batch-size batch-stride]
-    (cpu-bn-calc-impl input means variances scale bias output batch-size batch-stride double))
-  (cpu-update-means-variances [input
-                               ^DoubleArrayView running-means ^DoubleArrayView running-variances
-                               ^DoubleArrayView saved-means ^DoubleArrayView saved-variances
-                               batch-size batch-stride ave-factor epsilon]
-    (cpu-update-means-variances-impl input running-means running-variances
-                                     saved-means saved-variances
-                                     batch-size batch-stride
-                                     ave-factor epsilon double))
-  (cpu-bn-backward [input ^DoubleArrayView means ^DoubleArrayView
-                    variances ^DoubleArrayView scale
-                    ^DoubleArrayView bias ^DoubleArrayView output
-                    ^DoubleArrayView scale-gradient
-                    ^DoubleArrayView bias-gradient ^DoubleArrayView input-gradient
-                    ^DoubleArrayView output-gradient batch-size batch-stride]
-    (cpu-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
-                          input-gradient output-gradient batch-size batch-stride double))
   (cpu-lrn-forward [input ^DoubleArrayView output ^Tensor input-tensor n k alpha beta]
     (cpu-lrn-forward-impl input output input-tensor n k alpha beta double))
   (cpu-lrn-backward [input ^DoubleArrayView output-gradient ^DoubleArrayView input-gradient
@@ -913,24 +715,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
     (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability float))
   (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
     (cpu-prepare-gaussian-impl mult-buffer rand-buffer float))
-  (cpu-bn-calc [^FloatArrayView input ^FloatArrayView means ^FloatArrayView variances
-                ^FloatArrayView scale ^FloatArrayView bias ^FloatArrayView output
-                batch-size batch-stride]
-    (cpu-bn-calc-impl input means variances scale bias output batch-size batch-stride float))
-  (cpu-update-means-variances [input
-                               ^FloatArrayView running-means ^FloatArrayView running-variances
-                               ^FloatArrayView saved-means ^FloatArrayView saved-variances
-                               batch-size batch-stride ave-factor epsilon]
-    (cpu-update-means-variances-impl input running-means running-variances
-                                     saved-means saved-variances
-                                     batch-size batch-stride
-                                     ave-factor epsilon float))
-  (cpu-bn-backward [input ^FloatArrayView means ^FloatArrayView variances ^FloatArrayView scale
-                    ^FloatArrayView bias ^FloatArrayView output ^FloatArrayView scale-gradient
-                    ^FloatArrayView bias-gradient ^FloatArrayView input-gradient
-                    ^FloatArrayView output-gradient batch-size batch-stride]
-    (cpu-bn-backward-impl input means variances scale bias output scale-gradient bias-gradient
-                          input-gradient output-gradient batch-size batch-stride float))
   (cpu-lrn-forward [input ^FloatArrayView output ^Tensor input-tensor n k alpha beta]
     (cpu-lrn-forward-impl input output input-tensor n k alpha beta float))
   (cpu-lrn-backward [input ^FloatArrayView output-gradient ^FloatArrayView input-gradient
@@ -1197,56 +981,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   [layer batch-size]
   (let [{:keys [channels width height]} (first (graph/node->output-dimensions layer))]
     (math/tensor batch-size channels height width)))
-
-
-(defrecord BatchNormalization [backend]
-  nn-backend/PBatchNormalization
-  (batch-norm-inference! [this input running-means running-variances scale bias output epsilon]
-    (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-        (cpu-bn-calc (device-array->view input)
-                     (device-array->view running-means)
-                     (device-array->view running-variances)
-                     (device-array->view scale)
-                     (device-array->view bias)
-                     (device-array->view output)
-                     batch-size batch-stride))))
-  (batch-norm-forward! [this input
-                        running-means running-variances
-                        saved-means saved-variances
-                        scale bias output average-factor epsilon]
-    (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-        (cpu-update-means-variances (device-array->view input)
-                                    (device-array->view running-means)
-                                    (device-array->view running-variances)
-                                    (device-array->view saved-means)
-                                    (device-array->view saved-variances)
-                                    batch-size batch-stride
-                                    average-factor epsilon)))
-    (nn-backend/batch-norm-inference! this input saved-means saved-variances
-                                      scale bias output epsilon))
-  (batch-norm-backward! [this input saved-means saved-variances scale bias output
-                         scale-gradient bias-gradient input-gradient output-gradient
-                         epsilon]
-    (let [[batch-size batch-stride] (math/batch-shape input)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream backend)
-        (cpu-bn-backward (device-array->view input)
-                         (device-array->view saved-means)
-                         (device-array->view saved-variances)
-                         (device-array->view scale)
-                         (device-array->view bias)
-                         (device-array->view output)
-                         (device-array->view scale-gradient)
-                         (device-array->view bias-gradient)
-                         (device-array->view input-gradient)
-                         (device-array->view output-gradient)
-                         batch-size batch-stride)))))
-
-
-(defmethod cpu-layer :batch-normalization
-  [backend layer batch-size]
-  (->BatchNormalization backend))
 
 
 (defrecord LocalResponseNormalization [backend layer batch-size]

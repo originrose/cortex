@@ -462,36 +462,53 @@ a few compatibility issues."
 https://arxiv.org/pdf/1502.03167v3.pdf.
 ave-factor is the exponential falloff for the running averages of mean and variance
 while epsilon is the stabilization factor for the variance (because we need inverse variance
-and we don't want to divide by zero."
-  [& {:keys [ave-factor epsilon]
+and we don't want to divide by zero.
+
+Batch normalization can work in two modes; :elementwise where it normalizes each parameter
+across batches and :spatial where it normalizes each channel across all elements and batches."
+  [& {:keys [ave-factor epsilon mode]
       :or {ave-factor 0.9
            epsilon 1e-4}
       :as arg-map}]
   (when (< (double epsilon) 1e-5)
     (throw (Exception. "batch-normalization minimum epsilon is 1e-5.
 This is for cudnn compatibility.")))
+  (when-not (contains? #{:elementwise :spatial} (get arg-map :mode :elementwise))
+    (throw (ex-info "Batch normalization can either be elementwise or spatial"
+                    {:mode (get arg-map :mode)})))
   [(merge
     {:type :batch-normalization
      :average-factor ave-factor
-     :epsilon epsilon}
+     :epsilon epsilon
+     :mode :elementwise}
     (dissoc arg-map :epsilon))])
+
+
+(defn batch-norm-param-shape
+  [graph node argument]
+  (condp = (get node :mode :elementwise)
+    :elementwise
+    (linear-bias-parameter-shape graph node argument)
+    :spatial
+    (let [dims (graph/node->input-dimension node)]
+      [(get dims :channels)])))
 
 
 (defmethod graph/get-node-metadata :batch-normalization
   [desc]
   {:arguments
-   {:scale {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+   {:scale {:shape-fn :cortex.nn.layers/batch-norm-param-shape
             :initialization {:type :constant :value 1}
             :gradients? true
             :type :parameter}
-    :bias {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+    :bias {:shape-fn :cortex.nn.layers/batch-norm-param-shape
            :initialization {:type :constant :value 0}
            :gradients? true
            :type :parameter}
-    :means {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+    :means {:shape-fn :cortex.nn.layers/batch-norm-param-shape
             :initialization {:type :constant :value 0}
             :type :parameter}
-    :variances {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+    :variances {:shape-fn :cortex.nn.layers/batch-norm-param-shape
                 :initialization {:type :constant :value 0}
                 :type :parameter}}
    :passes #{:training :inference}})
