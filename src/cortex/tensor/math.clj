@@ -101,4 +101,18 @@ running means, variances using a running average
                                               average-factor
                                               scale bias epsilon
                                               batch-count channel-count element-count]
-    "Spatial version.  See batch-normalize-spatial!"))
+    "Spatial version.  See batch-normalize-spatial!")
+  (batch-normalize-gradients-eltwise! [stream
+                                       input-gradient scale-gradient
+                                       bias-gradient output-gradient
+                                       output input batch-means batch-variances
+                                       scale bias epsilon
+                                       batch-count element-count]
+    "Gradient calculation.  All gradients exception output gradient are out vars.")
+  (batch-normalize-gradients-spatial! [stream
+                                       input-gradient scale-gradient
+                                       bias-gradient output-gradient
+                                       output input batch-means batch-variances
+                                       scale bias epsilon
+                                       batch-count channel-count element-count]
+    "Gradient calculation.  All gradients exception output gradient are out vars."))

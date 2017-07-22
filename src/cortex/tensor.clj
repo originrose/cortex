@@ -1034,7 +1034,7 @@ So either it is dense *or* num-columns is 1"
 
 
 (defn- batch-normalize-setup
-  "The various batch normalize calls all have a setup of setup rules.  This checks all
+  "The various batch normalize calls all have a set of setup rules.  This checks all
 preconditions and then returns the type of batch normalization required (spatial vs. eltwise)."
   [io-args mean-var-bias-scale-args epsilon]
   (let [all-args (concat io-args mean-var-bias-scale-args)
@@ -1188,6 +1188,54 @@ operation.  Batch size is then considered everything before the last two dimensi
                                                       batch-count
                                                       channel-count
                                                       element-count)))))
+
+
+(defn batch-normalize-gradients!
+  [input-gradient scale-gradient bias-gradient output-gradient
+   output input batch-means batch-variances
+   scale bias epsilon]
+  (let [{:keys [type mvbs-args]} (batch-normalize-setup [output input
+                                                         output-gradient input-gradient]
+                                                        [batch-means batch-variances
+                                                         scale bias
+                                                         scale-gradient bias-gradient]
+                                                        epsilon)
+        [batch-means batch-variances scale bias
+         scale-gradient bias-gradient] mvbs-args
+        input-shape (shape input)]
+    (condp = type
+      :eltwise
+      (tm/batch-normalize-gradients-eltwise! (check-stream)
+                                             (tensor->buffer input-gradient)
+                                             (tensor->buffer scale-gradient)
+                                             (tensor->buffer bias-gradient)
+                                             (tensor->buffer output-gradient)
+                                             (tensor->buffer output)
+                                             (tensor->buffer input)
+                                             (tensor->buffer batch-means)
+                                             (tensor->buffer batch-variances)
+                                             (tensor->buffer scale)
+                                             (tensor->buffer bias)
+                                             epsilon
+                                             (first input-shape)
+                                             (second input-shape))
+      :spatial
+      (let [batch-count (long (apply * (drop-last 2 input-shape)))
+            [channel-count element-count] (take-last 2 input-shape)]
+        (tm/batch-normalize-gradients-spatial! (check-stream)
+                                               (tensor->buffer input-gradient)
+                                               (tensor->buffer scale-gradient)
+                                               (tensor->buffer bias-gradient)
+                                               (tensor->buffer output-gradient)
+                                               (tensor->buffer output)
+                                               (tensor->buffer input)
+                                               (tensor->buffer batch-means)
+                                               (tensor->buffer batch-variances)
+                                               (tensor->buffer scale)
+                                               (tensor->buffer bias)
+                                               epsilon
+                                               batch-count channel-count element-count)))))
+
 
 (extend-type Tensor
   mp/PVectorView

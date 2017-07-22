@@ -308,3 +308,74 @@ for the cuda backend."
      (is (m/equals [34.857142857142854, 34.857142857142854, 34.857142857142854]
                    (ct/to-double-array running-variances)
                    1e-4)))))
+
+
+(defn batch-normalize-gradients
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   ;;eltwise
+   (let [input (ct/->tensor (partition 3 (range 12)))
+         output (ct/->tensor (partition
+                              3 [-26.0, 4.0, 6.116036847575795, 64.0, 12.955334711889902
+                                 12.46414739030318, 154.0, 21.910669423779805, 18.812257933030565
+                                 244.0, 30.86600413566971, 25.16036847575795]))
+         input-gradient (ct/new-tensor [4 3])
+         output-gradient (ct/->tensor (partition 3 (repeat 12 1)))
+         means (ct/->tensor (repeat 3 1))
+         ;;Ensure to include a variance of 0 to sniff out behavior in edge case
+         variances (ct/->tensor (range 0 3))
+         scale (ct/->tensor (repeat 3 3))
+         bias (ct/->tensor (repeat 3 4))
+         scale-gradient (ct/new-tensor [3])
+         bias-gradient (ct/new-tensor [3])]
+     ;;Use a large epsilon to ensure the cpu version treats the epsilon identical
+     ;;as the gpu version
+     (ct/batch-normalize-gradients! input-gradient scale-gradient bias-gradient output-gradient
+                                    output input means variances scale bias 1e-2)
+     (is (m/equals [0.0, 0.0, -132.0, 0.0, -40.5, -528.0, 0.0, -81.0, -924.0, 0.0,
+                    -121.5, -1320.0]
+                   (ct/to-double-array input-gradient)
+                   1e-4))
+     (is (m/equals [0.0, 18.0, 44.0]
+                   (ct/to-double-array scale-gradient)
+                   1e-4))
+     (is (m/equals [4.0, 4.0, 4.0]
+                   (ct/to-double-array bias-gradient)
+                   1e-4)))
+   ;;spatial
+   (let [input (ct/->tensor (partition 3 (partition 4 (range 24))))
+         output (ct/->tensor (->> [-26.0, 4.0, 34.0, 64.0,
+                                   12.955334711889902, 15.94044628251987,
+                                   18.925557853149837, 21.910669423779805, 18.812257933030565,
+                                   20.92829478060636, 23.044331628182157,
+                                   25.16036847575795, 334.0,
+                                   364.0, 394.0, 424.0, 48.77667355944951, 51.76178513007948,
+                                   54.74689670070945, 57.73200827133942, 44.204700103940105,
+                                   46.3207369515159, 48.436773799091696, 50.55281064666749]
+                                  (partition 4)
+                                  (partition 3)))
+         input-gradient (ct/new-tensor [2 3 4])
+         output-gradient (ct/->tensor (partition 3 (partition 4 (repeat 24 1))))
+         means (ct/->tensor (repeat 3 1))
+         ;;Ensure to include a variance of 0
+         variances (ct/->tensor (range 0 3))
+         scale (ct/->tensor (repeat 3 3))
+         bias (ct/->tensor (repeat 3 4))
+         scale-gradient (ct/new-tensor [3])
+         bias-gradient (ct/new-tensor [3])]
+     ;;Use a large epsilon to ensure the cpu version treats the epsilon identical
+     ;;as the gpu version
+     (ct/batch-normalize-gradients! input-gradient scale-gradient bias-gradient output-gradient
+                                    output input means variances scale bias 1e-2)
+     (is (m/equals [0.0, 0.0, 0.0, 0.0, -94.5, -126.0, -157.5, -189.0, -2436.0, -2784.0,
+                    -3132.0, -3480.0, 0.0, 0.0, 0.0, 0.0, -472.5, -504.0, -535.5,
+                    -567.0, -6612.0, -6960.0, -7308.0, -7656.0]
+                   (ct/to-double-array input-gradient)
+                   1e-4))
+     (is (m/equals [0.0, 84.0, 232.0]
+                   (ct/to-double-array scale-gradient)
+                   1e-4))
+     (is (m/equals [8.0, 8.0, 8.0]
+                   (ct/to-double-array bias-gradient)
+                   1e-4)))))

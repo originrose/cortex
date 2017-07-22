@@ -408,4 +408,70 @@
            (->ptr running-variances)
            (double epsilon)
            (->ptr batch-means)
+           (->ptr batch-variances)))))))
+
+  (batch-normalize-gradients-eltwise! [stream
+                                       input-gradient scale-gradient
+                                       bias-gradient output-gradient
+                                       output input batch-means batch-variances
+                                       scale bias epsilon
+                                       batch-count element-count]
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input)
+            io-tensor (cuda-base/tensor datatype batch-count 1 1 element-count)
+            var-tensor (cuda-base/tensor datatype 1 1 1 element-count)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnBatchNormalizationBackward
+           cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           io-tensor
+           (->ptr input)
+           io-tensor
+           (->ptr output-gradient)
+           io-tensor
+           (->ptr input-gradient)
+           var-tensor
+           (->ptr scale)
+           (->ptr scale-gradient)
+           (->ptr bias-gradient)
+           (double epsilon)
+           (->ptr batch-means)
+           (->ptr batch-variances)))))))
+
+  (batch-normalize-gradients-spatial! [stream
+                                       input-gradient scale-gradient
+                                       bias-gradient output-gradient
+                                       output input batch-means batch-variances
+                                       scale bias epsilon
+                                       batch-count channel-count element-count]
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input)
+            io-tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)
+            var-tensor (cuda-base/tensor datatype 1 channel-count 1 1)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnBatchNormalizationBackward
+           cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           (value->ptr 1.0 datatype) ;;alpha
+           (value->ptr 0.0 datatype) ;;beta
+           io-tensor
+           (->ptr input)
+           io-tensor
+           (->ptr output-gradient)
+           io-tensor
+           (->ptr input-gradient)
+           var-tensor
+           (->ptr scale)
+           (->ptr scale-gradient)
+           (->ptr bias-gradient)
+           (double epsilon)
+           (->ptr batch-means)
            (->ptr batch-variances))))))))
