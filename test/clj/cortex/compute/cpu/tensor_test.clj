@@ -43,3 +43,7 @@
 
 (def-double-float-test batch-normalize-update-and-apply
   (verify-tensor/batch-normalize-update-and-apply (driver) *datatype*))
+
+
+(def-double-float-test batch-normalize-gradients
+  (verify-tensor/batch-normalize-gradients (driver) *datatype*))

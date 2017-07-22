@@ -478,72 +478,77 @@
 (def ^:private blas-fn-map
   (blas-macro-iter blas-impl))
 
+(definterface BatchNormalizeOffsetter
+  (^long parallel_count [])
+  (^long idx_count [])
+  (^long idx_to_offset [^long var-idx ^long elem-idx]))
+
+
+(defrecord BNEltwiseOffsetter [^long batch-count ^long element-count]
+  BatchNormalizeOffsetter
+  (^long parallel_count [_] element-count)
+  (^long idx_count [_] batch-count)
+  (^long idx_to_offset [_ ^long elem-idx ^long batch-idx]
+    (+ elem-idx
+       (* batch-idx element-count))))
+
+
+(defrecord BNSpatialOffsetter [^long batch-count ^long channel-count ^long element-count]
+  BatchNormalizeOffsetter
+  (^long parallel_count [_] channel-count)
+  (^long idx_count [_] (* batch-count element-count))
+  (^long idx_to_offset [_ ^long channel-idx ^long batch-elem-idx]
+   (+ (rem batch-elem-idx element-count)
+      (* channel-idx element-count)
+      (* (quot batch-elem-idx element-count) (* channel-count element-count)))))
+
+
+(defmacro batch-normalize-impl
+  [datatype offsetter
+   output input means variances scale bias epsilon]
+  `(let [^BatchNormalizeOffsetter offsetter# ~offsetter
+         input-ary# (datatype->view-cast-fn ~datatype ~input)
+         means-ary# (datatype->view-cast-fn ~datatype ~means)
+         variances-ary# (datatype->view-cast-fn ~datatype ~variances)
+         scale-ary# (datatype->view-cast-fn ~datatype ~scale)
+         bias-ary# (datatype->view-cast-fn ~datatype ~bias)
+         output-ary# (datatype->view-cast-fn ~datatype ~output)
+         epsilon# (datatype->cast-fn ~datatype ~epsilon)
+         parallel-count# (.parallel_count offsetter#)
+         index-count# (.idx_count offsetter#)]
+     (parallel/parallel-for
+      parallel-idx# parallel-count#
+      (let [variance# (v-aget variances-ary# parallel-idx#)
+            ;;Account for if the variance is zero.
+            inv-std-dev# (datatype->cast-fn ~datatype (Math/sqrt (/ 1.0
+                                                                    (+ variance# epsilon#))))
+            mean# (v-aget means-ary# parallel-idx#)
+            scale# (v-aget scale-ary# parallel-idx#)
+            shift# (v-aget bias-ary# parallel-idx#)]
+        (c-for
+         [idx# 0 (< idx# index-count#) (inc idx#)]
+         (let [item-offset# (.idx_to_offset offsetter# parallel-idx# idx#)
+               x-hat# (* (- (v-aget input-ary# item-offset#) mean#)
+                         inv-std-dev#)]
+           (v-aset output-ary# item-offset#
+                   (+ (* x-hat# scale#) shift#))))))))
+
 
 (defmacro batch-normalize-eltwise-impl
   [datatype]
-  `(fn [output# input# means# variances# scale# bias# epsilon# batch-count# element-count#]
-     (let [batch-count# (long batch-count#)
-           element-count# (long element-count#)
-           input-ary# (datatype->view-cast-fn ~datatype input#)
-           means-ary# (datatype->view-cast-fn ~datatype means#)
-           variances-ary# (datatype->view-cast-fn ~datatype variances#)
-           scale-ary# (datatype->view-cast-fn ~datatype scale#)
-           bias-ary# (datatype->view-cast-fn ~datatype bias#)
-           output-ary# (datatype->view-cast-fn ~datatype output#)
-           epsilon# (datatype->cast-fn ~datatype epsilon#)]
-       (parallel/parallel-for
-        elem-idx# element-count#
-        (let [variance# (v-aget variances-ary# elem-idx#)
-              ;;Account for if the variance is zero.
-              inv-std-dev# (datatype->cast-fn ~datatype (Math/sqrt (/ 1.0
-                                                                     (+ variance# epsilon#))))
-              mean# (v-aget means-ary# elem-idx#)
-              scale# (v-aget scale-ary# elem-idx#)
-              shift# (v-aget bias-ary# elem-idx#)]
-          (c-for
-           [batch-idx# 0 (< batch-idx# batch-count#) (inc batch-idx#)]
-           (let [item-offset# (+ (* batch-idx# element-count#) elem-idx#)
-                 x-hat# (* (- (v-aget input-ary# item-offset#) mean#)
-                           inv-std-dev#)]
-             (v-aset output-ary# item-offset#
-                           (+ (* x-hat# scale#) shift#)))))))))
+  `(fn [output# input# means# variances# scale# bias# epsilon#
+        batch-count# element-count#]
+     (batch-normalize-impl ~datatype (->BNEltwiseOffsetter batch-count# element-count#)
+                           output# input# means# variances# scale# bias# epsilon#)))
 
 
 (defmacro batch-normalize-spatial-impl
   [datatype]
   `(fn [output# input# means# variances# scale# bias# epsilon#
         batch-count# channel-count# element-count#]
-     (let [batch-count# (long batch-count#)
-           element-count# (long element-count#)
-           channel-count# (long channel-count#)
-           input-ary# (datatype->view-cast-fn ~datatype input#)
-           means-ary# (datatype->view-cast-fn ~datatype means#)
-           variances-ary# (datatype->view-cast-fn ~datatype variances#)
-           scale-ary# (datatype->view-cast-fn ~datatype scale#)
-           bias-ary# (datatype->view-cast-fn ~datatype bias#)
-           output-ary# (datatype->view-cast-fn ~datatype output#)
-           epsilon# (datatype->cast-fn ~datatype epsilon#)
-           batch-stride# (* channel-count# element-count#)]
-       (parallel/parallel-for
-        channel-idx# channel-count#
-        (let [variance# (v-aget variances-ary# channel-idx#)
-              ;;Account for if the variance is zero.
-              inv-std-dev# (datatype->cast-fn ~datatype (Math/sqrt (/ 1.0
-                                                                     (+ variance# epsilon#))))
-              mean# (v-aget means-ary# channel-idx#)
-              scale# (v-aget scale-ary# channel-idx#)
-              shift# (v-aget bias-ary# channel-idx#)
-              channel-offset# (* channel-idx# element-count#)]
-          (c-for
-           [batch-idx# 0 (< batch-idx# batch-count#) (inc batch-idx#)]
-           (let [batch-offset# (+ (* batch-idx# batch-stride#) channel-offset#)]
-            (c-for
-             [elem-idx# 0 (< elem-idx# element-count#) (inc elem-idx#)]
-             (let [item-offset# (+ batch-offset# elem-idx#)
-                   x-hat# (* (- (v-aget input-ary# item-offset#) mean#)
-                             inv-std-dev#)]
-               (v-aset output-ary# item-offset#
-                             (+ (* x-hat# scale#) shift#)))))))))))
+     (batch-normalize-impl ~datatype (->BNSpatialOffsetter batch-count# channel-count#
+                                                           element-count#)
+                           output# input# means# variances# scale# bias# epsilon#)))
 
 
 (defmacro sum-double-var
@@ -562,6 +567,59 @@
           sum-var#)))))
 
 
+(defmacro batch-normalize-update-impl
+  [datatype offsetter input
+   batch-means batch-variances
+   running-means running-variances
+   average-factor]
+  `(let [^BatchNormalizeOffsetter offsetter# ~offsetter
+         input-ary# (datatype->view-cast-fn ~datatype ~input)
+         batch-means-ary# (datatype->view-cast-fn ~datatype ~batch-means)
+         batch-variances-ary# (datatype->view-cast-fn ~datatype ~batch-variances)
+         running-means-ary# (datatype->view-cast-fn ~datatype ~running-means)
+         running-variances-ary# (datatype->view-cast-fn ~datatype ~running-variances)
+         ave-factor# (datatype->cast-fn ~datatype ~average-factor)
+         ave-lerp# (- (datatype->cast-fn ~datatype 1.0) ave-factor#)
+         parallel-count# (.parallel_count offsetter#)
+         index-count# (.idx_count offsetter#)
+         index-count-val# (max 1.0 (double index-count#))
+         running-index-count-val# (max 1.0 (- index-count-val# 1.0))]
+     (parallel/parallel-for
+      parallel-idx# parallel-count#
+      (let [variance# (v-aget running-variances-ary# parallel-idx#)
+            mean# (v-aget running-means-ary# parallel-idx#)
+            new-mean# (datatype->cast-fn
+                       ~datatype
+                       (/ (sum-double-var idx# index-count#
+                                          (v-aget input-ary#
+                                                  (.idx_to_offset offsetter#
+                                                                  parallel-idx#
+                                                                  idx#)))
+                          index-count-val#))
+
+            new-var# (sum-double-var
+                      idx# index-count#
+                      (let [mean-diff# (- new-mean#
+                                          (v-aget input-ary#
+                                                  (.idx_to_offset offsetter#
+                                                                  parallel-idx#
+                                                                  idx#)))]
+                        (* mean-diff# mean-diff#)))]
+        (v-aset batch-means-ary# parallel-idx#
+                new-mean#)
+        (v-aset batch-variances-ary# parallel-idx#
+                (datatype->cast-fn ~datatype
+                                   (/ new-var#
+                                      index-count-val#)))
+        (v-aset running-means-ary# parallel-idx#
+                (+ (* mean# ave-lerp#) (* new-mean# ave-factor#)))
+        (v-aset running-variances-ary# parallel-idx#
+                (+ (* variance# ave-lerp#) (* (datatype->cast-fn ~datatype
+                                                                 (/ new-var#
+                                                                    running-index-count-val#))
+                                              ave-factor#)))))))
+
+
 (defmacro batch-normalize-update-eltwise-impl
   [datatype]
   `(fn [input#
@@ -569,77 +627,11 @@
         running-means# running-variances#
         average-factor#
         batch-count# element-count#]
-     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
-           batch-means-ary# (datatype->view-cast-fn ~datatype batch-means#)
-           batch-variances-ary# (datatype->view-cast-fn ~datatype batch-variances#)
-           running-means-ary# (datatype->view-cast-fn ~datatype running-means#)
-           running-variances-ary# (datatype->view-cast-fn ~datatype running-variances#)
-           ave-factor# (datatype->cast-fn ~datatype average-factor#)
-           ave-lerp# (- (datatype->cast-fn ~datatype 1.0) ave-factor#)
-           batch-count# (long batch-count#)
-           element-count# (long element-count#)]
-       (parallel/parallel-for
-        elem-idx# element-count#
-        (let [variance# (v-aget running-variances-ary# elem-idx#)
-              mean# (v-aget running-means-ary# elem-idx#)
-              batch-count-val# (double batch-count#)
-              var-batch-count# (max 1.0 (- batch-count-val# 1.0))
-              new-mean# (datatype->cast-fn
-                         ~datatype
-                         (/ (sum-double-var batch-idx# batch-count#
-                                            (v-aget input-ary#
-                                                    (+ elem-idx#
-                                                       (* batch-idx# element-count#))))
-                            batch-count-val#))
-
-              new-var# (sum-double-var
-                        batch-idx# batch-count#
-                        (let [mean-diff# (- new-mean#
-                                            (v-aget input-ary#
-                                                    (+ elem-idx#
-                                                       (* batch-idx#
-                                                          element-count#))))]
-                          (* mean-diff# mean-diff#)))]
-          (v-aset batch-means-ary# elem-idx#
-                  new-mean#)
-          (v-aset batch-variances-ary# elem-idx#
-                  (datatype->cast-fn ~datatype
-                                     (/ new-var#
-                                        batch-count-val#)))
-          (v-aset running-means-ary# elem-idx#
-                  (+ (* mean# ave-lerp#) (* new-mean# ave-factor#)))
-          (v-aset running-variances-ary# elem-idx#
-                  (+ (* variance# ave-lerp#) (* (datatype->cast-fn ~datatype
-                                                                   (/ new-var#
-                                                                      var-batch-count#))
-                                                ave-factor#))))))))
-
-(defmacro nested-sum-double-var
-  "summation across two variables.  Sum var set to initial value, not zero."
-  [outer-idx outer-count inner-idx inner-count stmt]
-  `(double
-    (if (or (= 0 ~outer-count)
-            (= 0 ~inner-count))
-      0.0
-      (let [initial-value# (double
-                            (let [~outer-idx 0
-                                  ~inner-idx 0]
-                              ~stmt))]
-        (loop [sum-var# initial-value#
-               ~outer-idx 0]
-          (if (< ~outer-idx ~outer-count)
-            (recur
-             (double
-              (loop [sum-var# sum-var#
-                     ~inner-idx (if (= 0 ~outer-idx)
-                                  1
-                                  0)]
-                (if (< ~inner-idx ~inner-count)
-                  (recur (+ sum-var# ~stmt)
-                         (inc ~inner-idx))
-                  sum-var#)))
-             (inc ~outer-idx))
-            sum-var#))))))
+     (batch-normalize-update-impl ~datatype (->BNEltwiseOffsetter batch-count# element-count#)
+                                  input#
+                                  batch-means# batch-variances#
+                                  running-means# running-variances#
+                                  average-factor#)))
 
 
 (defmacro batch-normalize-update-spatial-impl
@@ -649,55 +641,147 @@
         running-means# running-variances#
         average-factor#
         batch-count# channel-count# element-count#]
-     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
-           batch-means-ary# (datatype->view-cast-fn ~datatype batch-means#)
-           batch-variances-ary# (datatype->view-cast-fn ~datatype batch-variances#)
-           running-means-ary# (datatype->view-cast-fn ~datatype running-means#)
-           running-variances-ary# (datatype->view-cast-fn ~datatype running-variances#)
-           ave-factor# (datatype->cast-fn ~datatype average-factor#)
-           ave-lerp# (- (datatype->cast-fn ~datatype 1.0) ave-factor#)
-           batch-count# (long batch-count#)
-           channel-count# (long channel-count#)
-           element-count# (long element-count#)
-           batch-stride# (* channel-count# element-count#)
-           batch-var-div# (max 1.0 (double (* batch-count# element-count#)))
-           running-var-div# (max 1.0 (- batch-var-div# 1.0))]
-       (parallel/parallel-for
-        channel-idx# channel-count#
-        (let [variance# (v-aget running-variances-ary# channel-idx#)
-              mean# (v-aget running-means-ary# channel-idx#)
-              channel-offset# (* channel-idx# element-count#)
-              new-mean# (datatype->cast-fn
-                         ~datatype
-                         (/ (nested-sum-double-var
-                             batch-idx# batch-count#
-                             elem-idx# element-count#
-                             (v-aget input-ary#
-                                     (+ elem-idx# channel-offset#
-                                        (* batch-idx# batch-stride#))))
-                            batch-var-div#))
+     (batch-normalize-update-impl ~datatype (->BNSpatialOffsetter batch-count#
+                                                                  channel-count#
+                                                                  element-count#)
+                                  input#
+                                  batch-means# batch-variances#
+                                  running-means# running-variances#
+                                  average-factor#)))
 
-              new-var# (nested-sum-double-var
-                        batch-idx# batch-count#
-                        elem-idx# element-count#
-                        (let [mean-diff# (- new-mean#
-                                            (v-aget input-ary#
-                                                    (+ elem-idx# channel-offset#
-                                                       (* batch-idx# batch-stride#))))]
-                          (* mean-diff# mean-diff#)))]
-          (v-aset batch-means-ary# channel-idx#
-                  new-mean#)
-          (v-aset batch-variances-ary# channel-idx#
-                  (datatype->cast-fn ~datatype
-                                     (/ new-var#
-                                        batch-var-div#)))
-          (v-aset running-means-ary# channel-idx#
-                  (+ (* mean# ave-lerp#) (* new-mean# ave-factor#)))
-          (v-aset running-variances-ary# channel-idx#
-                  (+ (* variance# ave-lerp#) (* (datatype->cast-fn ~datatype
-                                                                   (/ new-var#
-                                                                      running-var-div#))
-                                                ave-factor#))))))))
+
+(defmacro batch-normalize-gradients-impl
+  [datatype offsetter
+   input-gradient scale-gradient
+   bias-gradient output-gradient
+   output input batch-means batch-variances
+   scale bias epsilon]
+  `(let [^BatchNormalizeOffsetter offsetter# ~offsetter
+         pow-factor# (datatype->cast-fn ~datatype (/ -3.0 2.0))
+         input-ary# (datatype->view-cast-fn ~datatype ~input)
+         means-ary# (datatype->view-cast-fn ~datatype ~batch-means)
+         variances-ary# (datatype->view-cast-fn ~datatype ~batch-variances)
+         scale-ary# (datatype->view-cast-fn ~datatype ~scale)
+         bias-ary# (datatype->view-cast-fn ~datatype ~bias)
+         output-ary# (datatype->view-cast-fn ~datatype ~output)
+         scale-gradient-ary# (datatype->view-cast-fn ~datatype ~scale-gradient)
+         bias-gradient-ary# (datatype->view-cast-fn ~datatype ~bias-gradient)
+         input-gradient-ary# (datatype->view-cast-fn ~datatype ~input-gradient)
+         output-gradient-ary# (datatype->view-cast-fn ~datatype ~output-gradient)
+         epsilon# (datatype->cast-fn ~datatype ~epsilon)
+         parallel-count# (.parallel_count offsetter#)
+         index-count# (.idx_count offsetter#)]
+     (parallel/parallel-for
+      elem-idx# parallel-count#
+      (let [scale# (v-aget scale-ary# elem-idx#)
+            variance# (+ epsilon#
+                         (v-aget variances-ary# elem-idx#))
+            inv-std-dev# (/ 1.0 (Math/sqrt variance#))
+            mean# (v-aget means-ary# elem-idx#)
+            d-x-hat-d-out-ary# input-gradient-ary#
+            d-var# (datatype->cast-fn ~datatype (* -0.5 (Math/pow
+                                                         variance#
+                                                         pow-factor#)))]
+        ;;These sums are somewhat inefficient but the math is so complicated
+        ;;that I want to lay it out without combining loops.
+        (v-aset bias-gradient-ary# elem-idx#
+                (datatype->cast-fn
+                 ~datatype
+                 (sum-double-var
+                  idx# index-count#
+                  (v-aget output-gradient-ary#
+                          (.idx_to_offset offsetter# elem-idx# idx#)))))
+
+        (v-aset scale-gradient-ary# elem-idx#
+                (datatype->cast-fn
+                 ~datatype
+                 (sum-double-var
+                  idx# index-count#
+                  (let [elem-offset# (.idx_to_offset offsetter# elem-idx# idx#)]
+                    (* (v-aget output-gradient-ary# elem-offset#)
+                       (* (- (v-aget input-ary# elem-offset#)
+                             mean#)
+                          inv-std-dev#))))))
+        ;;(println 3)
+        ;;run through get get d-x-hat/d-output.  Store in input-gradient
+        (c-for [idx# 0 (< idx# index-count#) (inc idx#)]
+               (let [elem-offset# (.idx_to_offset offsetter# elem-idx# idx#)]
+                 (v-aset d-x-hat-d-out-ary# elem-offset#
+                         (* scale# (v-aget output-gradient-ary# elem-offset#)))))
+        ;;(println 4)
+        ;;Input gradient calculation...
+        (let [d-var-d-out# (datatype->cast-fn ~datatype
+                                              (sum-double-var
+                                               idx# index-count#
+                                               (let [elem-offset# (.idx_to_offset offsetter#
+                                                                                  elem-idx#
+                                                                                  idx#)]
+                                                 (* (v-aget d-x-hat-d-out-ary# elem-offset#)
+                                                    (- (v-aget input-ary# elem-offset#)
+                                                       mean#)
+                                                    d-var#))))
+              d-mean-d-out# (datatype->cast-fn
+                             ~datatype
+                             (+ (sum-double-var
+                                 idx# index-count#
+                                 (let [elem-offset# (.idx_to_offset offsetter# elem-idx# idx#)]
+                                   (* (- (v-aget d-x-hat-d-out-ary# elem-offset#))
+                                      inv-std-dev#)))
+                                (* d-var-d-out#
+                                   (/ (sum-double-var
+                                       idx# index-count#
+                                       (let [elem-offset# (.idx_to_offset offsetter#
+                                                                          elem-idx#
+                                                                          idx#)]
+                                         (* -2.0
+                                            (- (v-aget input-ary# elem-offset#)
+                                               mean#))))
+                                      index-count#))))]
+          ;;final input gradient calculation
+          (c-for
+           [idx# 0 (< idx# index-count#) (inc idx#)]
+           (let [elem-offset# (.idx_to_offset offsetter# elem-idx# idx#)
+                 d-x-hat-d-out# (v-aget d-x-hat-d-out-ary# elem-offset#)
+                 input-var# (v-aget input-ary# elem-offset#)
+                 one-over-index-count# (/ 1.0 index-count#)
+                 sum-part-1# (* d-x-hat-d-out# inv-std-dev#)
+                 sum-part-2# (* d-var-d-out# 2.0 (- input-var# mean#) one-over-index-count#)
+                 sum-part-3# (* d-mean-d-out# one-over-index-count#)]
+             (v-aset input-gradient-ary# elem-offset#
+                     (datatype->cast-fn ~datatype (+ sum-part-1#
+                                                     sum-part-2#
+                                                     sum-part-3#))))))))))
+
+
+(defmacro batch-normalize-gradients-eltwise-impl
+  [datatype]
+  `(fn [input-gradient# scale-gradient#
+        bias-gradient# output-gradient#
+        output# input# batch-means# batch-variances#
+        scale# bias# epsilon#
+        batch-count# element-count#]
+     (batch-normalize-gradients-impl ~datatype (->BNEltwiseOffsetter batch-count#
+                                                                     element-count#)
+                                     input-gradient# scale-gradient#
+                                     bias-gradient# output-gradient#
+                                     output# input# batch-means# batch-variances#
+                                     scale# bias# epsilon#)))
+
+
+(defmacro batch-normalize-gradients-spatial-impl
+  [datatype]
+  `(fn [input-gradient# scale-gradient#
+        bias-gradient# output-gradient#
+        output# input# batch-means# batch-variances#
+        scale# bias# epsilon#
+        batch-count# channel-count# element-count#]
+     (batch-normalize-gradients-impl ~datatype (->BNSpatialOffsetter batch-count#
+                                                                     channel-count#
+                                                                     element-count#)
+                                     input-gradient# scale-gradient#
+                                     bias-gradient# output-gradient#
+                                     output# input# batch-means# batch-variances#
+                                     scale# bias# epsilon#)))
 
 
 (defonce cpu-nn-ops-types [:float :double])
@@ -705,13 +789,17 @@
 
 (defmacro cpu-nn-ops-macro
   []
-  (->> (for [ops-type cpu-nn-ops-types]
-         [ops-type
-          {:batch-normalize-eltwise! `(batch-normalize-eltwise-impl ~ops-type)
-           :batch-normalize-spatial! `(batch-normalize-spatial-impl ~ops-type)
-           :batch-normalize-update-eltwise! `(batch-normalize-update-eltwise-impl ~ops-type)
-           :batch-normalize-update-spatial! `(batch-normalize-update-spatial-impl ~ops-type)}])
-       (into {})))
+  (->>
+   (for [ops-type cpu-nn-ops-types]
+     [ops-type
+      {:batch-normalize-eltwise! `(batch-normalize-eltwise-impl ~ops-type)
+       :batch-normalize-spatial! `(batch-normalize-spatial-impl ~ops-type)
+       :batch-normalize-update-eltwise! `(batch-normalize-update-eltwise-impl ~ops-type)
+       :batch-normalize-update-spatial! `(batch-normalize-update-spatial-impl ~ops-type)
+       :batch-normalize-gradients-eltwise! `(batch-normalize-gradients-eltwise-impl ~ops-type)
+       :batch-normalize-gradients-spatial! `(batch-normalize-gradients-spatial-impl ~ops-type)}
+      ])
+   (into {})))
 
 
 (def cpu-nn-ops (cpu-nn-ops-macro))
@@ -850,4 +938,32 @@
        batch-count channel-count element-count)
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-spatial!])
        output input batch-means batch-variances scale bias epsilon
+       batch-count channel-count element-count)))
+
+  (batch-normalize-gradients-eltwise! [stream
+                                       input-gradient scale-gradient
+                                       bias-gradient output-gradient
+                                       output input batch-means batch-variances
+                                       scale bias epsilon
+                                       batch-count element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-gradients-eltwise!])
+       input-gradient scale-gradient
+       bias-gradient output-gradient
+       output input batch-means batch-variances
+       scale bias epsilon
+       batch-count element-count)))
+
+  (batch-normalize-gradients-spatial! [stream
+                                       input-gradient scale-gradient
+                                       bias-gradient output-gradient
+                                       output input batch-means batch-variances
+                                       scale bias epsilon
+                                       batch-count channel-count element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :batch-normalize-gradients-spatial!])
+       input-gradient scale-gradient
+       bias-gradient output-gradient
+       output input batch-means batch-variances
+       scale bias epsilon
        batch-count channel-count element-count))))

@@ -3,8 +3,6 @@
   meant to provide a language in which to implement new things but that explicitly avoids access
   to certain parts of the comput ecosystem that the engine driving the ecosystem is expected to
   manage.  Clients should not, for instance, access the stream or the datatype directly.
-  Currently the dimensions of tensors (like the dimensions of the graph) are hardcoded to
-  [batch-size channels height width].
 
 There is an implicit assumption throughout this file that implementations will loop through
   smaller entities instead of throwing an exception if sizes don't match.  This allows for
@@ -1129,7 +1127,8 @@ operation.  Batch size is then considered everything before the last two dimensi
                                               epsilon
                                               batch-count
                                               channel-count
-                                              element-count)))))
+                                              element-count)))
+    output))
 
 (defn batch-normalize-update-and-apply!
   "Calculate the per-batch stats and use those to ensure the output is normal.
@@ -1187,10 +1186,14 @@ operation.  Batch size is then considered everything before the last two dimensi
                                                       epsilon
                                                       batch-count
                                                       channel-count
-                                                      element-count)))))
+                                                      element-count)))
+    [output batch-means batch-variances running-means running-variances]))
 
 
 (defn batch-normalize-gradients!
+  "Generate gradients.  batch-means and batch-variances must be *exactly* what was calculated
+during update-and-apply.  Also note that batch-variances is implementation defined.
+See batch-normalize-update-and-apply!"
   [input-gradient scale-gradient bias-gradient output-gradient
    output input batch-means batch-variances
    scale bias epsilon]
@@ -1234,7 +1237,8 @@ operation.  Batch size is then considered everything before the last two dimensi
                                                (tensor->buffer scale)
                                                (tensor->buffer bias)
                                                epsilon
-                                               batch-count channel-count element-count)))))
+                                               batch-count channel-count element-count)))
+    [input-gradient scale-gradient bias-gradient]))
 
 
 (extend-type Tensor
