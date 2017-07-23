@@ -10,9 +10,11 @@
                  ;; Change the following dep to depend on different versions of CUDA
                  ;[org.bytedeco.javacpp-presets/cuda "7.5-1.2"]
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
-                 ;;The dataset abstraction uses parallel and optionally resource management.
+                 [thinktopic/think.parallel "0.3.6"]
+                 [thinktopic/think.resource "1.2.1"]
                  [thinktopic/think.parallel "0.3.7"]
-                 [thinktopic/think.resource "1.2.1"]]
+                 [thinktopic/think.resource "1.2.1"]
+                 [org.clojure/math.combinatorics "0.1.4"]]
 
   :java-source-paths ["java"]
 

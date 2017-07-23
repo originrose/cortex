@@ -19,7 +19,6 @@ checkouts
 models
 figwheel_server.log
 mnist
-resources
 trained-network.nippy
 trained-networks
 .idea/

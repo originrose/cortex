@@ -1,7 +1,7 @@
 (ns cortex.compute.driver
-  "Base set of protocols required to move information from the host to
-  the device  as well as  enable some form  of computation on  a given
-  device.  There is a cpu implementation provided for reference.
+  "Base set of protocols required to move information from the host to the device as well as
+  enable some form of computation on a given device.  There is a cpu implementation provided for
+  reference.
 
   Three basic datatypes are defined:
    * Driver: Enables enumeration of devices and creation of host buffers.
@@ -44,12 +44,11 @@
 
 
 (defprotocol PDriver
-  "A driver is a generic compute abstraction.  Could be a group of threads,
-  could be a machine on a network or it could be a CUDA or OpenCL driver.
-  A stream is a stream of execution (analogous to a thread) where
-  subsequent calls are serialized.  All buffers implement a few of the datatype
-  interfaces, at least get-datatype and ecount.  Host buffers are expected to implement
-  enough of the datatype interfaces to allow a copy operation from generic datatypes
+  "A driver is a generic compute abstraction.  Could be a group of threads, could be a machine
+  on a network or it could be a CUDA or OpenCL driver.  A stream is a stream of execution
+  (analogous to a thread) where subsequent calls are serialized.  All buffers implement a few of
+  the datatype interfaces, at least get-datatype and ecount.  Host buffers are expected to
+  implement enough of the datatype interfaces to allow a copy operation from generic datatypes
   into them.  This means at least PAccess."
   (get-devices [driver]
     "Get a list of devices accessible to the system.")
@@ -88,7 +87,13 @@ and a floating point buffer (cuda cuRand limitation)"))
 (defprotocol PBuffer
   "Interface to create sub-buffers out of larger contiguous buffers."
   (sub-buffer-impl [buffer offset length]
-    "Create a sub buffer that shares the backing store with the main buffer."))
+    "Create a sub buffer that shares the backing store with the main buffer.")
+  (alias? [lhs-dev-buffer rhs-dev-buffer]
+    "Do these two buffers alias each other?  Meaning do they start at the same address
+and overlap completely?")
+  (partially-alias? [lhs-dev-buffer rhs-dev-buffer]
+    "Do these two buffers partially alias each other?  Does some sub-range of their
+data overlap?"))
 
 
 (def ^:dynamic *current-compute-device* nil)

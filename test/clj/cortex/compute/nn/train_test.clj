@@ -23,7 +23,7 @@
 (def-double-float-test corn
   (verify-train/test-corn (create-context)))
 
-(def-double-float-test mnist
+(deftest mnist
   (verify-train/train-mnist (create-context)))
 
 (def-double-float-test dataset-batch-size-mismatch
