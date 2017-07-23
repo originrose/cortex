@@ -4,17 +4,16 @@
 
   Note that input-bindings are maps from node-id to stream
   while output bindings are maps from node-id to {:stream :loss}."
-  (:require
-    [clojure.set :as c-set]
-    [clojure.core.matrix :as m]
-    [cortex.loss :as loss]
-    [cortex.argument :as arg]
-    [cortex.graph :as graph]
-    [cortex.optimize :as optimize]
-    [cortex.optimize.adam :as adam]
-    [cortex.nn.layers :as layers]
-    [cortex.nn.network :as network]
-    [cortex.util :as util]))
+  (:require [clojure.set :as c-set]
+            [clojure.core.matrix :as m]
+            [cortex.argument :as arg]
+            [cortex.graph :as graph]
+            [cortex.optimize :as optimize]
+            [cortex.optimize.adam :as adam]
+            [cortex.nn.layers :as layers]
+            [cortex.nn.network :as network]
+            [cortex.loss.core :as loss]
+            [cortex.util :as util]))
 
 
 (defn- ensure-unique-buffer-id

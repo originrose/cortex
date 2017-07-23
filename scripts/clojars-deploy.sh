@@ -2,6 +2,8 @@
 
 set -e
 
+git pull
+
 PROJECTS=". experiment importers/caffe importers/keras"
 
 for proj in $PROJECTS; do

@@ -8,7 +8,9 @@
 (defn test-wrapper
   [test-fn]
   (resource/with-resource-context
-    (test-fn)))
+    ;;Turn on if you want much slower tests.
+    (with-bindings {#'resource/*resource-debug-double-free* false}
+      (test-fn))))
 
 
 (def ^:dynamic *datatype* :double)

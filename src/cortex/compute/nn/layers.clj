@@ -79,7 +79,7 @@ and then forward many times for every parameter of the network."
                    (math/flat-desc)
                    (math/gaussian-desc 1 (:variance layer)))
         elem-count (* (long batch-size) (long (graph/node->input-size layer)))]
-    (math/generate-rands (drv/get-stream backend)
+    (math/generate-rands (nn-backend/get-stream)
                          (math/device-buffer rand-buffer)
                          dis-type)
     (if (= (:distribution layer) :bernoulli)
@@ -93,14 +93,14 @@ and then forward many times for every parameter of the network."
   (forward [this parameter-buffers input-buffers output-buffers]
     (let [input (first-buffer input-buffers)
           output (first-buffer output-buffers)]
-     (math/elem-mul (drv/get-stream backend)
+     (math/elem-mul (nn-backend/get-stream)
                     1.0 (math/device-buffer input) 1
                     (math/device-buffer mult-buffer) 1
                     (math/device-buffer output) 1)))
   (backward [this parameter-buffers output-buffers input-buffers]
     (let [input-gradient (first-gradient input-buffers)
           output-gradient (first-gradient output-buffers)]
-     (math/elem-mul (drv/get-stream backend)
+     (math/elem-mul (nn-backend/get-stream)
                     1.0 (math/device-buffer output-gradient) 1
                     (math/device-buffer mult-buffer) 1
                     (math/device-buffer input-gradient) 1)))
@@ -116,8 +116,8 @@ and then forward many times for every parameter of the network."
   (let [n-items (long (graph/node->input-size node))
         mult-buffer (nn-backend/new-array backend [n-items]
                                           batch-size)
-        rand-buffer (math/->DeviceArray (drv/allocate-rand-buffer
-                                         (drv/get-driver backend)
+        rand-buffer (math/->DeviceArray (nn-backend/allocate-rand-buffer
+                                         backend
                                          (math/ensure-factor-of-2
                                           (* n-items (long batch-size))))
                                         (math/tensor batch-size 1 1 n-items))]
@@ -185,7 +185,7 @@ and then forward many times for every parameter of the network."
     (let [input (first-buffer input-buffers)
           output (first-buffer output-buffers)
           neg-scale (get-in parameter-buffers [:neg-scale :buffer])
-          stream (drv/get-stream backend)]
+          stream (nn-backend/get-stream)]
 
 
       (math/select stream input select-buffer 1 0)
@@ -203,7 +203,7 @@ and then forward many times for every parameter of the network."
     (let [input-gradient (first-gradient input-buffers)
           input (first-buffer input-buffers)
           output-gradient (first-gradient output-buffers)
-          stream (drv/get-stream backend)
+          stream (nn-backend/get-stream)
           neg-scale-gradient (get-in parameter-buffers [:neg-scale :gradient])]
       (drv/memset stream (math/device-buffer neg-scale-gradient) 0 0
                   (m/ecount neg-scale-gradient))
@@ -224,29 +224,27 @@ and then forward many times for every parameter of the network."
   (let [input-size (long (graph/node->input-size layer))
         n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
         n-pixels (quot input-size n-channels)
-        driver (drv/get-driver backend)
-        stream (drv/get-stream backend)]
+        stream (nn-backend/get-stream)]
     (->Prelu backend layer
              (nn-backend/new-array backend [input-size] batch-size)
-             (math/array driver stream :int (->> (range n-channels)
-                                                 (map #(repeat n-pixels %))
-                                                 (repeat batch-size)
-                                                 flatten)
+             (math/array stream :int (->> (range n-channels)
+                                          (map #(repeat n-pixels %))
+                                          (repeat batch-size)
+                                          flatten)
                          batch-size)
              (nn-backend/new-array backend [input-size] batch-size)
-             (math/array driver stream :int (range (* input-size (long batch-size))) batch-size)
+             (math/array stream :int (range (* input-size (long batch-size))) batch-size)
              (nn-backend/new-array backend [input-size] batch-size))))
 
 (defn- do-concat
   [backend input-buffers output-buffers batch-indexes buffer-key]
   (let [output (get-in output-buffers [0 buffer-key])
         [num-batches num-output] (math/batch-shape output)
-        driver (drv/get-driver backend)
-        stream (drv/get-stream backend)
+        stream (nn-backend/get-stream)
         output-buf (math/device-buffer output)
         final-offset
         (reduce (fn [^long offset input-buffer]
-                  (let [target-buf (drv/sub-buffer driver output-buf offset
+                  (let [target-buf (drv/sub-buffer output-buf offset
                                                    (- (dtype/ecount output) offset))
                         [num-batches input-stride] (math/batch-shape input-buffer)]
                     (condp = buffer-key
@@ -287,8 +285,7 @@ and then forward many times for every parameter of the network."
 (defmethod create :concatenate
   [backend layer batch-size]
   (->Concatenate backend layer
-                 (-> (math/array (drv/get-driver backend)
-                                 (drv/get-stream backend)
+                 (-> (math/array (nn-backend/get-stream)
                                  :int (range batch-size))
                      math/device-buffer)))
 
@@ -298,7 +295,7 @@ and then forward many times for every parameter of the network."
     (let [input-array (first-buffer input-buffers)
           n-elems (dtype/ecount input-array)
           input-buffer (math/device-buffer input-array)
-          stream (drv/get-stream backend)]
+          stream (nn-backend/get-stream)]
       (->> output-buffers
            (map (comp math/device-buffer :buffer))
            (map #(drv/copy-device->device stream input-buffer 0 % 0 n-elems))
@@ -307,7 +304,7 @@ and then forward many times for every parameter of the network."
   (backward [this parameter-buffers output-buffers input-buffers]
     (let [input-array (first-gradient input-buffers)
           n-elems (dtype/ecount input-array)
-          stream (drv/get-stream backend)]
+          stream (nn-backend/get-stream)]
       (drv/memset stream (math/device-buffer input-array) 0 0 n-elems)
       (->> output-buffers
            (map (comp math/device-buffer :gradient))
@@ -322,27 +319,25 @@ and then forward many times for every parameter of the network."
 
 (defn fixed-with-tensor
   "Given the data in this array, create a new array with a different tensor."
-  [ary tensor driver]
+  [ary tensor]
   (when-not (<= (long (m/ecount tensor))
                 (long (m/ecount ary)))
     (throw (ex-info "Array reshaped to larger size!")))
   (math/->DeviceArray
-   (drv/sub-buffer driver (math/device-buffer ary) 0 (m/ecount tensor))
+   (drv/sub-buffer (math/device-buffer ary) 0 (m/ecount tensor))
    tensor))
 
 
 (defrecord Join [backend layer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (let [batch-row-data (math/batched-data-to-per-input-data (drv/get-driver backend)
-                                                              (map :buffer
+    (let [batch-row-data (math/batched-data-to-per-input-data (map :buffer
                                                                    (concat output-buffers
                                                                            input-buffers)))
           output-n-elems (dtype/ecount (ffirst batch-row-data))
-          stream (drv/get-stream backend)
+          stream (nn-backend/get-stream)
           operation (get layer :operation :+)
-          min-input-count (apply min (map dtype/ecount (rest (first batch-row-data))))
-          driver (drv/get-driver backend)]
+          min-input-count (apply min (map dtype/ecount (rest (first batch-row-data))))]
       (drv/memset stream (math/device-buffer (first-buffer output-buffers)) 0 0
                   (dtype/ecount (first-buffer output-buffers)))
       (mapv
@@ -359,10 +354,8 @@ and then forward many times for every parameter of the network."
                (let [n-elems (if (= operation :+)
                                (long (min output-n-elems (dtype/ecount input-array)))
                                min-input-count)
-                     input-array (fixed-with-tensor input-array (math/tensor n-elems)
-                                                    driver)
-                     output-array (fixed-with-tensor output-array (math/tensor n-elems)
-                                                     driver)]
+                     input-array (fixed-with-tensor input-array (math/tensor n-elems))
+                     output-array (fixed-with-tensor output-array (math/tensor n-elems))]
                  (condp = operation
                    :+
                    (do (math/sum stream 1.0 input-array 1.0 output-array))
@@ -376,19 +369,16 @@ and then forward many times for every parameter of the network."
        batch-row-data)))
 
   (backward [this parameter-buffers output-buffers input-buffers]
-    (let [batch-row-data (math/batched-data-to-per-input-data (drv/get-driver backend)
-                                                              (map :gradient
+    (let [batch-row-data (math/batched-data-to-per-input-data (map :gradient
                                                                    (concat output-buffers
                                                                            input-buffers)))
-          batch-row-inputs (math/batched-data-to-per-input-data (drv/get-driver backend)
-                                                                (map :buffer
+          batch-row-inputs (math/batched-data-to-per-input-data (map :buffer
                                                                      input-buffers))
           output-n-elems (dtype/ecount (ffirst batch-row-data))
-          stream (drv/get-stream backend)
+          stream (nn-backend/get-stream)
           operation (get layer :operation :+)
           min-elem-count (apply min (map dtype/ecount (rest (first batch-row-data))))
-          input-idx-set (set (range (count input-buffers)))
-          driver (drv/get-driver backend)]
+          input-idx-set (set (range (count input-buffers)))]
       (mapv
        (fn [batch-row input-buffers]
          (let [output-gradient (first batch-row)
@@ -400,19 +390,15 @@ and then forward many times for every parameter of the network."
                (let [n-elems (if (= operation :+)
                                (min output-n-elems (dtype/ecount input-gradient))
                                min-elem-count)
-                     input-gradient (fixed-with-tensor input-gradient
-                                                       (math/tensor n-elems) driver)
-                     output-gradient (fixed-with-tensor output-gradient
-                                                        (math/tensor n-elems) driver)]
+                     input-gradient (fixed-with-tensor input-gradient (math/tensor n-elems))
+                     output-gradient (fixed-with-tensor output-gradient (math/tensor n-elems))]
                  (math/assign! stream input-gradient output-gradient)
                  (when (= operation :*)
                    ;;Multiply the gradient by every other input.
                    (->> (disj input-idx-set idx)
                         (mapv (fn [^long other-idx]
                                 (let [other-array (-> (get input-buffers other-idx)
-                                                      (fixed-with-tensor
-                                                       (math/tensor n-elems)
-                                                       driver))]
+                                                      (fixed-with-tensor (math/tensor n-elems)))]
                                   (math/elem-mul stream
                                                  1.0 other-array 1
                                                  input-gradient 1

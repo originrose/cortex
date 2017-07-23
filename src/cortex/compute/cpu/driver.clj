@@ -13,14 +13,40 @@
             FloatBuffer DoubleBuffer Buffer]
            [com.github.fommil.netlib BLAS]
            [java.util Random]
-           [think.datatype ArrayView IntArrayView]))
+           [think.datatype ArrayViewBase IntArrayView]))
 
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* true)
 
 
-(defrecord CPUStream [input-chan exit-chan error-atom])
+(defrecord CPUDevice [driver-fn device-id error-atom])
+(defrecord CPUStream [device input-chan exit-chan error-atom])
+(defrecord CPUDriver [devices error-atom])
+
+
+(extend-protocol drv/PDriverProvider
+  CPUDriver
+  (get-driver [driver] driver)
+  CPUDevice
+  (get-driver [device] ((get device :driver-fn)))
+  CPUStream
+  (get-driver [stream] (drv/get-driver (.device stream))))
+
+
+(extend-protocol drv/PDeviceProvider
+  CPUDriver
+  (get-device [driver] (drv/default-device driver))
+  CPUDevice
+  (get-device [device] device)
+  CPUStream
+  (get-device [stream] (.device stream)))
+
+
+(extend-protocol drv/PStreamProvider
+  CPUStream
+  (get-stream [stream] stream))
+
 
 (extend-type CPUStream
   resource/PResource
@@ -35,26 +61,26 @@
 
 
 (defn cpu-stream
-  ([error-atom]
-   (let [^CPUStream retval (->CPUStream (async/chan 16) (async/chan) error-atom)]
-     (async/go
-       (loop [next-val (async/<! (:input-chan retval))]
+  ([device error-atom]
+   (let [^CPUStream retval (->CPUStream device (async/chan 16) (async/chan) error-atom)]
+     (async/thread
+       (loop [next-val (async/<!! (:input-chan retval))]
          (when next-val
            (try
              (next-val)
              (catch Throwable e
                (reset! error-atom e)))
-           (recur (async/<! (:input-chan retval)))))
+           (recur (async/<!! (:input-chan retval)))))
        (async/close! (:exit-chan retval)))
      (resource/track retval)))
-  ([] (cpu-stream (atom nil))))
+  ([device] (cpu-stream device (atom nil))))
 
 
 (defn main-thread-cpu-stream
   "Create a cpu stream that will execute everything immediately inline.
 Use with care; the synchonization primitives will just hang with this stream."
   ^CPUStream []
-  (->CPUStream nil nil nil))
+  (->CPUStream nil nil nil nil))
 
 
 (defn is-main-thread-cpu-stream?
@@ -153,45 +179,55 @@ Use with care; the synchonization primitives will just hang with this stream."
 (extend-type CPUEvent
   drv/PEvent
   (wait-for-event [event]
-    (async/<!! (.input-chan event))))
+    (async/<!! (.input-chan event)))
+  resource/PResource
+  (release-resource [event]))
 
-(defrecord CPUDriver [^long dev-count ^long current-device error-atom])
 
-(defn driver []
-  (->CPUDriver 1 1 (atom nil)))
+(defn driver
+  [& {:keys [num-devices]
+      :or {num-devices 1}}]
+  (let [error-atom (atom nil)
+        retval (->CPUDriver (atom nil) error-atom)]
+    (reset! (get retval :devices)
+            (->> (range num-devices)
+                 (mapv #(-> (->CPUDevice (constantly retval) % error-atom)))))
+    retval))
+
+(extend-type CPUDevice
+  drv/PDevice
+  (memory-info-impl [impl]
+    (get-memory-info))
+
+  (create-stream-impl [impl]
+    (check-stream-error impl)
+    (cpu-stream impl (:error-atom impl)))
+
+  (allocate-device-buffer-impl [impl elem-count elem-type]
+    (check-stream-error impl)
+    (dtype/make-view elem-type elem-count))
+
+  (allocate-rand-buffer-impl [impl elem-count]
+    (check-stream-error impl)
+    (dtype/make-view :float elem-count)))
+
 
 (extend-type CPUDriver
   drv/PDriver
   (get-devices [impl]
-    (mapv #(+ 1 %) (range (.dev-count impl))))
+    @(get impl :devices))
 
-  (set-current-device [impl ^long device]
-    (assoc impl :current-device device))
-
-  (get-current-device [impl]
-    (:current-device impl))
-
-  (memory-info [impl]
-    (get-memory-info))
-
-  (create-stream [impl]
+  (allocate-host-buffer-impl [impl elem-count elem-type options]
     (check-stream-error impl)
-    (cpu-stream (:error-atom impl)))
+    (dtype/make-view elem-type elem-count)))
 
-  (allocate-host-buffer [impl elem-count elem-type]
-    (check-stream-error impl)
-    (dtype/make-view elem-type elem-count))
 
-  (allocate-device-buffer [impl elem-count elem-type]
-    (check-stream-error impl)
-    (dtype/make-view elem-type elem-count))
-
-  (allocate-rand-buffer [impl elem-count]
-    (check-stream-error impl)
-    (dtype/make-view :float elem-count))
-
-  (sub-buffer-impl [impl buffer offset length]
-    (dtype/->view buffer offset length)))
+(extend-type ArrayViewBase
+  drv/PBuffer
+  (sub-buffer-impl [buffer offset length]
+    (dtype/->view buffer offset length))
+  resource/PResource
+  (release-resource [_]))
 
 
 (extend-type CPUStream
@@ -251,9 +287,3 @@ Use with care; the synchonization primitives will just hang with this stream."
                         beta (dtype/->view y) (dtype/->view y-indexes)
                         (dtype/->view result) (dtype/->view res-indexes)
                         n-elems-per-idx))))
-
-
-(extend-type Buffer
-  resource/PResource
-  (release-resource [buf]))
-

@@ -46,11 +46,13 @@
 
 (defmacro cudnn-call
   [& body]
-  `(let [retval# (do ~@body)]
-     (when-not (= retval# cudnn/CUDNN_STATUS_SUCCESS)
-       (throw (Exception.
-               (format "Cudnn error: %s" (.getString (cudnn/cudnnGetErrorString retval#))))))
-     retval#))
+  `(do
+     (cuda-drv/ensure-device)
+     (let [retval# (do ~@body)]
+      (when-not (= retval# cudnn/CUDNN_STATUS_SUCCESS)
+        (throw (Exception.
+                (format "Cudnn error: %s" (.getString (cudnn/cudnnGetErrorString retval#))))))
+      retval#)))
 
 (defonce forward-algorithms
   (cuda-drv/reverse-hash-map
@@ -183,23 +185,55 @@
   (^cudnn$cudnnActivationStruct [mode] (activation-description mode cudnn/CUDNN_PROPAGATE_NAN 0.0)))
 
 
-(defrecord CudaBackend [type driver stream cudnn-context datatype network-functions])
+(defrecord CudaBackend [type device stream cudnn-context datatype network-functions]
+  resource/PResource
+  (release-resource
+    [backend]
+    (drv/with-compute-device (get backend :device)
+      (resource/release-resource-context (get backend :resource-context))))
+  drv/PDeviceProvider
+  (get-device
+    [backend]
+    (get backend :device))
+  drv/PStreamProvider
+  (get-stream
+    [backend]
+    (get backend :stream))
+  drv/PDriverProvider
+  (get-driver
+    [backend]
+    (drv/get-driver (drv/get-device backend)))
+  dtype/PDatatype
+  (get-datatype
+    [backend]
+    (get backend :datatype)))
+
 
 (defn backend
-  ([driver stream datatype]
-   (let [network-functions {:prepare-bernoulli-dropout
-                            (cuda-drv/load-float-double-function
-                              "prepare_bernoulli_dropout.fatbin"
-                              "prepare_bernoulli_dropout")
-                            :prepare-gaussian-dropout
-                            (cuda-drv/load-float-double-function
-                              "prepare_gaussian_dropout.fatbin"
-                              "prepare_gaussian_dropout")}]
-     (->CudaBackend :cuda driver stream (cudnn-context) datatype network-functions)))
-  ([datatype] (let [driver (cuda-drv/driver)
-                    stream (drv/create-stream driver)]
-                (backend driver stream datatype)))
-  ([] (backend :double)))
+  [& {:keys [driver device datatype stream]
+      :or {datatype :float}}]
+  (let [driver (or driver (cuda-drv/driver))
+        device (or device (drv/default-device driver))]
+    ;;Do not use with device as that enforces a resource context.  This means
+    ;;the backend would be destroyed as it left this function.
+    ;;Using the unsafe function means are a explicitly relying on an outer resource
+    ;;context to handle release of this backend.
+    (drv/unsafe-with-compute-device
+     device
+     (let [[backend res-ctx]
+            (resource/return-resource-context
+             (let [network-functions {:prepare-bernoulli-dropout
+                                      (cuda-drv/load-float-double-function
+                                       "prepare_bernoulli_dropout.fatbin"
+                                       "prepare_bernoulli_dropout")
+                                      :prepare-gaussian-dropout
+                                      (cuda-drv/load-float-double-function
+                                       "prepare_gaussian_dropout.fatbin"
+                                       "prepare_gaussian_dropout")}
+                   default-stream (or stream (drv/create-stream))]
+               (->CudaBackend :cuda device default-stream (cudnn-context) datatype network-functions)))]
+        (resource/track (assoc backend :resource-context res-ctx))))))
+
 
 (defn get-cudnn
   ^cudnn$cudnnContext [^CudaBackend network]
@@ -207,10 +241,13 @@
 
 (defmacro stream-with-cudnn
   [backend & body]
-  `(let [stream# (drv/get-stream ~backend)
+  `(let [backend# ~backend
+         stream# (nn-backend/get-stream)
+         cuda-stream# (cuda-drv/get-cuda-stream stream#)
          ~'cudnn-context (get-cudnn ~backend)]
      (locking ~'cudnn-context
-       (cudnn/cudnnSetStream ~'cudnn-context (drv/get-stream stream#))
+       (cuda-drv/check-stream-device stream#)
+       (cudnn-call (cudnn/cudnnSetStream ~'cudnn-context cuda-stream#))
        ~@body)))
 
 
@@ -226,20 +263,22 @@
 (extend-type DoublePointer
   PCUDAOptimizeMethod
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
+    (cuda-drv/launch-linear-kernel (nn-backend/get-stream)
+                                   (backend->fn backend :prepare-bernoulli-dropout :double) elem-count 0
                                    mult-buffer rand-buffer (double probability) elem-count))
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :double) elem-count 0
+    (cuda-drv/launch-linear-kernel (nn-backend/get-stream)
+                                   (backend->fn backend :prepare-gaussian-dropout :double) elem-count 0
                                    mult-buffer rand-buffer elem-count)))
 
 
 (extend-type FloatPointer
   PCUDAOptimizeMethod
   (cuda-prepare-bernoulli-dropout! [mult-buffer probability ^FloatPointer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-bernoulli-dropout :float) elem-count 0
+    (cuda-drv/launch-linear-kernel (nn-backend/get-stream) (backend->fn backend :prepare-bernoulli-dropout :float) elem-count 0
                                    mult-buffer rand-buffer (float probability) elem-count))
   (cuda-prepare-gaussian-dropout! [mult-buffer rand-buffer elem-count backend]
-    (cuda-drv/launch-linear-kernel (drv/get-stream backend) (backend->fn backend :prepare-gaussian-dropout :float) elem-count 0
+    (cuda-drv/launch-linear-kernel (nn-backend/get-stream) (backend->fn backend :prepare-gaussian-dropout :float) elem-count 0
                                    mult-buffer rand-buffer elem-count)))
 
 
@@ -350,7 +389,7 @@
                                               (first-buffer output-buffers))))))
 
   (backward [layer parameter-buffers output-buffers input-buffers]
-    (compute-layers/softmax-backward! (drv/get-stream backend)
+    (compute-layers/softmax-backward! (nn-backend/get-stream)
                                       (compute-layers/first-gradient input-buffers)
                                       (compute-layers/first-gradient output-buffers))))
 
@@ -626,7 +665,7 @@ Backward Data: %s %d"
                                     (.get backward-filter-workspace-size)
                                     (.get backward-data-workspace-size))
           workspace (when-not (= 0 total-workspace-size)
-                      (drv/allocate-device-buffer (drv/get-driver backend) total-workspace-size :byte))]
+                      (drv/allocate-device-buffer total-workspace-size :byte))]
       (map->ConvolutionLayer
        {:backend backend
         :workspace workspace
@@ -690,12 +729,16 @@ Backward Data: %s %d"
         cudnn-dtype (dtype->cudnn datatype)
         input-tensor (layer-input->image-tensor layer batch-size datatype)
         output-tensor (layer-output->image-tensor layer batch-size datatype)
-        output-dims (int-array 4)]
+        output-dims (int-array 4)
+        pool-op (get layer :pool-op :max)]
     (cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
     (resource/track pooling-desc)
     (cudnn-call (cudnn/cudnnSetPooling2dDescriptor
                  pooling-desc
-                 cudnn/CUDNN_POOLING_MAX
+                 (condp = pool-op
+                   :max cudnn/CUDNN_POOLING_MAX
+                   :avg cudnn/CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING
+                   :avg-exc-pad cudnn/CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING)
                  cudnn/CUDNN_PROPAGATE_NAN
                  (:kernel-height layer) (:kernel-width layer)
                  (:pad-y layer) (:pad-x layer)
@@ -873,12 +916,6 @@ Backward Data: %s %d"
 
 
 (extend-type CudaBackend
-  drv/PDriverProvider
-  (get-driver [impl] (.driver impl))
-  drv/PStreamProvider
-  (get-stream [impl] (.stream impl))
-  dtype/PDatatype
-  (get-datatype [impl] (.datatype impl))
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
     (cuda-layer backend layer batch-size))

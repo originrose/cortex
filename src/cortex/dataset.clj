@@ -22,15 +22,5 @@
 
   Serialization to various formats is simple:
   For each format, two functions are necessary.
-  (1) A function to take a sequence of maps and serializes it.
-  (2) A function that takes serialized data and returns a sequence of maps."
-  (:require [clojure.core.matrix :as m]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Helper Functions
-
-(defn column-shapes
-  [dataset]
-  (->> (first dataset)
-       (map (fn [[k v]] [k (m/ecount v)]))
-       (into {})))
+  (1) A function to take a sequence of maps and serialize it.
+  (2) A function that takes serialized data and returns a sequence of maps.")

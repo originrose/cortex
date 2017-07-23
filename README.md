@@ -12,10 +12,11 @@ https://groups.google.com/forum/#!forum/clojure-cortex
 
 ## Usage
 
-Cortex has a 0.5.0 release meaning all libraries are released on clojars.  This is very preliminary and I would expect quite a few things to change
+`[thinktopic/cortex 0.9.10]`
+
+All libraries are released on [clojars](https://clojars.org/thinktopic/cortex).  Cortex is not 1.0 yet preliminary and you should expect quite a few things to change
 over time but it should allow you to train some initial classifiers or regressions.  Note that the save format has not stabilized and although we do
-just save edn data in nippy format it may require some effort to bring versions of saved forward.  Once a future proof save format has been
-nailed down then we are a major step closer to 1.0.0.
+just save edn data in nippy format it may require some effort to bring versions of saved forward.
 
 ## Cortex Design
 
@@ -26,7 +27,7 @@ Please see the various unit tests and examples for training a model.  Specifical
 [mnist verification](src/cortex/verify/nn/train.clj)
 
 Also, for an example of using cortex in a more real-world scenario please see:
-[mnist example](examples/suite-classification/src/suite_classification/core.clj).
+[mnist example](examples/mnist-classification/src/mnist_classification/core.clj).
 
 
 
@@ -43,38 +44,46 @@ Also, for an example of using cortex in a more real-world scenario please see:
 
  * Recurrence in all forms.  There is some work towards that direction in the compute branch and it is specifically designed to match the cudnn API for recurrence.  This is less important at this point than running some of the larger pre-trained models.
 
- * Graph-based description layer.  This will make doing things like res-nets and dense-nets easier and repeatable.
-
- * Better training - currently there are lots of things that don't train as well as we would like.  This could be because we are using Adam exclusively instead of sgd, it could be because of bugs in the code or it could be because we need different weight initialization.  In any case, building larger nets that train better is of course of critical importance.
-
  * Speaking of larger nets, multiple GPU support and multiple machine support (which could be helped by the above graph based description layer).
 
  * Profiling GPU system to make sure we are using as much GPU as possible in the single-gpu case.
 
- * Better data import/augmentation systems.  Basically inline augmentation of data so the net never sees the same training example twice.
-
- * Better data import/visualization support.  We need a solid panda-equivalent with some level of visualization and feature parity and it isn't clear the best way to get this.  Currently there are three different 'dataset' abstractions in clojure it isn't clear if any of them support the level of indirection and features that panda does.
+ * Better data import/visualization support.  We have geom and we have a clear definition of the datasets, now we need to put together the pieces and build some great visualizations as examples.
 
 
 ### Getting Started:
 
- * Get the project and run lein test in both cortex and compute.  The various unit tests train various models.
+ * Get the project and run `lein test` in both cortex and compute.  The various unit tests train various models.
 
 ### GPU Compute Install Instructions
 
 #### Ubuntu
 
-Basic steps include, at minimum: Installing nvidia-cuda-toolkit.
-and installing cudnn available from here: https://developer.nvidia.com/cudnn publicly.
+[Download Cuda](https://developer.nvidia.com/cuda-downloads) and follow the installation commands provided
 
-    $ sudo apt-get install nvidia-cuda-toolkit nvidia-361 libcuda1-361
+    $ sudo dpkg -i cuda-repo-<distro>_<version>_<architecture>.deb
+    $ sudo apt-get update
+    $ sudo apt-get install cuda
 
-The .zip contains some libraries that you will need to make available to the loader. I simply copied the library files to /usr/lib, though I'm sure there's a better way of doing this.
+Install the Cuda driver and any dependencies. Use driver version specific to device being used (to check on Ubuntu: System Settings -> Software & Updates -> Additional Drivers)
 
-Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 8.0, if you're running 8.0 you will need to use change the javacpp dependency in your project file.
+    $ sudo apt-get install nvidia-<driver version>
 
+[Install cuDNN](https://developer.nvidia.com/cudnn) and copy the cuDNN files to the corresponding folders in the local cuda installation (probably at /usr/local/cuda). For reference, follow the "Installing cuDNN" section [here](http://www.pyimagesearch.com/2016/07/04/how-to-install-cuda-toolkit-and-cudnn-for-deep-learning/).
 
-[MNist Example](https://github.com/thinktopic/cortex/blob/master/examples/suite-classification/project.clj)
+Add Cuda to the PATH in `~/.bashrc`
+
+    # CUDA Toolkit
+    export CUDA_HOME=/usr/local/cuda
+    export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
+    export PATH=${CUDA_HOME}/bin:${PATH}
+
+Run `$ nvcc -V` to make sure cuda version is as expected.
+
+To check everything is working, run `$ nvidia-smi`
+
+Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 8.0, so if you're running 7.5 you will need to change the javacpp dependency in your project file of the [mnist Example](https://github.com/thinktopic/cortex/blob/master/examples/mnist-classification/project.clj).
+
 
 #### Mac OS
 These instructions follow the gpu setup from [Tensor Flow](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#optional-setup-gpu-for-mac), i.e.:
@@ -82,7 +91,7 @@ These instructions follow the gpu setup from [Tensor Flow](https://github.com/te
 Install coreutils and cuda:
 
     $ brew install coreutils
-    $ brew tap caskroom/cask
+    $ brew tap caskroom/drivers
     $ brew cask install cuda
 
 Add CUDA Tool kit to bash profile
@@ -111,6 +120,11 @@ lj:82:28)
 ```
 
 Make sure you have installed the appropriate CUDNN for your version of CUDA.
+
+#### Windows
+
+Some preliminary information about getting gpu-acceleration working on windows is available here:
+https://groups.google.com/forum/#!topic/clojure-cortex/hNFW1T_2PZc
 
 ### See also:
 

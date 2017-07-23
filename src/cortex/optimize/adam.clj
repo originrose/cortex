@@ -6,12 +6,13 @@
    [cortex.compute.driver :as drv]
    [cortex.compute.cpu.backend :as cpu-backend]
    [cortex.compute.cpu.driver :as cpu-drv]
-   [cortex.compute.cuda.driver :as cuda-drv]
+   ;[cortex.compute.cuda.driver :as cuda-drv]
    [cortex.util :as util]
    [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
    [think.datatype.marshal :as marshal]
    [think.parallel.core :as parallel]
-   [cortex.graph :as graph])
+   [cortex.graph :as graph]
+   [cortex.compute.nn.backend :as compute-backend])
   (:import
    [think.datatype ArrayView IntArrayView]))
 
@@ -46,15 +47,15 @@
 
 (defn- dispatch-to-gpu
   [stream dispatch-fn item-count & args]
-  (apply cuda-drv/launch-linear-kernel
+  (require 'cortex.compute.cuda.driver)
+  (apply (resolve 'cortex.compute.cuda.driver/launch-linear-kernel)
          stream dispatch-fn item-count 0
          args))
 
 
 (defn- ->buffer
   ([backend array ^long offset]
-   (drv/sub-buffer (drv/get-driver backend)
-                   (math/device-buffer array)
+   (drv/sub-buffer (math/device-buffer array)
                    offset
                    (- (dtype/ecount array) offset)))
   ([backend buffer]
@@ -121,9 +122,9 @@
    alpha beta1 beta2 epsilon pow-beta1-t pow-beta2-t
    gradient-alpha gradient parameters m v]
   (let [datatype (dtype/get-datatype backend)
-        stream (drv/get-stream backend)
+        stream (compute-backend/get-stream)
         item-count (dtype/ecount gradient)
-        ->d #(cuda-drv/dtype-cast % datatype)]
+        ->d #(drv/dtype-cast % datatype)]
     (ensure-datatype datatype gradient parameters m v)
     (dev-dispatch-fn stream (get-in fn-map [datatype :fn]) item-count
                      (->d alpha) (->d beta1) (->d beta2) (->d epsilon)
@@ -162,10 +163,7 @@
 
 (defn- setup-optimizer
   [backend optimizer step-fn]
-  (let [driver (drv/get-driver backend)
-        stream (drv/get-stream backend)
-        datatype (dtype/get-datatype backend)]
-    (->Adam backend optimizer step-fn POW-BETA1-T POW-BETA2-T)))
+  (->Adam backend optimizer step-fn POW-BETA1-T POW-BETA2-T))
 
 
 (defmethod create-optimizer [:cpu :adam]
@@ -178,7 +176,7 @@
 (defmethod create-optimizer [:cuda :adam]
   [backend optimizer]
   ;; Load the compiled GPU kernel for floats and doubles
-  (let [cuda-fns (cuda-drv/load-float-double-function "adam.fatbin" "adam_step")]
+  (let [cuda-fns ((resolve 'cortex.compute.cuda.driver/load-float-double-function) "adam.fatbin" "adam_step")]
     (setup-optimizer backend optimizer
                      (adam-step-fn backend cuda-fns dispatch-to-gpu))))
 

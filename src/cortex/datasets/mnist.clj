@@ -1,16 +1,15 @@
 (ns cortex.datasets.mnist
   (:require [clojure.java.io :as io]
-            [cortex.datasets.util :as util]
-            [clojure.core.matrix :as mat]
+            [clojure.core.matrix :as m]
             [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix.macros :refer [c-for]]
-            [mikera.vectorz.matrix-api])
-  (:import
-    [java.io DataInputStream]))
+            [mikera.vectorz.matrix-api]
+            [cortex.datasets.util :as util])
+  (:import [java.io DataInputStream]))
 
 (set! *warn-on-reflection* true)
 
-(mat/set-current-implementation :vectorz)
+(m/set-current-implementation :vectorz)
 
 (def WIDTH 28)
 (def HEIGHT 28)
@@ -62,7 +61,7 @@
     (assert= (.readInt input) size "Unexpected image count")
     (assert= (.readInt input) WIDTH "Unexpected row count")
     (assert= (.readInt input) HEIGHT "Unexpected column count")
-    (let [core-m-array (mat/new-array :vectorz [size HEIGHT WIDTH])
+    (let [core-m-array (m/new-array :vectorz [size HEIGHT WIDTH])
           ^doubles dbl-array (mp/as-double-array core-m-array)]
       (c-for [img 0 (< img size) (inc img)]
         (c-for [row 0 (< row HEIGHT) (inc row)]
@@ -98,26 +97,40 @@
 (defn training-dataset []
   (let [data (load-data (get-in DATASET [:train :data]))
         labels (load-labels (get-in DATASET [:train :labels]))]
-    (dataset-seq (mat/slice-views data 0) labels)))
+    (dataset-seq (m/slice-views data 0) labels)))
 
 
 (defn test-dataset []
   (let [data (load-data (get-in DATASET [:test :data]))
         labels (load-labels (get-in DATASET [:test :labels]))]
-    (dataset-seq (mat/slice-views data 0) labels)))
+    (dataset-seq (m/slice-views data 0) labels)))
+
+
+(defn global-whiten!
+  [data]
+  (let [global-mean (/ (m/esum data) (m/ecount data))
+        _ (m/div! data global-mean)
+        global-variance (m/ereduce (fn [^double accum ^double val]
+                                     (+ accum (* val val)))
+                                   0.0
+                                   data)
+        global-stddev (Math/sqrt (/ global-variance (m/ecount data)))]
+    {:data (m/div! data global-stddev)
+     :mean global-mean
+     :stddev global-stddev}))
 
 
 (defn normalized-data []
   (let [train-d (training-dataset)
         test-d (test-dataset)
-        all-rows (mat/array :vectorz (vec (concat train-d test-d)))
-        data-shape (mat/shape all-rows)
+        all-rows (m/array :vectorz (vec (concat train-d test-d)))
+        data-shape (m/shape all-rows)
         num-cols (long (second data-shape))
         num-rows (long (first data-shape))
-        normalized (util/global-whiten! all-rows)
+        normalized (global-whiten! all-rows)
         norm-mat (get normalized :data)
         num-train-d (count train-d)
-        return-train-d (mat/submatrix norm-mat 0 num-train-d 0 num-cols)
-        return-test-d (mat/submatrix norm-mat num-train-d (- num-rows num-train-d) 0 num-cols)]
+        return-train-d (m/submatrix norm-mat 0 num-train-d 0 num-cols)
+        return-test-d (m/submatrix norm-mat num-train-d (- num-rows num-train-d) 0 num-cols)]
     {:training return-train-d
      :test return-test-d}))

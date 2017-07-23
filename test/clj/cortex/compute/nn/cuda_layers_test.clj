@@ -2,13 +2,13 @@
   (:require [cortex.compute.verify.utils :refer [def-double-float-test] :as verify-utils]
             [clojure.test :refer :all]
             [cortex.verify.nn.layers :as verify-layers]
-            [cortex.compute.cuda.backend :as cuda-backend]
             [cortex.nn.execute :as execute]))
 
 (use-fixtures :each verify-utils/test-wrapper)
 
 (defn create-context
   []
+  (require '[cortex.compute.cuda.backend :as cuda-backend])
   (execute/compute-context :backend :cuda
                            :datatype verify-utils/*datatype*))
 
@@ -50,6 +50,12 @@
 
 (def-double-float-test pool-layer
   (verify-layers/pool-layer-basic (create-context)))
+
+(def-double-float-test pool-layer-avg
+  (verify-layers/pool-layer-avg (create-context)))
+
+(def-double-float-test pool-layer-avg-exc-pad
+  (verify-layers/pool-layer-avg-exc-pad (create-context)))
 
 (def-double-float-test dropout-bernoulli
   (verify-layers/dropout-bernoulli (create-context)))

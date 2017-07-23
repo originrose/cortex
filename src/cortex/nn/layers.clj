@@ -5,10 +5,15 @@ on them that pertails exactly to that implementation.  They are expected to be t
 of extra keys/information on the descriptions.  Because of this the description
 constructors are all variable args with the extra arguments expected to be
   keyword-value pairs and are assoc'd into the description map."
-  (:require [cortex.util :refer [merge-args arg-list->arg-map] :as util]
-            [cortex.loss :as loss]
+  (:require [cortex.util :refer [merge-args arg-list->arg-map]]
             [cortex.graph :as graph]
-            [cortex.buffer-initialization :as buf-init]))
+            [cortex.buffer-initialization :as buf-init]
+            [cortex.loss.core :as loss]
+            [cortex.loss.mse]
+            [cortex.loss.center]
+            [cortex.loss.softmax]
+            [cortex.loss.censor]
+            [cortex.loss.regularization]))
 
 
 ;; Helpers
@@ -34,7 +39,7 @@ constructors are all variable args with the extra arguments expected to be
 
 ;;This type of initialization finds the next activation in the graph and then
 ;;decides what to do from there.
-(defmethod graph/initialize-graph-parameter-buffer :weight-initialization
+(defmethod graph/initialize-graph-parameter-buffer :auto-weight-initialization
   [graph node argument shape initialization]
   (let [activation-set #{:tanh :relu :logistic}
         next-activation (->> (graph/relative-dfs-seq graph (get node :id))
@@ -46,6 +51,26 @@ constructors are all variable args with the extra arguments expected to be
                                    :shape shape})
       (buf-init/initialize-buffer {:type :xavier
                                    :shape shape}))))
+
+(defmethod graph/initialize-graph-parameter-buffer :relu
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :relu
+                               :shape shape}))
+
+(defmethod graph/initialize-graph-parameter-buffer :orthogonal
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :orthogonal
+                               :shape shape}))
+
+(defmethod graph/initialize-graph-parameter-buffer :xavier
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :xavier
+                               :shape shape}))
+
+(defmethod graph/initialize-graph-parameter-buffer :bengio-glorot
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :bengio-glorot
+                               :shape shape}))
 
 ;; Input Layer
 (defmethod graph/build-node :input
@@ -114,7 +139,7 @@ constructors are all variable args with the extra arguments expected to be
   {:arguments
    {:weights {:type :parameter
               :shape-fn :cortex.nn.layers/linear-weight-parameter-shape
-              :initialization {:type :weight-initialization}
+              :initialization {:type :auto-weight-initialization}
               :gradients? true}
     :bias {:type :parameter
            :shape-fn :cortex.nn.layers/linear-bias-parameter-shape
@@ -389,7 +414,7 @@ a few compatibility issues."
   {:arguments
    {:weights {:type :parameter
               :shape-fn :cortex.nn.layers/convolutional-weight-parameter-shape
-              :initialization {:type :weight-initialization}
+              :initialization {:type :auto-weight-initialization}
               :gradients? true}
     :bias {:type :parameter
            :shape-fn :cortex.nn.layers/convolutional-bias-parameter-shape
@@ -398,13 +423,23 @@ a few compatibility issues."
    :passes #{:training :inference}})
 
 
-;; Pooling Layers
-
 (defn max-pooling
-  ([kernel-dim pad stride & args]
-   [(apply convolutional-type-layer :max-pooling
-           kernel-dim kernel-dim pad pad
-           stride stride 0 :ceil args)]))
+  "Max pooling with one of three possible pooling operations (:pool-op):
+:max - default, take the max excluding padding.
+:avg - Take the average including padding.
+:avg-exc-pad - Take the average excluding padding."
+  [kernel-dim pad stride & args]
+  (let [retval (-> (apply convolutional-type-layer :max-pooling
+                          kernel-dim kernel-dim pad pad
+                          stride stride 0 :ceil args)
+                   (#(if (contains? % :pool-op)
+                       %
+                       (assoc % :pool-op :max))))]
+    (when-not (get #{:max :avg :avg-exc-pad} (get retval :pool-op))
+      (throw (ex-info "Max pooling layers have three possible pool operations:"
+                      {:possible-operation-set #{:max :avg :avg-exc-pad}
+                       :pool-op (get retval :pool-op)})))
+    [retval]))
 
 
 (defmethod graph/build-node :max-pooling
@@ -525,11 +560,14 @@ input dimensions."
   (let [input-dims (mapv #(-> (graph/get-node graph %)
                               (graph/ensure-single-output-dimensions node)
                               (assoc :id %))
-                         p-id-seq)]
+                         p-id-seq)
+        input-dims-set (set (map #(dissoc % :id) input-dims))]
     (assoc node
            :input-dimensions input-dims
-           :output-dimensions [(graph/create-node-dimensions
-                                (apply max (map graph/dimensions->size input-dims)))])))
+           :output-dimensions (if (= 1 (count input-dims-set))
+                                [(first input-dims-set)]
+                                [(graph/create-node-dimensions
+                                  (apply max (map graph/dimensions->size input-dims)))]))))
 
 
 (defmethod graph/get-node-metadata :join

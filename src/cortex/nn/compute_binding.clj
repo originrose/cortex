@@ -2,24 +2,24 @@
   "Internal machinery needed to make execute work.  Ideally this machinery is used during
   execute, layer unit tests, and gradient checking in such a way that once the layer unit tests
   work someone has some confidence that this module is correct."
-  (:require [clojure.pprint :as pprint]
-            [cortex.nn.network :as network]
+  (:require [clojure.pprint]
             [clojure.core.matrix :as m]
-            [cortex.compute.nn.backend :as backend]
-            [cortex.compute.driver :as drv]
-            [cortex.graph :as graph]
-            [cortex.compute.loss :as compute-loss]
+            [clojure.core.matrix.macros :refer [c-for]]
             [think.datatype.core :as dtype]
+            [cortex.optimize :as optimize]
+            [cortex.graph :as graph]
+            [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.layers :as layers]
+            [cortex.compute.nn.backend :as backend]
+            [cortex.compute.driver :as drv]
             [cortex.compute.nn.layers :as compute-layers]
-            [cortex.optimize :as optimize]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.compute.math :as math]
-            [cortex.loss :as loss]
-            [cortex.util :as util]
+            [cortex.loss.core :as loss]
+            [cortex.loss.util :as loss-util]
             [cortex.buffer-initialization :as buf-init]
-            [clojure.core.matrix.macros :refer [c-for]]))
+            [cortex.util :as util]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -164,10 +164,10 @@
         (->> loss-function
              (mapv (fn [loss-term]
                      (let [term-gradients (generate-loss-term-gradients network backend loss-term)]
-                       {:compute-term (compute-loss/create-compute-loss-term backend
-                                                                             network
-                                                                             loss-term
-                                                                             batch-size)
+                       {:compute-term (loss-util/create-compute-loss-term backend
+                                                                          network
+                                                                          loss-term
+                                                                          batch-size)
                         :gradients term-gradients
                         :loss-term loss-term}))))]
     [network loss-function]))
@@ -179,12 +179,11 @@
    :traversal   ...
    :batch-size  ...}"
   [{:keys [compute-graph] :as network}
-   {:keys [backend-fn] :as context}
+   backend
    batch-size
    traversal
    {:keys [gradients? numeric-gradients? optimizer] :as options}]
-  (let [backend (backend-fn)
-        network (assoc network
+  (let [network (assoc network
                        :compute-binding {:batch-size batch-size}
                        :traversal traversal)
         stream-map (get traversal :stream-map)
@@ -298,7 +297,7 @@
   (let [backend (backend network)
         core-m (fn [data]
                  (when data
-                   (backend/to-core-matrix backend data)))
+                   (backend/to-core-matrix backend data :file-format? true)))
         ->doubles (fn [host-buffer]
                     (when host-buffer
                       (let [retval (double-array (m/ecount host-buffer))]
@@ -341,6 +340,10 @@
                                      [k (core-m v)]))
                               (into {})))))))))
 
+(defn backend
+  [network]
+  (get-in network [:compute-binding :backend]))
+
 
 (defn get-parameter
   "Get a specific parameter's value from the network.  This is necessary
@@ -348,28 +351,26 @@
   return a map containing at least :buffer."
   [network buffer-id]
   (if-let [param-data (get-in network [:compute-binding :parameter-buffers buffer-id])]
-    (backend/to-core-matrix (get-in network [:compute-binding :backend]) (get param-data :buffer))
+    (backend/to-core-matrix (backend network) (get param-data :buffer))
     (throw (ex-info "Failed to find parameter"
                     {:buffer-id buffer-id
                      :available-buffers (keys (get-in network [:compute-binding :parameter-buffers]))}))))
 
 
 ;; Getters for various bound items.
-(defn backend
-  [network]
-  (get-in network [:compute-binding :backend]))
 
 (defn driver
   [network]
-  (get-in network [:compute-binding :backend :driver]))
+  (drv/get-driver (backend network)))
+
 
 (defn stream
   [network]
-  (get-in network [:compute-binding :backend :stream]))
+  (backend/get-stream))
 
 (defn datatype
   [network]
-  (get-in network [:compute-binding :backend :datatype]))
+  (dtype/get-datatype (backend network)))
 
 (defn parameters
   [network]
@@ -430,12 +431,16 @@
          :host-buffer (drv/allocate-host-buffer driver
                                                 (* batch-size
                                                    (long size))
-                                                datatype)
+                                                datatype
+                                                :usage-type :reusable)
          :buffers (node-activations network id)}))
      (network/output-node-ids network graph-type))))
 
 
 (defn output-values
+  "Output the values from the network into a set of buffers.
+Laziness here means the network will do a side-effecty operation into the buffer
+before you are ready."
   [network output-buffers
    & {:keys [max-result-vector-size]
       :or {max-result-vector-size 100}}]
@@ -453,17 +458,26 @@
                                           (math/device-buffer buffer) 0
                                           host-buffer 0
                                           (dtype/ecount host-buffer))
-                   (drv/wait-for-event (drv/create-event stream))
-                   (c-for [idx 0 (< idx batch-size) (inc idx)]
-                          (dtype/copy! host-buffer (long (* idx output-size))
-                                       (get double-buffers idx) 0
-                                       output-size))
-                   (mapv (fn [buffer]
-                           {node-id (if (< output-size max-result-vector-size)
-                                      (vec buffer)
-                                      buffer)})
-                         double-buffers))))
-         (apply map merge))))
+                   {:host-buffer host-buffer
+                    :output-size output-size
+                    :double-buffers double-buffers
+                    :node-id node-id})))
+         ((fn [buf-seq]
+            ;;One sync for entire buffer set.
+            (drv/sync-stream stream)
+            (->> buf-seq
+                 ;;Laziness is not your friend here.
+                 (mapv (fn [{:keys [host-buffer output-size double-buffers node-id]}]
+                         (c-for [idx 0 (< idx batch-size) (inc idx)]
+                                (dtype/copy! host-buffer (long (* idx output-size))
+                                             (get double-buffers idx) 0
+                                             output-size))
+                         (mapv (fn [buffer]
+                                 {node-id (if (< output-size max-result-vector-size)
+                                            (vec buffer)
+                                            buffer)})
+                               double-buffers))))))
+         (apply mapv merge))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -543,7 +557,7 @@ traversal with the inputs and outputs mapped to specific buffers."
 
 (defn print-traversal-buffers
   [network]
-  (let [backend (get-in network [:compute-binding :backend])
+  (let [backend (backend network)
         to-double #(when %
                      (vec (take 20 (backend/to-double-array backend %))))]
     (clojure.pprint/pprint (mapv (fn [[k v]]
@@ -586,17 +600,18 @@ traversal with the inputs and outputs mapped to specific buffers."
 
 (defmethod perform-pass :default
   [pass-direction network pass-function {:keys [incoming id outgoing]}]
-  (comment
-    (let [backend (get-in network [:compute-binding :backend])
-          to-double #(vec (backend/to-double-array backend %))]
-      (clojure.pprint/pprint (mapv (fn [{:keys [buffer gradient]}]
-                                     [:incoming {:buffer (to-double buffer)}])
-                                   incoming))))
-  (let [id->output-map (generate-node-id->output-map network)]
-    (pass-function
-     (get-in network [:compute-binding :nodes id])
-     (resolve-node-arguments network id id->output-map)
-     incoming outgoing)))
+  (let [id->output-map (generate-node-id->output-map network)
+        retval (pass-function
+                (get-in network [:compute-binding :nodes id])
+                (resolve-node-arguments network id id->output-map)
+                incoming outgoing)]
+    ;;If you get a network that is producing NAN's, then this may be a decent way to find it fast.
+    (comment
+      (let [double-data (vec (backend/to-double-array (backend network) (get (first outgoing) :buffer)))]
+        (when (seq (filter #(Double/isNaN %) double-data))
+          (println "NAN detected on layer" id)
+          (clojure.pprint/pprint (vec (take 200 double-data))))))
+    retval))
 
 
 
@@ -790,7 +805,7 @@ any loss-specific parameter buffers."
          (distinct)
          (mapcat id->input-buffers)
          (map :gradient)
-         (backend/zero-many! (get-in network [:compute-binding :backend]))
+         (backend/zero-many! (backend network))
          dorun)
     network))
 
@@ -800,7 +815,7 @@ any loss-specific parameter buffers."
   (let [backend (backend network)
         buffer-map (-> (resolve-node-arguments network (get loss-term :id))
                        (util/deep-merge gradients))]
-    (compute-loss/compute-loss-gradient compute-term buffer-map)
+    (loss-util/compute-loss-gradient compute-term buffer-map)
     ;;Useful debugging tool.
     (comment
       (clojure.pprint/pprint

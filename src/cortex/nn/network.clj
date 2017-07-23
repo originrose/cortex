@@ -1,17 +1,16 @@
 (ns cortex.nn.network
   "Translation from cortex layer vectors into actual network graphs."
-  (:require
-    [clojure.set :as c-set]
-    [clojure.pprint :as pprint]
-    [clojure.core.matrix :as m]
-    [clojure.core.matrix.macros :refer [c-for]]
-    [think.datatype.core :as dtype]
-    [cortex.graph :as graph]
-    [cortex.argument :as arg]
-    [cortex.loss :as loss]
-    [cortex.compute.driver :as drv]
-    [cortex.compute.math :as math]
-    [cortex.nn.layers :as layers])
+  (:require [clojure.set :as c-set]
+            [clojure.pprint :as pprint]
+            [clojure.core.matrix :as m]
+            [clojure.core.matrix.macros :refer [c-for]]
+            [think.datatype.core :as dtype]
+            [cortex.graph :as graph]
+            [cortex.argument :as arg]
+            [cortex.loss.core :as loss]
+            [cortex.compute.driver :as drv]
+            [cortex.compute.math :as math]
+            [cortex.nn.layers :as layers])
   (:import [java.util UUID]))
 
 
@@ -350,3 +349,17 @@ opposed to networks), but consider:
                                    [k (layer->buffer-shape network layer k)])))))
          (pprint/print-table (concat ["type" "input" "output"] parameter-keys)))
     (println "Parameter count:" (graph/parameter-count (:compute-graph network)))))
+
+
+(defn find-network-fail
+  "Sometimes we get descriptions that are quite large that fail to build.  This is a debugging tool
+to pair down the description until it builds which helps to quickly find the failure."
+  [network-desc]
+  (->> (range 10 (count network-desc))
+       (map #(take % network-desc))
+       (take-while #(try
+                      (linear-network %)
+                      (catch Throwable e
+                        nil)))
+       last
+       count))

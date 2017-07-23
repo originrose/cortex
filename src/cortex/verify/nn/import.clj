@@ -19,16 +19,17 @@
    (when-let [failures (seq (get network :verification-failures))]
      (throw (Exception. (format "Description verification failed:\n %s"
                                 (with-out-str (clojure.pprint/pprint failures))))))
-   (resource/with-resource-context
+   (execute/with-compute-context context
      (let [roots (graph/roots (network/network->graph network))
            leaves (graph/leaves (network/network->graph network))
            input (get layer-id->output (first roots))
            batch-size 1
            network
            (as-> network network
-               (compute-binding/bind-context-to-network network context
-                                                        batch-size (traverse/training-traversal network)
-                                                        {})
+             (compute-binding/bind-context-to-network network
+                                                      (execute/current-backend)
+                                                      batch-size (traverse/training-traversal network)
+                                                      {})
                (compute-binding/traverse context network {(first roots) input} :inference)
                ;;save gradients at this point implies save io buffers
                (compute-binding/save-to-network context network {:save-gradients? true}))
