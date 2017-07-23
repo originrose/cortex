@@ -1031,12 +1031,16 @@ So either it is dense *or* num-columns is 1"
   c)
 
 
+
 (defn- batch-normalize-setup
   "The various batch normalize calls all have a set of setup rules.  This checks all
 preconditions and then returns the type of batch normalization required (spatial vs. eltwise)."
   [io-args mean-var-bias-scale-args epsilon]
   (let [all-args (concat io-args mean-var-bias-scale-args)
         input-shape (shape (first io-args))
+        input-shape (if (= 1 (count input-shape))
+                      [1 (first input-shape)]
+                      input-shape)
         input (first io-args)]
     (apply ensure-datatypes (get-datatype (first all-args)) all-args)
     (apply ensure-same-device all-args)
@@ -1054,7 +1058,9 @@ preconditions and then returns the type of batch normalization required (spatial
     (let [mvbs-args (mapv as-row-vector mean-var-bias-scale-args)
           means-shape (shape (first mvbs-args))
           io-shapes (mapv shape io-args)
-          mvbs-shapes (mapv shape mvbs-args)]
+          mvbs-shapes (mapv shape mvbs-args)
+          retval {:mvbs-args mvbs-args
+                  :input-shape input-shape}]
       (when-not-error (> (count input-shape) 1)
         "Input shape needs at least 2 dimensions"
         {:input-shape (shape input)})
@@ -1071,8 +1077,7 @@ preconditions and then returns the type of batch normalization required (spatial
               "Means, variances, scale, bias must match input element count."
               {:input-shape input-shape
                :means-shape means-shape})
-            {:type :eltwise
-             :mvbs-args mvbs-args})
+            (assoc retval :type :eltwise))
         (let [batch-count (long (apply * (drop-last 2 input-shape)))
               [channel-count element-count] (take-last 2 input-shape)]
           (when-not-error (= (long channel-count)
@@ -1081,8 +1086,7 @@ preconditions and then returns the type of batch normalization required (spatial
             {:input-shape input-shape
              :input-channel-count channel-count
              :means-element-count (first means-shape)})
-          {:type :spatial
-           :mvbs-args mvbs-args})))))
+          (assoc retval :type :spatial))))))
 
 
 (defn batch-normalize!
@@ -1099,11 +1103,11 @@ second to last dimensions is considered the channels member and means, variances
 bias are all 'channels' size in length and the normalization are applied in an channel-wise
 operation.  Batch size is then considered everything before the last two dimensions."
   [output input means variances scale bias epsilon]
-  (let [{:keys [type mvbs-args]} (batch-normalize-setup [output input]
-                                                        [means variances scale bias]
-                                                        epsilon)
-        [means variances scale bias] mvbs-args
-        input-shape (shape input)]
+  (let [{:keys [type mvbs-args input-shape]}
+        (batch-normalize-setup [output input]
+                               [means variances scale bias]
+                               epsilon)
+        [means variances scale bias] mvbs-args]
     (condp = type
       :eltwise (tm/batch-normalize-eltwise! (check-stream)
                                             (tensor->buffer output)
