@@ -3,7 +3,7 @@
   :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
                  [thinktopic/experiment "0.9.12-SNAPSHOT"]
                  [org.clojure/tools.cli "0.3.5"]
-                 [thinktopic/think.image "0.4.11-SNAPSHOT"]
+                 [thinktopic/think.image "0.4.11"]
                  ;;If you need cuda 8...
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ;;If you need cuda 7.5...

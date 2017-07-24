@@ -5,7 +5,7 @@
                  [org.clojure/tools.cli "0.3.5"]
 
                  ; to manipulate images
-                 [thinktopic/think.image "0.4.11-SNAPSHOT"]
+                 [thinktopic/think.image "0.4.11"]
                  ; [net.mikera/imagez "0.12.0"]
                  ;;If you need cuda 8...
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
