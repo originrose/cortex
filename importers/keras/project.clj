@@ -5,17 +5,18 @@
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/hdf5 "0.2.1"]
-                 [thinktopic/cortex "0.9.11"]
-                 [cheshire "5.6.3"]]
+                 [thinktopic/cortex "0.9.12-SNAPSHOT"]
+                 [cheshire "5.6.3"]
+                 [thinktopic/think.image "0.4.11"]]
   :plugins [[s3-wagon-private "1.1.2"]
             [lein-codox "0.10.2"]]
-  :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
-                                :passphrase :env
-                                :username :env
-                                :releases false}
-                  "releases"  {:url "s3p://thinktopic.jars/releases/"
-                               :passphrase :env
-                               :username :env
-                               :snapshots false
-                               :sign-releases false}}
+  ;; :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
+  ;;                               :passphrase :env
+  ;;                               :username :env
+  ;;                               :releases false}
+  ;;                 "releases"  {:url "s3p://thinktopic.jars/releases/"
+  ;;                              :passphrase :env
+  ;;                              :username :env
+  ;;                              :snapshots false
+  ;;                              :sign-releases false}}
   :main think.cortex.keras.core)

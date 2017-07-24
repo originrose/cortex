@@ -12,7 +12,11 @@
             [cortex.verify.nn.import :as compute-verify]
             [clojure.string :as string]
             [cortex.nn.execute :as execute]
-            [cortex.graph :as graph]))
+            [cortex.graph :as graph]
+            [cortex.util :as util]
+            [clojure.java.io :as io]
+            [mikera.image.core :as i]
+            [think.image.patch :as patch]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* true)
@@ -533,7 +537,6 @@
   versions of the model description, and the name of the hdf5 file which stores the
   weights, loads the weights for the model.  Returns a built network."
   [desc-seq weights-fname]
-  (println "==========================================================")
   (resource/with-resource-context
     (description->network desc-seq (hdf5/open-file weights-fname))))
 
@@ -685,3 +688,23 @@
       network
       (throw (ex-info "Model did not pass verification."
                       {:report verified})))))
+
+(defn import-and-save
+  "Once import-model is verified to work, this function will save the imported model to a nippy file."
+  [model-json-file weights-h5-file trained-network-name]
+  (util/write-nippy-file trained-network-name
+                         (json-weight-file->network model-json-file weights-h5-file)))
+
+
+;; ================== Testing images ====================== ;;
+
+(defn label-one
+  "Take a random test image and label it."
+  ([image-filename] (label-one image-filename "models/resnet50.nippy"))
+  ([image-filename trained-model]
+   (let [data [{:input-1 (-> image-filename (io/file) (i/load-image) (i/resize 224 224) (patch/image->patch :datatype :float))}]]
+     (->>
+       (execute/run (util/read-nippy-file trained-model) data :batch-size 1)
+       (first)
+       :fc1000-activation
+       (util/max-index)))))
