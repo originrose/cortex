@@ -235,6 +235,27 @@
     (is (m/equals (flatten (repeat batch-size [7 10])) (m/eseq input-gradient)))))
 
 
+(defn linear-lsh
+  [context]
+  (let [item-count 2
+        batch-size 1
+        num-output 2
+        {:keys [output input-gradient parameters]}
+        (forward-backward-test [(layers/input item-count)
+                                (layers/linear-lsh num-output
+                                               :weights {:buffer [[1 2] [3 4]]}
+                                               :bias {:buffer [0 10]})]
+                               context
+                               batch-size
+                               [1 2]
+                               [1 2])
+        weight-gradient (m/eseq (get-in parameters [:weights :buffer :gradient]))
+        bias-gradient (m/eseq (get-in parameters [:bias :buffer :gradient]))]
+    (is (= (map double [5 21]) (m/eseq output)))
+    (is (m/equals [1 2 2 4] weight-gradient))
+    (is (m/equals [1 2] bias-gradient))
+    (is (m/equals [7 10] input-gradient))))
+
 (def activation-answers
   {:logistic [[0.2689414213699951 0.7310585786300049 0.2689414213699951 0.7310585786300049
                0.2689414213699951 0.7310585786300049 0.2689414213699951 0.7310585786300049

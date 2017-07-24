@@ -12,7 +12,9 @@ implementation as possible."
             [think.resource.core :as resource]
             [think.datatype.core :as dtype]
             [cortex.graph :as graph]
-            [cortex.nn.layers :as cortex-layers]))
+            [cortex.nn.layers :as cortex-layers]
+            [thinktopic.bluejay.metric :as metric]
+            [thinktopic.bluejay.hash :as hash]))
 
 
 (set! *warn-on-reflection* true)
@@ -69,6 +71,93 @@ implementation as possible."
 (defmethod create :linear
   [backend node batch-size]
   (->Linear backend))
+
+(defn- hash-neurons
+  [hash-table weights input-length n-neurons]
+  (reduce
+    (fn [table index]
+      (hash/insert-item table
+                        {:index index
+                         :value (dtype/->view weights
+                                              (* index input-length)
+                                              input-length)}))
+    hash-table
+    (range n-neurons)))
+
+
+;; TODO: need to get enough of core.matrix working on cortex.compute.math.DeviceArray
+; so that it can play well with Bluejay (maybe just dot product)?
+
+(defrecord LinearLSH [backend hash-table*]
+  compute-protocols/ComputeLayer
+  (forward [layer parameter-buffers input-buffers output-buffers]
+    (println "param-buffers: " (type (get-in parameter-buffers [:weights :buffer])))
+    (println "n-neurons: " (dtype/ecount (get-in parameter-buffers [:bias :buffer])))
+    (println "input-buffers: " (dtype/ecount (:buffer (first input-buffers))))
+    ; Now insert all of the neurons, and pass the table to the record
+    ;(hash/insert-item hash-table item)
+    (let [input-length (dtype/ecount (:buffer (first input-buffers)))
+          n-neurons (dtype/ecount (get-in parameter-buffers [:bias :buffer]))
+          weights (get-in parameter-buffers [:weights :buffer])
+          hash-table (if (zero? (:count @hash-table*))
+                  (hash-neurons @hash-table* weights input-length n-neurons)
+                  @hash-table*)
+          input (:buffer (first input-buffers))
+
+          ; TODO: Make this 5% an input arg
+          n-active-neurons (Math/floor (* 0.05 n-neurons))
+          ; lookup matching neurons in LSH table
+          matches (hash/nearest-N-lsh hash-table :value n-active-neurons 0.5)
+          match-indexes (map :index matches)
+          neuron-views (map (fn [match]
+                              (dtype/->view weights (* match input-length) input-length))
+                            match-indexes)
+          ;; now dot product each view with the input, and save in the zeroed
+          ;; out output buffers.  (Maybe use the previous indexes to zero out
+          ;; first so we only zero the minimum amount).
+          ;; do individual multiplies then add bias
+          ;; Save the match indexes for when gradients are propagated
+          ]
+
+      ;(nn-backend/biased-multiply! backend
+      ;                             (first-buffer input-buffers)
+      ;                             (get-in parameter-buffers [:weights :buffer])
+      ;                             (get-in parameter-buffers [:bias :buffer])
+      ;                             (first-buffer output-buffers))
+      ))
+  (backward [layer parameter-buffers output-buffers input-buffers]
+    ; lookup which neurons were activated in the forward pass
+    ; Only propagate gradients to those neurons, doing multiplies back through
+    ; their weights to get input values, and then sparse cross product to get
+    ; weight updates, and apply them.
+    ; Remove/re-insert each activated neuron (or do a check first to see if
+    ; needed)?
+
+    ;(nn-backend/biased-multiply-backward! backend
+    ;                                      (first-buffer input-buffers)
+    ;                                      (get-in parameter-buffers [:weights :buffer])
+    ;                                      (get-in parameter-buffers [:bias :buffer])
+    ;                                      (first-buffer output-buffers)
+    ;                                      (first-gradient input-buffers)
+    ;                                      (get-in parameter-buffers [:weights :gradient])
+    ;                                      (get-in parameter-buffers [:bias :gradient])
+    ;                                      (first-gradient output-buffers))
+    ))
+
+(defmethod create :linear-lsh
+  [backend {:keys [input-dimensions weights] :as node} batch-size]
+  ; Make the LSH table, pass to record
+  (let [{:keys [channels height width]} (first input-dimensions)
+        item-length (* channels height width)
+        n-tables 8
+        n-hashes 8
+        bin-width 1.0
+        hash-family (hash/l2-hash-family)
+        ; Need to figure out what the hash key function is for these arrays,
+        ; rather than :value which is meant for maps
+        hash-table (hash/create-lsh-hash hash-family item-length
+                                         n-tables n-hashes bin-width identity)]
+    (->LinearLSH backend (atom hash-table))))
 
 (defn dropout-prepare-forward!
   "The reason this function is not part of forward is that in the off case

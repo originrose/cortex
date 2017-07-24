@@ -598,3 +598,28 @@ input dimensions."
 (defmethod graph/get-node-metadata :split
   [desc]
   {:passes #{:training :inference}})
+
+(defn linear-lsh
+  [num-output & args]
+  [(merge-args {:type :linear-lsh :output-size num-output} args)])
+
+
+(defmethod graph/build-node :linear-lsh
+  [graph node predecessor-id-seq successor-id-seq]
+  (-> (graph/ensure-single-parent graph node predecessor-id-seq)
+      (graph/carry-input-dims-forward node)))
+
+
+(defmethod graph/get-node-metadata :linear-lsh
+  [node]
+  (graph/get-node-metadata (assoc node :type :linear))
+  {:arguments
+   {:weights {:type :parameter
+              :shape-fn :cortex.nn.layers/linear-weight-parameter-shape
+              :initialization {:type :auto-weight-initialization}
+              :gradients? true}
+    :bias {:type :parameter
+           :shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+           :initialization {:type :constant :value 0}
+           :gradients? true}}
+   :passes [:inference :training]})

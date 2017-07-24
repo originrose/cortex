@@ -27,6 +27,9 @@
 (def-double-float-test linear-batch
   (verify-layers/linear-batch (create-context)))
 
+(def-double-float-test linear-lsh
+  (verify-layers/linear-lsh (create-context)))
+
 (def-double-float-test sigmoid
   (verify-layers/test-activation (create-context) :logistic))
 
