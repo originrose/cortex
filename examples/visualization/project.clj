@@ -3,7 +3,7 @@
   :url "http://cortex.thinktopic.com"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.8.0"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
                  [thinktopic/think.tsne "0.1.1"]
                  [incanter/incanter-core "1.5.7"]
                  [incanter/incanter-charts "1.5.7"]
