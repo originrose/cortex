@@ -234,6 +234,38 @@
           (into {})))))
 
 
+(defmacro ^:private perform-unary-op-impl
+  [operation x]
+  (condp = operation
+    :floor `(Math/floor (double ~x))
+    :ceil `(Math/ceil (double ~x))
+    :round `(Math/round (double ~x))
+    :- `(- ~x)))
+
+
+(defmacro ^:private binary-accum!-impl
+  [datatype operation reverse-operands?]
+  `(fn [dest# dest-idx-sys# dest-alpha#
+        y# y-idx-sys# y-alpha#
+        n-elems#]
+     (let [n-elems# (long n-elems#)
+           dest# (datatype->view-cast-fn ~datatype dest#)
+           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)
+           y# (datatype->view-cast-fn ~datatype y#)
+           y-idx->address# (get-elem-idx->address y-idx-sys#)
+           y-alpha# (datatype->cast-fn ~datatype y-alpha#)]
+       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
+              (let [dest-idx# (.idx_to_address dest-idx->address# idx#)
+                    y-idx# (.idx_to_address y-idx->address# idx#)]
+                (v-aset dest# dest-idx#
+                              (datatype->cast-fn
+                               ~datatype
+                               (perform-op-rev-ops ~operation ~reverse-operands?
+                                                   (* (v-aget dest# dest-idx#) dest-alpha#)
+                                                   (* (v-aget y# y-idx#) y-alpha#)))))))))
+
+
 (def ^:private operations
   [:+ :- :* :/ :max :min])
 

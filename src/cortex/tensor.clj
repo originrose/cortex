@@ -829,6 +829,56 @@ to non-gemm operations."
                     (max (ecount src) (ecount dest)))))))
 
 
+(defn- ensure-ecounts-commensurate
+  [x y]
+  (let [n-x (ecount x)
+        n-y (ecount y)
+        min-ec (min n-x n-y)
+        max-ec (long (max n-x n-y))]
+    (when-not (= 0 min-ec)
+      (when-not-error (= 0 (rem max-ec min-ec))
+        "Element counts are not commensurate"
+        {:x-ecount (ecount x)
+         :y-ecount (ecount y)}))))
+
+
+(defn- perform-unary-op
+  ^double [^double value op]
+  (condp = op
+    :ceil (Math/ceil value)
+    :round (Math/round value)
+    :floor (Math/floor value)
+    :- (- value)))
+
+
+(defn unary-op!
+  "dest[idx] = op(alpha * x)"
+  ^Tensor [dest alpha x op]
+  (condp = (datatype->keyword x)
+    :number
+    (assign! dest (perform-unary-op
+                   (* (double alpha)
+                      (double x))
+                   op))
+    :tensor
+    (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
+      (tm/unary-accum! (check-stream)
+                       (tensor->buffer dest) (tensor->index-system dest)
+                       alpha op (ecount dest))
+      (do
+        (ensure-datatypes (get-datatype dest) x)
+        (ensure-same-device dest x)
+        (ensure-ecounts-commensurate dest x)
+        (check-partial-alias dest x)
+        (tm/unary-op! (check-stream)
+                      (tensor->buffer dest) (tensor->index-system dest)
+                      (tensor->buffer x) (tensor->index-system x)
+                      alpha op
+                      (max (ecount dest) (ecount x))))))
+  dest)
+
+
+
 (defmulti ^:private typed-binary-op
   "Binary operations may contain one or two scalars in various
   positions.  This multimethod disambiguates between those positions."
@@ -846,20 +896,9 @@ to non-gemm operations."
                :+ (+ x y)
                :- (- x y)
                :* (* x y)
-               :/ (/ x y)))))
-
-
-(defn- ensure-ecounts-commensurate
-  [x y]
-  (let [n-x (ecount x)
-        n-y (ecount y)
-        min-ec (min n-x n-y)
-        max-ec (long (max n-x n-y))]
-    (when-not (= 0 min-ec)
-      (when-not-error (= 0 (rem max-ec min-ec))
-        "Element counts are not commensurate"
-        {:x-ecount (ecount x)
-         :y-ecount (ecount y)}))))
+               :/ (/ x y)
+               :max (Math/max x y)
+               :min (Math/min x y)))))
 
 
 (defn- binary-op-constant!

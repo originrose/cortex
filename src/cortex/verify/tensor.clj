@@ -56,6 +56,19 @@ for the cuda backend."
                    (ct/to-double-array final))))))
 
 
+(defn unary-op
+  [driver datatype]
+  (tensor-context driver datatype
+   (let [tens-a (ct/->tensor (partition 3 (range 9)))
+         tens-b (ct/->tensor (repeat 9 1))]
+     (ct/unary-op! tens-b 2.5 tens-a :ceil)
+     (is (m/equals (mapv #(Math/ceil (* ^double % 2.5)) (range 9))
+                   (ct/to-double-array tens-b)))
+     (ct/unary-op! tens-b 1.0 tens-b :-)
+     (is (m/equals (mapv #(- (Math/ceil (* ^double % 2.5))) (range 9))
+                   (ct/to-double-array tens-b))))))
+
+
 (defn binary-constant-op
   [driver datatype]
   (tensor-context

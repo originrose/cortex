@@ -29,6 +29,10 @@
   (verify-tensor/binary-op (driver) *datatype*))
 
 
+(deftest unary-op
+  (verify-tensor/unary-op (driver) *datatype*))
+
+
 (def-double-float-test gemm
   (verify-tensor/gemm (driver) *datatype*))
 
