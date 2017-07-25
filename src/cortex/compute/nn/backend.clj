@@ -13,7 +13,8 @@
 
   (:require [cortex.compute.math :as math]
             [cortex.compute.driver :as drv]
-            [think.datatype.core :as dtype]))
+            [think.datatype.core :as dtype]
+            [cortex.tensor :as tensor]))
 
 
 (def ^:dynamic *current-backend-stream* nil)
@@ -49,22 +50,11 @@ some specific data from a description.  Most layers need to implement
 computelayer/forward,backward."
   (create [backend layer batch-size]))
 
-
 (defprotocol PDropout
   ;;Flat distribution -> scaled 1 or 0 multiplicative buffer.
   (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer])
   ;;Gaussian distribution copied to mult buffer.
   (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]))
-
-
-(defprotocol PBatchNormalization
-  (batch-norm-inference! [backend input running-means running-variances scale bias output epsilon])
-  (batch-norm-forward! [backend input
-                        running-means running-variances batch-means batch-variances
-                        scale bias output average-factor epsilon])
-  (batch-norm-backward! [backend input batch-means batch-variances scale bias output
-                         scale-gradient bias-gradient input-gradient output-gradient
-                         epsilon]))
 
 (defn array
   ([backend data items-per-batch]
@@ -111,26 +101,47 @@ computelayer/forward,backward."
     (drv/memset (get-stream) (math/device-buffer ary) 0 0 (math/ecount ary))))
 
 
+(defn- ->ct-tensor
+  [ary]
+  (when ary
+    (math/array->cortex-tensor ary)))
+
+
 (defn biased-multiply!
   [backend input weights bias output]
-  (let [stream (get-stream)]
-    (math/sum stream 1.0 bias 0.0 output)
-    (math/gemm stream false true
-               1.0 (math/as-2d-batch-matrix input) weights
-               1.0 (math/as-2d-batch-matrix output))))
+  (let [input (->ct-tensor input)
+        weights (->ct-tensor weights)
+        bias (->ct-tensor bias)
+        output (->ct-tensor output)]
+    (tensor/with-stream (get-stream)
+      (tensor/binary-op! output 1.0 bias 0.0 output :+)
+      (tensor/gemm! output false true
+                    1.0 (tensor/as-batch-matrix input) weights
+                    1.0))))
 
 
 (defn biased-multiply-backward!
   [backend input weights bias output
    input-gradient weight-gradient bias-gradient output-gradient]
-  (let [stream (get-stream)]
-    (when bias-gradient
-      (math/sum stream 1.0 output-gradient 1.0 bias-gradient))
-    (when input-gradient
-      (math/gemm stream false false
-                 1.0 (math/as-2d-batch-matrix output-gradient) weights
-                 0.0 (math/as-2d-batch-matrix input-gradient)))
-    (when weight-gradient
-      (math/gemm stream true false
-                 1.0 (math/as-2d-batch-matrix output-gradient) (math/as-2d-batch-matrix input)
-                 1.0 weight-gradient))))
+  (let [input (->ct-tensor input)
+        weights (->ct-tensor weights)
+        bias (->ct-tensor bias)
+        output (->ct-tensor output)
+        input-gradient (->ct-tensor input-gradient)
+        weight-gradient (->ct-tensor weight-gradient)
+        bias-gradient (->ct-tensor bias-gradient)
+        output-gradient (->ct-tensor output-gradient)]
+    (tensor/with-stream (get-stream)
+     (when bias-gradient
+       (tensor/binary-op! bias-gradient 1.0 output-gradient 1.0 bias-gradient :+))
+      (when input-gradient
+        (tensor/gemm! (tensor/as-batch-matrix input-gradient)
+                      false false 1.0
+                      (tensor/as-batch-matrix output-gradient) weights
+                      0.0))
+      (when weight-gradient
+        (tensor/gemm! weight-gradient
+                      true false 1.0
+                      (tensor/as-batch-matrix output-gradient)
+                      (tensor/as-batch-matrix input)
+                      1.0)))))

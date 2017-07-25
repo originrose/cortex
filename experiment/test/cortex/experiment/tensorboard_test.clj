@@ -7,9 +7,11 @@
             [cortex.nn.execute :as execute]
             [cortex.experiment.train :as train]
             [cortex.nn.network :as network]
+            [cortex.experiment.classification :as classification]
             [clojure.core.async :as async :refer [>! <! <!! >!! chan close! go alts!]]
             [cortex.metrics :as met]
-            [cortex.experiment.logistic-test :as lt]))
+            [cortex.experiment.logistic-test :as lt])
+  (:import [java.nio.file Files]))
 
 ;; "Default" dataset taken from: https://cran.r-project.org/web/packages/ISLR/index.html
 ;; Distributed under the GPL-2 LICENSE
@@ -110,7 +112,7 @@
 
 (defn- train-and-eval
   [train-ds test-ds network-description log-file]
-  (let [epoch-count 20
+  (let [epoch-count 2
         metrics-chan (chan)
         event-writer-chan (start-tensorboard-broadcast log-file metrics-chan epoch-count)
         _ (train/train-n network-description train-ds test-ds
@@ -119,13 +121,20 @@
     ;;wait for the listener to finish reading epoch-count events
     (<!! event-writer-chan)))
 
-(deftest test-listener
+(defn get-trainer
+  "given a training function, returns a partial function that trains on
+  a 90-10 split of the default dataset"
+  [trainer-fn]
   (let [ds (shuffle (default-dataset))
-          log-path "/tmp/tflogs/"
-          ds-count (count ds)
-          train-ds (take (int (* 0.9 ds-count)) ds)
-          test-ds (drop (int (* 0.9 ds-count)) ds)
-          train-fn (partial train-and-eval train-ds test-ds)]
+        ds-count (count ds)
+        train-ds (take (int (* 0.9 ds-count)) ds)
+        test-ds (drop (int (* 0.9 ds-count)) ds)
+        train-fn (partial trainer-fn train-ds test-ds)]
+    train-fn))
+
+(deftest test-listener
+  (let [train-fn (get-trainer train-and-eval)
+        log-path "/tmp/tflogs/"]
       (mapv train-fn [linear-with-batch-norm
                       linear-without-batch-norm relu-with-batch-norm
                       tanh-with-batch-norm]
@@ -135,3 +144,23 @@
                   ["linear"
                    "linear_nobatchnorm" "relu" "tanh"]))
       (is (.exists (io/file (str log-path "/linear/tfevents.linear.out"))))))
+
+(defn- perform-experiment-eval
+  [train-ds test-ds network-description log-file]
+  (let [epoch-count 2
+        listener (classification/create-tensorboard-listener 
+                       {:file-path log-file})]
+    (classification/perform-experiment network-description train-ds test-ds
+                                       listener
+                                       {:epoch-count epoch-count})))
+
+(deftest test-perform-experiment
+  (let [train-fn (get-trainer perform-experiment-eval)
+        log-path "/tmp/tflogs/"
+        pathname "linear-bn"]
+    (mapv train-fn [linear-with-batch-norm]
+          (mapv #(let [path (str log-path % "/tfevents." % ".out")]
+                   (io/make-parents path)
+                   path)
+                [pathname]))
+    (is (.exists (io/file (str log-path "/linear-bn/tfevents." pathname ".out"))))))

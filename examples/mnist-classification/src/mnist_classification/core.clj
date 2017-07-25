@@ -140,9 +140,9 @@
          listener (if-let [file-path (:tensorboard-output argmap)]
                     (classification/create-tensorboard-listener 
                           {:file-path file-path})
-                      (classification/create-listener mnist-observation->image
-                                                  class-mapping
-                                                  argmap))]
+                    (classification/create-listener mnist-observation->image
+                                                    class-mapping
+                                                    argmap))]
      (classification/perform-experiment
       (initial-description image-size image-size num-classes)
       train-ds test-ds listener))))

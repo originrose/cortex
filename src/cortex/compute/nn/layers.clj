@@ -12,7 +12,8 @@ implementation as possible."
             [think.resource.core :as resource]
             [think.datatype.core :as dtype]
             [cortex.graph :as graph]
-            [cortex.nn.layers :as cortex-layers]))
+            [cortex.nn.layers :as cortex-layers]
+            [cortex.tensor :as tensor]))
 
 
 (set! *warn-on-reflection* true)
@@ -70,6 +71,7 @@ implementation as possible."
   [backend node batch-size]
   (->Linear backend))
 
+
 (defn dropout-prepare-forward!
   "The reason this function is not part of forward is that in the off case
 you want to check gradients you need to call prepare-forward once precisely
@@ -124,57 +126,90 @@ and then forward many times for every parameter of the network."
     (->Dropout backend node batch-size mult-buffer rand-buffer)))
 
 
+(defn- ->batch-tensor
+  "Create either a 2d tensor with the batches as the leading dimension
+or a faithful tensor of the math/array data.  This does no copy; just constructs
+a datastructure that shares the backing store."
+  [buffer batch-count input-dimension spatial?]
+  (let [retval (if spatial?
+                 (tensor/reinterpret-tensor
+                  (math/array->cortex-tensor buffer)
+                  (tensor/dimensions [batch-count
+                                      (get input-dimension :channels)
+                                      (* (long (get input-dimension :height))
+                                         (long (get input-dimension :width)))]))
+                 (math/array->cortex-tensor (math/as-2d-batch-matrix buffer)))]
+    retval))
+
 
 (defrecord BatchNormalization [backend layer batch-means batch-variances
-                               local-average-factor-atom impl]
+                               local-average-factor-atom]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (nn-backend/batch-norm-forward! impl
-                                    (first-buffer input-buffers)
-                                    (get-in parameter-buffers [:means :buffer])
-                                    (get-in parameter-buffers [:variances :buffer])
-                                    batch-means batch-variances
-                                    (get-in parameter-buffers [:scale :buffer])
-                                    (get-in parameter-buffers [:bias :buffer])
-                                    (first-buffer output-buffers)
-                                    @local-average-factor-atom
-                                    (get layer :epsilon))
+    (let [->tensor #(->batch-tensor %
+                                    (math/batch-size (first-buffer input-buffers))
+                                    (graph/node->input-dimension layer)
+                                    (= (get layer :mode) :spatial))]
+      (tensor/with-stream (nn-backend/get-stream)
+        (tensor/batch-normalize-update-and-apply!
+         (->tensor (first-buffer output-buffers))
+         (->tensor (first-buffer input-buffers))
+         (math/array->cortex-tensor batch-means)
+         (math/array->cortex-tensor batch-variances)
+         (math/array->cortex-tensor (get-in parameter-buffers [:means :buffer]))
+         (math/array->cortex-tensor (get-in parameter-buffers [:variances :buffer]))
+         @local-average-factor-atom
+         (math/array->cortex-tensor (get-in parameter-buffers [:scale :buffer]))
+         (math/array->cortex-tensor (get-in parameter-buffers [:bias :buffer]))
+         (get layer :epsilon))))
     ;;The very first batch we just set the running means to the batch-means.
     ;;After that we linear interpolate between the current value and next value
     ;;using the average factor as the interpolation factor.
     (reset! local-average-factor-atom (get layer :average-factor)))
   (backward [this parameter-buffers output-buffers input-buffers]
-    (nn-backend/batch-norm-backward! impl
-                                     (first-buffer input-buffers)
-                                     batch-means batch-variances
-                                     (get-in parameter-buffers [:scale :buffer])
-                                     (get-in parameter-buffers [:bias :buffer])
-                                     (first-buffer output-buffers)
-                                     (get-in parameter-buffers [:scale :gradient])
-                                     (get-in parameter-buffers [:bias :gradient])
-                                     (first-gradient input-buffers)
-                                     (first-gradient output-buffers)
-                                     (get layer :epsilon)))
+    (let [->tensor #(->batch-tensor %
+                                    (math/batch-size (first-buffer input-buffers))
+                                    (graph/node->input-dimension layer)
+                                    (= (get layer :mode) :spatial))]
+     (tensor/with-stream (nn-backend/get-stream)
+       (tensor/batch-normalize-gradients!
+        (->tensor (first-gradient input-buffers))
+        (math/array->cortex-tensor (get-in parameter-buffers [:scale :gradient]))
+        (math/array->cortex-tensor (get-in parameter-buffers [:bias :gradient]))
+        (->tensor (first-gradient output-buffers))
+        (->tensor (first-buffer output-buffers))
+        (->tensor (first-buffer input-buffers))
+        (math/array->cortex-tensor batch-means)
+        (math/array->cortex-tensor batch-variances)
+        (math/array->cortex-tensor (get-in parameter-buffers [:scale :buffer]))
+        (math/array->cortex-tensor (get-in parameter-buffers [:bias :buffer]))
+        (get layer :epsilon)))))
   compute-protocols/ComputeLayerInfer
   (infer [this parameter-buffers input-buffers output-buffers]
-    (nn-backend/batch-norm-inference! impl
-                                      (first-buffer input-buffers)
-                                      (get-in parameter-buffers [:means :buffer])
-                                      (get-in parameter-buffers [:variances :buffer])
-                                      (get-in parameter-buffers [:scale :buffer])
-                                      (get-in parameter-buffers [:bias :buffer])
-                                      (first-buffer output-buffers)
-                                      (get layer :epsilon))))
+    (let [->tensor #(->batch-tensor %
+                                    (math/batch-size (first-buffer input-buffers))
+                                    (graph/node->input-dimension layer)
+                                    (= (get layer :mode) :spatial))]
+     (tensor/with-stream (nn-backend/get-stream)
+       (tensor/batch-normalize!
+        (->tensor (first-buffer output-buffers))
+        (->tensor (first-buffer input-buffers))
+        (math/array->cortex-tensor (get-in parameter-buffers [:means :buffer]))
+        (math/array->cortex-tensor (get-in parameter-buffers [:variances :buffer]))
+        (math/array->cortex-tensor (get-in parameter-buffers [:scale :buffer]))
+        (math/array->cortex-tensor (get-in parameter-buffers [:bias :buffer]))
+        (get layer :epsilon))))))
 
 
 
 (defmethod create :batch-normalization
   [backend layer batch-size]
   (->BatchNormalization backend layer
-                        (nn-backend/new-array backend [(graph/node->input-size layer)])
-                        (nn-backend/new-array backend [(graph/node->input-size layer)])
-                        (atom 1.0)
-                        (nn-backend/create backend layer batch-size)))
+                        (nn-backend/new-array backend (cortex-layers/batch-norm-param-shape
+                                                       nil layer nil))
+                        (nn-backend/new-array backend (cortex-layers/batch-norm-param-shape
+                                                       nil layer nil))
+                        (atom 1.0)))
 
 
 (defrecord Prelu [backend layer select-buffer
