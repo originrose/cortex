@@ -7,7 +7,7 @@
                  [thinktopic/hdf5 "0.2.1"]
                  [thinktopic/cortex "0.9.12-SNAPSHOT"]
                  [cheshire "5.6.3"]
-                 [thinktopic/think.image "0.4.11"]]
+                 [thinktopic/think.image "0.4.12-SNAPSHOT"]]
   :plugins [[s3-wagon-private "1.1.2"]
             [lein-codox "0.10.2"]]
   ;; :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"

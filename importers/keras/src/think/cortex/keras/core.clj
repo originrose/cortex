@@ -702,7 +702,10 @@
   "Take a random test image and label it."
   ([image-filename] (label-one image-filename "models/resnet50.nippy"))
   ([image-filename trained-model]
-   (let [data [{:input-1 (-> image-filename (io/file) (i/load-image) (i/resize 224 224) (patch/image->patch :datatype :float))}]]
+   (let [data [{:input-1 (-> image-filename (io/file) (i/load-image) (i/resize 224 224)
+                             (patch/image->patch :datatype :float :normalize false)
+                             ;; https://github.com/fchollet/deep-learning-models/blob/master/imagenet_utils.py
+                             (patch/patch-mean-subtract 103.939 116.779 123.68))}]]
      (->>
        (execute/run (util/read-nippy-file trained-model) data :batch-size 1)
        (first)
