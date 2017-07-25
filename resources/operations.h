@@ -62,6 +62,8 @@ namespace tensor { namespace operations {
 	ceil,
 	round,
 	negate,
+	tanh,
+	logistic,
       };
     };
 
@@ -119,6 +121,30 @@ namespace tensor { namespace operations {
       __device__ double operator()(double data) { return floor(data); }
     };
 
+    template<typename dtype>
+    struct unary_tanh
+    {
+      __device__ dtype operator()(dtype data) { return static_cast<dtype>( tanh( (double) data ) ); }
+    };
+
+    template<>
+    struct unary_tanh<float>
+    {
+      __device__ float operator()(float data) { return tanhf( data ); }
+    };
+
+    template<typename dtype>
+    struct unary_logistic
+    {
+      __device__ dtype operator()(dtype data) { return static_cast<dtype>( 1.0 / (1.0 * exp(- (double) data))); }
+    };
+
+    template<>
+    struct unary_logistic<float>
+    {
+      __device__ float operator()(float data) { return 1.0 / (1.0 * expf(- data)); }
+    };
+
     struct general_unary_operation
     {
       int op_type;
@@ -136,6 +162,10 @@ namespace tensor { namespace operations {
 	  return unary_rounder<dtype>()(lhs);
 	case unary_operation_type::negate:
 	  return -lhs;
+	case unary_operation_type::tanh:
+	  return unary_tanh<dtype>()(lhs);
+	case unary_operation_type::logistic:
+	  return unary_logistic<dtype>()(lhs);
 	};
 	return (dtype) 0;
       }

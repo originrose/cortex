@@ -848,7 +848,10 @@ to non-gemm operations."
     :ceil (Math/ceil value)
     :round (Math/round value)
     :floor (Math/floor value)
-    :- (- value)))
+    :- (- value)
+    :tanh (Math/tanh value)
+    :logistic (/ 1.0
+                 (+ 1.0 (Math/exp (- value))))))
 
 
 (defn unary-op!
@@ -857,8 +860,8 @@ to non-gemm operations."
   (condp = (datatype->keyword x)
     :number
     (assign! dest (perform-unary-op
-                   (* (double alpha)
-                      (double x))
+                   (* (double (compute-drv/dtype-cast alpha (get-datatype dest)))
+                      (double (compute-drv/dtype-cast x (get-datatype dest))))
                    op))
     :tensor
     (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
@@ -876,7 +879,6 @@ to non-gemm operations."
                       alpha op
                       (max (ecount dest) (ecount x))))))
   dest)
-
 
 
 (defmulti ^:private typed-binary-op
@@ -1282,6 +1284,42 @@ See batch-normalize-update-and-apply!"
                                                epsilon
                                                batch-count channel-count element-count)))
     [input-gradient scale-gradient bias-gradient]))
+
+
+(defn activation-gradient!
+  "Generalized function to get the input gradient from a set of 'activation' functions:
+  :logistic, :tanh :relu (max 0 x)
+  logistic: out * (1 - out) * out-grad
+  tanh: (1 - out * out) * out-grad
+  relu: (out > 0) ? out-grad : 0
+
+  Due to this using cudnn functions, this is only available on tensors with fairly
+  basic index system components."
+  ^Tensor [input-gradient output-gradient output op]
+  (when-not-error (not (compute-drv/alias? (tensor->buffer input-gradient)
+                                           (tensor->buffer output)))
+    "Input and input-gradient must not alias"
+    {})
+  (ensure-datatypes (get-datatype input-gradient) output output-gradient)
+  (ensure-same-device input-gradient output output-gradient)
+  (ensure-basic-indexing input-gradient output output-gradient)
+  (when-not-error (contains? #{:logistic :tanh :relu} op)
+    "Only :logistic :tanh and :relu are supported"
+    {:operation op})
+  (let [out-ecount (ecount output)]
+    (when-not-error (and (= out-ecount (ecount input-gradient))
+                         (= out-ecount (ecount output-gradient)))
+      "All element ecounts must match"
+      {:out-ecount out-ecount
+       :in-grad-ecount (ecount input-gradient)
+       :out-grad-ecount (ecount output-gradient)})
+    (tm/activation-gradient! (check-stream)
+                             (tensor->buffer input-gradient)
+                             (tensor->buffer output-gradient)
+                             (tensor->buffer output)
+                             op
+                             out-ecount))
+  input-gradient)
 
 
 (extend-type Tensor

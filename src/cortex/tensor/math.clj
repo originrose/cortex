@@ -125,4 +125,10 @@ running means, variances using a running average
                                        output input batch-means batch-variances
                                        scale bias epsilon
                                        batch-count channel-count element-count]
-    "Gradient calculation.  All gradients exception output gradient are out vars."))
+    "Gradient calculation.  All gradients exception output gradient are out vars.")
+  (activation-gradient! [stream
+                         input-gradient
+                         output-gradient
+                         output
+                         op
+                         element-count]))

@@ -72,7 +72,9 @@
      :floor (int 0)
      :ceil (int 1)
      :round (int 2)
-     :- (int 3))])
+     :- (int 3)
+     :tanh (int 4)
+     :logistic (int 5))])
 
 
 

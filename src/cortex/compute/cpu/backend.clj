@@ -119,9 +119,9 @@
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [out-val# (v-aget dest# idx#)]
                 (v-aset src-grad# idx#
-                      (* out-val#
-                         (- val-1# out-val#)
-                         (v-aget dest-grad# idx#)))))
+                        (* out-val#
+                           (- val-1# out-val#)
+                           (v-aget dest-grad# idx#)))))
        (= ~act-type :relu)
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [mult# (~cast-fn (if (> (v-aget src# idx#)

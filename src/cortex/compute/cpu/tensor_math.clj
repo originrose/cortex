@@ -234,7 +234,7 @@
           (into {})))))
 
 (def ^:private unary-operations
-  [:floor :ceil :round :-])
+  [:floor :ceil :round :- :tanh :logistic])
 
 
 (defmacro ^:private perform-unary-op-impl
@@ -243,7 +243,10 @@
     :floor `(Math/floor (double ~x))
     :ceil `(Math/ceil (double ~x))
     :round `(Math/round (double ~x))
-    :- `(- ~x)))
+    :- `(- ~x)
+    :tanh `(Math/tanh (double ~x))
+    :logistic `(/ 1.0
+                  (+ 1.0 (Math/exp (- ~x))))))
 
 
 (defmacro ^:private unary-accum!-impl
