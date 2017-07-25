@@ -5,7 +5,7 @@
             [cortex.nn.network :as network]))
 
 ;; Input and test data (the xor function)
-(def xor
+(def xor-dataset
   [{:x [0.0 0.0] :y [0.0]}
    {:x [0.0 1.0] :y [1.0]}
    {:x [1.0 0.0] :y [1.0]}
@@ -19,7 +19,11 @@
     (layers/linear 1 :id :y)]))
 
 (defn train-xor []
-  (let [trained (train/train-n nn xor xor
-                               :batch-size 4 :epoch-count 3000)]
-    (println "XOR results before training" (execute/run nn xor))
-    (println "XOR results after training" (execute/run trained xor))))
+  (let [trained (train/train-n nn xor-dataset xor-dataset
+                               :batch-size 4
+                               :epoch-count 3000
+                               :simple-loss-print? true)]
+    (println "\nXOR results before training:")
+    (clojure.pprint/pprint (execute/run nn xor))
+    (println "\nXOR results after training:")
+    (clojure.pprint/pprint (execute/run trained xor))))
