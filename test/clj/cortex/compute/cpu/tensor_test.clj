@@ -29,7 +29,7 @@
   (verify-tensor/binary-op (driver) *datatype*))
 
 
-(def-double-float-test unary-op
+(def-all-dtype-test unary-op
   (verify-tensor/unary-op (driver) *datatype*))
 
 

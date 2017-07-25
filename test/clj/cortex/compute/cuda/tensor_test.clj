@@ -27,7 +27,7 @@
 
 
 (def-cas-dtype-test unary-op
-  (verify-tensor/unary-op (create-driver) *datatype*))
+  (verify-tensor/unary-op (create-driver) :int))
 
 
 (def-cas-dtype-test binary-constant-op

@@ -1,6 +1,5 @@
 (ns cortex.verify.tensor
   (:require [cortex.tensor :as ct]
-            [cortex.compute.cpu.driver :as cpu-driver]
             [cortex.compute.driver :as drv]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]))
@@ -62,10 +61,10 @@ for the cuda backend."
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
          tens-b (ct/->tensor (repeat 9 1))]
      (ct/unary-op! tens-b 2.5 tens-a :ceil)
-     (is (m/equals (mapv #(Math/ceil (* ^double % 2.5)) (range 9))
+     (is (m/equals (mapv #(Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype))) (range 9))
                    (ct/to-double-array tens-b)))
      (ct/unary-op! tens-b 1.0 tens-b :-)
-     (is (m/equals (mapv #(- (Math/ceil (* ^double % 2.5))) (range 9))
+     (is (m/equals (mapv #(- (Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype)))) (range 9))
                    (ct/to-double-array tens-b))))))
 
 
