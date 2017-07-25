@@ -9,3 +9,7 @@ pom.xml.asc
 /.nrepl-port
 .hgignore
 .hg/
+
+# Ephemeral web file
+/resources/public/css/app.css
+/resources/public/js/app.js
