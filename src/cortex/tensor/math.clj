@@ -27,7 +27,6 @@ enforced for that case.")
                  dest dest-idx
                  alpha op n-elems]
     "dest[idx] = op(alpha * dest[idx]")
-
   (unary-op! [stream
               dest dest-idx
               x x-idx

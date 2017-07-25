@@ -233,6 +233,9 @@
      (->> (generate-all-marshalling-assign-fns)
           (into {})))))
 
+(def ^:private unary-operations
+  [:floor :ceil :round :-])
+
 
 (defmacro ^:private perform-unary-op-impl
   [operation x]
@@ -243,27 +246,55 @@
     :- `(- ~x)))
 
 
-(defmacro ^:private binary-accum!-impl
-  [datatype operation reverse-operands?]
+(defmacro ^:private unary-accum!-impl
+  [datatype operation]
   `(fn [dest# dest-idx-sys# dest-alpha#
-        y# y-idx-sys# y-alpha#
         n-elems#]
      (let [n-elems# (long n-elems#)
            dest# (datatype->view-cast-fn ~datatype dest#)
            dest-idx->address# (get-elem-idx->address dest-idx-sys#)
-           dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)
-           y# (datatype->view-cast-fn ~datatype y#)
-           y-idx->address# (get-elem-idx->address y-idx-sys#)
-           y-alpha# (datatype->cast-fn ~datatype y-alpha#)]
+           dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)]
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
-              (let [dest-idx# (.idx_to_address dest-idx->address# idx#)
-                    y-idx# (.idx_to_address y-idx->address# idx#)]
+              (let [dest-idx# (.idx_to_address dest-idx->address# idx#)]
                 (v-aset dest# dest-idx#
                               (datatype->cast-fn
                                ~datatype
-                               (perform-op-rev-ops ~operation ~reverse-operands?
-                                                   (* (v-aget dest# dest-idx#) dest-alpha#)
-                                                   (* (v-aget y# y-idx#) y-alpha#)))))))))
+                               (perform-unary-op-impl ~operation (* (v-aget dest# dest-idx#)
+                                                                    dest-alpha#)))))))))
+
+
+(defmacro ^:private unary-op!-impl
+  [datatype operation]
+  `(fn [dest# dest-idx-sys#
+        x# x-idx-sys# x-alpha#
+        n-elems#]
+     (let [n-elems# (long n-elems#)
+           dest# (datatype->view-cast-fn ~datatype dest#)
+           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           x# (datatype->view-cast-fn ~datatype x#)
+           x-idx->address# (get-elem-idx->address x-idx-sys#)
+           x-alpha# (datatype->cast-fn ~datatype x-alpha#)
+           n-elems# (long n-elems#)]
+       (parallel/parallel-for
+        idx# n-elems#
+        (v-aset dest# (.idx_to_address dest-idx->address# idx#)
+                (datatype->cast-fn
+                 ~datatype
+                 (perform-unary-op-impl ~operation (* (v-aget x# (.idx_to_address x-idx->address# idx#))
+                                                      x-alpha#))))))))
+
+
+(defmacro unary-op-table-impl
+  []
+  (->> (for [dtype dtype/datatypes
+             op unary-operations]
+         [[dtype op] {:unary-accum! `(unary-accum!-impl ~dtype ~op)
+                      :unary-op! `(unary-op!-impl ~dtype ~op)}])
+       (into {})))
+
+
+(def ^:private unary-op-table
+  (unary-op-table-impl))
 
 
 (def ^:private operations
@@ -431,7 +462,7 @@
                                                  (* (v-aget y# y-idx#) y-alpha#)))))))))
 
 
-(defmacro binary-op-table
+(defmacro binary-op-table-impl
   []
   (->> (for [dtype dtype/datatypes
              op operations]
@@ -442,7 +473,7 @@
 (def ^:private binary-op-table
   (memoize
    (fn []
-     (binary-op-table))))
+     (binary-op-table-impl))))
 
 
 (defmacro ^:private blas-macro-iter
@@ -852,7 +883,19 @@
        dest dest-idx-sys
        src src-idx-sys
        n-elems)))
-
+  (unary-accum! [stream
+                 dest dest-idx
+                 alpha op n-elems]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in unary-op-table [[(dtype/get-datatype dest) op] :unary-accum!])
+       dest dest-idx alpha n-elems)))
+  (unary-op! [stream
+              dest dest-idx
+              x x-idx
+              alpha op n-elems]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in unary-op-table [[(dtype/get-datatype dest) op] :unary-op!])
+       dest dest-idx x x-idx alpha n-elems)))
   (binary-accum-constant! [stream
                            dest dest-idx dest-alpha
                            scalar

@@ -66,6 +66,16 @@
          (int (if rev-ops? 1 0)))))
 
 
+(defn- unary-op->cuda
+  ^Integer [operation]
+  [(condp = operation
+     :floor (int 0)
+     :ceil (int 1)
+     :round (int 2)
+     :- (int 3))])
+
+
+
 (defonce cuda_typename_expansion
   [["int8_t" "_b"]
    ["int16_t" "_s"]
@@ -180,6 +190,43 @@
                          (index-system->cuda dest-idx-sys)
                          [(cuda-base/->ptr src)]
                          (index-system->cuda src-idx-sys)
+                         [n-elems])
+                 vec))))
+
+  (unary-accum! [stream
+                 dest dest-idx
+                 alpha op n-elems]
+    (let [dest-dtype (dtype/get-datatype dest)
+          unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-accum
+                                              dest-dtype
+                                              #(cuda-base/load-cas-datatype-function
+                                                "tensor_unary_accum"))]
+      (apply cuda-base/launch-linear-kernel
+             (-> (concat [stream unop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(drv/dtype-cast alpha dest-dtype)]
+                         (unary-op->cuda op)
+                         [n-elems])
+                 vec))))
+
+  (unary-op! [stream
+              dest dest-idx
+              x x-idx
+              alpha op n-elems]
+    (let [dest-dtype (dtype/get-datatype dest)
+          unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-op
+                                              dest-dtype
+                                              #(cuda-base/load-all-datatype-function
+                                                "tensor_unary_op"))]
+      (apply cuda-base/launch-linear-kernel
+             (-> (concat [stream unop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(cuda-base/->ptr x)]
+                         (index-system->cuda x-idx)
+                         [(drv/dtype-cast alpha dest-dtype)]
+                         (unary-op->cuda op)
                          [n-elems])
                  vec))))
 

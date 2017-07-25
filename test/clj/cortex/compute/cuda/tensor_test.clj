@@ -26,6 +26,10 @@
   (verify-tensor/assign-marshal (create-driver) *datatype*))
 
 
+(def-cas-dtype-test unary-op
+  (verify-tensor/unary-op (create-driver) *datatype*))
+
+
 (def-cas-dtype-test binary-constant-op
   (verify-tensor/binary-constant-op (create-driver) *datatype*))
 

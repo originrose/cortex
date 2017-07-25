@@ -53,12 +53,98 @@ namespace tensor { namespace operations {
 	return (dtype) 0;
       }
     };
+
+    struct unary_operation_type
+    {
+      enum _enum
+      {
+	floor = 0,
+	ceil,
+	round,
+	negate,
+      };
+    };
+
+    template<typename dtype>
+    struct unary_rounder
+    {
+      __device__ dtype operator()(dtype data) { return data; }
+    };
+
+    template<>
+    struct unary_rounder<float>
+    {
+      __device__ float operator()(float data) { return static_cast<float>(lroundf(data)); }
+    };
+
+    template<>
+    struct unary_rounder<double>
+    {
+      __device__ double operator()(double data) { return static_cast<double>(llrint(data)); }
+    };
+
+    template<typename dtype>
+    struct unary_ceil
+    {
+      __device__ dtype operator()(dtype data) { return data; }
+    };
+
+    template<>
+    struct unary_ceil<float>
+    {
+      __device__ float operator()(float data) { return ceilf(data); }
+    };
+
+    template<>
+    struct unary_ceil<double>
+    {
+      __device__ double operator()(double data) { return ceil(data); }
+    };
+
+    template<typename dtype>
+    struct unary_floor
+    {
+      __device__ dtype operator()(dtype data) { return data; }
+    };
+
+    template<>
+    struct unary_floor<float>
+    {
+      __device__ float operator()(float data) { return floorf(data); }
+    };
+
+    template<>
+    struct unary_floor<double>
+    {
+      __device__ double operator()(double data) { return floor(data); }
+    };
+
+    struct general_unary_operation
+    {
+      int op_type;
+      __device__ general_unary_operation( int op )
+	: op_type(op)
+	{}
+      template<typename dtype>
+      __device__ dtype operator()( dtype lhs ) const {
+	switch( op_type ) {
+	case unary_operation_type::floor:
+	  return  unary_floor<dtype>()(lhs);
+	case unary_operation_type::ceil:
+	  return unary_ceil<dtype>()(lhs);
+	case unary_operation_type::round:
+	  return unary_rounder<dtype>()(lhs);
+	case unary_operation_type::negate:
+	  return -lhs;
+	};
+	return (dtype) 0;
+      }
+    };
   }}
 
 
 #define EXPLODE_OP_SYSTEM(varname)		\
   int op_type##varname
-
 
 #define ENCAPSULATE_OP_SYSTEM(varname)		\
   general_operation(op_type##varname)
@@ -68,5 +154,11 @@ namespace tensor { namespace operations {
 
 #define ENCAPSULATE_OP_SYSTEM_REV(varname)		\
   general_operation(op_type##varname, (bool)rev_op##varname)
+
+#define EXPLODE_UNARY_OP_SYSTEM(varname)		\
+  int op_type##varname
+
+#define ENCAPSULATE_UNARY_OP_SYSTEM(varname)		\
+  general_unary_operation(op_type##varname)
 
 #endif
