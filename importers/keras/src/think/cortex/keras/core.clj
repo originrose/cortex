@@ -700,14 +700,16 @@
 
 (defn label-one
   "Take a random test image and label it."
-  ([image-filename] (label-one image-filename "models/resnet50.nippy"))
-  ([image-filename trained-model]
-   (let [data [{:input-1 (-> image-filename (io/file) (i/load-image) (i/resize 224 224)
-                             (patch/image->patch :datatype :float :normalize false)
-                             ;; https://github.com/fchollet/deep-learning-models/blob/master/imagenet_utils.py
-                             (patch/patch-mean-subtract 103.939 116.779 123.68))}]]
-     (->>
-       (execute/run (util/read-nippy-file trained-model) data :batch-size 1)
-       (first)
-       :fc1000-activation
-       (util/max-index)))))
+  [image-filename & {:keys [model-f labels-f]
+                     :or {model-f "models/resnet50.nippy" labels-f "models/imagenet_class_index.json"}}]
+  (let [data [{:input-1 (-> image-filename (io/file) (i/load-image) (i/resize 224 224)
+                            (patch/image->patch :datatype :float :normalize false)
+                            ;; https://github.com/fchollet/deep-learning-models/blob/master/imagenet_utils.py
+                            (patch/patch-mean-subtract 103.939 116.779 123.68 :bgr-reorder true))}]
+        idx (->>
+              (execute/run (util/read-nippy-file model-f) data :batch-size 1)
+              (first)
+              :fc1000-activation
+              (util/max-index))
+        imgnet-labels (read-json-model labels-f)]
+    ((-> idx str keyword) imgnet-labels)))
