@@ -110,3 +110,12 @@
                                          (layers/linear->logistic 2 :id :out)])
         out-node (network/network->node network :out)]
     (is (= :logistic (:type out-node)))))
+
+
+(deftest out-of-order-description
+  (let [network (network/linear-network [(layers/input 2 1 1 :id :in)
+                                         (layers/linear 2 :parents [:linear-parent])
+                                         (layers/linear 2 :id :linear-parent :parents [:in])])
+        depth-first-seq (graph/dfs-seq (network/network->graph network))]
+    (is (= [:in :linear-parent :linear-1 :mse-loss-1]
+           (vec depth-first-seq)))))
