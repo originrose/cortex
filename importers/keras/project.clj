@@ -8,7 +8,7 @@
                  [thinktopic/cortex "0.9.12-SNAPSHOT"]
                  [cheshire "5.6.3"]
                  [thinktopic/think.image "0.4.12"]]
-  :profiles {:ci {:dependencies [[thinktopic/hdf5 "0.2.1"]]}}
+  :profiles {:ci {:dependencies [[thinktopic/hdf5 "0.1.3"]]}}
   :plugins [[lein-codox "0.10.2"]]
   :test-selectors {:ci (complement :skip-ci)}
   :main think.cortex.keras.core)
