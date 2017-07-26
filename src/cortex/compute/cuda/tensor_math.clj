@@ -174,6 +174,24 @@
   (cuda-base/activation-description (act-type->cudnn-activation act-type)))
 
 
+(defn- cudnn-compatible?
+  [idx-system]
+  (is/simple-monotonically-increasing? idx-system))
+
+
+(defn- cudnn-activation!
+  [stream input input-alpha output n-elems act-type]
+  (resource/with-resource-context
+    (let [dest-dtype (dtype/get-datatype output)
+          tensor (cuda-base/tensor dest-dtype 1 1 1 n-elems)]
+      (cuda-base/cudnn-with-stream
+       stream
+       (cuda-base/cudnn-call
+        (cudnn/cudnnActivationForward cudnn-context (act-type->cudnn act-type)
+                                      (value->ptr input-alpha dest-dtype) tensor (->ptr input)
+                                      (value->ptr 0 dest-dtype) tensor (->ptr output)))))))
+
+
 (extend-type CudaStream
   tm/TensorMath
   (assign-constant! [stream buffer index-system value n-elems]
@@ -215,14 +233,20 @@
                                               dest-dtype
                                               #(cuda-base/load-cas-datatype-function
                                                 "tensor_unary_accum"))]
-      (apply cuda-base/launch-linear-kernel
-             (-> (concat [stream unop-fn n-elems 0]
-                         [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
-                         [(drv/dtype-cast alpha dest-dtype)]
-                         (unary-op->cuda op)
-                         [n-elems])
-                 vec))))
+      (if (and (or (= dest-dtype :float)
+                   (= dest-dtype :double))
+               (or (= op :logistic)
+                   (= op :tanh))
+               (cudnn-compatible? dest-idx))
+        (cudnn-activation! stream dest alpha dest n-elems op)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream unop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(drv/dtype-cast alpha dest-dtype)]
+                           (unary-op->cuda op)
+                           [n-elems])
+                   vec)))))
 
   (unary-op! [stream
               dest dest-idx
@@ -233,16 +257,23 @@
                                               dest-dtype
                                               #(cuda-base/load-all-datatype-function
                                                 "tensor_unary_op"))]
-      (apply cuda-base/launch-linear-kernel
-             (-> (concat [stream unop-fn n-elems 0]
-                         [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
-                         [(cuda-base/->ptr x)]
-                         (index-system->cuda x-idx)
-                         [(drv/dtype-cast alpha dest-dtype)]
-                         (unary-op->cuda op)
-                         [n-elems])
-                 vec))))
+      (if (and (or (= dest-dtype :float)
+                   (= dest-dtype :double))
+               (or (= op :logistic)
+                   (= op :tanh))
+               (cudnn-compatible? dest-idx)
+               (cudnn-compatible? x-idx))
+        (cudnn-activation! stream x alpha dest n-elems op)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream unop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(cuda-base/->ptr x)]
+                           (index-system->cuda x-idx)
+                           [(drv/dtype-cast alpha dest-dtype)]
+                           (unary-op->cuda op)
+                           [n-elems])
+                   vec)))))
 
   (binary-accum-constant! [stream
                            dest dest-idx dest-alpha
@@ -254,14 +285,20 @@
                                                #(cuda-base/load-cas-datatype-function
                                                  "tensor_accum_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
-      (apply cuda-base/launch-linear-kernel
-             (-> (concat [stream binop-fn n-elems 0]
-                         [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
-                         [(->dtype dest-alpha) (->dtype scalar)]
-                         (operation->cuda operation reverse-operands?)
-                         [n-elems])
-                 vec))))
+      (if (and (cudnn-compatible? dest-idx)
+               (= :max operation)
+               (= 0.0 scalar)
+               (or (= dest-dtype :double)
+                   (= dest-dtype :float)))
+        (cudnn-activation! stream dest dest-alpha dest n-elems :relu)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream binop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(->dtype dest-alpha) (->dtype scalar)]
+                           (operation->cuda operation reverse-operands?)
+                           [n-elems])
+                   vec)))))
 
   (binary-op-constant! [stream
                         dest dest-idx
@@ -274,16 +311,23 @@
                                                #(cuda-base/load-all-datatype-function
                                                  "tensor_binary_op_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
-      (apply cuda-base/launch-linear-kernel
-             (-> (concat [stream binop-fn n-elems 0]
-                         [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
-                         [(cuda-base/->ptr x)]
-                         (index-system->cuda x-idx)
-                         [(->dtype x-alpha) (->dtype scalar)]
-                         (operation->cuda operation reverse-operands?)
-                         [n-elems])
-                 vec))))
+      (if (and (cudnn-compatible? x-idx)
+               (cudnn-compatible? dest-idx)
+               (= 0.0 (double scalar))
+               (= :max operation)
+               (or (= dest-dtype :double)
+                   (= dest-dtype :float)))
+        (cudnn-activation! stream x x-alpha dest n-elems :relu)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream binop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(cuda-base/->ptr x)]
+                           (index-system->cuda x-idx)
+                           [(->dtype x-alpha) (->dtype scalar)]
+                           (operation->cuda operation reverse-operands?)
+                           [n-elems])
+                   vec)))))
 
   (binary-accum! [stream
                   dest dest-idx dest-alpha
