@@ -94,7 +94,8 @@ a datastructure that shares the backing store."
     (tensor/with-stream (nn-backend/get-stream)
       (let [->tensor #(->batch-tensor %
                                       (math/batch-size (first-buffer input-buffers))
-                                      (graph/node->input-dimension this))
+                                      (graph/node->input-dimension layer)
+                                      false)
             output (->tensor (first-buffer output-buffers))
             input (->tensor (first-buffer input-buffers))]
         (condp = act-type
@@ -106,7 +107,8 @@ a datastructure that shares the backing store."
     (tensor/with-stream (nn-backend/get-stream)
       (let [->tensor #(->batch-tensor %
                                       (math/batch-size (first-buffer input-buffers))
-                                      (graph/node->input-dimension this))
+                                      (graph/node->input-dimension layer)
+                                      false)
             output (->tensor (first-buffer output-buffers))
             input-gradient (->tensor (first-gradient input-buffers))
             output-gradient (->tensor (first-gradient output-buffers))]
