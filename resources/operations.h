@@ -46,9 +46,9 @@ namespace tensor { namespace operations {
 	case operation_type::divide:
 	  return reverse_operands ? rhs / lhs : lhs / rhs;
 	case operation_type::max:
-	  return reverse_operands ? op_max(lhs, rhs) : op_max(rhs, lhs);
+	  return op_max(lhs, rhs);
 	case operation_type::min:
-	  return reverse_operands ? op_min(lhs, rhs) : op_min(rhs, lhs);
+	  return op_min(lhs, rhs);
 	};
 	return (dtype) 0;
       }

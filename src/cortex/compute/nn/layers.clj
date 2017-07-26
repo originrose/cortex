@@ -88,6 +88,45 @@ a datastructure that shares the backing store."
   (->Linear backend))
 
 
+(defrecord ActivationLayer [act-type layer]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [->tensor #(->batch-tensor %
+                                      (math/batch-size (first-buffer input-buffers))
+                                      (graph/node->input-dimension this))
+            output (->tensor (first-buffer output-buffers))
+            input (->tensor (first-buffer input-buffers))]
+        (condp = act-type
+          :logistic (tensor/unary-op! output 1.0 input :logistic)
+          :tanh (tensor/unary-op! output 1.0 input :tanh)
+          :relu (tensor/binary-op! output 1.0 input 0 0 :max)))))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [->tensor #(->batch-tensor %
+                                      (math/batch-size (first-buffer input-buffers))
+                                      (graph/node->input-dimension this))
+            output (->tensor (first-buffer output-buffers))
+            input-gradient (->tensor (first-gradient input-buffers))
+            output-gradient (->tensor (first-gradient output-buffers))]
+        (tensor/activation-gradient! input-gradient output-gradient output act-type)))))
+
+
+(defmethod create :relu
+  [backend node batch-size]
+  (->ActivationLayer :relu node))
+
+
+(defmethod create :logistic
+  [backend node batch-size]
+  (->ActivationLayer :logistic node))
+
+
+(defmethod create :tanh
+  [backend node batch-size]
+  (->ActivationLayer :tanh node))
+
 
 (defn dropout-prepare-forward!
   "The reason this function is not part of forward is that in the off case

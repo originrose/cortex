@@ -443,7 +443,7 @@ for the cuda backend."
                     0.9999877116507956, 0.9999983369439447]
                    (ct/to-double-array output)
                    1e-4))
-     (ct/binary-op! output 1.0 input 0 0 :min)
+     (ct/binary-op! output 1.0 input 0 0 :max)
      (is (m/equals [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
                    (ct/to-double-array output))))))
 

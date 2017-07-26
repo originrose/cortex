@@ -59,8 +59,8 @@
        :- (int 1)
        :* (int 2)
        :/ (int 3)
-       :max (int 4)
-       :min (int 5))])
+       :min (int 4)
+       :max (int 5))])
   ([operation rev-ops?]
    (conj (operation->cuda operation)
          (int (if rev-ops? 1 0)))))

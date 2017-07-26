@@ -62,9 +62,6 @@
 
 (defprotocol PCPUNetworkImpl
   "Implementation of various functions based on buffer datatype."
-  (cpu-activation-forward [input-buf act-type output-buf])
-  (cpu-activation-backward [input-buf act-type output-buf
-                            output-gradient input-gradient])
   (cpu-softmax-forward [input-buf output-buf n-input n-channels])
   (cpu-planar-input->convolution! [input input-convolved conv-config])
   (cpu-convolution->planar-output! [input-convolved input-gradient conv-config])
@@ -628,12 +625,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (extend-type DoubleArrayView
   PCPUNetworkImpl
-  (cpu-activation-forward [input-buf act-type ^DoubleArrayView output-buf]
-    (cpu-act-forward-impl act-type input-buf output-buf double))
-  (cpu-activation-backward [input act-type ^DoubleArrayView output
-                            ^DoubleArrayView output-gradient
-                            ^DoubleArrayView input-gradient]
-    (cpu-act-backward-impl act-type input output output-gradient input-gradient double))
   (cpu-softmax-forward [input-buf ^DoubleArrayView output-buf ^long n-input ^long n-channels]
     (cpu-softmax-forward-impl n-input input-buf output-buf n-channels double))
   (cpu-planar-input->convolution! [input ^DoubleArrayView input-convolved
@@ -678,12 +669,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (extend-type FloatArrayView
   PCPUNetworkImpl
-  (cpu-activation-forward [input-buf act-type ^FloatArrayView output-buf]
-    (cpu-act-forward-impl act-type input-buf output-buf float))
-  (cpu-activation-backward [input act-type ^FloatArrayView output
-                            ^FloatArrayView output-gradient
-                            ^FloatArrayView input-gradient]
-    (cpu-act-backward-impl act-type input output output-gradient input-gradient float))
   (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input ^long n-channels]
     (cpu-softmax-forward-impl n-input input-buf output-buf n-channels float))
   (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved conv-config]
@@ -739,37 +724,10 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (device-array->view (compute-layers/first-gradient buffers)))
 
 
-(defrecord ActivationLayer [layer cpu-stream]
-  compute-protocols/ComputeLayer
-  (forward [this parameter-buffers input output]
-    (cpu-drv/with-stream-dispatch cpu-stream
-      (cpu-activation-forward (first-buffer input)
-                              (:type layer)
-                              (first-buffer output))))
-  (backward [this parameter-buffers output input]
-    (cpu-drv/with-stream-dispatch cpu-stream
-      (cpu-activation-backward (first-buffer input) (:type layer)
-                               (first-buffer output)
-                               (first-gradient output)
-                               (first-gradient input)))))
-
 (defmulti cpu-layer
           "Create a implementation layer for the cpu backend."
           (fn [backend layer batch-size]
     (get layer :type)))
-
-
-(defmethod cpu-layer :logistic
-  [backend layer batch-size]
-  (->ActivationLayer layer (drv/get-stream backend)))
-
-(defmethod cpu-layer :relu
-  [backend layer batch-size]
-  (->ActivationLayer layer (drv/get-stream backend)))
-
-(defmethod cpu-layer :tanh
-  [backend layer batch-size]
-  (->ActivationLayer layer (drv/get-stream backend)))
 
 
 (defrecord SoftmaxLayer [layer cpu-stream]

@@ -313,7 +313,7 @@
     :* `(* ~x ~y)
     ;;Math/max and friends aren't defined for all primitives leading to reflection warnings.
     :max `(if (> ~x ~y) ~x ~y)
-    :min `(if (< ~x ~y) ~y ~x)))
+    :min `(if (> ~x ~y) ~y ~x)))
 
 
 (defmacro ^:private perform-op-rev-ops
