@@ -421,3 +421,48 @@ for the cuda backend."
      (is (m/equals [60.0, 92.0, 124.0]
                    (ct/to-double-array bias-gradient)
                    1e-4)))))
+
+
+(defn activation-forward
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [input (ct/->tensor (range -4 8))
+         output (ct/new-tensor [12])]
+     (ct/unary-op! output 1.0 input :logistic)
+     (is (m/equals [0.01798620996209156, 0.04742587317756678, 0.11920292202211755,
+                    0.2689414213699951, 0.5, 0.7310585786300049, 0.8807970779778823,
+                    0.9525741268224334, 0.9820137900379085, 0.9933071490757153,
+                    0.9975273768433653, 0.9990889488055994]
+                   (ct/to-double-array output)
+                   1e-4))
+     (ct/unary-op! output 1.0 input :tanh)
+     (is (m/equals [-0.999329299739067, -0.9950547536867305, -0.9640275800758169,
+                    -0.7615941559557649, 0.0, 0.7615941559557649, 0.9640275800758169,
+                    0.9950547536867305, 0.999329299739067, 0.9999092042625951,
+                    0.9999877116507956, 0.9999983369439447]
+                   (ct/to-double-array output)
+                   1e-4))
+     (ct/binary-op! output 1.0 input 0 0 :min)
+     (is (m/equals [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+                   (ct/to-double-array output))))))
+
+
+(defn activation-gradient
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [output (ct/->tensor (range 12))
+         output-gradient (ct/->tensor (range -4 8))
+         input-gradient (ct/new-tensor [12])]
+     (ct/activation-gradient! input-gradient output-gradient output :logistic)
+     (is (m/equals [-0.0, -0.0, 4.0, 6.0, -0.0, -20.0, -60.0,
+                    -126.0, -224.0, -360.0, -540.0, -770.0]
+                   (ct/to-double-array input-gradient)))
+     (ct/activation-gradient! input-gradient output-gradient output :tanh)
+     (is (m/equals [-4.0, -0.0, 6.0, 8.0, -0.0, -24.0, -70.0,
+                    -144.0, -252.0, -400.0, -594.0, -840.0]
+                   (ct/to-double-array input-gradient)))
+     (ct/activation-gradient! input-gradient output-gradient output :relu)
+     (is (m/equals [0.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+                   (ct/to-double-array input-gradient))))))

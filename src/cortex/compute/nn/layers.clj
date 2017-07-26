@@ -47,6 +47,22 @@ implementation as possible."
   (nn-backend/create backend node batch-size))
 
 
+(defn- ->batch-tensor
+  "Create either a 2d tensor with the batches as the leading dimension
+or a faithful tensor of the math/array data.  This does no copy; just constructs
+a datastructure that shares the backing store."
+  [buffer batch-count input-dimension spatial?]
+  (let [retval (if spatial?
+                 (tensor/reinterpret-tensor
+                  (math/array->cortex-tensor buffer)
+                  (tensor/dimensions [batch-count
+                                      (get input-dimension :channels)
+                                      (* (long (get input-dimension :height))
+                                         (long (get input-dimension :width)))]))
+                 (math/array->cortex-tensor (math/as-2d-batch-matrix buffer)))]
+    retval))
+
+
 (defrecord Linear [backend]
   compute-protocols/ComputeLayer
   (forward [layer parameter-buffers input-buffers output-buffers]
@@ -70,6 +86,7 @@ implementation as possible."
 (defmethod create :linear
   [backend node batch-size]
   (->Linear backend))
+
 
 
 (defn dropout-prepare-forward!
@@ -124,22 +141,6 @@ and then forward many times for every parameter of the network."
                                           (* n-items (long batch-size))))
                                         (math/tensor batch-size 1 1 n-items))]
     (->Dropout backend node batch-size mult-buffer rand-buffer)))
-
-
-(defn- ->batch-tensor
-  "Create either a 2d tensor with the batches as the leading dimension
-or a faithful tensor of the math/array data.  This does no copy; just constructs
-a datastructure that shares the backing store."
-  [buffer batch-count input-dimension spatial?]
-  (let [retval (if spatial?
-                 (tensor/reinterpret-tensor
-                  (math/array->cortex-tensor buffer)
-                  (tensor/dimensions [batch-count
-                                      (get input-dimension :channels)
-                                      (* (long (get input-dimension :height))
-                                         (long (get input-dimension :width)))]))
-                 (math/array->cortex-tensor (math/as-2d-batch-matrix buffer)))]
-    retval))
 
 
 (defrecord BatchNormalization [backend layer batch-means batch-variances

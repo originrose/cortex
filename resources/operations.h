@@ -136,13 +136,13 @@ namespace tensor { namespace operations {
     template<typename dtype>
     struct unary_logistic
     {
-      __device__ dtype operator()(dtype data) { return static_cast<dtype>( 1.0 / (1.0 * exp(- (double) data))); }
+      __device__ dtype operator()(dtype data) { return static_cast<dtype>( 1.0 / (1.0 + exp(- (double) data))); }
     };
 
     template<>
     struct unary_logistic<float>
     {
-      __device__ float operator()(float data) { return 1.0 / (1.0 * expf(- data)); }
+      __device__ float operator()(float data) { return 1.0 / (1.0 + expf(- data)); }
     };
 
     struct general_unary_operation

@@ -51,3 +51,11 @@
 
 (def-double-float-test batch-normalize-gradients
   (verify-tensor/batch-normalize-gradients (driver) *datatype*))
+
+
+(def-double-float-test activation-forward
+  (verify-tensor/activation-forward (driver) *datatype*))
+
+
+(def-double-float-test activation-gradient
+  (verify-tensor/activation-gradient (driver) *datatype*))

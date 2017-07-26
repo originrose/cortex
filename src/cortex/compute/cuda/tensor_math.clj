@@ -161,6 +161,18 @@
 (def ^:private blas-fn-map
   (blas-macro-iter blas-impl))
 
+(defn act-type->cudnn-activation
+  [act-type]
+  (condp = act-type
+    :relu cudnn/CUDNN_ACTIVATION_RELU
+    :logistic cudnn/CUDNN_ACTIVATION_SIGMOID
+    :tanh cudnn/CUDNN_ACTIVATION_TANH))
+
+
+(defn- act-type->cudnn
+  [act-type]
+  (cuda-base/activation-description (act-type->cudnn-activation act-type)))
+
 
 (extend-type CudaStream
   tm/TensorMath
@@ -523,4 +535,29 @@
            (->ptr bias-gradient)
            (double epsilon)
            (->ptr batch-means)
-           (->ptr batch-variances))))))))
+           (->ptr batch-variances)))))))
+
+  (activation-gradient! [stream
+                         input-gradient
+                         output-gradient
+                         output
+                         op
+                         element-count]
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input-gradient)
+            tensor (cuda-base/tensor datatype 1 1 1 element-count)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnActivationBackward cudnn-context
+                                         (act-type->cudnn op)
+                                         (value->ptr 1 datatype)
+                                         tensor
+                                         (->ptr output)
+                                         tensor
+                                         (->ptr output-gradient)
+                                         tensor
+                                         (->ptr output)
+                                         (value->ptr 0 datatype)
+                                         tensor
+                                         (->ptr input-gradient))))))))
