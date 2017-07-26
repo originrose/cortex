@@ -8,15 +8,7 @@
                  [thinktopic/cortex "0.9.12-SNAPSHOT"]
                  [cheshire "5.6.3"]
                  [thinktopic/think.image "0.4.12"]]
-  :plugins [[s3-wagon-private "1.1.2"]
-            [lein-codox "0.10.2"]]
-  ;; :repositories  {"snapshots"  {:url "s3p://thinktopic.jars/snapshots/"
-  ;;                               :passphrase :env
-  ;;                               :username :env
-  ;;                               :releases false}
-  ;;                 "releases"  {:url "s3p://thinktopic.jars/releases/"
-  ;;                              :passphrase :env
-  ;;                              :username :env
-  ;;                              :snapshots false
-  ;;                              :sign-releases false}}
+  :profiles {:ci {:dependencies [[thinktopic/hdf5 "0.1.3"]]}}
+  :plugins [[lein-codox "0.10.2"]]
+  :test-selectors {:ci (fn [m] (not (:skip-ci m)))}
   :main think.cortex.keras.core)

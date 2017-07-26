@@ -108,5 +108,5 @@
 
 
 
-(deftest verify-resnet
+(deftest ^:skip-ci verify-resnet
   (is (keras/import-model resnet_archf resnet_weightf resnet_outf)))
