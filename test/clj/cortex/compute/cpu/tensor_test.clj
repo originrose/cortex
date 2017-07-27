@@ -59,3 +59,7 @@
 
 (def-double-float-test activation-gradient
   (verify-tensor/activation-gradient (driver) *datatype*))
+
+
+(def-double-float-test softmax
+  (verify-tensor/softmax (driver) *datatype*))

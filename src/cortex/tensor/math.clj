@@ -131,4 +131,9 @@ running means, variances using a running average
                          output-gradient
                          output
                          op
-                         element-count]))
+                         element-count])
+  (softmax! [stream
+             output
+             input
+             batch-count
+             element-count]))
