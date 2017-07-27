@@ -62,7 +62,6 @@
 
 (defprotocol PCPUNetworkImpl
   "Implementation of various functions based on buffer datatype."
-  (cpu-softmax-forward [input-buf output-buf n-input n-channels])
   (cpu-planar-input->convolution! [input input-convolved conv-config])
   (cpu-convolution->planar-output! [input-convolved input-gradient conv-config])
   (cpu-fill [buffer value])
@@ -135,6 +134,7 @@
                             (* out-val# out-val#))
                          (v-aget dest-grad# idx#))))))))
 
+
 (defmacro array-max
   [ary n-items start-idx cast-fn]
   `(loop [idx# 1
@@ -144,6 +144,7 @@
               (Math/max (~cast-fn max-val#) (v-aget ~ary (+ ~start-idx idx#))))
        max-val#)))
 
+
 (defmacro array-sum
   [ary n-items start-idx]
   `(loop [idx# 1
@@ -152,48 +153,6 @@
        (recur (inc idx#)
               (+ sum-val# (v-aget ~ary (+ ~start-idx idx#))))
        sum-val#)))
-
-
-(defmacro cpu-view-softmax
-  [src dest cast-fn]
-  `(let [num-items# (.length ~src)
-         max-val# (~cast-fn (array-max ~src num-items# 0 ~cast-fn))]
-     ;;Subtract max for numerical stability
-     (c-for [idx# 0 (< idx# num-items#) (inc idx#)]
-            (v-aset ~dest idx# (Math/exp (- (v-aget ~src idx#) max-val#))))
-     ;;perform normalization with array sum.
-     (let [sum-val# (~cast-fn (array-sum ~dest num-items# 0))]
-       (c-for [idx# 0 (< idx# num-items#) (inc idx#)]
-              (.diveq ~dest idx# sum-val#)))))
-
-
-
-(defmacro cpu-softmax-forward-impl
-  [n-input input-buf output-buf n-channels cast-fn]
-  `(let [n-input# (long ~n-input)
-         src# (ArrayView/toView ~input-buf)
-         dest# (ArrayView/toView ~output-buf)
-         batch-size# (quot (v-alength src#) n-input#)
-         n-channels# (long ~n-channels)]
-     (c-for [batch-idx# 0 (< batch-idx# batch-size#) (inc batch-idx#)]
-            (if (= n-channels# 1)
-              (let [start-offset# (* batch-idx# n-input#)
-                    max-val# (~cast-fn (array-max src# n-input# start-offset# ~cast-fn))
-                    src# (.toView src# start-offset# n-input#)
-                    dest# (.toView dest# start-offset# n-input#)]
-                (cpu-view-softmax src# dest# ~cast-fn))
-              (let [start-offset# (* batch-idx# n-input#)
-                    n-pixels# (quot n-input# n-channels#)]
-                (parallel/parallel-for
-                 pixel# n-pixels#
-                 (cpu-view-softmax (.toView src# (+ start-offset#
-                                                    (* pixel# n-channels#))
-                                            n-channels#)
-                                   (.toView dest# (+ start-offset#
-                                                     (* pixel# n-channels#))
-                                            n-channels#)
-                                   ~cast-fn)))))))
-
 
 
 (defmacro cpu-planar-input->convolution!-impl
@@ -625,8 +584,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (extend-type DoubleArrayView
   PCPUNetworkImpl
-  (cpu-softmax-forward [input-buf ^DoubleArrayView output-buf ^long n-input ^long n-channels]
-    (cpu-softmax-forward-impl n-input input-buf output-buf n-channels double))
   (cpu-planar-input->convolution! [input ^DoubleArrayView input-convolved
                                    conv-config]
     (cpu-planar-input->convolution!-impl input input-convolved conv-config double))
@@ -669,8 +626,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (extend-type FloatArrayView
   PCPUNetworkImpl
-  (cpu-softmax-forward [input-buf ^FloatArrayView output-buf ^long n-input ^long n-channels]
-    (cpu-softmax-forward-impl n-input input-buf output-buf n-channels float))
   (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved conv-config]
     (cpu-planar-input->convolution!-impl input input-convolved conv-config float))
   (cpu-convolution->planar-output! [input-convolved ^FloatArrayView input-gradient conv-config]
@@ -725,26 +680,10 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 
 (defmulti cpu-layer
-          "Create a implementation layer for the cpu backend."
-          (fn [backend layer batch-size]
+  "Create a implementation layer for the cpu backend."
+  (fn [backend layer batch-size]
     (get layer :type)))
 
-
-(defrecord SoftmaxLayer [layer cpu-stream]
-  compute-protocols/ComputeLayer
-  (forward [this parameter-buffers input output]
-    (cpu-drv/with-stream-dispatch cpu-stream
-      (cpu-softmax-forward (first-buffer input) (first-buffer output)
-                           (graph/node->input-size layer) (:output-channels layer))))
-  (backward [this parameter-buffers output input]
-    (compute-layers/softmax-backward! cpu-stream
-                                      (compute-layers/first-gradient input)
-                                      (compute-layers/first-gradient output))))
-
-
-(defmethod cpu-layer :softmax
-  [backend layer batch-size]
-  (->SoftmaxLayer layer (drv/get-stream backend)))
 
 (defn conv-type-layer->conv-config
   "Backwards compatibility function necessary as the node format has changed over time."

@@ -183,15 +183,25 @@
     :float `(marshal/as-float-array-view ~buf)
     :double `(marshal/as-double-array-view ~buf)))
 
+(defmacro ^:private datatype->cast-fn
+  [dtype val]
+  (condp = dtype
+    :byte `(byte ~val)
+    :short `(short ~val)
+    :int `(int ~val)
+    :long `(long ~val)
+    :float `(float ~val)
+    :double `(double ~val)))
+
 (defmacro ^:private datatype->cast-fn-symbol
   [dtype]
   (condp = dtype
-    :byte 'byte
-    :short 'short
-    :int 'int
-    :long 'long
-    :float 'float
-    :double 'double))
+    :byte `byte
+    :short `short
+    :int `int
+    :long `long
+    :float `float
+    :double `double))
 
 
 (defn- generate-datatype-combinations
@@ -850,12 +860,12 @@
                                      scale# bias# epsilon#)))
 
 (defmacro array-max
-  [ary n-items start-idx cast-fn]
+  [ary n-items start-idx datatype]
   `(loop [idx# 1
           max-val# (v-aget ~ary ~start-idx)]
      (if (< idx# ~n-items)
        (recur (inc idx#)
-              (Math/max (~cast-fn max-val#) (v-aget ~ary (+ ~start-idx idx#))))
+              (Math/max (datatype->cast-fn ~datatype max-val#) (v-aget ~ary (+ ~start-idx idx#))))
        max-val#)))
 
 (defmacro array-sum
@@ -878,7 +888,8 @@
        (parallel/parallel-for
         batch-idx# batch-count#
         (let [batch-offset# (* batch-idx# element-count#)
-              max-val# (array-max input# element-count# batch-offset# (datatype->cast-fn-symbol ~datatype))]
+              max-val# (datatype->cast-fn ~datatype
+                                          (array-max input# element-count# batch-offset# ~datatype))]
           (c-for
            [idx# 0 (< idx# element-count#) (inc idx#)]
            (v-aset output# (+ idx# batch-offset#)
@@ -904,7 +915,7 @@
        :batch-normalize-update-spatial! `(batch-normalize-update-spatial-impl ~ops-type)
        :batch-normalize-gradients-eltwise! `(batch-normalize-gradients-eltwise-impl ~ops-type)
        :batch-normalize-gradients-spatial! `(batch-normalize-gradients-spatial-impl ~ops-type)
-       :softmax-forward! `(softmax-forward-impl ~ops-type)}])
+       :softmax! `(softmax-forward-impl ~ops-type)}])
    (into {})))
 
 
@@ -1142,4 +1153,13 @@
                          element-count]
     (cpu-driver/with-stream-dispatch stream
       ((get activation-backward-table (dtype/get-datatype input-gradient))
-       input-gradient output-gradient output op element-count))))
+       input-gradient output-gradient output op element-count)))
+
+  (softmax! [stream
+             output
+             input
+             batch-count
+             element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax!])
+       output input batch-count element-count))))

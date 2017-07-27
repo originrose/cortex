@@ -130,6 +130,34 @@ a datastructure that shares the backing store."
   (->ActivationLayer :tanh node))
 
 
+(defn- softmax-tensor
+  [layer math-ary]
+  (let [channels (long (get layer :output-channels))
+        ary-ecount (math/ecount math-ary)]
+    (if (> channels 1)
+      (tensor/reinterpret-tensor
+       (math/array->cortex-tensor math-ary)
+       (tensor/dimensions [(quot ary-ecount channels) channels]))
+      (math/array->cortex-tensor (math/as-2d-batch-matrix math-ary)))))
+
+
+(defrecord SoftmaxLayer [layer]
+  compute-protocols/ComputeLayer
+  (forward [this param-buffers input-buffers output-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (tensor/softmax! (softmax-tensor layer (first-buffer output-buffers))
+                       (softmax-tensor layer (first-buffer input-buffers)))))
+  (backward [this param-buffers output-buffers input-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (tensor/assign! (softmax-tensor layer (first-gradient input-buffers))
+                      (softmax-tensor layer (first-gradient output-buffers))))))
+
+
+(defmethod create :softmax
+  [backend node batch-size]
+  (->SoftmaxLayer node))
+
+
 (defn dropout-prepare-forward!
   "The reason this function is not part of forward is that in the off case
 you want to check gradients you need to call prepare-forward once precisely
