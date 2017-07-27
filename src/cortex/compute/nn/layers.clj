@@ -47,6 +47,22 @@ implementation as possible."
   (nn-backend/create backend node batch-size))
 
 
+(defn- ->batch-tensor
+  "Create either a 2d tensor with the batches as the leading dimension
+or a faithful tensor of the math/array data.  This does no copy; just constructs
+a datastructure that shares the backing store."
+  [buffer batch-count input-dimension spatial?]
+  (let [retval (if spatial?
+                 (tensor/reinterpret-tensor
+                  (math/array->cortex-tensor buffer)
+                  (tensor/dimensions [batch-count
+                                      (get input-dimension :channels)
+                                      (* (long (get input-dimension :height))
+                                         (long (get input-dimension :width)))]))
+                 (math/array->cortex-tensor (math/as-2d-batch-matrix buffer)))]
+    retval))
+
+
 (defrecord Linear [backend]
   compute-protocols/ComputeLayer
   (forward [layer parameter-buffers input-buffers output-buffers]
@@ -70,6 +86,48 @@ implementation as possible."
 (defmethod create :linear
   [backend node batch-size]
   (->Linear backend))
+
+
+(defrecord ActivationLayer [act-type layer]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [->tensor #(->batch-tensor %
+                                      (math/batch-size (first-buffer input-buffers))
+                                      (graph/node->input-dimension layer)
+                                      false)
+            output (->tensor (first-buffer output-buffers))
+            input (->tensor (first-buffer input-buffers))]
+        (condp = act-type
+          :logistic (tensor/unary-op! output 1.0 input :logistic)
+          :tanh (tensor/unary-op! output 1.0 input :tanh)
+          :relu (tensor/binary-op! output 1.0 input 0 0 :max)))))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [->tensor #(->batch-tensor %
+                                      (math/batch-size (first-buffer input-buffers))
+                                      (graph/node->input-dimension layer)
+                                      false)
+            output (->tensor (first-buffer output-buffers))
+            input-gradient (->tensor (first-gradient input-buffers))
+            output-gradient (->tensor (first-gradient output-buffers))]
+        (tensor/activation-gradient! input-gradient output-gradient output act-type)))))
+
+
+(defmethod create :relu
+  [backend node batch-size]
+  (->ActivationLayer :relu node))
+
+
+(defmethod create :logistic
+  [backend node batch-size]
+  (->ActivationLayer :logistic node))
+
+
+(defmethod create :tanh
+  [backend node batch-size]
+  (->ActivationLayer :tanh node))
 
 
 (defn dropout-prepare-forward!
@@ -124,22 +182,6 @@ and then forward many times for every parameter of the network."
                                           (* n-items (long batch-size))))
                                         (math/tensor batch-size 1 1 n-items))]
     (->Dropout backend node batch-size mult-buffer rand-buffer)))
-
-
-(defn- ->batch-tensor
-  "Create either a 2d tensor with the batches as the leading dimension
-or a faithful tensor of the math/array data.  This does no copy; just constructs
-a datastructure that shares the backing store."
-  [buffer batch-count input-dimension spatial?]
-  (let [retval (if spatial?
-                 (tensor/reinterpret-tensor
-                  (math/array->cortex-tensor buffer)
-                  (tensor/dimensions [batch-count
-                                      (get input-dimension :channels)
-                                      (* (long (get input-dimension :height))
-                                         (long (get input-dimension :width)))]))
-                 (math/array->cortex-tensor (math/as-2d-batch-matrix buffer)))]
-    retval))
 
 
 (defrecord BatchNormalization [backend layer batch-means batch-variances

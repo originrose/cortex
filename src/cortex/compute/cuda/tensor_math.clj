@@ -59,11 +59,23 @@
        :- (int 1)
        :* (int 2)
        :/ (int 3)
-       :max (int 4)
-       :min (int 5))])
+       :min (int 4)
+       :max (int 5))])
   ([operation rev-ops?]
    (conj (operation->cuda operation)
          (int (if rev-ops? 1 0)))))
+
+
+(defn- unary-op->cuda
+  ^Integer [operation]
+  [(condp = operation
+     :floor (int 0)
+     :ceil (int 1)
+     :round (int 2)
+     :- (int 3)
+     :tanh (int 4)
+     :logistic (int 5))])
+
 
 
 (defonce cuda_typename_expansion
@@ -149,6 +161,36 @@
 (def ^:private blas-fn-map
   (blas-macro-iter blas-impl))
 
+(defn act-type->cudnn-activation
+  [act-type]
+  (condp = act-type
+    :relu cudnn/CUDNN_ACTIVATION_RELU
+    :logistic cudnn/CUDNN_ACTIVATION_SIGMOID
+    :tanh cudnn/CUDNN_ACTIVATION_TANH))
+
+
+(defn- act-type->cudnn
+  [act-type]
+  (cuda-base/activation-description (act-type->cudnn-activation act-type)))
+
+
+(defn- cudnn-compatible?
+  [idx-system]
+  (is/simple-monotonically-increasing? idx-system))
+
+
+(defn- cudnn-activation!
+  [stream input input-alpha output n-elems act-type]
+  (resource/with-resource-context
+    (let [dest-dtype (dtype/get-datatype output)
+          tensor (cuda-base/tensor dest-dtype 1 1 1 n-elems)]
+      (cuda-base/cudnn-with-stream
+       stream
+       (cuda-base/cudnn-call
+        (cudnn/cudnnActivationForward cudnn-context (act-type->cudnn act-type)
+                                      (value->ptr input-alpha dest-dtype) tensor (->ptr input)
+                                      (value->ptr 0 dest-dtype) tensor (->ptr output)))))))
+
 
 (extend-type CudaStream
   tm/TensorMath
@@ -183,6 +225,56 @@
                          [n-elems])
                  vec))))
 
+  (unary-accum! [stream
+                 dest dest-idx
+                 alpha op n-elems]
+    (let [dest-dtype (dtype/get-datatype dest)
+          unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-accum
+                                              dest-dtype
+                                              #(cuda-base/load-cas-datatype-function
+                                                "tensor_unary_accum"))]
+      (if (and (or (= dest-dtype :float)
+                   (= dest-dtype :double))
+               (or (= op :logistic)
+                   (= op :tanh))
+               (cudnn-compatible? dest-idx))
+        (cudnn-activation! stream dest alpha dest n-elems op)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream unop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(drv/dtype-cast alpha dest-dtype)]
+                           (unary-op->cuda op)
+                           [n-elems])
+                   vec)))))
+
+  (unary-op! [stream
+              dest dest-idx
+              x x-idx
+              alpha op n-elems]
+    (let [dest-dtype (dtype/get-datatype dest)
+          unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-op
+                                              dest-dtype
+                                              #(cuda-base/load-all-datatype-function
+                                                "tensor_unary_op"))]
+      (if (and (or (= dest-dtype :float)
+                   (= dest-dtype :double))
+               (or (= op :logistic)
+                   (= op :tanh))
+               (cudnn-compatible? dest-idx)
+               (cudnn-compatible? x-idx))
+        (cudnn-activation! stream x alpha dest n-elems op)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream unop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(cuda-base/->ptr x)]
+                           (index-system->cuda x-idx)
+                           [(drv/dtype-cast alpha dest-dtype)]
+                           (unary-op->cuda op)
+                           [n-elems])
+                   vec)))))
+
   (binary-accum-constant! [stream
                            dest dest-idx dest-alpha
                            scalar
@@ -193,14 +285,20 @@
                                                #(cuda-base/load-cas-datatype-function
                                                  "tensor_accum_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
-      (apply cuda-base/launch-linear-kernel
-             (-> (concat [stream binop-fn n-elems 0]
-                         [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
-                         [(->dtype dest-alpha) (->dtype scalar)]
-                         (operation->cuda operation reverse-operands?)
-                         [n-elems])
-                 vec))))
+      (if (and (cudnn-compatible? dest-idx)
+               (= :max operation)
+               (= 0.0 scalar)
+               (or (= dest-dtype :double)
+                   (= dest-dtype :float)))
+        (cudnn-activation! stream dest dest-alpha dest n-elems :relu)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream binop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(->dtype dest-alpha) (->dtype scalar)]
+                           (operation->cuda operation reverse-operands?)
+                           [n-elems])
+                   vec)))))
 
   (binary-op-constant! [stream
                         dest dest-idx
@@ -213,16 +311,23 @@
                                                #(cuda-base/load-all-datatype-function
                                                  "tensor_binary_op_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
-      (apply cuda-base/launch-linear-kernel
-             (-> (concat [stream binop-fn n-elems 0]
-                         [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
-                         [(cuda-base/->ptr x)]
-                         (index-system->cuda x-idx)
-                         [(->dtype x-alpha) (->dtype scalar)]
-                         (operation->cuda operation reverse-operands?)
-                         [n-elems])
-                 vec))))
+      (if (and (cudnn-compatible? x-idx)
+               (cudnn-compatible? dest-idx)
+               (= 0.0 (double scalar))
+               (= :max operation)
+               (or (= dest-dtype :double)
+                   (= dest-dtype :float)))
+        (cudnn-activation! stream x x-alpha dest n-elems :relu)
+        (apply cuda-base/launch-linear-kernel
+               (-> (concat [stream binop-fn n-elems 0]
+                           [(cuda-base/->ptr dest)]
+                           (index-system->cuda dest-idx)
+                           [(cuda-base/->ptr x)]
+                           (index-system->cuda x-idx)
+                           [(->dtype x-alpha) (->dtype scalar)]
+                           (operation->cuda operation reverse-operands?)
+                           [n-elems])
+                   vec)))))
 
   (binary-accum! [stream
                   dest dest-idx dest-alpha
@@ -474,4 +579,29 @@
            (->ptr bias-gradient)
            (double epsilon)
            (->ptr batch-means)
-           (->ptr batch-variances))))))))
+           (->ptr batch-variances)))))))
+
+  (activation-gradient! [stream
+                         input-gradient
+                         output-gradient
+                         output
+                         op
+                         element-count]
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype input-gradient)
+            tensor (cuda-base/tensor datatype 1 1 1 element-count)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnActivationBackward cudnn-context
+                                         (act-type->cudnn op)
+                                         (value->ptr 1 datatype)
+                                         tensor
+                                         (->ptr output)
+                                         tensor
+                                         (->ptr output-gradient)
+                                         tensor
+                                         (->ptr output)
+                                         (value->ptr 0 datatype)
+                                         tensor
+                                         (->ptr input-gradient))))))))

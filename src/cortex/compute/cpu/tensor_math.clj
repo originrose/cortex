@@ -233,6 +233,72 @@
      (->> (generate-all-marshalling-assign-fns)
           (into {})))))
 
+(def ^:private unary-operations
+  [:floor :ceil :round :- :tanh :logistic])
+
+
+(defmacro ^:private perform-unary-op-impl
+  [operation x]
+  (condp = operation
+    :floor `(Math/floor (double ~x))
+    :ceil `(Math/ceil (double ~x))
+    :round `(Math/round (double ~x))
+    :- `(- ~x)
+    :tanh `(Math/tanh (double ~x))
+    :logistic `(/ 1.0
+                  (+ 1.0 (Math/exp (- ~x))))))
+
+
+(defmacro ^:private unary-accum!-impl
+  [datatype operation]
+  `(fn [dest# dest-idx-sys# dest-alpha#
+        n-elems#]
+     (let [n-elems# (long n-elems#)
+           dest# (datatype->view-cast-fn ~datatype dest#)
+           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)]
+       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
+              (let [dest-idx# (.idx_to_address dest-idx->address# idx#)]
+                (v-aset dest# dest-idx#
+                              (datatype->cast-fn
+                               ~datatype
+                               (perform-unary-op-impl ~operation (* (v-aget dest# dest-idx#)
+                                                                    dest-alpha#)))))))))
+
+
+(defmacro ^:private unary-op!-impl
+  [datatype operation]
+  `(fn [dest# dest-idx-sys#
+        x# x-idx-sys# x-alpha#
+        n-elems#]
+     (let [n-elems# (long n-elems#)
+           dest# (datatype->view-cast-fn ~datatype dest#)
+           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           x# (datatype->view-cast-fn ~datatype x#)
+           x-idx->address# (get-elem-idx->address x-idx-sys#)
+           x-alpha# (datatype->cast-fn ~datatype x-alpha#)
+           n-elems# (long n-elems#)]
+       (parallel/parallel-for
+        idx# n-elems#
+        (v-aset dest# (.idx_to_address dest-idx->address# idx#)
+                (datatype->cast-fn
+                 ~datatype
+                 (perform-unary-op-impl ~operation (* (v-aget x# (.idx_to_address x-idx->address# idx#))
+                                                      x-alpha#))))))))
+
+
+(defmacro unary-op-table-impl
+  []
+  (->> (for [dtype dtype/datatypes
+             op unary-operations]
+         [[dtype op] {:unary-accum! `(unary-accum!-impl ~dtype ~op)
+                      :unary-op! `(unary-op!-impl ~dtype ~op)}])
+       (into {})))
+
+
+(def ^:private unary-op-table
+  (unary-op-table-impl))
+
 
 (def ^:private operations
   [:+ :- :* :/ :max :min])
@@ -247,7 +313,7 @@
     :* `(* ~x ~y)
     ;;Math/max and friends aren't defined for all primitives leading to reflection warnings.
     :max `(if (> ~x ~y) ~x ~y)
-    :min `(if (< ~x ~y) ~x ~y)))
+    :min `(if (> ~x ~y) ~y ~x)))
 
 
 (defmacro ^:private perform-op-rev-ops
@@ -399,7 +465,7 @@
                                                  (* (v-aget y# y-idx#) y-alpha#)))))))))
 
 
-(defmacro binary-op-table
+(defmacro binary-op-table-impl
   []
   (->> (for [dtype dtype/datatypes
              op operations]
@@ -410,7 +476,7 @@
 (def ^:private binary-op-table
   (memoize
    (fn []
-     (binary-op-table))))
+     (binary-op-table-impl))))
 
 
 (defmacro ^:private blas-macro-iter
@@ -805,12 +871,57 @@
 (def cpu-nn-ops (cpu-nn-ops-macro))
 
 
+(defmacro act-backward-impl
+  [datatype]
+  `(fn [input-gradient# output-gradient# output# op# n-elems#]
+     (let [dest# (datatype->view-cast-fn ~datatype output#)
+           src-grad# (datatype->view-cast-fn ~datatype input-gradient#)
+           dest-grad# (datatype->view-cast-fn ~datatype output-gradient#)
+           n-elems# (long n-elems#)
+           val-1# (datatype->cast-fn ~datatype 1)
+           val-0# (datatype->cast-fn ~datatype 0)]
+       (condp = op#
+         :logistic
+         ;; input gradient = output * (1 - output) * output-gradient
+         (parallel/parallel-for
+          idx# n-elems#
+          (let [out-val# (v-aget dest# idx#)]
+            (v-aset src-grad# idx#
+                    (* out-val#
+                       (- val-1# out-val#)
+                       (v-aget dest-grad# idx#)))))
+         :relu
+         (parallel/parallel-for
+          idx# n-elems#
+          (let [mult# (datatype->cast-fn ~datatype
+                                         (if (> (v-aget dest# idx#)
+                                                val-0#)
+                                           1
+                                           0))]
+            (v-aset src-grad# idx#
+                    (* mult# (v-aget dest-grad# idx#)))))
+         :tanh
+         (parallel/parallel-for
+          idx# n-elems#
+          (let [out-val# (v-aget dest# idx#)]
+            (v-aset src-grad# idx#
+                    (* (- val-1#
+                          (* out-val# out-val#))
+                       (v-aget dest-grad# idx#)))))))))
+
+
+(def activation-backward-table
+  {:double (act-backward-impl :double)
+   :float (act-backward-impl :float)})
+
+
 (extend-type CPUStream
   tm/TensorMath
   (assign-constant! [stream buffer index-system value n-elems]
     (cpu-driver/with-stream-dispatch stream
       ((get (assign-constant-map) (dtype/get-datatype buffer))
        buffer index-system value n-elems)))
+
   (assign! [stream
             dest dest-idx-sys
             src src-idx-sys
@@ -820,6 +931,21 @@
        dest dest-idx-sys
        src src-idx-sys
        n-elems)))
+
+  (unary-accum! [stream
+                 dest dest-idx
+                 alpha op n-elems]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in unary-op-table [[(dtype/get-datatype dest) op] :unary-accum!])
+       dest dest-idx alpha n-elems)))
+
+  (unary-op! [stream
+              dest dest-idx
+              x x-idx
+              alpha op n-elems]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in unary-op-table [[(dtype/get-datatype dest) op] :unary-op!])
+       dest dest-idx x x-idx alpha n-elems)))
 
   (binary-accum-constant! [stream
                            dest dest-idx dest-alpha
@@ -966,4 +1092,14 @@
        bias-gradient output-gradient
        output input batch-means batch-variances
        scale bias epsilon
-       batch-count channel-count element-count))))
+       batch-count channel-count element-count)))
+
+  (activation-gradient! [stream
+                         input-gradient
+                         output-gradient
+                         output
+                         op
+                         element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get activation-backward-table (dtype/get-datatype input-gradient))
+       input-gradient output-gradient output op element-count))))

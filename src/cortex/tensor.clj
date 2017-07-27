@@ -829,6 +829,58 @@ to non-gemm operations."
                     (max (ecount src) (ecount dest)))))))
 
 
+(defn- ensure-ecounts-commensurate
+  [x y]
+  (let [n-x (ecount x)
+        n-y (ecount y)
+        min-ec (min n-x n-y)
+        max-ec (long (max n-x n-y))]
+    (when-not (= 0 min-ec)
+      (when-not-error (= 0 (rem max-ec min-ec))
+        "Element counts are not commensurate"
+        {:x-ecount (ecount x)
+         :y-ecount (ecount y)}))))
+
+
+(defn- perform-unary-op
+  ^double [^double value op]
+  (condp = op
+    :ceil (Math/ceil value)
+    :round (Math/round value)
+    :floor (Math/floor value)
+    :- (- value)
+    :tanh (Math/tanh value)
+    :logistic (/ 1.0
+                 (+ 1.0 (Math/exp (- value))))))
+
+
+(defn unary-op!
+  "dest[idx] = op(alpha * x)"
+  ^Tensor [dest alpha x op]
+  (condp = (datatype->keyword x)
+    :number
+    (assign! dest (perform-unary-op
+                   (* (double (compute-drv/dtype-cast alpha (get-datatype dest)))
+                      (double (compute-drv/dtype-cast x (get-datatype dest))))
+                   op))
+    :tensor
+    (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
+      (tm/unary-accum! (check-stream)
+                       (tensor->buffer dest) (tensor->index-system dest)
+                       alpha op (ecount dest))
+      (do
+        (ensure-datatypes (get-datatype dest) x)
+        (ensure-same-device dest x)
+        (ensure-ecounts-commensurate dest x)
+        (check-partial-alias dest x)
+        (tm/unary-op! (check-stream)
+                      (tensor->buffer dest) (tensor->index-system dest)
+                      (tensor->buffer x) (tensor->index-system x)
+                      alpha op
+                      (max (ecount dest) (ecount x))))))
+  dest)
+
+
 (defmulti ^:private typed-binary-op
   "Binary operations may contain one or two scalars in various
   positions.  This multimethod disambiguates between those positions."
@@ -846,20 +898,9 @@ to non-gemm operations."
                :+ (+ x y)
                :- (- x y)
                :* (* x y)
-               :/ (/ x y)))))
-
-
-(defn- ensure-ecounts-commensurate
-  [x y]
-  (let [n-x (ecount x)
-        n-y (ecount y)
-        min-ec (min n-x n-y)
-        max-ec (long (max n-x n-y))]
-    (when-not (= 0 min-ec)
-      (when-not-error (= 0 (rem max-ec min-ec))
-        "Element counts are not commensurate"
-        {:x-ecount (ecount x)
-         :y-ecount (ecount y)}))))
+               :/ (/ x y)
+               :max (Math/max x y)
+               :min (Math/min x y)))))
 
 
 (defn- binary-op-constant!
@@ -1243,6 +1284,42 @@ See batch-normalize-update-and-apply!"
                                                epsilon
                                                batch-count channel-count element-count)))
     [input-gradient scale-gradient bias-gradient]))
+
+
+(defn activation-gradient!
+  "Generalized function to get the input gradient from a set of 'activation' functions:
+  :logistic, :tanh :relu (max 0 x)
+  logistic: out * (1 - out) * out-grad
+  tanh: (1 - out * out) * out-grad
+  relu: (out > 0) ? out-grad : 0
+
+  Due to this using cudnn functions, this is only available on tensors with fairly
+  basic index system components."
+  ^Tensor [input-gradient output-gradient output op]
+  (when-not-error (not (compute-drv/alias? (tensor->buffer input-gradient)
+                                           (tensor->buffer output)))
+    "Input and input-gradient must not alias"
+    {})
+  (ensure-datatypes (get-datatype input-gradient) output output-gradient)
+  (ensure-same-device input-gradient output output-gradient)
+  (ensure-basic-indexing input-gradient output output-gradient)
+  (when-not-error (contains? #{:logistic :tanh :relu} op)
+    "Only :logistic :tanh and :relu are supported"
+    {:operation op})
+  (let [out-ecount (ecount output)]
+    (when-not-error (and (= out-ecount (ecount input-gradient))
+                         (= out-ecount (ecount output-gradient)))
+      "All element ecounts must match"
+      {:out-ecount out-ecount
+       :in-grad-ecount (ecount input-gradient)
+       :out-grad-ecount (ecount output-gradient)})
+    (tm/activation-gradient! (check-stream)
+                             (tensor->buffer input-gradient)
+                             (tensor->buffer output-gradient)
+                             (tensor->buffer output)
+                             op
+                             out-ecount))
+  input-gradient)
 
 
 (extend-type Tensor
