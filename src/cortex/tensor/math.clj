@@ -23,6 +23,15 @@ types used in the library: [:float :double :int] all combinations of assignment 
 indexing strategy should be provided.
 This function will not be called if dest and src are on different devices, memcpy semantics are
 enforced for that case.")
+  (unary-accum! [stream
+                 dest dest-idx
+                 alpha op n-elems]
+    "dest[idx] = op(alpha * dest[idx]")
+  (unary-op! [stream
+              dest dest-idx
+              x x-idx
+              alpha op n-elems]
+    "dest[idx] = op( x[idx] * alpha )")
   (binary-accum-constant! [stream
                            dest dest-idx dest-alpha
                            scalar
@@ -75,14 +84,15 @@ and could result in ambiguity.  So we pass in the striding specifically.")
                              output input means variances scale bias epsilon
                              batch-count element-count]
     "output = ((input - mean) / (sqrt variance)) * scale + bias.
-Apply operation elementwise across batch-count batches.")
+Apply operation elementwise across batch-count batches.  All tensors must be packed.")
   (batch-normalize-spatial! [stream
                              output input means variances scale bias epsilon
                              batch-count channel-count element-count]
     "Same idea as batch-normalize-eltwise but apply across channels across batches meaning
 there will channel-count of means, variances, scale, and bias.  Input, output can be
 considered vectors of [batch-count channel-count element-count] in length.  Put another way,
-each mean is applied to all elements in a particular channel across all batches.")
+each mean is applied to all elements in a particular channel across all batches.
+All tensors must be packed")
    (batch-normalize-update-and-apply-eltwise! [stream
                                                output input
                                                batch-means batch-variances
@@ -115,4 +125,15 @@ running means, variances using a running average
                                        output input batch-means batch-variances
                                        scale bias epsilon
                                        batch-count channel-count element-count]
-    "Gradient calculation.  All gradients exception output gradient are out vars."))
+    "Gradient calculation.  All gradients exception output gradient are out vars.")
+  (activation-gradient! [stream
+                         input-gradient
+                         output-gradient
+                         output
+                         op
+                         element-count])
+  (softmax! [stream
+             output
+             input
+             batch-count
+             element-count]))

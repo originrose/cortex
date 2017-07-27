@@ -829,6 +829,58 @@ to non-gemm operations."
                     (max (ecount src) (ecount dest)))))))
 
 
+(defn- ensure-ecounts-commensurate
+  [x y]
+  (let [n-x (ecount x)
+        n-y (ecount y)
+        min-ec (min n-x n-y)
+        max-ec (long (max n-x n-y))]
+    (when-not (= 0 min-ec)
+      (when-not-error (= 0 (rem max-ec min-ec))
+        "Element counts are not commensurate"
+        {:x-ecount (ecount x)
+         :y-ecount (ecount y)}))))
+
+
+(defn- perform-unary-op
+  ^double [^double value op]
+  (condp = op
+    :ceil (Math/ceil value)
+    :round (Math/round value)
+    :floor (Math/floor value)
+    :- (- value)
+    :tanh (Math/tanh value)
+    :logistic (/ 1.0
+                 (+ 1.0 (Math/exp (- value))))))
+
+
+(defn unary-op!
+  "dest[idx] = op(alpha * x)"
+  ^Tensor [dest alpha x op]
+  (condp = (datatype->keyword x)
+    :number
+    (assign! dest (perform-unary-op
+                   (* (double (compute-drv/dtype-cast alpha (get-datatype dest)))
+                      (double (compute-drv/dtype-cast x (get-datatype dest))))
+                   op))
+    :tensor
+    (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
+      (tm/unary-accum! (check-stream)
+                       (tensor->buffer dest) (tensor->index-system dest)
+                       alpha op (ecount dest))
+      (do
+        (ensure-datatypes (get-datatype dest) x)
+        (ensure-same-device dest x)
+        (ensure-ecounts-commensurate dest x)
+        (check-partial-alias dest x)
+        (tm/unary-op! (check-stream)
+                      (tensor->buffer dest) (tensor->index-system dest)
+                      (tensor->buffer x) (tensor->index-system x)
+                      alpha op
+                      (max (ecount dest) (ecount x))))))
+  dest)
+
+
 (defmulti ^:private typed-binary-op
   "Binary operations may contain one or two scalars in various
   positions.  This multimethod disambiguates between those positions."
@@ -846,20 +898,9 @@ to non-gemm operations."
                :+ (+ x y)
                :- (- x y)
                :* (* x y)
-               :/ (/ x y)))))
-
-
-(defn- ensure-ecounts-commensurate
-  [x y]
-  (let [n-x (ecount x)
-        n-y (ecount y)
-        min-ec (min n-x n-y)
-        max-ec (long (max n-x n-y))]
-    (when-not (= 0 min-ec)
-      (when-not-error (= 0 (rem max-ec min-ec))
-        "Element counts are not commensurate"
-        {:x-ecount (ecount x)
-         :y-ecount (ecount y)}))))
+               :/ (/ x y)
+               :max (Math/max x y)
+               :min (Math/min x y)))))
 
 
 (defn- binary-op-constant!
@@ -948,6 +989,13 @@ Datatypes must match."
       [cols rows]
       [rows cols])))
 
+(defn- ensure-cudnn-datatype
+  [dtype op]
+  (when-not-error (or (= :double dtype)
+                      (= :float dtype))
+    (format "%s is only defined for float and double tensors" op)
+    {:datatype dtype}))
+
 
 (defn gemm!
   "C = alpha * (trans-a? A) * (trans-b? B) + beta * C."
@@ -955,10 +1003,7 @@ Datatypes must match."
   (ensure-datatypes (get-datatype C) A B)
   (ensure-same-device C A B)
   (ensure-basic-indexing C A B)
-  (when-not-error (or (= :double (get-datatype C))
-                      (= :float (get-datatype C)))
-    "Gemm is only defined for float and double tensors"
-    {:C-datatype (get-datatype C)})
+  (ensure-cudnn-datatype (get-datatype C) "gemm")
   (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? A)
         [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? B)
         [c-row-count c-col-count :as c-shape] (tensor->2d-shape C)
@@ -1013,10 +1058,7 @@ So either it is dense *or* num-columns is 1"
   (ensure-datatypes (get-datatype c) A x)
   (ensure-same-device c A x)
   (ensure-basic-indexing c A x)
-  (when-not-error (or (= :double (get-datatype c))
-                      (= :float (get-datatype c)))
-    "Gemm is only defined for float and double tensors"
-    {:C-datatype (get-datatype c)})
+  (ensure-cudnn-datatype (get-datatype c) "gemv")
   (ensure-vector-indexable x c)
   (let [[a-row-count a-col-count] (tensor->2d-shape A)
         inc-x (blas-vector-increment x)
@@ -1045,6 +1087,7 @@ preconditions and then returns the type of batch normalization required (spatial
     (apply ensure-datatypes (get-datatype (first all-args)) all-args)
     (apply ensure-same-device all-args)
     (apply ensure-basic-indexing all-args)
+    (ensure-cudnn-datatype (get-datatype (first io-args)) "batch-normalize")
     (when-not-error (> (double epsilon) 1e-5)
       "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
       {:epsilon epsilon})
@@ -1243,6 +1286,69 @@ See batch-normalize-update-and-apply!"
                                                epsilon
                                                batch-count channel-count element-count)))
     [input-gradient scale-gradient bias-gradient]))
+
+
+(defn activation-gradient!
+  "Generalized function to get the input gradient from a set of 'activation' functions:
+  :logistic, :tanh :relu (max 0 x)
+  logistic: out * (1 - out) * out-grad
+  tanh: (1 - out * out) * out-grad
+  relu: (out > 0) ? out-grad : 0
+
+  Due to this using cudnn functions, this is only available on tensors with fairly
+  basic index system components."
+  ^Tensor [input-gradient output-gradient output op]
+  (when-not-error (not (compute-drv/alias? (tensor->buffer input-gradient)
+                                           (tensor->buffer output)))
+    "Input and input-gradient must not alias"
+    {})
+  (ensure-datatypes (get-datatype input-gradient) output output-gradient)
+  (ensure-same-device input-gradient output output-gradient)
+  (ensure-basic-indexing input-gradient output output-gradient)
+  (ensure-cudnn-datatype (get-datatype input-gradient) "activation-gradient!")
+  (when-not-error (contains? #{:logistic :tanh :relu} op)
+    "Only :logistic :tanh and :relu are supported"
+    {:operation op})
+  (let [out-ecount (ecount output)]
+    (when-not-error (and (= out-ecount (ecount input-gradient))
+                         (= out-ecount (ecount output-gradient)))
+      "All element ecounts must match"
+      {:out-ecount out-ecount
+       :in-grad-ecount (ecount input-gradient)
+       :out-grad-ecount (ecount output-gradient)})
+    (tm/activation-gradient! (check-stream)
+                             (tensor->buffer input-gradient)
+                             (tensor->buffer output-gradient)
+                             (tensor->buffer output)
+                             op
+                             out-ecount))
+  input-gradient)
+
+
+(defn softmax!
+  "Perform a softmax calculation across the last n-dimension of input, output.
+The first dimension is considered the batch count, the last n-dimensions are squashed
+and the softmax operation is performed across all of them.
+softmax: https://en.wikipedia.org/wiki/Softmax_function"
+  ^Tensor [output input]
+  (ensure-datatypes (get-datatype output) input)
+  (ensure-same-device output input)
+  (ensure-basic-indexing output input)
+  (ensure-cudnn-datatype (get-datatype input) "softmax!")
+  (when-not-error (= (shape output)
+                     (shape input))
+    "Input, output shapes do not match"
+    {:input-shape (shape input)
+     :output-shape (shape output)})
+  (let [input (as-batch-matrix input)
+        output (as-batch-matrix output)
+        input-shape (shape input)]
+    (tm/softmax! (check-stream)
+                 (tensor->buffer output)
+                 (tensor->buffer input)
+                 (first input-shape)
+                 (second input-shape)))
+  output)
 
 
 (extend-type Tensor

@@ -29,6 +29,10 @@
   (verify-tensor/binary-op (driver) *datatype*))
 
 
+(def-all-dtype-test unary-op
+  (verify-tensor/unary-op (driver) *datatype*))
+
+
 (def-double-float-test gemm
   (verify-tensor/gemm (driver) *datatype*))
 
@@ -47,3 +51,15 @@
 
 (def-double-float-test batch-normalize-gradients
   (verify-tensor/batch-normalize-gradients (driver) *datatype*))
+
+
+(def-double-float-test activation-forward
+  (verify-tensor/activation-forward (driver) *datatype*))
+
+
+(def-double-float-test activation-gradient
+  (verify-tensor/activation-gradient (driver) *datatype*))
+
+
+(def-double-float-test softmax
+  (verify-tensor/softmax (driver) *datatype*))

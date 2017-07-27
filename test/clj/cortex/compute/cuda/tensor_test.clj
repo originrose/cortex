@@ -26,6 +26,10 @@
   (verify-tensor/assign-marshal (create-driver) *datatype*))
 
 
+(def-cas-dtype-test unary-op
+  (verify-tensor/unary-op (create-driver) :int))
+
+
 (def-cas-dtype-test binary-constant-op
   (verify-tensor/binary-constant-op (create-driver) *datatype*))
 
@@ -52,3 +56,15 @@
 
 (def-double-float-test batch-normalize-gradients
   (verify-tensor/batch-normalize-gradients (create-driver) *datatype*))
+
+
+(def-double-float-test activation-forward
+  (verify-tensor/activation-forward (create-driver) *datatype*))
+
+
+(def-double-float-test activation-gradient
+  (verify-tensor/activation-gradient (create-driver) *datatype*))
+
+
+(def-double-float-test softmax
+  (verify-tensor/softmax (create-driver) *datatype*))

@@ -1,8 +1,8 @@
 (defproject thinktopic/experiment "0.9.12-SNAPSHOT"
   :description "A higher-level library for performing experiments with cortex."
-  :dependencies [[org.clojure/clojure "1.8.0"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
                  [thinktopic/cortex "0.9.12-SNAPSHOT"]
-                 [thinktopic/think.image "0.4.10"]
+                 [thinktopic/think.image "0.4.11"]
                  [org.shark8me/tfevent-sink "0.1.3"]
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)
@@ -10,7 +10,7 @@
                  [thinktopic/think.gate "0.1.3"]
                  ;;This had better precisely match the version of figwheel that think.gate uses
                  ;;Tried with 1.9.XXX and had odd unexplainable failures.
-                 [org.clojure/clojurescript "1.8.51"]]
+                 [org.clojure/clojurescript "1.9.671"]]
 
   :plugins [[lein-cljsbuild "1.1.5"]
             [lein-garden "0.3.0"]]
