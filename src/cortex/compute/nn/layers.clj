@@ -366,80 +366,56 @@ a datastructure that shares the backing store."
 (defrecord Join [backend layer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (let [batch-row-data (math/batched-data-to-per-input-data (map :buffer
-                                                                   (concat output-buffers
-                                                                           input-buffers)))
-          output-n-elems (dtype/ecount (ffirst batch-row-data))
-          stream (nn-backend/get-stream)
+    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+          output (->tensor (first-buffer output-buffers))
+          inputs (mapv (comp ->tensor :buffer) input-buffers)
           operation (get layer :operation :+)
-          min-input-count (apply min (map dtype/ecount (rest (first batch-row-data))))]
-      (drv/memset stream (math/device-buffer (first-buffer output-buffers)) 0 0
-                  (dtype/ecount (first-buffer output-buffers)))
-      (mapv
-       (fn [batch-row]
-         ;;The code below is carefully constructed to account for the possibility that
-         ;;the various input buffers are not all the same size and the size of the output
-         ;;buffer is the max of the input buffers.  The input buffers are logically zero
-         ;;extended to be the size of the output buffer.
-         (let [output-array (first batch-row)]
-           (->>
-            (rest batch-row)
-            (map-indexed
-             (fn [idx input-array]
-               (let [n-elems (if (= operation :+)
-                               (long (min output-n-elems (dtype/ecount input-array)))
-                               min-input-count)
-                     input-array (fixed-with-tensor input-array (math/tensor n-elems))
-                     output-array (fixed-with-tensor output-array (math/tensor n-elems))]
-                 (condp = operation
-                   :+
-                   (do (math/sum stream 1.0 input-array 1.0 output-array))
-                   :*
-                   (if (= 0 idx)
-                     (math/assign! stream output-array input-array)
-                     (math/elem-mul stream 1.0 input-array 1
-                                    output-array 1
-                                    output-array 1))))))
-            dorun)))
-       batch-row-data)))
+          min-num-columns (->> inputs
+                               (map (comp second tensor/shape))
+                               (apply min))]
+      (tensor/with-stream (nn-backend/get-stream)
+        (tensor/assign! output 0)
+        (doseq [[idx input] (map-indexed vector inputs)]
+          (let [[num-rows num-columns] (tensor/shape input)
+                num-columns (if (= operation :+)
+                              num-columns
+                              min-num-columns)
+                output (tensor/submatrix output 0 num-rows 0 num-columns)
+                input (tensor/submatrix input 0 num-rows 0 num-columns)]
+            (condp = operation
+              :+ (tensor/binary-op! output 1.0 output 1.0 input :+)
+              :* (if (= 0 (long idx))
+                   (tensor/assign! output input)
+                   (tensor/binary-op! output 1.0 output 1.0 input :*))))))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
-    (let [batch-row-data (math/batched-data-to-per-input-data (map :gradient
-                                                                   (concat output-buffers
-                                                                           input-buffers)))
-          batch-row-inputs (math/batched-data-to-per-input-data (map :buffer
-                                                                     input-buffers))
-          output-n-elems (dtype/ecount (ffirst batch-row-data))
-          stream (nn-backend/get-stream)
+    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+          output-gradient (->tensor (first-gradient output-buffers))
+          input-gradients (mapv (comp ->tensor :gradient) input-buffers)
+          inputs (mapv (comp ->tensor :buffer) input-buffers)
           operation (get layer :operation :+)
-          min-elem-count (apply min (map dtype/ecount (rest (first batch-row-data))))
-          input-idx-set (set (range (count input-buffers)))]
-      (mapv
-       (fn [batch-row input-buffers]
-         (let [output-gradient (first batch-row)
-               input-buffers (vec input-buffers)]
-           (->>
-            (rest batch-row)
-            (map-indexed
-             (fn [idx input-gradient]
-               (let [n-elems (if (= operation :+)
-                               (min output-n-elems (dtype/ecount input-gradient))
-                               min-elem-count)
-                     input-gradient (fixed-with-tensor input-gradient (math/tensor n-elems))
-                     output-gradient (fixed-with-tensor output-gradient (math/tensor n-elems))]
-                 (math/assign! stream input-gradient output-gradient)
-                 (when (= operation :*)
-                   ;;Multiply the gradient by every other input.
-                   (->> (disj input-idx-set idx)
-                        (mapv (fn [^long other-idx]
-                                (let [other-array (-> (get input-buffers other-idx)
-                                                      (fixed-with-tensor (math/tensor n-elems)))]
-                                  (math/elem-mul stream
-                                                 1.0 other-array 1
-                                                 input-gradient 1
-                                                 input-gradient 1)))))))))
-            dorun)))
-       batch-row-data batch-row-inputs))))
+          input-idx-set (set (range (count input-buffers)))
+          min-num-columns (->> inputs
+                               (map (comp second tensor/shape))
+                               (apply min))]
+      (tensor/with-stream (nn-backend/get-stream)
+        (doseq [[idx input-gradient] (map-indexed vector input-gradients)]
+          (let [[num-rows num-columns] (tensor/shape input-gradient)
+                num-columns (if (= operation :+)
+                              num-columns
+                              min-num-columns)
+                output-gradient (tensor/submatrix output-gradient 0 num-rows 0 num-columns)
+                input-gradient (tensor/submatrix input-gradient 0 num-rows 0 num-columns)]
+            (tensor/assign! input-gradient output-gradient)
+            (when (= operation :*)
+              (->> (disj input-idx-set idx)
+                   (mapv (fn [^long other-idx]
+                           (let [other-input (-> (get inputs other-idx)
+                                                 (tensor/submatrix 0 num-rows 0 num-columns))]
+                             (tensor/binary-op! input-gradient
+                                                1 input-gradient
+                                                1 other-input
+                                                :*))))))))))))
 
 
 (defmethod create :join
