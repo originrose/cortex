@@ -989,6 +989,13 @@ Datatypes must match."
       [cols rows]
       [rows cols])))
 
+(defn- ensure-cudnn-datatype
+  [dtype op]
+  (when-not-error (or (= :double dtype)
+                      (= :float dtype))
+    (format "%s is only defined for float and double tensors" op)
+    {:datatype dtype}))
+
 
 (defn gemm!
   "C = alpha * (trans-a? A) * (trans-b? B) + beta * C."
@@ -996,10 +1003,7 @@ Datatypes must match."
   (ensure-datatypes (get-datatype C) A B)
   (ensure-same-device C A B)
   (ensure-basic-indexing C A B)
-  (when-not-error (or (= :double (get-datatype C))
-                      (= :float (get-datatype C)))
-    "Gemm is only defined for float and double tensors"
-    {:C-datatype (get-datatype C)})
+  (ensure-cudnn-datatype (get-datatype C) "gemm")
   (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? A)
         [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? B)
         [c-row-count c-col-count :as c-shape] (tensor->2d-shape C)
@@ -1054,10 +1058,7 @@ So either it is dense *or* num-columns is 1"
   (ensure-datatypes (get-datatype c) A x)
   (ensure-same-device c A x)
   (ensure-basic-indexing c A x)
-  (when-not-error (or (= :double (get-datatype c))
-                      (= :float (get-datatype c)))
-    "Gemm is only defined for float and double tensors"
-    {:C-datatype (get-datatype c)})
+  (ensure-cudnn-datatype (get-datatype c) "gemv")
   (ensure-vector-indexable x c)
   (let [[a-row-count a-col-count] (tensor->2d-shape A)
         inc-x (blas-vector-increment x)
@@ -1086,6 +1087,7 @@ preconditions and then returns the type of batch normalization required (spatial
     (apply ensure-datatypes (get-datatype (first all-args)) all-args)
     (apply ensure-same-device all-args)
     (apply ensure-basic-indexing all-args)
+    (ensure-cudnn-datatype (get-datatype (first io-args)) "batch-normalize")
     (when-not-error (> (double epsilon) 1e-5)
       "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
       {:epsilon epsilon})
@@ -1303,6 +1305,7 @@ See batch-normalize-update-and-apply!"
   (ensure-datatypes (get-datatype input-gradient) output output-gradient)
   (ensure-same-device input-gradient output output-gradient)
   (ensure-basic-indexing input-gradient output output-gradient)
+  (ensure-cudnn-datatype (get-datatype input-gradient) "activation-gradient!")
   (when-not-error (contains? #{:logistic :tanh :relu} op)
     "Only :logistic :tanh and :relu are supported"
     {:operation op})
@@ -1320,6 +1323,32 @@ See batch-normalize-update-and-apply!"
                              op
                              out-ecount))
   input-gradient)
+
+
+(defn softmax!
+  "Perform a softmax calculation across the last n-dimension of input, output.
+The first dimension is considered the batch count, the last n-dimensions are squashed
+and the softmax operation is performed across all of them.
+softmax: https://en.wikipedia.org/wiki/Softmax_function"
+  ^Tensor [output input]
+  (ensure-datatypes (get-datatype output) input)
+  (ensure-same-device output input)
+  (ensure-basic-indexing output input)
+  (ensure-cudnn-datatype (get-datatype input) "softmax!")
+  (when-not-error (= (shape output)
+                     (shape input))
+    "Input, output shapes do not match"
+    {:input-shape (shape input)
+     :output-shape (shape output)})
+  (let [input (as-batch-matrix input)
+        output (as-batch-matrix output)
+        input-shape (shape input)]
+    (tm/softmax! (check-stream)
+                 (tensor->buffer output)
+                 (tensor->buffer input)
+                 (first input-shape)
+                 (second input-shape)))
+  output)
 
 
 (extend-type Tensor

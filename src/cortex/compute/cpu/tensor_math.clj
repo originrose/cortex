@@ -183,15 +183,15 @@
     :float `(marshal/as-float-array-view ~buf)
     :double `(marshal/as-double-array-view ~buf)))
 
-(defmacro ^:private datatype->cast-fn
-  [dtype val]
+(defmacro ^:private datatype->cast-fn-symbol
+  [dtype]
   (condp = dtype
-    :byte `(byte ~val)
-    :short `(short ~val)
-    :int `(int ~val)
-    :long `(long ~val)
-    :float `(float ~val)
-    :double `(double ~val)))
+    :byte 'byte
+    :short 'short
+    :int 'int
+    :long 'long
+    :float 'float
+    :double 'double))
 
 
 (defn- generate-datatype-combinations
@@ -849,6 +849,46 @@
                                      output# input# batch-means# batch-variances#
                                      scale# bias# epsilon#)))
 
+(defmacro array-max
+  [ary n-items start-idx cast-fn]
+  `(loop [idx# 1
+          max-val# (v-aget ~ary ~start-idx)]
+     (if (< idx# ~n-items)
+       (recur (inc idx#)
+              (Math/max (~cast-fn max-val#) (v-aget ~ary (+ ~start-idx idx#))))
+       max-val#)))
+
+(defmacro array-sum
+  [ary n-items start-idx]
+  `(loop [idx# 1
+          sum-val# (v-aget ~ary ~start-idx)]
+     (if (< idx# ~n-items)
+       (recur (inc idx#)
+              (+ sum-val# (v-aget ~ary (+ ~start-idx idx#))))
+       sum-val#)))
+
+
+(defmacro softmax-forward-impl
+  [datatype]
+  `(fn [output# input# batch-count# element-count#]
+     (let [output# (datatype->view-cast-fn ~datatype output#)
+           input# (datatype->view-cast-fn ~datatype input#)
+           batch-count# (long batch-count#)
+           element-count# (long element-count#)]
+       (parallel/parallel-for
+        batch-idx# batch-count#
+        (let [batch-offset# (* batch-idx# element-count#)
+              max-val# (array-max input# element-count# batch-offset# (datatype->cast-fn-symbol ~datatype))]
+          (c-for
+           [idx# 0 (< idx# element-count#) (inc idx#)]
+           (v-aset output# (+ idx# batch-offset#)
+                   (Math/exp (- (v-aget input# (+ idx# batch-offset#))
+                                max-val#))))
+          ;;perform normalization with array sum.
+          (let [sum-val# (datatype->cast-fn ~datatype (array-sum output# element-count# batch-offset#))]
+            (c-for [idx# 0 (< idx# element-count#) (inc idx#)]
+                   (.diveq output# (+ idx# batch-offset#) sum-val#))))))))
+
 
 (defonce cpu-nn-ops-types [:float :double])
 
@@ -863,8 +903,8 @@
        :batch-normalize-update-eltwise! `(batch-normalize-update-eltwise-impl ~ops-type)
        :batch-normalize-update-spatial! `(batch-normalize-update-spatial-impl ~ops-type)
        :batch-normalize-gradients-eltwise! `(batch-normalize-gradients-eltwise-impl ~ops-type)
-       :batch-normalize-gradients-spatial! `(batch-normalize-gradients-spatial-impl ~ops-type)}
-      ])
+       :batch-normalize-gradients-spatial! `(batch-normalize-gradients-spatial-impl ~ops-type)
+       :softmax-forward! `(softmax-forward-impl ~ops-type)}])
    (into {})))
 
 
