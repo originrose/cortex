@@ -62,6 +62,35 @@ dest[idx] = alpha * dest[idx] op y[idx]")
     "Binary operation where dest is not involved in the computation.
 dest[idx] = alpha * x[idx] op y[idx]")
 
+  (ternary-op! [stream
+                dest dest-idx
+                x x-idx x-alpha
+                y y-idx y-alpha
+                z z-idx z-alpha
+                n-elems
+                operation]
+    "Apply ternary elementwise operation to args")
+
+  (ternary-op-constant! [stream
+                         dest dest-idx
+                         a a-idx a-alpha
+                         b b-idx b-alpha
+                         constant
+                         n-elems
+                         operation arg-order]
+    "Apply ternary elementwise operation to args and constant.
+Argument order is specified by arg-order.")
+
+  (ternary-op-constant-constant! [stream
+                                  dest dest-idx
+                                  a a-idx a-alpha
+                                  const-1
+                                  const-2
+                                  n-elems
+                                  operation arg-order]
+    "Apply ternary elementwise operation to args + 2 constants.
+Argument order is specified by arg-order")
+
   (gemm! [stream
           c c-colstride
           trans-a? trans-b? alpha

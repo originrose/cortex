@@ -4,6 +4,7 @@
             [cortex.tensor.math :as tm]
             [cortex.tensor.index-system :as is]
             [cortex.compute.driver :as drv]
+            [cortex.compute.cpu.tensor-math :as cpu-tens-math]
             [cortex.compute.math-util :as cmu]
             [think.resource.core :as resource])
   (:import [cortex.compute.cuda.driver CudaStream]
@@ -50,7 +51,9 @@
    (strategy->c-or-len index-system)
    (strategy->idx-ptr index-system)
    (int (or (get index-system :num-columns) 1))
-   (int (or (get index-system :column-stride) 1))])
+   (int (or (get index-system :column-stride) 1))
+   (int (or (get index-system :idx-numerator) 1))
+   (int (or (get index-system :idx-denominator) 1))])
 
 (defn- operation->cuda
   ([operation]
@@ -75,6 +78,12 @@
      :- (int 3)
      :tanh (int 4)
      :logistic (int 5))])
+
+
+(defn- ternary-op->cuda
+  ^Integer [operation]
+  [(condp = operation
+     :select (int 0))])
 
 
 
@@ -190,6 +199,12 @@
         (cudnn/cudnnActivationForward cudnn-context (act-type->cudnn act-type)
                                       (value->ptr input-alpha dest-dtype) tensor (->ptr input)
                                       (value->ptr 0 dest-dtype) tensor (->ptr output)))))))
+
+
+(defn arg-order->indexes
+  [arg-order]
+  (->> (cpu-tens-math/arg-order->indexes arg-order)
+       (mapv #(byte %))))
 
 
 (extend-type CudaStream
@@ -373,6 +388,92 @@
                          (index-system->cuda y-idx)
                          [(->dtype y-alpha)]
                          (operation->cuda operation)
+                         [n-elems])
+                 vec))))
+
+  (ternary-op! [stream
+                dest dest-idx
+                x x-idx x-alpha
+                y y-idx y-alpha
+                z z-idx z-alpha
+                n-elems
+                operation]
+    (let [dest-dtype (dtype/get-datatype dest)
+          ternop-fn (cuda-base/get-or-create-fn stream :tensor-ternary-op
+                                                dest-dtype
+                                                #(cuda-base/load-all-datatype-function
+                                                  "tensor_ternary_op"))
+          ->dtype #(drv/dtype-cast % dest-dtype)]
+      (apply cuda-base/launch-linear-kernel
+             (-> (concat [stream ternop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(cuda-base/->ptr x)]
+                         (index-system->cuda x-idx)
+                         [(->dtype x-alpha)]
+                         [(cuda-base/->ptr y)]
+                         (index-system->cuda y-idx)
+                         [(->dtype y-alpha)]
+                         [(cuda-base/->ptr z)]
+                         (index-system->cuda z-idx)
+                         [(->dtype z-alpha)]
+                         (ternary-op->cuda operation)
+                         [n-elems])
+                 vec))))
+
+  (ternary-op-constant! [stream
+                         dest dest-idx
+                         a a-idx a-alpha
+                         b b-idx b-alpha
+                         constant
+                         n-elems
+                         operation arg-order]
+    (let [dest-dtype (dtype/get-datatype dest)
+          ternop-fn (cuda-base/get-or-create-fn stream :tensor-ternary-op-constant
+                                                dest-dtype
+                                                #(cuda-base/load-all-datatype-function
+                                                  "tensor_ternary_op_constant"))
+          ->dtype #(drv/dtype-cast % dest-dtype)]
+      (apply cuda-base/launch-linear-kernel
+             (-> (concat [stream ternop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(cuda-base/->ptr a)]
+                         (index-system->cuda a-idx)
+                         [(->dtype a-alpha)]
+                         [(cuda-base/->ptr b)]
+                         (index-system->cuda b-idx)
+                         [(->dtype b-alpha)]
+                         [(->dtype constant)]
+                         (ternary-op->cuda operation)
+                         (arg-order->indexes arg-order)
+                         [n-elems])
+                 vec))))
+
+  (ternary-op-constant-constant! [stream
+                                  dest dest-idx
+                                  a a-idx a-alpha
+                                  const-1
+                                  const-2
+                                  n-elems
+                                  operation arg-order]
+    (let [dest-dtype (dtype/get-datatype dest)
+          ternop-fn (cuda-base/get-or-create-fn stream :tensor-ternary-op-constant_constant
+                                                dest-dtype
+                                                #(cuda-base/load-all-datatype-function
+                                                  "tensor_ternary_op_constant_constant"))
+          ->dtype #(drv/dtype-cast % dest-dtype)]
+      (apply cuda-base/launch-linear-kernel
+             (-> (concat [stream ternop-fn n-elems 0]
+                         [(cuda-base/->ptr dest)]
+                         (index-system->cuda dest-idx)
+                         [(cuda-base/->ptr a)]
+                         (index-system->cuda a-idx)
+                         [(->dtype a-alpha)]
+                         [(->dtype const-1)]
+                         [(->dtype const-2)]
+                         (ternary-op->cuda operation)
+                         (arg-order->indexes arg-order)
                          [n-elems])
                  vec))))
 

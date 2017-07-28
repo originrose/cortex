@@ -1,5 +1,6 @@
 (ns cortex.verify.tensor
   (:require [cortex.tensor :as ct]
+            [cortex.tensor.index-system :as ci]
             [cortex.compute.driver :as drv]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]))
@@ -66,6 +67,25 @@ for the cuda backend."
      (ct/unary-op! tens-b 1.0 tens-b :-)
      (is (m/equals (mapv #(- (Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype)))) (range 9))
                    (ct/to-double-array tens-b))))))
+
+
+(defn channel-op
+  [driver datatype]
+  (tensor-context driver datatype
+   (let [tens-a (ct/->tensor (partition 3 (partition 3 (range 18))))
+         tens-chan (assoc (ct/->tensor (range 3))
+                          :dimensions (ct/dimensions [3 3])
+                          :index-system
+                          (ci/index-system (ci/monotonically-increasing-strategy (* 3 3))
+                                           :idx-denominator 3))
+         tens-result (ct/new-tensor [2 3 3])]
+
+     (ct/binary-op! tens-result 1.0 tens-a 1.0 tens-chan :*)
+     (is (m/equals [0.0, 0.0, 0.0, 3.0, 4.0, 5.0,
+                    12.0, 14.0, 16.0, 0.0, 0.0, 0.0, 12.0,
+                    13.0, 14.0, 30.0, 32.0, 34.0]
+                   (ct/to-double-array tens-result))))))
+
 
 
 (defn binary-constant-op
@@ -491,3 +511,28 @@ for the cuda backend."
                       0.6439142598879722]
                      (ct/to-double-array output)
                      1e-4)))))
+
+
+(defn ternary-op-select
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [dest (ct/->tensor (repeat 10 0))
+         x-arg (ct/->tensor (range -5 5))
+         y-arg (ct/->tensor (range 10))
+         z-arg (ct/->tensor (repeat 10 2))]
+     (ct/ternary-op! dest 1 x-arg 2.0 y-arg 3.0 z-arg :select)
+     (is (m/equals [0 2 4 6 8 6 6 6 6 6]
+                   (ct/to-double-array dest)))
+     (ct/ternary-op! dest 1 x-arg 1.0 -1 3.0 z-arg :select)
+     (is (m/equals [-1 -1 -1 -1 -1 6 6 6 6 6]
+                   (ct/to-double-array dest)))
+     (ct/ternary-op! dest 1 x-arg 3.0 z-arg 1.0 -1 :select)
+     (is (m/equals [6 6 6 6 6 -1 -1 -1 -1 -1]
+                   (ct/to-double-array dest)))
+     (ct/ternary-op! dest 1 x-arg 3.0 2.0 1.0 -1 :select)
+     (is (m/equals [6 6 6 6 6 -1 -1 -1 -1 -1]
+                   (ct/to-double-array dest)))
+     (ct/ternary-op! dest 1 x-arg 1.0 -1 3.0 2.0 :select)
+     (is (m/equals [-1 -1 -1 -1 -1 6 6 6 6 6]
+                   (ct/to-double-array dest))))))

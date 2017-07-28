@@ -38,6 +38,10 @@
   (verify-tensor/binary-op (create-driver) *datatype*))
 
 
+(def-all-dtype-test channel-op
+  (verify-tensor/channel-op (create-driver) *datatype*))
+
+
 (def-double-float-test gemm
   (verify-tensor/gemm (create-driver) *datatype*))
 
@@ -68,3 +72,7 @@
 
 (def-double-float-test softmax
   (verify-tensor/softmax (create-driver) *datatype*))
+
+
+(def-all-dtype-test ternary-op-select
+  (verify-tensor/ternary-op-select (create-driver) *datatype*))

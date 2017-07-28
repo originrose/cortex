@@ -982,6 +982,82 @@ Datatypes must match."
   dest)
 
 
+(defn- inline-ternary-op
+  [alpha x beta y gamma z op]
+  (double
+   (condp = op
+     :select (if (>= (* (double alpha) (double x))
+                     0.0)
+               (* (double gamma) (double z))
+               (* (double beta) (double y))))))
+
+
+(defn- order-tenery-args
+  [[[x x-dt] [y y-dt] [z z-dt] z-d] alpha beta gamma]
+  (let [x-data [x x-dt :x alpha]
+        y-data [y y-dt :y beta]
+        z-data [z z-dt :z gamma]
+        tensor-groups (->> [x-data y-data z-data]
+                           (filter #(= :tensor (second %))))
+        constant-groups (->> [x-data y-data z-data]
+                             (remove #(= :tensor (second %))))]
+    {:tensor-pairs (mapv (juxt first #(nth % 3)) tensor-groups)
+     :constants (mapv #(* (double (first %))
+                          (double (nth % 3))) constant-groups)
+     :arg-order (->> (concat (map #(nth % 2) tensor-groups)
+                             (map #(nth % 2) constant-groups)))}))
+
+
+(defn ternary-op!
+  "Perform the elementwise operation
+  dest = op( alpha * x, beta * y, gamma * z )
+  dest tensor and must not alias any other arguments.  There is on accumulator version
+  of these operations at this time in order to keep kernel permutations low (3 backend permutations).
+
+  x, y, z can be constants or tensors.
+
+  operations:
+  select: dest = (if (>= x 0) y z)"
+  [dest alpha x beta y gamma z op]
+  (let [type-vect (map (juxt identity datatype->keyword) [x y z])
+        tensors (->> (filter #(= :tensor (second %)) type-vect)
+                     (map first))
+        num-tensor-args (count tensors)
+        max-ecount (long (apply max 0 (map ecount tensors)))]
+    (if (= 0 num-tensor-args)
+      (assign! dest (inline-ternary-op alpha x beta y gamma z op))
+      (let [{:keys [tensor-pairs constants arg-order]} (order-tenery-args type-vect alpha beta gamma)]
+        (apply ensure-datatypes (get-datatype dest) tensors)
+        (apply ensure-same-device dest tensors)
+        (doseq [tens tensors]
+          (ensure-ecounts-commensurate dest tens))
+        (case num-tensor-args
+          3 (tm/ternary-op! (check-stream)
+                            (tensor->buffer dest) (tensor->index-system dest)
+                            (tensor->buffer x) (tensor->index-system x) alpha
+                            (tensor->buffer y) (tensor->index-system y) beta
+                            (tensor->buffer z) (tensor->index-system z) gamma
+                            max-ecount
+                            op)
+          2 (let [[[a-tens a-mul] [b-tens b-mul]] tensor-pairs]
+              (tm/ternary-op-constant! (check-stream)
+                                       (tensor->buffer dest) (tensor->index-system dest)
+                                       (tensor->buffer a-tens) (tensor->index-system a-tens) a-mul
+                                       (tensor->buffer b-tens) (tensor->index-system b-tens) b-mul
+                                       (first constants)
+                                       max-ecount
+                                       op arg-order))
+          1 (let [[[a-tens a-mul]] tensor-pairs]
+              (tm/ternary-op-constant-constant! (check-stream)
+                                                (tensor->buffer dest) (tensor->index-system dest)
+                                                (tensor->buffer a-tens) (tensor->index-system a-tens) a-mul
+                                                (first constants)
+                                                (second constants)
+                                                max-ecount
+                                                op arg-order)))))
+    dest))
+
+
 (defn- trans-2d-shape
   [trans-a? a]
   (let [[rows cols] (tensor->2d-shape a)]

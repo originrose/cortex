@@ -488,6 +488,121 @@
    (fn []
      (binary-op-table-impl))))
 
+(defmacro select-impl
+  [x y z]
+  `(if (>= ~x 0) ~z ~y))
+
+
+(defmacro ^:private ternary-op-impl
+  [datatype]
+  `(fn [dest# dest-idx#
+        x# x-idx# x-alpha#
+        y# y-idx# y-alpha#
+        z# z-idx# z-alpha#
+        n-elems#
+        op#]
+     (let [d-addr# (get-elem-idx->address dest-idx#)
+           x-addr# (get-elem-idx->address x-idx#)
+           y-addr# (get-elem-idx->address y-idx#)
+           z-addr# (get-elem-idx->address z-idx#)
+           dest# (datatype->view-cast-fn ~datatype dest#)
+           x# (datatype->view-cast-fn ~datatype x#)
+           y# (datatype->view-cast-fn ~datatype y#)
+           z# (datatype->view-cast-fn ~datatype z#)
+           x-alpha# (datatype->cast-fn ~datatype x-alpha#)
+           y-alpha# (datatype->cast-fn ~datatype y-alpha#)
+           z-alpha# (datatype->cast-fn ~datatype z-alpha#)]
+       (condp = op#
+         :select
+         (parallel/parallel-for
+          idx# n-elems#
+          (v-aset dest# (.idx_to_address d-addr# idx#)
+                  (datatype->cast-fn ~datatype
+                                     (select-impl (* x-alpha# (v-aget x# (.idx_to_address x-addr# idx#)))
+                                                  (* y-alpha# (v-aget y# (.idx_to_address y-addr# idx#)))
+                                                  (* z-alpha# (v-aget z# (.idx_to_address z-addr# idx#)))))))))))
+
+
+(defn arg-order->indexes
+  [arg-order]
+  (let [order-map (->> (map-indexed #(vector %2 %1) arg-order)
+                       (into {}))]
+    (mapv #(get order-map %) [:x :y :z])))
+
+
+(defmacro ^:private ternary-op-constant-impl
+  [datatype]
+  `(fn [dest# dest-idx#
+        x# x-idx# x-alpha#
+        y# y-idx# y-alpha#
+        constant#
+        n-elems#
+        op# arg-order#]
+     (let [d-addr# (get-elem-idx->address dest-idx#)
+           x-addr# (get-elem-idx->address x-idx#)
+           y-addr# (get-elem-idx->address y-idx#)
+           dest# (datatype->view-cast-fn ~datatype dest#)
+           x# (datatype->view-cast-fn ~datatype x#)
+           y# (datatype->view-cast-fn ~datatype y#)
+           x-alpha# (datatype->cast-fn ~datatype x-alpha#)
+           y-alpha# (datatype->cast-fn ~datatype y-alpha#)
+           arg-indexes# (arg-order->indexes arg-order#)
+           [x-idx# y-idx# z-idx#] arg-indexes#]
+       (condp = op#
+         :select
+         (parallel/parallel-for
+          idx# n-elems#
+          (let [arg-vec# [(* x-alpha# (v-aget x# (.idx_to_address x-addr# idx#)))
+                          (* y-alpha# (v-aget y# (.idx_to_address y-addr# idx#)))
+                          constant#]]
+           (v-aset dest# (.idx_to_address d-addr# idx#)
+                   (datatype->cast-fn ~datatype
+                                      (select-impl (datatype->cast-fn ~datatype (get arg-vec# x-idx#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# y-idx#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# z-idx#)))))))))))
+
+
+(defmacro ^:private ternary-op-constant-constant-impl
+  [datatype]
+  `(fn [dest# dest-idx#
+        x# x-idx# x-alpha#
+        constant-1#
+        constant-2#
+        n-elems#
+        op# arg-order#]
+     (let [d-addr# (get-elem-idx->address dest-idx#)
+           x-addr# (get-elem-idx->address x-idx#)
+           dest# (datatype->view-cast-fn ~datatype dest#)
+           x# (datatype->view-cast-fn ~datatype x#)
+           x-alpha# (datatype->cast-fn ~datatype x-alpha#)
+           arg-indexes# (arg-order->indexes arg-order#)
+           [x-idx# y-idx# z-idx#] arg-indexes#]
+       (condp = op#
+         :select
+         (parallel/parallel-for
+          idx# n-elems#
+          (let [arg-vec# [(* x-alpha# (v-aget x# (.idx_to_address x-addr# idx#)))
+                          constant-1#
+                          constant-2#]]
+           (v-aset dest# (.idx_to_address d-addr# idx#)
+                   (datatype->cast-fn ~datatype
+                                      (select-impl (datatype->cast-fn ~datatype (get arg-vec# x-idx#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# y-idx#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# z-idx#)))))))))))
+
+
+(defmacro ternary-op-iter
+  []
+  (->> (for [dtype dtype/datatypes]
+         [dtype {:ternary-op! `(ternary-op-impl ~dtype)
+                 :ternary-op-constant! `(ternary-op-constant-impl ~dtype)
+                 :ternary-op-constant-constant! `(ternary-op-constant-constant-impl ~dtype)}])
+       (into {})))
+
+
+(def ^:private ternary-op-table
+  (ternary-op-iter))
+
 
 (defmacro ^:private blas-macro-iter
   [inner-macro]
@@ -778,13 +893,11 @@
                        (* (- (v-aget input-ary# elem-offset#)
                              mean#)
                           inv-std-dev#))))))
-        ;;(println 3)
         ;;run through get get d-x-hat/d-output.  Store in input-gradient
         (c-for [idx# 0 (< idx# index-count#) (inc idx#)]
                (let [elem-offset# (.idx_to_offset offsetter# elem-idx# idx#)]
                  (v-aset d-x-hat-d-out-ary# elem-offset#
                          (* scale# (v-aget output-gradient-ary# elem-offset#)))))
-        ;;(println 4)
         ;;Input gradient calculation...
         (let [d-var-d-out# (datatype->cast-fn ~datatype
                                               (sum-double-var
@@ -1040,6 +1153,54 @@
        x x-idx x-alpha
        y y-idx y-alpha
        n-elems)))
+
+  (ternary-op! [stream
+                dest dest-idx
+                x x-idx x-alpha
+                y y-idx y-alpha
+                z z-idx z-alpha
+                n-elems
+                operation]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in ternary-op-table [(dtype/get-datatype dest) :ternary-op!])
+       dest dest-idx
+       x x-idx x-alpha
+       y y-idx y-alpha
+       z z-idx z-alpha
+       n-elems
+       operation)))
+
+  (ternary-op-constant! [stream
+                         dest dest-idx
+                         a a-idx a-alpha
+                         b b-idx b-alpha
+                         constant
+                         n-elems
+                         operation arg-order]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in ternary-op-table [(dtype/get-datatype dest) :ternary-op-constant!])
+       dest dest-idx
+       a a-idx a-alpha
+       b b-idx b-alpha
+       constant
+       n-elems
+       operation arg-order)))
+
+  (ternary-op-constant-constant! [stream
+                                  dest dest-idx
+                                  a a-idx a-alpha
+                                  const-1
+                                  const-2
+                                  n-elems
+                                  operation arg-order]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in ternary-op-table [(dtype/get-datatype dest) :ternary-op-constant-constant!])
+       dest dest-idx
+       a a-idx a-alpha
+       const-1
+       const-2
+       n-elems
+       operation arg-order)))
 
   (gemm! [stream
           C c-colstride
