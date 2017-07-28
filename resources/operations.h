@@ -170,6 +170,40 @@ namespace tensor { namespace operations {
 	return (dtype) 0;
       }
     };
+
+    struct ternary_operation_type
+    {
+      enum _enum
+      {
+	select = 0,
+      };
+    };
+
+    template<typename dtype>
+    struct select_op
+    {
+      __device__ dtype operator()( dtype x, dtype y, dtype z ) {
+	if (x >= (dtype) 0 )
+	  return z;
+	return y;
+      }
+    };
+
+    struct ternary_operation
+    {
+      int op_type;
+      __device__ ternary_operation( int op )
+	: op_type(op)
+	{}
+      template<typename dtype>
+      __device__ dtype operator()( dtype x, dtype y, dtype z ) const {
+	switch( op_type ) {
+	case ternary_operation_type::select:
+	  return select_op<dtype>()(x, y, z);
+	};
+	return (dtype) 0;
+      }
+    };
   }}
 
 
@@ -190,5 +224,11 @@ namespace tensor { namespace operations {
 
 #define ENCAPSULATE_UNARY_OP_SYSTEM(varname)		\
   general_unary_operation(op_type##varname)
+
+#define EXPLODE_TERNARY_OP_SYSTEM(varname)		\
+  int op_type##varname
+
+#define ENCAPSULATE_TERNARY_OP_SYSTEM(varname)	\
+  ternary_operation(op_type##varname)
 
 #endif

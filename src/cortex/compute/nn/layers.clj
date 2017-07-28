@@ -13,7 +13,8 @@ implementation as possible."
             [think.datatype.core :as dtype]
             [cortex.graph :as graph]
             [cortex.nn.layers :as cortex-layers]
-            [cortex.tensor :as tensor]))
+            [cortex.tensor :as tensor]
+            [cortex.tensor.index-system :as ci]))
 
 
 (set! *warn-on-reflection* true)
@@ -181,7 +182,7 @@ and then forward many times for every parameter of the network."
   (forward [this parameter-buffers input-buffers output-buffers]
     (let [input (first-buffer input-buffers)
           output (first-buffer output-buffers)]
-     (math/elem-mul (nn-backend/get-stream)
+      (math/elem-mul (nn-backend/get-stream)
                     1.0 (math/device-buffer input) 1
                     (math/device-buffer mult-buffer) 1
                     (math/device-buffer output) 1)))
@@ -282,46 +283,49 @@ and then forward many times for every parameter of the network."
                         (atom 1.0)))
 
 
-(defrecord Prelu [backend layer select-buffer
-                  neg-scale-indexes neg-scale-expanded
-                  monotonic-indexes scale-buffer]
+(defrecord Prelu [backend layer scale-buffer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (let [input (first-buffer input-buffers)
-          output (first-buffer output-buffers)
-          neg-scale (get-in parameter-buffers [:neg-scale :buffer])
-          stream (nn-backend/get-stream)]
-
-
-      (math/select stream input select-buffer 1 0)
-      (drv/indexed-copy stream
-                        (math/device-buffer neg-scale)
-                        (math/device-buffer neg-scale-indexes)
-                        (math/device-buffer neg-scale-expanded)
-                        (math/device-buffer monotonic-indexes) 1)
-      (math/elem-mul stream 1.0 select-buffer 1 neg-scale-expanded 1 scale-buffer 1)
-      (math/select stream input select-buffer 0 1)
-      (math/sum stream 1.0 select-buffer 1.0 scale-buffer scale-buffer)
-      (math/elem-mul stream 1.0 scale-buffer 1 input 1 output 1)))
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+            input (->tensor (first-buffer input-buffers))
+            output (->tensor (first-buffer output-buffers))
+            [num-batches input-size] (tensor/shape input)
+            input-size (long input-size)
+            n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
+            n-pixels (quot input-size n-channels)
+            neg-scale (cond-> (->tensor (get-in parameter-buffers [:neg-scale :buffer]))
+                        (not= 1 n-channels)
+                        (assoc :dimensions (tensor/dimensions [n-channels n-pixels])
+                               :index-system (ci/index-system
+                                              (ci/monotonically-increasing-strategy input-size)
+                                              :idx-denominator n-pixels)))
+            scale-buffer (->tensor scale-buffer)]
+        (tensor/ternary-op! scale-buffer 1.0 input 1.0 neg-scale 1.0 1.0 :select)
+        (tensor/binary-op! output 1.0 input 1.0 scale-buffer :*))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
-    (let [input-gradient (first-gradient input-buffers)
-          input (first-buffer input-buffers)
-          output-gradient (first-gradient output-buffers)
-          stream (nn-backend/get-stream)
-          neg-scale-gradient (get-in parameter-buffers [:neg-scale :gradient])]
-      (drv/memset stream (math/device-buffer neg-scale-gradient) 0 0
-                  (m/ecount neg-scale-gradient))
-      ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output
-      ;;anyway
-      (math/elem-mul stream 1.0 output-gradient 1 input 1 select-buffer 1)
-      ;;sum into center gradient
-      (math/indirect-add stream
-                         1.0 select-buffer monotonic-indexes
-                         1.0 neg-scale-gradient neg-scale-indexes
-                         neg-scale-gradient neg-scale-indexes 1)
-      ;;Input gradient is just the same elem mul times output gradient
-      (math/elem-mul stream 1.0 scale-buffer 1 output-gradient 1 input-gradient 1))))
+    (tensor/with-stream (nn-backend/get-stream)
+     (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+           input-gradient (->tensor (first-gradient input-buffers))
+           input (->tensor (first-buffer input-buffers))
+           output-gradient (->tensor (first-gradient output-buffers))
+           n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
+           [num-batches input-size] (tensor/shape input)
+           n-pixels (quot (long input-size) n-channels)
+           neg-scale-gradient (cond-> (->tensor (get-in parameter-buffers [:neg-scale :gradient]))
+                                (not= 1 n-channels)
+                                (assoc :dimensions (tensor/dimensions [n-channels n-pixels])
+                                       :index-system (ci/index-system
+                                                      (ci/monotonically-increasing-strategy input-size)
+                                                      :idx-denominator n-pixels)))
+           scale-buffer (->tensor scale-buffer)]
+       ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output
+       ;;anyway
+       (tensor/binary-op! input-gradient 1.0 output-gradient 1 input :*)
+       (tensor/binary-op! neg-scale-gradient 1.0 neg-scale-gradient 1.0 input-gradient :+)
+       ;;Input gradient is just the same elem mul times output gradient
+       (tensor/binary-op! input-gradient 1.0 output-gradient 1.0 scale-buffer :*)))))
 
 
 (defmethod create :prelu
@@ -330,107 +334,72 @@ and then forward many times for every parameter of the network."
         n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
         n-pixels (quot input-size n-channels)
         stream (nn-backend/get-stream)]
-    (->Prelu backend layer
-             (nn-backend/new-array backend [input-size] batch-size)
-             (math/array stream :int (->> (range n-channels)
-                                          (map #(repeat n-pixels %))
-                                          (repeat batch-size)
-                                          flatten)
-                         batch-size)
-             (nn-backend/new-array backend [input-size] batch-size)
-             (math/array stream :int (range (* input-size (long batch-size))) batch-size)
-             (nn-backend/new-array backend [input-size] batch-size))))
+    (->Prelu backend layer (nn-backend/new-array backend [input-size] batch-size))))
+
 
 (defn- do-concat
-  [backend input-buffers output-buffers batch-indexes buffer-key]
-  (let [output (get-in output-buffers [0 buffer-key])
-        [num-batches num-output] (math/batch-shape output)
-        stream (nn-backend/get-stream)
-        output-buf (math/device-buffer output)
-        final-offset
-        (reduce (fn [^long offset input-buffer]
-                  (let [target-buf (drv/sub-buffer output-buf offset
-                                                   (- (dtype/ecount output) offset))
-                        [num-batches input-stride] (math/batch-shape input-buffer)]
-                    (condp = buffer-key
-                      :buffer
-                      ;;Copy from input buffer to output.
-                      (drv/indexed-copy stream
-                                        (math/device-buffer input-buffer) batch-indexes
-                                        target-buf batch-indexes
-                                        input-stride :dest-stride num-output)
-                      :gradient
-                      ;;Copy from output to input buffer.
-                      (do
-                       (drv/indexed-copy stream
-                                         target-buf batch-indexes
-                                         (math/device-buffer input-buffer) batch-indexes
-                                         input-stride :src-stride num-output)))
-                    (+ offset (long input-stride))))
-                0
-                (map buffer-key input-buffers))]
+  [input-buffers output-buffers buffer-key]
+  (tensor/with-stream (nn-backend/get-stream)
+   (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+         output (->tensor (get-in output-buffers [0 buffer-key]))
+         [num-batches num-output] (tensor/shape output)
+         final-offset
+         (reduce (fn [^long offset input-buffer]
+                   (let [[in-num-batch in-num-cols] (tensor/shape input-buffer)
+                         target-output (tensor/submatrix output 0 num-batches offset in-num-cols)]
+                     (condp = buffer-key
+                       :buffer (tensor/assign! target-output input-buffer)
+                       :gradient (tensor/assign! input-buffer target-output))
+                     (+ offset (long in-num-cols))))
+                 0
+                 (map (comp ->tensor buffer-key) input-buffers))]
 
-    ;;Ensure the result adds up to the correct amount.
-    (when-not (- (long final-offset) (long num-output))
-      (throw (ex-info "Output size and input buffer count mismatch"
-                      {:input-sizes (map (comp dtype/ecount buffer-key) input-buffers)
-                       :final-offset final-offset
-                       :output-size num-output})))
-    final-offset))
+     ;;Ensure the result adds up to the correct amount.
+     (when-not (- (long final-offset) (long num-output))
+       (throw (ex-info "Output size and input buffer count mismatch"
+                       {:input-sizes (map (comp dtype/ecount buffer-key) input-buffers)
+                        :final-offset final-offset
+                        :output-size num-output})))
+     final-offset)))
 
 
-(defrecord Concatenate [backend layer batch-indexes]
+(defrecord Concatenate [backend layer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (do-concat backend input-buffers output-buffers batch-indexes :buffer))
+    (do-concat input-buffers output-buffers :buffer))
   (backward [this parameter-buffers output-buffers input-buffers]
-    (do-concat backend input-buffers output-buffers batch-indexes :gradient)))
+    (do-concat input-buffers output-buffers :gradient)))
 
 
 (defmethod create :concatenate
   [backend layer batch-size]
-  (->Concatenate backend layer
-                 (-> (math/array (nn-backend/get-stream)
-                                 :int (range batch-size))
-                     math/device-buffer)))
+  (->Concatenate backend layer))
 
 (defrecord Split [backend layer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (let [input-array (first-buffer input-buffers)
-          n-elems (dtype/ecount input-array)
-          input-buffer (math/device-buffer input-array)
-          stream (nn-backend/get-stream)]
-      (->> output-buffers
-           (map (comp math/device-buffer :buffer))
-           (map #(drv/copy-device->device stream input-buffer 0 % 0 n-elems))
-           dorun)))
+    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+          input-tensor (->tensor (first-buffer input-buffers))]
+      (tensor/with-stream (nn-backend/get-stream)
+       (->> output-buffers
+            (map (comp ->tensor :buffer))
+            (map #(tensor/assign! % input-tensor))
+            dorun))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
-    (let [input-array (first-gradient input-buffers)
-          n-elems (dtype/ecount input-array)
-          stream (nn-backend/get-stream)]
-      (drv/memset stream (math/device-buffer input-array) 0 0 n-elems)
-      (->> output-buffers
-           (map (comp math/device-buffer :gradient))
-           (map #(math/sum stream 1.0 % 1.0 input-array))
-           dorun))))
+    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+          input-gradient (->tensor (first-gradient input-buffers))]
+      (tensor/with-stream (nn-backend/get-stream)
+        (tensor/assign! input-gradient 0)
+        (->> output-buffers
+             (map (comp ->tensor :gradient))
+             (map #(tensor/binary-op! input-gradient 1.0 input-gradient 1.0 % :+))
+             dorun)))))
 
 
 (defmethod create :split
   [backend layer batch-size]
   (->Split backend layer))
-
-
-(defn fixed-with-tensor
-  "Given the data in this array, create a new array with a different tensor."
-  [ary tensor]
-  (when-not (<= (long (m/ecount tensor))
-                (long (m/ecount ary)))
-    (throw (ex-info "Array reshaped to larger size!")))
-  (math/->DeviceArray
-   (drv/sub-buffer (math/device-buffer ary) 0 (m/ecount tensor))
-   tensor))
 
 
 (defrecord Join [backend layer]
