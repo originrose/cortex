@@ -13,7 +13,8 @@
             [cortex.nn.traverse :as traverse]
             [cortex.graph :as graph]
             [cortex.util :as util]
-            [cortex.experiment.util :as experiment-util]))
+            [cortex.experiment.util :as experiment-util])
+  (:gen-class))
 
 
 ;; NETWORK SETUP ;;
@@ -130,3 +131,8 @@
     (println "Parameter count: " param-count)
     ;; memory: 4 (4 bytes per float) * batch-size * vals-per-batch
     (* 4 batch-size vals-per-batch)))
+
+
+(defn -main
+  [& args]
+  (train))

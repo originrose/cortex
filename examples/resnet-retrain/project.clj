@@ -7,4 +7,5 @@
                  [thinktopic/think.image "0.4.13-SNAPSHOT"]
                  ;;If you need cuda 8...
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]]
+  :uberjar-name "resnet-retrain.jar"
   :main resnet-retrain.core)
