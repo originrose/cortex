@@ -490,23 +490,22 @@
                                [:beta:0 :gamma:0 :moving_mean:0 :moving_variance:0] (keys weight-map)))))
             (let [params (mapv #(hdf5/->clj %) [bias-ds scale-ds mean-ds variance-ds])
                   double-params (mapv #(ensure-doubles (:data %)) params) ;; vector of 4 param vectors: [[<offset params>] [<gamma params>] ...]
-                  ;; temp hack
                   channel-height (get-in node [:input-dimensions 0 :height])
                   channel-width (get-in node [:input-dimensions 0 :width])
-                  expanded-params (mapv (fn [param-vec]
-                                          (->> param-vec
-                                               (mapcat #(repeat (* channel-height channel-width) %))))
-                                        double-params)
                   [bias-arg scale-arg means-arg variances-arg] (mapv #(graph/get-node-argument node %)
-                                                                     [:bias :scale :means :variances])]
+                                                                     [:bias :scale :means :variances])
+
+                  network (if (or (> channel-height 1) (> channel-width 1))
+                            (assoc-in network [:compute-graph :nodes
+                                               (:id node) :mode] :spatial)
+                            network)]
 
               (reduce (fn [network param-kv]
                         (assoc-in network [:compute-graph :buffers
                                            (get (key param-kv) :buffer-id)
                                            :buffer]
-                                  (get expanded-params (val param-kv))))
-                      network (zipmap [bias-arg scale-arg means-arg variances-arg] [0 1 2 3]))
-              ))))
+                                  (get double-params (val param-kv))))
+                      network (zipmap [bias-arg scale-arg means-arg variances-arg] [0 1 2 3]))))))
       network)))
 
 
@@ -636,7 +635,7 @@
   "This function fulfills one basic contract of the importer: for a given Keras
   architecture description in a JSON file with supported layer types, we map it
   to a cortex description of the same architecture.
-
+  z
   This also defines a separate, valid import path. I.e., if we don't want to
   import weights but we want to create a Cortex model with an equivalent arch.
   to some well-known Keras model, we can use its architecture json as a single

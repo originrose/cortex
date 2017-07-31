@@ -622,7 +622,7 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
   (= (drop-while #(= 1 %) shape1)
      (drop-while #(= 1 %) shape2)))
 
-(defn- generate-parameter-argument-buffer
+(defn generate-parameter-argument-buffer
   "Given a parameter argument generate it's buffer."
   [node-id graph argument]
   (let [node (get-node graph node-id)
@@ -633,7 +633,8 @@ lower indexes...In other words the dimenion tuple is in big-endian order."
           (throw (ex-info "Existing buffer does not match expected shape"
                           {:node-id node-id
                            :existing-shape (m/shape existing-buffer)
-                           :expected-shape expected-shape})))
+                           :expected-shape expected-shape
+                           :node node})))
         graph)
       (let [param-buffer-id (util/generate-id (str (name (get node :id))
                                                    "-"
