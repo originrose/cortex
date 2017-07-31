@@ -2,7 +2,6 @@
   (:require [think.datatype.core :refer [v-aget v-aset] :as dtype]
             [think.datatype.marshal :as marshal]
             [cortex.tensor.math :as tm]
-            [cortex.tensor.index-system :as is]
             [clojure.math.combinatorics :as combo]
             [cortex.compute.cpu.driver :as cpu-driver]
             [think.parallel.core :as parallel]
@@ -16,88 +15,28 @@
 (set! *warn-on-reflection* true)
 
 
-(defn- classify-index-system
-  "We will need to code elem-idx->address for each of these."
-  [index-system]
-  (let [elems-per-idx-calc (if (= 1 (long (get index-system :elements-per-idx 1)))
-                             :identity
-                             :elements-per-idx)
-        system-type (is/system->strategy-type index-system)
-        adjustment (if (not= (long (or (get index-system :idx-numerator) 1))
-                             (long (or (get index-system :idx-denominator) 1)))
-                     :idx-adjustment
-                     :identity)
-        address-layout (if (not= (long (or (get index-system :num-columns) 1))
-                                 (long (or (get index-system :column-stride) 1)))
-                         :address-layout
-                         :identity)]
-    [elems-per-idx-calc system-type adjustment address-layout]))
-
-
-(defmacro ^:private index-strategy-calc
-  [index-idx strategy-type constant length indexes]
-  (condp = strategy-type
-    :constant
-    `~constant
-    :monotonically-increasing
-    `(rem ~index-idx
-          (long ~length))
-    :monotonically-decreasing
-    `(- ~length
-        (rem ~index-idx
-             ~length)
-        1)
-    :indexed
-    `(v-aget ~indexes (rem ~index-idx
-                                 ~length))))
-
-
-(defmacro ^:private elems-per-idx-calc
-  [inner-macro elems-per-idx-calc elements-per-idx & args]
-  (condp = elems-per-idx-calc
-    :identity
-    `(~inner-macro ~'elem-idx ~@args)
-    :elements-per-idx
-    `(let [index-idx# (quot ~'elem-idx ~elements-per-idx)
-           index-offset# (rem ~'elem-idx ~elements-per-idx)]
-       (+ (* (~inner-macro index-idx# ~@args)
-             ~elements-per-idx)
-          index-offset#))))
-
-
-(defmacro ^:private adjustment-calc
-  [adjustment-type index idx-numerator idx-denominator]
-  (condp = adjustment-type
-    :identity
-    `~index
-    :idx-adjustment
-    ` (quot (* ~index ~idx-numerator)
-            ~idx-denominator)))
-
-
-(defmacro ^:private address-calc
-  [address-type index num-columns column-stride]
-  (condp = address-type
-    :identity
-    `~index
-    :address-layout
-    `(let [index# ~index]
-       (+ (* ~column-stride (quot index# ~num-columns))
-          (rem index# ~num-columns)))))
-
-
-(defmacro ^:private combine-calculations
-  [elems-per-idx system-type adjustment address]
-  `(address-calc
-    ~address
-    (adjustment-calc
-     ~adjustment
-     (elems-per-idx-calc
-      index-strategy-calc
-      ~elems-per-idx ~'elements-per-idx
-      ~system-type ~'constant ~'length ~'indexes)
-     ~'idx-numerator ~'idx-denominator)
-    ~'num-columns ~'column-stride))
+(defn elem-idx->addr
+  "Precondition:  rev-shape, rev-max-shape, strides are same length.
+rev-max-shape: maxes of all shapes passed in, reversed
+rev-shape: reverse shape.
+rev-strides: reverse strides.
+arg: >= 0."
+  ^long [rev-shape rev-strides rev-max-shape arg]
+  (long (let [num-items (count rev-shape)]
+          (loop [idx (long 0)
+                 arg (long arg)
+                 offset (long 0)]
+            (if (and (> arg 0)
+                     (< idx num-items))
+              (let [next-max (long (rev-max-shape idx))
+                    next-stride (long (rev-strides idx))
+                    next-dim (long (rev-shape idx))
+                    max-idx (rem arg next-max)
+                    shape-idx (rem arg next-dim)]
+                (recur (inc idx)
+                       (quot arg next-max)
+                       (+ offset (* next-stride shape-idx))))
+              offset)))))
 
 
 ;;Need the interface to get correct type hinting to avoid boxing/unboxing every index.
@@ -105,61 +44,34 @@
   (^long idx_to_address [^long arg]))
 
 
-(defmacro ^:private generate-address-function-generator
-  [elems-per-idx system-type adjustment address]
-  `(fn [index-system#]
-     (let [~'constant (long (get-in index-system# [:strategy :constant] 1))
-           ~'elements-per-idx (long (or (get index-system# :elements-per-idx) 1))
-           ~'length (long (is/index-strategy-length (get index-system# :strategy)))
-           ~'indexes (marshal/as-int-array-view (get-in index-system# [:strategy :indexes]))
-           ~'idx-numerator (long (or (get index-system# :idx-numerator) 1))
-           ~'idx-denominator (long (or (get index-system# :idx-denominator) 1))
-           ~'num-columns (long (or (get index-system# :num-columns) 1))
-           ~'column-stride (long (or (get index-system# :column-stride) 1))]
-       ;;General case
-       (reify
-         ElemIdxToAddressFunction
-         (idx_to_address [_ ~'elem-idx]
-           (combine-calculations ~elems-per-idx ~system-type ~adjustment ~address))))))
+(defrecord ElemIdxToAddr [rev-shape rev-strides rev-max-shape]
+  ElemIdxToAddressFunction
+  (^long idx_to_address [this ^long arg]
+   (elem-idx->addr rev-shape rev-strides rev-max-shape arg)))
 
 
-(defn- generate-combinations
-  []
-  (for [elems [:identity :elements-per-idx]
-        strategy [:constant :monotonically-increasing :monotonically-decreasing :indexed]
-        adjustment [:identity :idx-adjustment]
-        address [:identity :address-layout]]
-    [elems strategy adjustment address]))
-
-
-;;How to do the combinatorial explosion in some compact form...
-(defmacro ^:private generate-all-address-functions
-  []
-  (mapv (fn [[elem sys adj addr :as comb]]
-          [comb `(generate-address-function-generator ~elem ~sys ~adj ~addr)])
-        (generate-combinations)))
-
-
-(def ^:private combination-map
-  (memoize
-   (fn []
-     (->> (generate-all-address-functions)
-          (into {})))))
-
-
-(defn ^:private get-elem-idx->address
-  ^ElemIdxToAddressFunction [index-system]
-`z  ((get (combination-map) (classify-index-system index-system)) index-system))
+(defn ^:private get-elem-dims->address
+  ^ElemIdxToAddressFunction [{:keys [shape strides]} max-shape]
+  (let [max-shape-count (count max-shape)
+        rev-shape (->> (concat (reverse shape)
+                               (repeat 1))
+                       (take max-shape-count)
+                       vec)
+        rev-strides (->> (concat (reverse strides)
+                                 (repeat (first strides)))
+                         (take max-shape-count)
+                         vec)]
+    (->ElemIdxToAddr rev-shape rev-strides (vec (reverse max-shape)))))
 
 
 (defmacro ^:private assign-constant-impl
   [view-type view-cast-fn _ dtype-cast-fn]
   `(vector
     (dtype/get-datatype (~dtype-cast-fn 0))
-    (fn [buffer# index-system# value# n-elems#]
+    (fn [buffer# dimensions# value# n-elems#]
       (let [n-elems# (long n-elems#)
             buffer# (~view-cast-fn buffer#)
-            idx->address# (get-elem-idx->address index-system#)
+            idx->address# (get-elem-dims->address dimensions# (get dimensions# :shape))
             value# (~dtype-cast-fn value#)]
         (parallel/parallel-for
          idx# n-elems#
@@ -212,15 +124,28 @@
       [lhs rhs])))
 
 
+(defn max-shape-from-dimensions
+  [& args]
+  (let [shapes (mapv :shape args)
+        max-count (apply max 0 (map count shapes))
+        rev-shapes (map (comp vec reverse) shapes)]
+    (->> (range max-count)
+         (map (fn [idx]
+                (apply max 0 (map #(get % idx 0) rev-shapes))))
+         reverse
+         vec)))
+
+
 (defmacro ^:private marshalling-assign-fn
   [lhs-dtype rhs-dtype]
-  `(fn [dest# dest-idx-sys#
-        src# src-idx-sys#
+  `(fn [dest# dest-dim#
+        src# src-dim#
         n-elems#]
      (let [dest# (datatype->view-cast-fn ~lhs-dtype dest#)
            src# (datatype->view-cast-fn ~rhs-dtype src#)
-           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
-           src-idx->address# (get-elem-idx->address src-idx-sys#)
+           max-shape# (max-shape-from-dimensions dest-dim# src-dim#)
+           dest-idx->address# (get-elem-dims->address dest-dim# max-shape#)
+           src-idx->address# (get-elem-dims->address src-dim# max-shape#)
            n-elems# (long n-elems#)]
        (parallel/parallel-for
         idx# n-elems#
@@ -261,11 +186,11 @@
 
 (defmacro ^:private unary-accum!-impl
   [datatype operation]
-  `(fn [dest# dest-idx-sys# dest-alpha#
+  `(fn [dest# dest-dims# dest-alpha#
         n-elems#]
      (let [n-elems# (long n-elems#)
            dest# (datatype->view-cast-fn ~datatype dest#)
-           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-idx->address# (get-elem-dims->address dest-dims# (get dest-dims# :shape))
            dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)]
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [dest-idx# (.idx_to_address dest-idx->address# idx#)]
@@ -278,14 +203,15 @@
 
 (defmacro ^:private unary-op!-impl
   [datatype operation]
-  `(fn [dest# dest-idx-sys#
-        x# x-idx-sys# x-alpha#
+  `(fn [dest# dest-dims#
+        x# x-dims# x-alpha#
         n-elems#]
      (let [n-elems# (long n-elems#)
+           max-shape# (max-shape-from-dimensions dest-dims# x-dims#)
            dest# (datatype->view-cast-fn ~datatype dest#)
-           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-idx->address# (get-elem-dims->address dest-dims# max-shape#)
            x# (datatype->view-cast-fn ~datatype x#)
-           x-idx->address# (get-elem-idx->address x-idx-sys#)
+           x-idx->address# (get-elem-dims->address x-dims# max-shape#)
            x-alpha# (datatype->cast-fn ~datatype x-alpha#)
            n-elems# (long n-elems#)]
        (parallel/parallel-for
@@ -335,12 +261,12 @@
 
 (defmacro ^:private binary-accum-constant!-impl
   [datatype operation reverse-operands?]
-  `(fn [dest# dest-idx-sys# dest-alpha#
+  `(fn [dest# dest-dims# dest-alpha#
         scalar#
         n-elems#]
      (let [n-elems# (long n-elems#)
            dest# (datatype->view-cast-fn ~datatype dest#)
-           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-idx->address# (get-elem-dims->address dest-dims# (get dest-dims# :shape))
            scalar# (datatype->cast-fn ~datatype scalar#)
            dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)]
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
@@ -370,15 +296,16 @@
 
 (defmacro ^:private binary-op-constant!-impl
   [datatype operation reverse-operands?]
-  `(fn [dest# dest-idx-sys#
-        x# x-idx-sys# x-alpha#
+  `(fn [dest# dest-dims#
+        x# x-dims# x-alpha#
         scalar#
         n-elems#]
      (let [n-elems# (long n-elems#)
+           max-shape# (max-shape-from-dimensions dest-dims# x-dims#)
            dest# (datatype->view-cast-fn ~datatype dest#)
-           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-idx->address# (get-elem-dims->address dest-dims# max-shape#)
            x# (datatype->view-cast-fn ~datatype x#)
-           x-idx->address# (get-elem-idx->address x-idx-sys#)
+           x-idx->address# (get-elem-dims->address x-dims# max-shape#)
            x-alpha# (datatype->cast-fn ~datatype x-alpha#)
            scalar# (datatype->cast-fn ~datatype scalar#)]
        (parallel/parallel-for
@@ -410,15 +337,16 @@
 
 (defmacro ^:private binary-accum!-impl
   [datatype operation reverse-operands?]
-  `(fn [dest# dest-idx-sys# dest-alpha#
-        y# y-idx-sys# y-alpha#
+  `(fn [dest# dest-dims# dest-alpha#
+        y# y-dims# y-alpha#
         n-elems#]
      (let [n-elems# (long n-elems#)
+           max-shape# (max-shape-from-dimensions dest-dims# y-dims#)
            dest# (datatype->view-cast-fn ~datatype dest#)
-           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-idx->address# (get-elem-dims->address dest-dims# max-shape#)
            dest-alpha# (datatype->cast-fn ~datatype dest-alpha#)
            y# (datatype->view-cast-fn ~datatype y#)
-           y-idx->address# (get-elem-idx->address y-idx-sys#)
+           y-idx->address# (get-elem-dims->address y-dims# max-shape#)
            y-alpha# (datatype->cast-fn ~datatype y-alpha#)]
        (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
               (let [dest-idx# (.idx_to_address dest-idx->address# idx#)
@@ -449,18 +377,19 @@
 
 (defmacro ^:private binary-op!-impl
   [datatype operation]
-  `(fn [dest# dest-idx-sys#
-        x# x-idx-sys# x-alpha#
-        y# y-idy-sys# y-alpha#
+  `(fn [dest# dest-dims#
+        x# x-dims# x-alpha#
+        y# y-dims# y-alpha#
         n-elems#]
      (let [n-elems# (long n-elems#)
+           max-shape# (max-shape-from-dimensions dest-dims# x-dims# y-dims#)
            dest# (datatype->view-cast-fn ~datatype dest#)
-           dest-idx->address# (get-elem-idx->address dest-idx-sys#)
+           dest-idx->address# (get-elem-dims->address dest-dims# max-shape#)
            x# (datatype->view-cast-fn ~datatype x#)
-           x-idx->address# (get-elem-idx->address x-idx-sys#)
+           x-idx->address# (get-elem-dims->address x-dims# max-shape#)
            x-alpha# (datatype->cast-fn ~datatype x-alpha#)
            y# (datatype->view-cast-fn ~datatype y#)
-           y-idx->address# (get-elem-idx->address y-idy-sys#)
+           y-idx->address# (get-elem-dims->address y-dims# max-shape#)
            y-alpha# (datatype->cast-fn ~datatype y-alpha#)]
        (parallel/parallel-for
         idx# (long n-elems#)
@@ -495,16 +424,17 @@
 
 (defmacro ^:private ternary-op-impl
   [datatype]
-  `(fn [dest# dest-idx#
-        x# x-idx# x-alpha#
-        y# y-idx# y-alpha#
-        z# z-idx# z-alpha#
+  `(fn [dest# dest-dims#
+        x# x-dims# x-alpha#
+        y# y-dims# y-alpha#
+        z# z-dims# z-alpha#
         n-elems#
         op#]
-     (let [d-addr# (get-elem-idx->address dest-idx#)
-           x-addr# (get-elem-idx->address x-idx#)
-           y-addr# (get-elem-idx->address y-idx#)
-           z-addr# (get-elem-idx->address z-idx#)
+     (let [max-shape# (max-shape-from-dimensions dest-dims# x-dims# y-dims# z-dims#)
+           d-addr# (get-elem-dims->address dest-dims# max-shape#)
+           x-addr# (get-elem-dims->address x-dims# max-shape#)
+           y-addr# (get-elem-dims->address y-dims# max-shape#)
+           z-addr# (get-elem-dims->address z-dims# max-shape#)
            dest# (datatype->view-cast-fn ~datatype dest#)
            x# (datatype->view-cast-fn ~datatype x#)
            y# (datatype->view-cast-fn ~datatype y#)
@@ -532,22 +462,23 @@
 
 (defmacro ^:private ternary-op-constant-impl
   [datatype]
-  `(fn [dest# dest-idx#
-        x# x-idx# x-alpha#
-        y# y-idx# y-alpha#
+  `(fn [dest# dest-dims#
+        x# x-dims# x-alpha#
+        y# y-dims# y-alpha#
         constant#
         n-elems#
         op# arg-order#]
-     (let [d-addr# (get-elem-idx->address dest-idx#)
-           x-addr# (get-elem-idx->address x-idx#)
-           y-addr# (get-elem-idx->address y-idx#)
+     (let [max-shape# (max-shape-from-dimensions dest-dims# x-dims# y-dims#)
+           d-addr# (get-elem-dims->address dest-dims# max-shape#)
+           x-addr# (get-elem-dims->address x-dims# max-shape#)
+           y-addr# (get-elem-dims->address y-dims# max-shape#)
            dest# (datatype->view-cast-fn ~datatype dest#)
            x# (datatype->view-cast-fn ~datatype x#)
            y# (datatype->view-cast-fn ~datatype y#)
            x-alpha# (datatype->cast-fn ~datatype x-alpha#)
            y-alpha# (datatype->cast-fn ~datatype y-alpha#)
            arg-indexes# (arg-order->indexes arg-order#)
-           [x-idx# y-idx# z-idx#] arg-indexes#]
+           [x-dims# y-dims# z-dims#] arg-indexes#]
        (condp = op#
          :select
          (parallel/parallel-for
@@ -557,26 +488,27 @@
                           constant#]]
            (v-aset dest# (.idx_to_address d-addr# idx#)
                    (datatype->cast-fn ~datatype
-                                      (select-impl (datatype->cast-fn ~datatype (get arg-vec# x-idx#))
-                                                   (datatype->cast-fn ~datatype (get arg-vec# y-idx#))
-                                                   (datatype->cast-fn ~datatype (get arg-vec# z-idx#)))))))))))
+                                      (select-impl (datatype->cast-fn ~datatype (get arg-vec# x-dims#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# y-dims#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# z-dims#)))))))))))
 
 
 (defmacro ^:private ternary-op-constant-constant-impl
   [datatype]
-  `(fn [dest# dest-idx#
-        x# x-idx# x-alpha#
+  `(fn [dest# dest-dims#
+        x# x-dims# x-alpha#
         constant-1#
         constant-2#
         n-elems#
         op# arg-order#]
-     (let [d-addr# (get-elem-idx->address dest-idx#)
-           x-addr# (get-elem-idx->address x-idx#)
+     (let [max-shape# (max-shape-from-dimensions dest-dims# x-dims#)
+           d-addr# (get-elem-dims->address dest-dims# max-shape#)
+           x-addr# (get-elem-dims->address x-dims# max-shape#)
            dest# (datatype->view-cast-fn ~datatype dest#)
            x# (datatype->view-cast-fn ~datatype x#)
            x-alpha# (datatype->cast-fn ~datatype x-alpha#)
            arg-indexes# (arg-order->indexes arg-order#)
-           [x-idx# y-idx# z-idx#] arg-indexes#]
+           [x-dims# y-dims# z-dims#] arg-indexes#]
        (condp = op#
          :select
          (parallel/parallel-for
@@ -586,9 +518,9 @@
                           constant-2#]]
            (v-aset dest# (.idx_to_address d-addr# idx#)
                    (datatype->cast-fn ~datatype
-                                      (select-impl (datatype->cast-fn ~datatype (get arg-vec# x-idx#))
-                                                   (datatype->cast-fn ~datatype (get arg-vec# y-idx#))
-                                                   (datatype->cast-fn ~datatype (get arg-vec# z-idx#)))))))))))
+                                      (select-impl (datatype->cast-fn ~datatype (get arg-vec# x-dims#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# y-dims#))
+                                                   (datatype->cast-fn ~datatype (get arg-vec# z-dims#)))))))))))
 
 
 (defmacro ternary-op-iter
@@ -1081,122 +1013,122 @@
 
 (extend-type CPUStream
   tm/TensorMath
-  (assign-constant! [stream buffer index-system value n-elems]
+  (assign-constant! [stream buffer dimensions value n-elems]
     (cpu-driver/with-stream-dispatch stream
       ((get (assign-constant-map) (dtype/get-datatype buffer))
-       buffer index-system value n-elems)))
+       buffer dimensions value n-elems)))
 
   (assign! [stream
-            dest dest-idx-sys
-            src src-idx-sys
+            dest dest-dims
+            src src-dims
             n-elems]
     (cpu-driver/with-stream-dispatch stream
       ((get (assign!-map) [(dtype/get-datatype dest) (dtype/get-datatype src)])
-       dest dest-idx-sys
-       src src-idx-sys
+       dest dest-dims
+       src src-dims
        n-elems)))
 
   (unary-accum! [stream
-                 dest dest-idx
+                 dest dest-dims
                  alpha op n-elems]
     (cpu-driver/with-stream-dispatch stream
       ((get-in unary-op-table [[(dtype/get-datatype dest) op] :unary-accum!])
-       dest dest-idx alpha n-elems)))
+       dest dest-dims alpha n-elems)))
 
   (unary-op! [stream
-              dest dest-idx
-              x x-idx
+              dest dest-dims
+              x x-dims
               alpha op n-elems]
     (cpu-driver/with-stream-dispatch stream
       ((get-in unary-op-table [[(dtype/get-datatype dest) op] :unary-op!])
-       dest dest-idx x x-idx alpha n-elems)))
+       dest dest-dims x x-dims alpha n-elems)))
 
   (binary-accum-constant! [stream
-                           dest dest-idx dest-alpha
+                           dest dest-dims dest-alpha
                            scalar
                            n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
       ((get (binary-accum-constant-table) [(dtype/get-datatype dest) operation
                                            reverse-operands?])
-       dest dest-idx dest-alpha
+       dest dest-dims dest-alpha
        scalar n-elems)))
 
   (binary-op-constant! [stream
-                        dest dest-idx
-                        x x-idx x-alpha
+                        dest dest-dims
+                        x x-dims x-alpha
                         scalar
                         n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
       ((get (binary-op-constant-table) [(dtype/get-datatype dest) operation reverse-operands?])
-       dest dest-idx
-       x x-idx x-alpha
+       dest dest-dims
+       x x-dims x-alpha
        scalar n-elems)))
 
   (binary-accum! [stream
-                  dest dest-idx dest-alpha
-                  y y-idx y-alpha
+                  dest dest-dims dest-alpha
+                  y y-dims y-alpha
                   n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
       ((get (binary-accum-table) [(dtype/get-datatype dest) operation reverse-operands?])
-       dest dest-idx dest-alpha
-       y y-idx y-alpha
+       dest dest-dims dest-alpha
+       y y-dims y-alpha
        n-elems)))
 
   (binary-op! [stream
-               dest dest-idx
-               x x-idx x-alpha
-               y y-idx y-alpha
+               dest dest-dims
+               x x-dims x-alpha
+               y y-dims y-alpha
                n-elems operation]
     (cpu-driver/with-stream-dispatch stream
       ((get (binary-op-table) [(dtype/get-datatype dest) operation])
-       dest dest-idx
-       x x-idx x-alpha
-       y y-idx y-alpha
+       dest dest-dims
+       x x-dims x-alpha
+       y y-dims y-alpha
        n-elems)))
 
   (ternary-op! [stream
-                dest dest-idx
-                x x-idx x-alpha
-                y y-idx y-alpha
-                z z-idx z-alpha
+                dest dest-dims
+                x x-dims x-alpha
+                y y-dims y-alpha
+                z z-dims z-alpha
                 n-elems
                 operation]
     (cpu-driver/with-stream-dispatch stream
       ((get-in ternary-op-table [(dtype/get-datatype dest) :ternary-op!])
-       dest dest-idx
-       x x-idx x-alpha
-       y y-idx y-alpha
-       z z-idx z-alpha
+       dest dest-dims
+       x x-dims x-alpha
+       y y-dims y-alpha
+       z z-dims z-alpha
        n-elems
        operation)))
 
   (ternary-op-constant! [stream
-                         dest dest-idx
-                         a a-idx a-alpha
-                         b b-idx b-alpha
+                         dest dest-dims
+                         a a-dims a-alpha
+                         b b-dims b-alpha
                          constant
                          n-elems
                          operation arg-order]
     (cpu-driver/with-stream-dispatch stream
       ((get-in ternary-op-table [(dtype/get-datatype dest) :ternary-op-constant!])
-       dest dest-idx
-       a a-idx a-alpha
-       b b-idx b-alpha
+       dest dest-dims
+       a a-dims a-alpha
+       b b-dims b-alpha
        constant
        n-elems
        operation arg-order)))
 
   (ternary-op-constant-constant! [stream
-                                  dest dest-idx
-                                  a a-idx a-alpha
+                                  dest dest-dims
+                                  a a-dims a-alpha
                                   const-1
                                   const-2
                                   n-elems
                                   operation arg-order]
     (cpu-driver/with-stream-dispatch stream
       ((get-in ternary-op-table [(dtype/get-datatype dest) :ternary-op-constant-constant!])
-       dest dest-idx
-       a a-idx a-alpha
+       dest dest-dims
+       a a-dims a-alpha
        const-1
        const-2
        n-elems

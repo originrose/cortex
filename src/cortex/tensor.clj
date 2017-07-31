@@ -176,8 +176,9 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
 
 (defn dimension-buffer-ecount
   ^long [{:keys [shape strides]}]
-  (* (long (first shape))
-     (long (first strides))))
+  (+ (long (or 1 (second strides)))
+     (* (- (long (first shape)) 1)
+        (long (first strides)))))
 
 
 (defn dimensions->2d-shape
@@ -313,8 +314,12 @@ that rerequires the items to have the same element count."
 
 
 (defn- dimensions->column-stride
-  ^long [dimensions]
-  (get-in dimensions [:strides 1] (get-in dimensions [:shape 1] 1)))
+  ^long [{:keys [strides]}]
+  (long
+   (let [dim-count (count strides)]
+     (if (> dim-count 1)
+       (get strides (- dim-count 2))
+       (get strides 0 1)))))
 
 
 (defn- dimensions->num-columns
@@ -472,12 +477,11 @@ that rerequires the items to have the same element count."
 (defn make-dense
   ^Tensor [^Tensor tensor]
   (or (as-dense tensor)
-      (let [^Tensor retval (new-tensor [(ecount tensor)]
+      (let [^Tensor retval (new-tensor (shape tensor)
                                        :datatype (dtype/get-datatype tensor)
                                        :init-value nil)]
         (mp/assign! retval tensor)
-        (construct-tensor (tensor->device retval) (tensor->dimensions tensor)
-                          (tensor->buffer retval)))))
+        retval)))
 
 (defn copy-to-java-type
   [dest ^Tensor src]
@@ -608,8 +612,8 @@ and the rest of the dimensions being squashed into n-rows."
           sub-buffer (compute-drv/sub-buffer (tensor->buffer tensor)
                                              start-offset required-length)]
       (construct-tensor (tensor->device tensor)
-              (dimensions [row-length col-length] :strides [column-stride])
-              sub-buffer))))
+                        (dimensions [row-length col-length] :strides [column-stride 1])
+                        sub-buffer))))
 
 
 (defn- ensure-indexes

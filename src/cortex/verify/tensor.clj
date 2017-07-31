@@ -1,6 +1,5 @@
 (ns cortex.verify.tensor
   (:require [cortex.tensor :as ct]
-            [cortex.tensor.index-system :as ci]
             [cortex.compute.driver :as drv]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]))
@@ -26,7 +25,6 @@
      (ct/assign! tensor 1)
      (is (m/equals (repeat 9 1)
                    (ct/to-double-array tensor)))
-
      (let [rows (ct/rows tensor)
            columns (ct/columns tensor)]
        (doseq [row rows]
@@ -60,7 +58,7 @@ for the cuda backend."
   [driver datatype]
   (tensor-context driver datatype
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
-         tens-b (ct/->tensor (repeat 9 1))]
+         tens-b (ct/->tensor (partition 3 (repeat 9 1)))]
      (ct/unary-op! tens-b 2.5 tens-a :ceil)
      (is (m/equals (mapv #(Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype))) (range 9))
                    (ct/to-double-array tens-b)))
@@ -74,10 +72,7 @@ for the cuda backend."
   (tensor-context driver datatype
    (let [tens-a (ct/->tensor (partition 3 (partition 3 (range 18))))
          tens-chan (assoc (ct/->tensor (range 3))
-                          :dimensions (ct/dimensions [3 3])
-                          :index-system
-                          (ci/index-system (ci/monotonically-increasing-strategy (* 3 3))
-                                           :idx-denominator 3))
+                          :dimensions (ct/dimensions [3 1]))
          tens-result (ct/new-tensor [2 3 3])]
 
      (ct/binary-op! tens-result 1.0 tens-a 1.0 tens-chan :*)
@@ -87,13 +82,12 @@ for the cuda backend."
                    (ct/to-double-array tens-result))))))
 
 
-
 (defn binary-constant-op
   [driver datatype]
   (tensor-context
    driver datatype
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
-         tens-b (ct/->tensor (repeat 9 1))]
+         tens-b (ct/->tensor (partition 3 (repeat 9 1)))]
 
      (when-not (= datatype :byte)
        (ct/binary-op! tens-b 2.0 tens-a 3.0 4.0 :*)
@@ -125,8 +119,8 @@ for the cuda backend."
   (tensor-context
    driver datatype
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
-         tens-b (ct/->tensor (repeat 9 2))
-         tens-c (ct/->tensor (repeat 9 10))]
+         tens-b (ct/->tensor (partition 3 (repeat 9 2)))
+         tens-c (ct/->tensor (partition 3 (repeat 9 10)))]
      (ct/binary-op! tens-c 2.0 tens-a 2.0 tens-b :*)
      (is (m/equals (mapv #(* 2 2 2 %) (flatten (partition 3 (range 9))))
                    (ct/to-double-array tens-c)))
