@@ -45,18 +45,29 @@
        (filter #(.isFile %))))
 
 
+(defn- load-image
+  [path]
+  (i/load-image path))
+
+(def train-folder "data/train")
+(def test-folder "data/test")
+
+
 (defn create-train-test-folders
   "Given an original data directory that contains subdirs of classes (e.g. orig/cats, orig/dogs)
   and a split proportion, divide each class of files into a new training and testing directory
   (e.g. train/cats, train/dogs, test/cats, test/dogs)"
-  [orig-data-path train-path test-path test-proportion]
-  (let [subdirs (map #(.getPath %)
-                     (filter #(.isDirectory %) (file-seq (io/file orig-data-path))))
-        ;; remove top (root) directory
-        subdirs (remove #(= % (string/replace orig-data-path "/" "")) subdirs)]
-    (for [dir subdirs]
-      (let [files (gather-files dir)
-            num-test (int (* test-proportion (count files)))
+  [orig-data-path & {:keys [test-proportion]
+                     :or {test-proportion 0.3}}]
+  (let [subdirs (->> (file-seq (io/file orig-data-path))
+                     (filter #(.isDirectory %) )
+                     (map #(.getPath %))
+                     ;; remove top (root) directory
+                     rest
+                     (map (juxt identity gather-files))
+                     (filter #(> (count (second %)) 0)))]
+    (for [[dir files] subdirs]
+      (let [num-test (int (* test-proportion (count files)))
             test-files (take num-test files)
             train-files (drop num-test files)
             copy-fn (fn [file root-path]
@@ -65,16 +76,13 @@
                           (io/make-parents dest-path)
                           (io/copy file (io/file dest-path)))))]
         (println "Working on " dir)
-        (dorun (pmap (fn [file] (copy-fn file train-path)) train-files))
-        (dorun (pmap (fn [file] (copy-fn file test-path)) test-files))
+        (dorun (pmap (fn [file] (copy-fn file train-folder)) train-files))
+        (dorun (pmap (fn [file] (copy-fn file test-folder)) test-files))
         ))))
 
 
 
 ;; TRAINING ;;
-
-(def train-folder "data/train")
-(def test-folder "data/test")
 
 (def classes
   (into [] (.list (io/file "data/train"))))

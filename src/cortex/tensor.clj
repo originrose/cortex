@@ -1269,15 +1269,14 @@ operation.  Batch size is then considered everything before the last two dimensi
    running-means running-variances
    ave-factor
    scale bias epsilon]
-  (let [{:keys [type mvbs-args]} (batch-normalize-setup [output input]
-                                                        [batch-means batch-variances
-                                                         running-means running-variances
-                                                         scale bias]
-                                                        epsilon)
+  (let [{:keys [type mvbs-args input-shape]} (batch-normalize-setup [output input]
+                                                                    [batch-means batch-variances
+                                                                     running-means running-variances
+                                                                     scale bias]
+                                                                    epsilon)
         [batch-means batch-variances
          running-means running-variances
-         scale bias]             mvbs-args
-        input-shape              (shape input)]
+         scale bias]             mvbs-args]
     (condp = type
       :eltwise
       (tm/batch-normalize-update-and-apply-eltwise! (check-stream)
@@ -1320,15 +1319,14 @@ See batch-normalize-update-and-apply!"
   [input-gradient scale-gradient bias-gradient output-gradient
    output input batch-means batch-variances
    scale bias epsilon]
-  (let [{:keys [type mvbs-args]} (batch-normalize-setup [output input
-                                                         output-gradient input-gradient]
-                                                        [batch-means batch-variances
-                                                         scale bias
-                                                         scale-gradient bias-gradient]
-                                                        epsilon)
+  (let [{:keys [type mvbs-args input-shape]} (batch-normalize-setup [output input
+                                                                     output-gradient input-gradient]
+                                                                    [batch-means batch-variances
+                                                                     scale bias
+                                                                     scale-gradient bias-gradient]
+                                                                    epsilon)
         [batch-means batch-variances scale bias
-         scale-gradient bias-gradient] mvbs-args
-        input-shape (shape input)]
+         scale-gradient bias-gradient] mvbs-args]
     (condp = type
       :eltwise
       (tm/batch-normalize-gradients-eltwise! (check-stream)

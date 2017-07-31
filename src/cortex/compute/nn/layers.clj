@@ -48,6 +48,15 @@ implementation as possible."
   (nn-backend/create backend node batch-size))
 
 
+(defn- ->simple-batch-tensor
+  [buffer]
+  (let [retval (math/array->cortex-tensor (math/as-2d-batch-matrix buffer))
+        retval-shape (tensor/shape retval)]
+    (if (< (count retval-shape) 2)
+      (assoc-in retval [:dimensions :shape] (vec (concat [1] retval-shape)))
+      retval)))
+
+
 (defn- ->batch-tensor
   "Create either a 2d tensor with the batches as the leading dimension
 or a faithful tensor of the math/array data.  This does no copy; just constructs
@@ -60,7 +69,7 @@ a datastructure that shares the backing store."
                                       (get input-dimension :channels)
                                       (* (long (get input-dimension :height))
                                          (long (get input-dimension :width)))]))
-                 (math/array->cortex-tensor (math/as-2d-batch-matrix buffer)))]
+                 (->simple-batch-tensor buffer))]
     retval))
 
 
@@ -93,10 +102,7 @@ a datastructure that shares the backing store."
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
     (tensor/with-stream (nn-backend/get-stream)
-      (let [->tensor #(->batch-tensor %
-                                      (math/batch-size (first-buffer input-buffers))
-                                      (graph/node->input-dimension layer)
-                                      false)
+      (let [->tensor #(->simple-batch-tensor %)
             output (->tensor (first-buffer output-buffers))
             input (->tensor (first-buffer input-buffers))]
         (condp = act-type
@@ -106,10 +112,7 @@ a datastructure that shares the backing store."
 
   (backward [this parameter-buffers output-buffers input-buffers]
     (tensor/with-stream (nn-backend/get-stream)
-      (let [->tensor #(->batch-tensor %
-                                      (math/batch-size (first-buffer input-buffers))
-                                      (graph/node->input-dimension layer)
-                                      false)
+      (let [->tensor #(->simple-batch-tensor %)
             output (->tensor (first-buffer output-buffers))
             input-gradient (->tensor (first-gradient input-buffers))
             output-gradient (->tensor (first-gradient output-buffers))]
@@ -287,7 +290,7 @@ and then forward many times for every parameter of the network."
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
     (tensor/with-stream (nn-backend/get-stream)
-      (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+      (let [->tensor #(->simple-batch-tensor %)
             input (->tensor (first-buffer input-buffers))
             output (->tensor (first-buffer output-buffers))
             [num-batches input-size] (tensor/shape input)
@@ -306,7 +309,7 @@ and then forward many times for every parameter of the network."
 
   (backward [this parameter-buffers output-buffers input-buffers]
     (tensor/with-stream (nn-backend/get-stream)
-     (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+     (let [->tensor #(->simple-batch-tensor %)
            input-gradient (->tensor (first-gradient input-buffers))
            input (->tensor (first-buffer input-buffers))
            output-gradient (->tensor (first-gradient output-buffers))
@@ -340,7 +343,7 @@ and then forward many times for every parameter of the network."
 (defn- do-concat
   [input-buffers output-buffers buffer-key]
   (tensor/with-stream (nn-backend/get-stream)
-   (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+   (let [->tensor #(->simple-batch-tensor %)
          output (->tensor (get-in output-buffers [0 buffer-key]))
          [num-batches num-output] (tensor/shape output)
          final-offset
@@ -378,7 +381,7 @@ and then forward many times for every parameter of the network."
 (defrecord Split [backend layer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+    (let [->tensor #(->simple-batch-tensor %)
           input-tensor (->tensor (first-buffer input-buffers))]
       (tensor/with-stream (nn-backend/get-stream)
        (->> output-buffers
@@ -387,7 +390,7 @@ and then forward many times for every parameter of the network."
             dorun))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
-    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+    (let [->tensor #(->simple-batch-tensor %)
           input-gradient (->tensor (first-gradient input-buffers))]
       (tensor/with-stream (nn-backend/get-stream)
         (tensor/assign! input-gradient 0)
@@ -405,7 +408,7 @@ and then forward many times for every parameter of the network."
 (defrecord Join [backend layer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+    (let [->tensor #(->simple-batch-tensor %)
           output (->tensor (first-buffer output-buffers))
           inputs (mapv (comp ->tensor :buffer) input-buffers)
           operation (get layer :operation :+)
@@ -428,7 +431,7 @@ and then forward many times for every parameter of the network."
                    (tensor/binary-op! output 1.0 output 1.0 input :*))))))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
-    (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
+    (let [->tensor #(->simple-batch-tensor %)
           output-gradient (->tensor (first-gradient output-buffers))
           input-gradients (mapv (comp ->tensor :gradient) input-buffers)
           inputs (mapv (comp ->tensor :buffer) input-buffers)
