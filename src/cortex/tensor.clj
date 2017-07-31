@@ -362,19 +362,7 @@ that rerequires the items to have the same element count."
   (^Tensor [device dimensions index-system buffer]
    (let [buffer-ecount (ecount buffer)
          shape (dimensions->shape dimensions)
-         column-stride (dimensions->column-stride dimensions index-system)
-         num-required-columns (max 0 (- (long (apply + 0 (drop-last shape)))
-                                        1))
-         required-buffer-ecount (long (+ (* column-stride num-required-columns)
-                                         (long (last shape))))]
-
-     (when-not-error (<= required-buffer-ecount buffer-ecount)
-       "Supplied buffer does not have enough capacity for declared dimensions"
-       {:buffer-ecount buffer-ecount
-        :dimensions dimensions
-        :required-buffer-ecount required-buffer-ecount
-        :column-stride column-stride
-        :index-system index-system})
+         column-stride (dimensions->column-stride dimensions index-system)]
      (when-let [num-columns (get index-system :num-columns)]
       (when-not-error (<= (long num-columns)
                           (long column-stride))
