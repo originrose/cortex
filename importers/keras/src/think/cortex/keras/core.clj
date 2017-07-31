@@ -206,17 +206,12 @@
                                  (= (keyword class_name) :InputLayer)
                                  model-vector
 
-                                 ;;on "Add" layers, assoc previous layer (so skip can figure out its shortcut parent)
-                                 (= (keyword class_name) :Add)
-                                 (let [prev (get-in (last model-vector) [:config :name])]
-                                   (conj model-vector (assoc current :previous_layer (keyword prev))))
-
                                  :else
                                  (conj model-vector current)))
                              [] model)
         ;;TODO models with a single channel input and figure out planar vs. interleaved
         cortex-layers (vec
-                        (flatten (concat (layers/input width height n-channels)
+                        (flatten (concat (layers/input width height n-channels :id :data)
                                          (mapv (fn [mod-item]
                                                  (try
                                                    (model-item->desc mod-item)
@@ -236,7 +231,8 @@
                                         (loop [ancestor-list [] cur parent-layer]
                                           ;; stop looking for ancestors when: reached another join layer, or reached input (end)
                                           (if (or (= (:type cur) :join)
-                                                  (= (:type cur) :input))
+                                                  (= (:type cur) :input)
+                                                  (= cur nil))
                                             ancestor-list
                                             (recur (conj ancestor-list cur)
                                                    (get-layer-by-id cortex-desc (get (:parents cur) 0)))))) parent-layers)
