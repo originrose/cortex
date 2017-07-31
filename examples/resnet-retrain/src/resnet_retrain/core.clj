@@ -94,7 +94,7 @@
 
 
 (defn train
-  []
+  [& [batch-size]]
   (let [[train-ds test-ds] [(-> train-folder
                                 (experiment-util/create-dataset-from-folder
                                   class-mapping
@@ -104,11 +104,13 @@
                                 (experiment-util/infinite-class-balanced-dataset))
                             (-> test-folder
                                 (experiment-util/create-dataset-from-folder
-                                  class-mapping
+                                 class-mapping
+                                 :image-aug-fn (fn [im] (i/resize im 224 224))
                                   :colorspace :rgb
                                   :normalize false))]
-        network (load-network "resnet50.nippy" :fc1000 layers-to-add)]
-    (train/train-n network train-ds test-ds :batch-size 1 :epoch-count 5)))
+        network (load-network "resnet50.nippy" :fc1000 layers-to-add)
+        batch-size (or batch-size 1)]
+    (train/train-n network train-ds test-ds :batch-size batch-size :epoch-count 5)))
 
 
 
@@ -134,5 +136,6 @@
 
 
 (defn -main
-  [& args]
-  (train))
+  [& [batch-size]]
+  (train (when batch-size
+           (Integer/parseInt batch-size))))
