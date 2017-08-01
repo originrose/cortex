@@ -98,16 +98,16 @@
   (let [[train-ds test-ds] [(-> train-folder
                                 (experiment-util/create-dataset-from-folder
                                   class-mapping
-                                  :image-aug-fn (fn [im] (i/resize im 224 224))
                                   :colorspace :rgb
-                                  :normalize false)
+                                  :normalize false
+                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68 :bgr-reorder true))
                                 (experiment-util/infinite-class-balanced-dataset))
                             (-> test-folder
                                 (experiment-util/create-dataset-from-folder
-                                 class-mapping
-                                 :image-aug-fn (fn [im] (i/resize im 224 224))
+                                  class-mapping
                                   :colorspace :rgb
-                                  :normalize false))]
+                                  :normalize false
+                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68 :bgr-reorder true)))]
         network (load-network "resnet50.nippy" :fc1000 layers-to-add)
         batch-size (or batch-size 1)]
     (train/train-n network train-ds test-ds :batch-size batch-size :epoch-count 5)))
