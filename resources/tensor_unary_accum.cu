@@ -33,7 +33,7 @@ void unary_accum(dtype* dest, const general_index_system& dest_sys, dtype dest_a
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    perform_cas( dest + dest_sys(elem_idx),
+    perform_cas( dest + dest_sys(elem_idx, dest_sys.rev_shape),
 		 unary_accum_op<dtype>( dest_alpha, operation ) );
   }
 }

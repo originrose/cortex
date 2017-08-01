@@ -11,11 +11,11 @@
 (defprotocol TensorMath
   "Operations defined in general terms to enable the tensor math abstraction and to allow
   unexpected use cases outside of the tensor definition."
-  (assign-constant! [stream buffer index-system value n-elems]
+  (assign-constant! [stream buffer dimensions value n-elems]
     "Assign a constant value to a buffer. using an index strategy.")
   (assign! [stream
-            dest dest-idx-sys
-            src src-idx-sys
+            dest dest-dims
+            src src-dims
             n-elems]
     "Assign to dest values from src using the appropriate index strategy.  Note that assignment
 *alone* should be marshalling if both src and dst are on the same device.  So for the three
@@ -24,57 +24,57 @@ indexing strategy should be provided.
 This function will not be called if dest and src are on different devices, memcpy semantics are
 enforced for that case.")
   (unary-accum! [stream
-                 dest dest-idx
+                 dest dest-dims
                  alpha op n-elems]
     "dest[idx] = op(alpha * dest[idx]")
   (unary-op! [stream
-              dest dest-idx
-              x x-idx
+              dest dest-dims
+              x x-dims
               alpha op n-elems]
     "dest[idx] = op( x[idx] * alpha )")
   (binary-accum-constant! [stream
-                           dest dest-idx dest-alpha
+                           dest dest-dims dest-alpha
                            scalar
                            n-elems operation reverse-operands?]
     "Binary operation where dest is involved in the computation.
 dest[idx] = alpha * dest[idx] op scalar")
 
   (binary-op-constant! [stream
-                        dest dest-idx
-                        x x-idx x-alpha
+                        dest dest-dims
+                        x x-dims x-alpha
                         scalar
                         n-elems operation reverse-operands?]
     "Binary operation where dest is not involved in the computation.
 dest[idx] = alpha * x[idx] op scalar")
 
   (binary-accum! [stream
-                  dest dest-idx dest-alpha
-                  y y-idx y-alpha
+                  dest dest-dims dest-alpha
+                  y y-dims y-alpha
                   n-elems operation reverse-operands?]
     "Binary operation where dest is involved in the computation.
 dest[idx] = alpha * dest[idx] op y[idx]")
 
   (binary-op! [stream
-               dest dest-idx
-               x x-idx x-alpha
-               y y-idx y-alpha
+               dest dest-dims
+               x x-dims x-alpha
+               y y-dims y-alpha
                n-elems operation]
     "Binary operation where dest is not involved in the computation.
 dest[idx] = alpha * x[idx] op y[idx]")
 
   (ternary-op! [stream
-                dest dest-idx
-                x x-idx x-alpha
-                y y-idx y-alpha
-                z z-idx z-alpha
+                dest dest-dims
+                x x-dims x-alpha
+                y y-dims y-alpha
+                z z-dims z-alpha
                 n-elems
                 operation]
     "Apply ternary elementwise operation to args")
 
   (ternary-op-constant! [stream
-                         dest dest-idx
-                         a a-idx a-alpha
-                         b b-idx b-alpha
+                         dest dest-dims
+                         a a-dims a-alpha
+                         b b-dims b-alpha
                          constant
                          n-elems
                          operation arg-order]
@@ -82,8 +82,8 @@ dest[idx] = alpha * x[idx] op y[idx]")
 Argument order is specified by arg-order.")
 
   (ternary-op-constant-constant! [stream
-                                  dest dest-idx
-                                  a a-idx a-alpha
+                                  dest dest-dims
+                                  a a-dims a-alpha
                                   const-1
                                   const-2
                                   n-elems

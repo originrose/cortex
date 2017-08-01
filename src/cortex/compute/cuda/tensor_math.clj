@@ -2,7 +2,6 @@
   (:require [cortex.compute.cuda.driver :refer [value->ptr ->ptr] :as cuda-base]
             [think.datatype.core :as dtype]
             [cortex.tensor.math :as tm]
-            [cortex.tensor.index-system :as is]
             [cortex.compute.driver :as drv]
             [cortex.compute.cpu.tensor-math :as cpu-tens-math]
             [cortex.compute.math-util :as cmu]
@@ -17,43 +16,20 @@
 (set! *unchecked-math* :warn-on-boxed)
 
 
-(defn- strategy-type->int
-  ^Integer [index-system]
-  (int
-   (condp = (get-in index-system [:strategy :type])
-     :constant 0
-     :monotonically-increasing 1
-     :monotonically-decreasing 2
-     :indexed 3)))
+(defn- dimensions->cuda
+  [{:keys [shape strides]}]
+  (let [max-shape-count 5
+        rev-shape (->> (concat (reverse shape)
+                               (repeat 1))
+                       (take max-shape-count)
+                       vec)
+        rev-strides (->> (concat (reverse strides)
+                                 (repeat (first strides)))
+                         (take max-shape-count)
+                         vec)]
+    (->> (concat rev-shape rev-strides)
+         (mapv int))))
 
-
-(defn- strategy->c-or-len
-  ^Integer [index-system]
-  (let [strategy (get index-system :strategy)]
-    (int
-     (condp = (get strategy :type)
-       :constant (get strategy :constant)
-       :monotonically-increasing (get strategy :length)
-       :monotonically-decreasing (get strategy :length)
-       :indexed (dtype/ecount (get strategy :indexes))))))
-
-
-(defn- strategy->idx-ptr
-  ^IntPointer [index-system]
-  (if (= :indexed (get-in index-system [:strategy :type]))
-    (cuda-base/->ptr (get-in index-system [:strategy :indexes]))
-    (IntPointer.)))
-
-
-(defn- index-system->cuda
-  [index-system]
-  [(strategy-type->int index-system)
-   (strategy->c-or-len index-system)
-   (strategy->idx-ptr index-system)
-   (int (or (get index-system :num-columns) 1))
-   (int (or (get index-system :column-stride) 1))
-   (int (or (get index-system :idx-numerator) 1))
-   (int (or (get index-system :idx-denominator) 1))])
 
 (defn- operation->cuda
   ([operation]
@@ -183,22 +159,26 @@
   (cuda-base/activation-description (act-type->cudnn-activation act-type)))
 
 
-(defn- cudnn-compatible?
-  [idx-system]
-  (is/simple-monotonically-increasing? idx-system))
+(defn dimensions->tensor
+  [dimensions dtype]
+  (cuda-base/tensor-with-strides dtype (get dimensions :shape) (get dimensions :strides)))
 
 
 (defn- cudnn-activation!
-  [stream input input-alpha output n-elems act-type]
+  [stream input input-dims input-alpha
+   output output-dims act-type]
   (resource/with-resource-context
     (let [dest-dtype (dtype/get-datatype output)
-          tensor (cuda-base/tensor dest-dtype 1 1 1 n-elems)]
+          in-tensor (dimensions->tensor input-dims dest-dtype)
+          out-tensor (if (= input-dims output-dims)
+                       in-tensor
+                       (dimensions->tensor output-dims dest-dtype))]
       (cuda-base/cudnn-with-stream
        stream
        (cuda-base/cudnn-call
         (cudnn/cudnnActivationForward cudnn-context (act-type->cudnn act-type)
-                                      (value->ptr input-alpha dest-dtype) tensor (->ptr input)
-                                      (value->ptr 0 dest-dtype) tensor (->ptr output)))))))
+                                      (value->ptr input-alpha dest-dtype) in-tensor (->ptr input)
+                                      (value->ptr 0 dest-dtype) out-tensor (->ptr output)))))))
 
 
 (defn arg-order->indexes
@@ -209,7 +189,7 @@
 
 (extend-type CudaStream
   tm/TensorMath
-  (assign-constant! [stream buffer index-system value n-elems]
+  (assign-constant! [stream buffer dimensions value n-elems]
     (let [datatype (dtype/get-datatype buffer)
           value (drv/dtype-cast value datatype)
           assign-fn (cuda-base/get-or-create-fn stream :tensor-assign-constant datatype
@@ -219,11 +199,11 @@
       (apply cuda-base/launch-linear-kernel
              (concat [stream assign-fn n-elems 0
                       (cuda-base/->ptr buffer)]
-                     (index-system->cuda index-system)
+                     (dimensions->cuda dimensions)
                      [value n-elems]))))
   (assign! [stream
-            dest dest-idx-sys
-            src src-idx-sys
+            dest dest-dims
+            src src-dims
             n-elems]
     (let [lhs-dtype (dtype/get-datatype dest)
           rhs-dtype (dtype/get-datatype src)
@@ -234,14 +214,14 @@
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream assign-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx-sys)
+                         (dimensions->cuda dest-dims)
                          [(cuda-base/->ptr src)]
-                         (index-system->cuda src-idx-sys)
+                         (dimensions->cuda src-dims)
                          [n-elems])
                  vec))))
 
   (unary-accum! [stream
-                 dest dest-idx
+                 dest dest-dims
                  alpha op n-elems]
     (let [dest-dtype (dtype/get-datatype dest)
           unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-accum
@@ -251,21 +231,20 @@
       (if (and (or (= dest-dtype :float)
                    (= dest-dtype :double))
                (or (= op :logistic)
-                   (= op :tanh))
-               (cudnn-compatible? dest-idx))
-        (cudnn-activation! stream dest alpha dest n-elems op)
+                   (= op :tanh)))
+        (cudnn-activation! stream dest dest-dims alpha dest dest-dims op)
         (apply cuda-base/launch-linear-kernel
                (-> (concat [stream unop-fn n-elems 0]
                            [(cuda-base/->ptr dest)]
-                           (index-system->cuda dest-idx)
+                           (dimensions->cuda dest-dims)
                            [(drv/dtype-cast alpha dest-dtype)]
                            (unary-op->cuda op)
                            [n-elems])
                    vec)))))
 
   (unary-op! [stream
-              dest dest-idx
-              x x-idx
+              dest dest-dims
+              x x-dims
               alpha op n-elems]
     (let [dest-dtype (dtype/get-datatype dest)
           unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-op
@@ -276,22 +255,22 @@
                    (= dest-dtype :double))
                (or (= op :logistic)
                    (= op :tanh))
-               (cudnn-compatible? dest-idx)
-               (cudnn-compatible? x-idx))
-        (cudnn-activation! stream x alpha dest n-elems op)
+               ;;Make sure no broadcasting
+               (= dest-dims x-dims))
+        (cudnn-activation! stream x x-dims alpha dest dest-dims op)
         (apply cuda-base/launch-linear-kernel
                (-> (concat [stream unop-fn n-elems 0]
                            [(cuda-base/->ptr dest)]
-                           (index-system->cuda dest-idx)
+                           (dimensions->cuda dest-dims)
                            [(cuda-base/->ptr x)]
-                           (index-system->cuda x-idx)
+                           (dimensions->cuda x-dims)
                            [(drv/dtype-cast alpha dest-dtype)]
                            (unary-op->cuda op)
                            [n-elems])
                    vec)))))
 
   (binary-accum-constant! [stream
-                           dest dest-idx dest-alpha
+                           dest dest-dims dest-alpha
                            scalar
                            n-elems operation reverse-operands?]
     (let [dest-dtype (dtype/get-datatype dest)
@@ -300,24 +279,23 @@
                                                #(cuda-base/load-cas-datatype-function
                                                  "tensor_accum_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
-      (if (and (cudnn-compatible? dest-idx)
-               (= :max operation)
+      (if (and (= :max operation)
                (= 0.0 scalar)
                (or (= dest-dtype :double)
                    (= dest-dtype :float)))
-        (cudnn-activation! stream dest dest-alpha dest n-elems :relu)
+        (cudnn-activation! stream dest dest-dims dest-alpha dest dest-dims :relu)
         (apply cuda-base/launch-linear-kernel
                (-> (concat [stream binop-fn n-elems 0]
                            [(cuda-base/->ptr dest)]
-                           (index-system->cuda dest-idx)
+                           (dimensions->cuda dest-dims)
                            [(->dtype dest-alpha) (->dtype scalar)]
                            (operation->cuda operation reverse-operands?)
                            [n-elems])
                    vec)))))
 
   (binary-op-constant! [stream
-                        dest dest-idx
-                        x x-idx x-alpha
+                        dest dest-dims
+                        x x-dims x-alpha
                         scalar
                         n-elems operation reverse-operands?]
     (let [dest-dtype (dtype/get-datatype dest)
@@ -326,27 +304,26 @@
                                                #(cuda-base/load-all-datatype-function
                                                  "tensor_binary_op_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
-      (if (and (cudnn-compatible? x-idx)
-               (cudnn-compatible? dest-idx)
+      (if (and (= x-dims dest-dims)
                (= 0.0 (double scalar))
                (= :max operation)
                (or (= dest-dtype :double)
                    (= dest-dtype :float)))
-        (cudnn-activation! stream x x-alpha dest n-elems :relu)
+        (cudnn-activation! stream x x-dims x-alpha dest dest-dims :relu)
         (apply cuda-base/launch-linear-kernel
                (-> (concat [stream binop-fn n-elems 0]
                            [(cuda-base/->ptr dest)]
-                           (index-system->cuda dest-idx)
+                           (dimensions->cuda dest-dims)
                            [(cuda-base/->ptr x)]
-                           (index-system->cuda x-idx)
+                           (dimensions->cuda x-dims)
                            [(->dtype x-alpha) (->dtype scalar)]
                            (operation->cuda operation reverse-operands?)
                            [n-elems])
                    vec)))))
 
   (binary-accum! [stream
-                  dest dest-idx dest-alpha
-                  y y-idx y-alpha
+                  dest dest-dims dest-alpha
+                  y y-dims y-alpha
                   n-elems operation reverse-operands?]
     (let [dest-dtype (dtype/get-datatype dest)
           binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-accum
@@ -357,19 +334,19 @@
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream binop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
+                         (dimensions->cuda dest-dims)
                          [(->dtype dest-alpha)]
                          [(cuda-base/->ptr y)]
-                         (index-system->cuda y-idx)
+                         (dimensions->cuda y-dims)
                          [(->dtype y-alpha)]
                          (operation->cuda operation reverse-operands?)
                          [n-elems])
                  vec))))
 
   (binary-op! [stream
-               dest dest-idx
-               x x-idx x-alpha
-               y y-idx y-alpha
+               dest dest-dims
+               x x-dims x-alpha
+               y y-dims y-alpha
                n-elems operation]
     (let [dest-dtype (dtype/get-datatype dest)
           binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-op
@@ -380,22 +357,22 @@
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream binop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
+                         (dimensions->cuda dest-dims)
                          [(cuda-base/->ptr x)]
-                         (index-system->cuda x-idx)
+                         (dimensions->cuda x-dims)
                          [(->dtype x-alpha)]
                          [(cuda-base/->ptr y)]
-                         (index-system->cuda y-idx)
+                         (dimensions->cuda y-dims)
                          [(->dtype y-alpha)]
                          (operation->cuda operation)
                          [n-elems])
                  vec))))
 
   (ternary-op! [stream
-                dest dest-idx
-                x x-idx x-alpha
-                y y-idx y-alpha
-                z z-idx z-alpha
+                dest dest-dims
+                x x-dims x-alpha
+                y y-dims y-alpha
+                z z-dims z-alpha
                 n-elems
                 operation]
     (let [dest-dtype (dtype/get-datatype dest)
@@ -407,24 +384,24 @@
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream ternop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
+                         (dimensions->cuda dest-dims)
                          [(cuda-base/->ptr x)]
-                         (index-system->cuda x-idx)
+                         (dimensions->cuda x-dims)
                          [(->dtype x-alpha)]
                          [(cuda-base/->ptr y)]
-                         (index-system->cuda y-idx)
+                         (dimensions->cuda y-dims)
                          [(->dtype y-alpha)]
                          [(cuda-base/->ptr z)]
-                         (index-system->cuda z-idx)
+                         (dimensions->cuda z-dims)
                          [(->dtype z-alpha)]
                          (ternary-op->cuda operation)
                          [n-elems])
                  vec))))
 
   (ternary-op-constant! [stream
-                         dest dest-idx
-                         a a-idx a-alpha
-                         b b-idx b-alpha
+                         dest dest-dims
+                         a a-dims a-alpha
+                         b b-dims b-alpha
                          constant
                          n-elems
                          operation arg-order]
@@ -437,12 +414,12 @@
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream ternop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
+                         (dimensions->cuda dest-dims)
                          [(cuda-base/->ptr a)]
-                         (index-system->cuda a-idx)
+                         (dimensions->cuda a-dims)
                          [(->dtype a-alpha)]
                          [(cuda-base/->ptr b)]
-                         (index-system->cuda b-idx)
+                         (dimensions->cuda b-dims)
                          [(->dtype b-alpha)]
                          [(->dtype constant)]
                          (ternary-op->cuda operation)
@@ -451,8 +428,8 @@
                  vec))))
 
   (ternary-op-constant-constant! [stream
-                                  dest dest-idx
-                                  a a-idx a-alpha
+                                  dest dest-dims
+                                  a a-dims a-alpha
                                   const-1
                                   const-2
                                   n-elems
@@ -466,9 +443,9 @@
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream ternop-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
-                         (index-system->cuda dest-idx)
+                         (dimensions->cuda dest-dims)
                          [(cuda-base/->ptr a)]
-                         (index-system->cuda a-idx)
+                         (dimensions->cuda a-dims)
                          [(->dtype a-alpha)]
                          [(->dtype const-1)]
                          [(->dtype const-2)]
@@ -483,6 +460,11 @@
           A a-row-count a-col-count a-colstride
           B b-col-count b-colstride
           beta]
+    (comment
+      (println "gemm-args" {:c c-colstride
+                            :a [a-row-count a-col-count a-colstride]
+                            :b [b-col-count b-colstride]
+                            }))
     (cmu/col->row-gemm
      (partial (get-in blas-fn-map [(dtype/get-datatype C) :gemm]) stream)
      trans-a? trans-b? a-row-count a-col-count b-col-count

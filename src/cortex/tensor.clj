@@ -5,8 +5,8 @@
   manage.  Clients should not, for instance, access the stream or the datatype directly.
 
 There is an implicit assumption throughout this file that implementations will loop through
-  smaller entities instead of throwing an exception if sizes don't match.  This allows for
-  instance an efficient accumulation of a batch of gradients into a single summed buffer.
+  smaller entities instead of throwing an exception if sizes don't match.  This is referred to
+  as broadcasting in numpy (https://docs.scipy.org/doc/numpy/user/basics.broadcasting.html).
 
 It does mean, however, that certain conditions that would actually be error cases are harder to
   detect because one has to check for remainders being zero (which potentially could cause a
@@ -51,7 +51,6 @@ For indirect operations element count is num-indexes * num-columns.  After that 
             [clojure.core.matrix :as m]
             [think.resource.core :as resource]
             [clojure.math.combinatorics :as combo]
-            [cortex.tensor.index-system :as is]
             [cortex.tensor.math :as tm]))
 
 
@@ -119,7 +118,7 @@ For indirect operations element count is num-indexes * num-columns.  After that 
 types is guaranteed to work across devices."
   [& args]
   (when-not-error (apply same-device? args)
-    "Tensor argumenst are not all on same device"
+    "Tensor arguments are not all on same device"
     {}))
 
 
@@ -129,25 +128,57 @@ vector of dimension names.  By convention the first member of the shape is the s
 and the last member of the shape is the most rapidly changing.  There can also be optionally a
 companion vector of names which name each dimension.  Names are used when doing things that are
 dimension aware such as a 2d convolution.  Shape is the same as a core-matrix shape."
-  [shape & {:keys [names]}]
-  {:shape shape
-   :names names})
+  [shape & {:keys [names strides]}]
+  (let [rev-shape (vec (reverse shape))
+        rev-strides (vec (reverse strides))
+        strides (->> (reduce (fn [new-strides dim-idx]
+                               (let [dim-idx (long dim-idx)
+                                     cur-stride (get rev-strides dim-idx)]
+                                 (if (= 0 dim-idx)
+                                   (conj new-strides (or cur-stride 1))
+                                   (let [last-idx (dec dim-idx)
+                                         last-stride (long (get new-strides last-idx))
+                                         cur-dim (long (get rev-shape last-idx))
+                                         min-next-stride (* last-stride cur-dim)]
+                                     (when cur-stride
+                                       (when-not-error (<= min-next-stride (long cur-stride))
+                                         "Invalid stride (too small) detected"
+                                         {:dimension-index dim-idx
+                                          :shape shape
+                                          :strides strides
+                                          :current-stride cur-stride
+                                          :min-possible-stride min-next-stride}))
+                                     (conj new-strides (or cur-stride min-next-stride))))))
+                             []
+                             (range (count shape)))
+                     reverse
+                     vec)]
+    {:shape (vec shape)
+     :strides strides
+     :names names}))
 
 
 (defn map->dimensions
-  [{:keys [batch-size channels height width order]
+  [{:keys [batch-size channels height width]
     :or {batch-size 1
          channels 1
          height 1
          width 1}}]
-  {:shape [batch-size channels height width]
-   :names [:batch-size :channels :height :width]})
+  (dimensions [batch-size channels height width]
+              :names [:batch-size :channels :height :width]))
 
 
 (defn dimension-ecount
   "Return the element count indicated by the dimension map"
   ^long [{:keys [shape]}]
   (long (apply * shape)))
+
+
+(defn dimension-buffer-ecount
+  ^long [{:keys [shape strides]}]
+  (+ (long (or 1 (second strides)))
+     (* (- (long (first shape)) 1)
+        (long (first strides)))))
 
 
 (defn dimensions->2d-shape
@@ -178,10 +209,23 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
   [{:keys [shape]}]
   shape)
 
+
+(defn dimensions->strides
+  ^long [{:keys [strides]}]
+  strides)
+
+
+(defn dimensions-dense?
+  [{:keys [shape strides]}]
+  (= (long (first strides))
+     (apply * (drop 1 shape))))
+
+
 (defn dimensions->most-rapidly-changing
   "Get the size of the most rapidly changing dimension"
   ^long [{:keys [shape]}]
   (last shape))
+
 
 (defn dimensions->least-rapidly-changing
   "Get the size of the least rapidly changing dimension"
@@ -245,7 +289,7 @@ that rerequires the items to have the same element count."
   dest)
 
 ;;Tensors are a tuple of device (driver for now) dimensions and index system and buffer.
-(defrecord Tensor [device dimensions index-system buffer]
+(defrecord Tensor [device dimensions buffer]
   dtype/PDatatype
   (get-datatype [tensor] (dtype/get-datatype (:buffer tensor)))
   compute-drv/PDeviceProvider
@@ -270,22 +314,17 @@ that rerequires the items to have the same element count."
 
 
 (defn- dimensions->column-stride
-  ^long [dimensions index-system]
-  (if-let [col-stride (get index-system :column-stride)]
-    col-stride
-    (last (get dimensions :shape))))
-
-
-(defn tensor->index-system
-  [^Tensor tensor]
-  (.index-system tensor))
+  ^long [{:keys [shape strides]}]
+  (long
+   (let [dim-count (count strides)]
+     (if (> dim-count 1)
+       (get strides (- dim-count 2))
+       (get shape 0 1)))))
 
 
 (defn- dimensions->num-columns
-  ^long [dimensions index-system]
-  (if-let [num-columns (get index-system :num-columns)]
-    num-columns
-    (last (get dimensions :shape))))
+  ^long [dimensions]
+  (get-in dimensions [:shape 1] 1))
 
 
 (defn- tensor->dimensions
@@ -296,15 +335,13 @@ that rerequires the items to have the same element count."
 (defn- tensor->column-stride
   ^long [^Tensor tensor]
   (dimensions->column-stride
-   (tensor->dimensions tensor)
-   (tensor->index-system tensor)))
+   (tensor->dimensions tensor)))
 
 
 (defn- tensor->num-columns
   ^long [^Tensor tensor]
   (dimensions->num-columns
-   (tensor->dimensions tensor)
-   (tensor->index-system tensor)))
+   (tensor->dimensions tensor)))
 
 
 (defn- tensor->device
@@ -326,10 +363,6 @@ that rerequires the items to have the same element count."
   [^Tensor tensor]
   (dimensions->batch-shape (tensor->dimensions tensor)))
 
-
-(defn tensor->index-system
-  [^Tensor tensor]
-  (.index-system tensor))
 
 
 (defn- ensure-assignment-matches
@@ -359,21 +392,10 @@ that rerequires the items to have the same element count."
 
 
 (defn construct-tensor
-  (^Tensor [device dimensions index-system buffer]
-   (let [buffer-ecount (ecount buffer)
-         shape (dimensions->shape dimensions)
-         column-stride (dimensions->column-stride dimensions index-system)]
-     (when-let [num-columns (get index-system :num-columns)]
-      (when-not-error (<= (long num-columns)
-                          (long column-stride))
-        "Tensor buffer column-count is greater than supplied column stride"
-        {:num-columns num-columns
-         :column-stride column-stride})))
-   (->Tensor device dimensions index-system buffer))
-  (^Tensor [device dimensions buffer]
-   (->Tensor device dimensions
-             (is/monotonically-increasing (dimension-ecount dimensions))
-             buffer)))
+  ^Tensor [device dimensions buffer]
+  (let [buffer-ecount (ecount buffer)
+        shape (dimensions->shape dimensions)]
+    (->Tensor device dimensions buffer)))
 
 
 (defn reinterpret-tensor
@@ -381,7 +403,6 @@ that rerequires the items to have the same element count."
   data."
   ^Tensor [^Tensor old-tensor new-dimensions]
   (construct-tensor (.device old-tensor) new-dimensions
-                    (tensor->index-system old-tensor)
                     (:buffer old-tensor)))
 
 
@@ -419,7 +440,8 @@ that rerequires the items to have the same element count."
 
 (defn dense?
   [^Tensor tensor]
-  (is/dense? (tensor->index-system tensor)))
+  (dimensions-dense? (tensor->dimensions tensor)))
+
 
 (def strided? (complement dense?))
 
@@ -449,12 +471,11 @@ that rerequires the items to have the same element count."
 (defn make-dense
   ^Tensor [^Tensor tensor]
   (or (as-dense tensor)
-      (let [^Tensor retval (new-tensor [(ecount tensor)]
+      (let [^Tensor retval (new-tensor (shape tensor)
                                        :datatype (dtype/get-datatype tensor)
                                        :init-value nil)]
         (mp/assign! retval tensor)
-        (construct-tensor (tensor->device retval) (tensor->dimensions tensor)
-                          (tensor->buffer retval)))))
+        retval)))
 
 (defn copy-to-java-type
   [dest ^Tensor src]
@@ -585,11 +606,8 @@ and the rest of the dimensions being squashed into n-rows."
           sub-buffer (compute-drv/sub-buffer (tensor->buffer tensor)
                                              start-offset required-length)]
       (construct-tensor (tensor->device tensor)
-              (dimensions [row-length col-length])
-              (assoc (tensor->index-system tensor)
-                     :num-columns col-length
-                     :column-stride column-stride)
-              sub-buffer))))
+                        (dimensions [row-length col-length] :strides [column-stride 1])
+                        sub-buffer))))
 
 
 (defn- ensure-indexes
@@ -601,131 +619,7 @@ and the rest of the dimensions being squashed into n-rows."
   (let [first-len (ecount (first args))]
     (when-not-error (every? #(= first-len (ecount %)) (rest args))
       "Index tensors must all have matching element-counts"
-      {:element-counts (map ecount args)}))
-  (when-not-error (every? #(is/simple-monotonically-increasing? (tensor->index-system %))
-                          args)
-    "Indexes must be simply indexed which means simple monotonically increasing with no repetition."
-    {:index-strategies (map tensor->index-system args)}))
-
-(defn ensure-indexable-tensor
-  [tensor]
-  (when-not-error (is/simple-monotonically-increasing? (tensor->index-system tensor))
-    "Cannot index members of non-monotonically increasing tensors."
-    {:index-system (tensor->index-system tensor)}))
-
-
-(defn index-columns
-  "This returns a new tensor with the columns indexed by indexes.  Operations are restricted
-to non-gemm operations."
-  ^Tensor [^Tensor tensor ^Tensor indexes]
-  (ensure-indexes indexes)
-  (ensure-indexable-tensor tensor)
-  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
-    (when-not-error (= n-cols (ecount indexes))
-      "Index-ecount and num-columns mismatch"
-      {:index-ecount (ecount indexes)
-       :num-columns n-cols})
-    (update tensor
-            :index-system
-            (fn [old-index-system]
-              (is/update-index-system
-               :strategy (is/indexed-strategy (tensor->buffer indexes))
-               :elements-per-idx 1)))))
-
-
-(defn indexed-columns?
-  "Return true if this tensor has indexed columns"
-  [tensor]
-  (let [index-system (tensor->index-system tensor)
-        [n-rows n-cols] (tensor->2d-shape tensor)
-        n-rows (long n-rows)
-        n-cols (long n-cols)]
-    (and (is/indexed? index-system)
-         (= 1 (is/elements-per-index index-system))
-         (= n-cols
-            (is/index-count index-system)))))
-
-
-(defn index-rows
-  "This returns a new tensor with the rows indexed by indexes.  Operations are restricted
-to non-gemm operations."
-  ^Tensor [^Tensor tensor ^Tensor indexes]
-  (ensure-indexes indexes)
-  (ensure-indexable-tensor tensor)
-  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
-    (when-not-error (= n-rows (ecount indexes))
-      "Index-ecount and num-rows mismatch"
-      {:index-ecount (ecount indexes)
-       :num-rows n-rows})
-    (update tensor
-            :index-system
-            (fn [old-index-system]
-              (is/update-index-system
-               :strategy (is/indexed-strategy (tensor->buffer indexes))
-               :elements-per-idx n-cols)))))
-
-
-(defn indexed-rows?
-  "Return true if this tensor has indexed rows"
-  [tensor]
-  (let [index-system (tensor->index-system tensor)
-        [n-rows n-cols] (tensor->2d-shape tensor)
-        n-rows (long n-rows)
-        n-cols (long n-cols)]
-    (and (is/indexed? index-system)
-         (= n-cols (is/elements-per-index index-system))
-         (= n-rows
-            (is/index-count index-system)))))
-
-
-(defn index-elements
-  "This returns a new tensor with the elements indexed by indexes.  Operations are restricted
-to non-gemm operations."
-  ^Tensor [^Tensor tensor ^Tensor indexes]
-  (ensure-indexes indexes)
-  (ensure-indexable-tensor tensor)
-  (let [n-elems (count tensor)]
-    (when-not-error (= n-elems (ecount indexes))
-      "Index-ecount and num-rows mismatch"
-      {:index-ecount (ecount indexes)
-       :num-elements n-elems})
-    (update tensor
-            :index-system
-            (fn [old-index-system]
-              (is/update-index-system
-               :strategy (is/indexed-strategy (tensor->buffer indexes))
-               :elements-per-idx 1)))))
-
-
-(defn indexed-elements?
-  "Return true if this tensor has indexed rows"
-  [tensor]
-  (let [index-system (tensor->index-system tensor)
-        n-elems (ecount tensor)]
-    (and (is/indexed? index-system)
-         (= 1 (is/elements-per-index index-system))
-         (= n-elems
-            (is/index-count index-system)))))
-
-(defn- simple-tensor?
-  "A simple tensor is one that can be copied or assigned to with memset or memcpy (not memmove)
-  semantics."
-  [tensor]
-  (and (dense? tensor)
-       (= :monotonically-increasing
-          (is/system->strategy-type (tensor->index-system tensor)))
-       (= (ecount tensor)
-          (is/system->index-length (tensor->index-system tensor)))))
-
-
-(defn- ensure-basic-indexing
-  "Basic indexing means monotonically increasing without indexed rows or any of the more
-  advanced indexing system features"
-  [& args]
-  (doseq [tensor args]
-   (when-not-error (is/simple-monotonically-increasing? (tensor->index-system tensor))
-     "tensor must have basic indexing"
-     {:index-system (tensor->index-system)})))
+      {:element-counts (map ecount args)})))
 
 
 (defn rows
@@ -735,7 +629,6 @@ to non-gemm operations."
         column-stride (tensor->column-stride tensor)
         device (tensor->device tensor)
         buffer (tensor->buffer tensor)]
-    (ensure-basic-indexing tensor)
     (mapv (fn [^long idx]
             (let [offset (* idx column-stride)
                   new-buf (compute-drv/sub-buffer buffer offset n-cols)]
@@ -752,13 +645,10 @@ to non-gemm operations."
         buffer (tensor->buffer tensor)
         col-required-mem (* (- (long n-rows) 1) column-stride)
         buf-ecount (ecount buffer)]
-    (ensure-basic-indexing tensor)
     (mapv (fn [^long offset]
             (let [new-buf (compute-drv/sub-buffer buffer offset (- buf-ecount offset))]
-              (construct-tensor device (dimensions [n-rows])
-                                (assoc (tensor->index-system tensor)
-                                       :num-columns 1
-                                       :column-stride column-stride)
+              (construct-tensor device
+                                (dimensions [n-rows] :strides [column-stride])
                                 new-buf)))
           (range n-cols))))
 
@@ -773,18 +663,19 @@ to non-gemm operations."
 
 (defmethod typed-assign! [:tensor :number]
   [^Tensor dest src]
-  (if (simple-tensor? dest)
+  (if (dense? dest)
     (compute-drv/memset (check-stream) (tensor->buffer dest) 0 src (ecount dest))
     (tm/assign-constant! (check-stream)
-                         (tensor->buffer dest) (tensor->index-system dest)
+                         (tensor->buffer dest)
+                         (tensor->dimensions dest)
                          src (ecount dest))))
 
 
 (defn- memcpy-semantics?
   [dest src]
   (and (= (ecount dest) (ecount src))
-       (simple-tensor? dest)
-       (simple-tensor? src)
+       (dense? dest)
+       (dense? src)
        (= (get-datatype dest)
           (get-datatype src))))
 
@@ -812,8 +703,8 @@ to non-gemm operations."
       (do
         (ensure-same-device dest src)
         (tm/assign! (check-stream)
-                    (tensor->buffer dest) (tensor->index-system dest)
-                    (tensor->buffer src) (tensor->index-system src)
+                    (tensor->buffer dest) (tensor->dimensions dest)
+                    (tensor->buffer src) (tensor->dimensions src)
                     (max (ecount src) (ecount dest)))))))
 
 
@@ -854,7 +745,7 @@ to non-gemm operations."
     :tensor
     (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
       (tm/unary-accum! (check-stream)
-                       (tensor->buffer dest) (tensor->index-system dest)
+                       (tensor->buffer dest) (tensor->dimensions dest)
                        alpha op (ecount dest))
       (do
         (ensure-datatypes (get-datatype dest) x)
@@ -862,8 +753,8 @@ to non-gemm operations."
         (ensure-ecounts-commensurate dest x)
         (check-partial-alias dest x)
         (tm/unary-op! (check-stream)
-                      (tensor->buffer dest) (tensor->index-system dest)
-                      (tensor->buffer x) (tensor->index-system x)
+                      (tensor->buffer dest) (tensor->dimensions dest)
+                      (tensor->buffer x) (tensor->dimensions x)
                       alpha op
                       (max (ecount dest) (ecount x))))))
   dest)
@@ -900,15 +791,15 @@ to non-gemm operations."
     (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
       (tm/binary-accum-constant!
        (check-stream)
-       (tensor->buffer dest) (tensor->index-system dest) alpha
+       (tensor->buffer dest) (tensor->dimensions dest) alpha
        y
        (ecount dest) op reverse-operands?)
       (do
         (check-partial-alias dest x)
         (tm/binary-op-constant!
          (check-stream)
-         (tensor->buffer dest) (tensor->index-system dest)
-         (tensor->buffer x) (tensor->index-system x) alpha
+         (tensor->buffer dest) (tensor->dimensions dest)
+         (tensor->buffer x) (tensor->dimensions x) alpha
          y
          (max (ecount x)
               (ecount dest)) op reverse-operands?))))
@@ -939,8 +830,8 @@ to non-gemm operations."
         (check-partial-alias dest y)
         (tm/binary-accum!
          (check-stream)
-         (tensor->buffer dest) (tensor->index-system dest) alpha
-         (tensor->buffer y) (tensor->index-system y) beta
+         (tensor->buffer dest) (tensor->dimensions dest) alpha
+         (tensor->buffer y) (tensor->dimensions y) beta
          (max (ecount dest)
               (ecount y)) op rev-ops?))
       (do
@@ -951,9 +842,9 @@ to non-gemm operations."
         (check-partial-alias dest x y)
         (tm/binary-op!
          (check-stream)
-         (tensor->buffer dest) (tensor->index-system dest)
-         (tensor->buffer x) (tensor->index-system x) alpha
-         (tensor->buffer y) (tensor->index-system y) beta
+         (tensor->buffer dest) (tensor->dimensions dest)
+         (tensor->buffer x) (tensor->dimensions x) alpha
+         (tensor->buffer y) (tensor->dimensions y) beta
          (max (ecount dest)
               (ecount x)
               (ecount y)) op))))
@@ -1021,24 +912,24 @@ Datatypes must match."
           (ensure-ecounts-commensurate dest tens))
         (case num-tensor-args
           3 (tm/ternary-op! (check-stream)
-                            (tensor->buffer dest) (tensor->index-system dest)
-                            (tensor->buffer x) (tensor->index-system x) alpha
-                            (tensor->buffer y) (tensor->index-system y) beta
-                            (tensor->buffer z) (tensor->index-system z) gamma
+                            (tensor->buffer dest) (tensor->dimensions dest)
+                            (tensor->buffer x) (tensor->dimensions x) alpha
+                            (tensor->buffer y) (tensor->dimensions y) beta
+                            (tensor->buffer z) (tensor->dimensions z) gamma
                             max-ecount
                             op)
           2 (let [[[a-tens a-mul] [b-tens b-mul]] tensor-pairs]
               (tm/ternary-op-constant! (check-stream)
-                                       (tensor->buffer dest) (tensor->index-system dest)
-                                       (tensor->buffer a-tens) (tensor->index-system a-tens) a-mul
-                                       (tensor->buffer b-tens) (tensor->index-system b-tens) b-mul
+                                       (tensor->buffer dest) (tensor->dimensions dest)
+                                       (tensor->buffer a-tens) (tensor->dimensions a-tens) a-mul
+                                       (tensor->buffer b-tens) (tensor->dimensions b-tens) b-mul
                                        (first constants)
                                        max-ecount
                                        op arg-order))
           1 (let [[[a-tens a-mul]] tensor-pairs]
               (tm/ternary-op-constant-constant! (check-stream)
-                                                (tensor->buffer dest) (tensor->index-system dest)
-                                                (tensor->buffer a-tens) (tensor->index-system a-tens) a-mul
+                                                (tensor->buffer dest) (tensor->dimensions dest)
+                                                (tensor->buffer a-tens) (tensor->dimensions a-tens) a-mul
                                                 (first constants)
                                                 (second constants)
                                                 max-ecount
@@ -1066,7 +957,6 @@ Datatypes must match."
   ^Tensor [C trans-a? trans-b? alpha A B beta]
   (ensure-datatypes (get-datatype C) A B)
   (ensure-same-device C A B)
-  (ensure-basic-indexing C A B)
   (ensure-cudnn-datatype (get-datatype C) "gemm")
   (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? A)
         [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? B)
@@ -1113,7 +1003,9 @@ So either it is dense *or* num-columns is 1"
   ^long [^Tensor tensor]
   (if (dense? tensor)
     1
-    (tensor->column-stride tensor)))
+    (or (-> (get-in tensor [:dimensions :strides])
+            last)
+        1)))
 
 
 (defn gemv!
@@ -1121,7 +1013,6 @@ So either it is dense *or* num-columns is 1"
   ^Tensor [c trans-a? alpha A x beta]
   (ensure-datatypes (get-datatype c) A x)
   (ensure-same-device c A x)
-  (ensure-basic-indexing c A x)
   (ensure-cudnn-datatype (get-datatype c) "gemv")
   (ensure-vector-indexable x c)
   (let [[a-row-count a-col-count] (tensor->2d-shape A)
@@ -1150,7 +1041,6 @@ preconditions and then returns the type of batch normalization required (spatial
         input (first io-args)]
     (apply ensure-datatypes (get-datatype (first all-args)) all-args)
     (apply ensure-same-device all-args)
-    (apply ensure-basic-indexing all-args)
     (ensure-cudnn-datatype (get-datatype (first io-args)) "batch-normalize")
     (when-not-error (> (double epsilon) 1e-5)
       "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
@@ -1357,10 +1247,7 @@ See batch-normalize-update-and-apply!"
   :logistic, :tanh :relu (max 0 x)
   logistic: out * (1 - out) * out-grad
   tanh: (1 - out * out) * out-grad
-  relu: (out > 0) ? out-grad : 0
-
-  Due to this using cudnn functions, this is only available on tensors with fairly
-  basic index system components."
+  relu: (out > 0) ? out-grad : 0"
   ^Tensor [input-gradient output-gradient output op]
   (when-not-error (not (compute-drv/alias? (tensor->buffer input-gradient)
                                            (tensor->buffer output)))
@@ -1368,7 +1255,6 @@ See batch-normalize-update-and-apply!"
     {})
   (ensure-datatypes (get-datatype input-gradient) output output-gradient)
   (ensure-same-device input-gradient output output-gradient)
-  (ensure-basic-indexing input-gradient output output-gradient)
   (ensure-cudnn-datatype (get-datatype input-gradient) "activation-gradient!")
   (when-not-error (contains? #{:logistic :tanh :relu} op)
     "Only :logistic :tanh and :relu are supported"
@@ -1397,7 +1283,6 @@ softmax: https://en.wikipedia.org/wiki/Softmax_function"
   ^Tensor [output input]
   (ensure-datatypes (get-datatype output) input)
   (ensure-same-device output input)
-  (ensure-basic-indexing output input)
   (ensure-cudnn-datatype (get-datatype input) "softmax!")
   (when-not-error (= (shape output)
                      (shape input))

@@ -1446,6 +1446,38 @@ relies only on blockDim.x block.x and thread.x"
   [cudnn-datatype]
   (get cudnn->datatype-map cudnn-datatype))
 
+(defn tensor-with-strides
+  ^cudnn$cudnnTensorStruct [dtype shape strides & {:keys [tensor-format]}]
+  (when-not (< (count shape) 5)
+    (throw (ex-info "cuda backend does not support 5D tensors (yet)."
+                    {:shape-count (count shape)})))
+  (let [tensor-format (or tensor-format cudnn/CUDNN_TENSOR_NCHW)
+        retval (cudnn$cudnnTensorStruct.)
+        shape-count (count shape)
+        strides-count (count strides)
+        ;;pad out to 4 entries
+        shape (->> (concat (take (- 4 shape-count) (repeat 1))
+                           shape)
+                   vec)
+        strides (when strides
+                  (->> (concat (take (- 4 strides-count) (repeat (first strides)))
+                               strides)
+                       vec))]
+    (cudnn-call (cudnn/cudnnCreateTensorDescriptor retval))
+    ;;set the format
+    (cudnn-call (cudnn/cudnnSetTensor4dDescriptor
+                 retval (int tensor-format) (dtype->cudnn dtype)
+                 (int (shape 0)) (int (shape 1)) (int (shape 2)) (int (shape 3))))
+    ;;set the strides
+    (when (and strides
+               (not (= (long (first strides)) (long (apply * 1 shape)))))
+      (cudnn-call (cudnn/cudnnSetTensor4dDescriptorEx
+                   retval (dtype->cudnn dtype)
+                   (int (shape 0)) (int (shape 1)) (int (shape 2)) (int (shape 3))
+                   (int (strides 0)) (int (strides 1))
+                   (int (strides 2)) (int (strides 3)))))
+    (resource/track retval)))
+
 (defn tensor
   (^cudnn$cudnnTensorStruct [dtype tensor-format n c h w]
    (let [retval (cudnn$cudnnTensorStruct.)]
