@@ -85,9 +85,10 @@
         datatype (datatype network)
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))]
-    (reduce (fn [compute-buffers {:keys [key non-trainable? buffer-id] :as parameter}]
-              (let [gradients? (and (not non-trainable?) gradients?)
-                    numeric-gradients? (and (not non-trainable?) numeric-gradients?)
+    (reduce (fn [compute-buffers {:keys [key buffer-id] :as parameter}]
+              (let [param-gradients? (get parameter :gradients?)
+                    gradients? (and param-gradients? gradients?)
+                    numeric-gradients? (and param-gradients? numeric-gradients?)
                     l2-max-constraint (double (get parameter :l2-max-constraint 0.0))]
                 (update compute-buffers buffer-id
                         (fn [compute-buffer]
@@ -756,23 +757,24 @@ traversal with the inputs and outputs mapped to specific buffers."
         buffer-alpha (/ 1.0 (double (batch-size network)))]
     ;; Call compute-parameters! on all of the paramter buffers
     (reduce (fn [offset {:keys [buffer gradient
-                                learning-attenuation non-trainable?]
-                         :or {learning-attenuation 1.0} :as parameter}]
-              (let [elem-count (long (m/ecount buffer))
-                    l2-max-constraint (double (get parameter :l2-max-constraint 0))
-                    ;;For some things it is easier to just
-                    ;;work at the flat buffer level and
-                    ;;not at the device array level.
-                    gradient-buf (math/device-buffer gradient)
-                    param-buf (math/device-buffer buffer)]
-                (when-not non-trainable?
-                  (optimize/compute-parameters! optimizer
-                                                (optimizer-parameters network)
-                                                (* buffer-alpha learning-attenuation)
-                                                offset gradient buffer)
-                  (when (is-l2-max-constraint-valid? parameter)
-                    (apply-l2-max-constraint network parameter)))
-                (+ offset elem-count)))
+                                learning-attenuation gradients?]
+                         :or {learning-attenuation 1.0
+                              gradients? true} :as parameter}]
+              (when gradients?
+               (let [elem-count (long (m/ecount buffer))
+                     l2-max-constraint (double (get parameter :l2-max-constraint 0))
+                     ;;For some things it is easier to just
+                     ;;work at the flat buffer level and
+                     ;;not at the device array level.
+                     gradient-buf (math/device-buffer gradient)
+                     param-buf (math/device-buffer buffer)]
+                 (optimize/compute-parameters! optimizer
+                                               (optimizer-parameters network)
+                                               (* buffer-alpha learning-attenuation)
+                                               offset gradient buffer)
+                 (when (is-l2-max-constraint-valid? parameter)
+                   (apply-l2-max-constraint network parameter))
+                 (+ offset elem-count))))
             0
             parameters)
 

@@ -59,7 +59,7 @@
               :numeric-gradient numeric-input-gradient}]
             (->> parameters
                  (map second)
-                 (remove #(get-in % [:description :non-trainable?]))
+                 (filter #(get-in % [:description :gradients?]))
                  (map (fn [{:keys [description parameter buffer] :as entry}]
                         (merge parameter buffer)))))))
 

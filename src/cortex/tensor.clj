@@ -395,12 +395,6 @@ that rerequires the items to have the same element count."
   (^Tensor [device dimensions buffer]
    (let [buffer-ecount (ecount buffer)
          shape (dimensions->shape dimensions)
-         required-buffer-ecount (dimension-buffer-ecount dimensions)]
-     (when-not-error (<= required-buffer-ecount buffer-ecount)
-       "Supplied buffer does not have enough capacity for declared dimensions"
-       {:buffer-ecount buffer-ecount
-        :dimensions dimensions
-        :required-buffer-ecount required-buffer-ecount}))
    (->Tensor device dimensions buffer)))
 
 
