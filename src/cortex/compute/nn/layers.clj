@@ -13,8 +13,7 @@ implementation as possible."
             [think.datatype.core :as dtype]
             [cortex.graph :as graph]
             [cortex.nn.layers :as cortex-layers]
-            [cortex.tensor :as tensor]
-            [cortex.tensor.index-system :as ci]))
+            [cortex.tensor :as tensor]))
 
 
 (set! *warn-on-reflection* true)
@@ -296,10 +295,7 @@ and then forward many times for every parameter of the network."
             n-pixels (quot input-size n-channels)
             neg-scale (cond-> (->tensor (get-in parameter-buffers [:neg-scale :buffer]))
                         (not= 1 n-channels)
-                        (assoc :dimensions (tensor/dimensions [n-channels n-pixels])
-                               :index-system (ci/index-system
-                                              (ci/monotonically-increasing-strategy input-size)
-                                              :idx-denominator n-pixels)))
+                        (assoc :dimensions (tensor/dimensions [n-channels 1])))
             scale-buffer (->tensor scale-buffer)]
         (tensor/ternary-op! scale-buffer 1.0 input 1.0 neg-scale 1.0 1.0 :select)
         (tensor/binary-op! output 1.0 input 1.0 scale-buffer :*))))
@@ -315,10 +311,7 @@ and then forward many times for every parameter of the network."
            n-pixels (quot (long input-size) n-channels)
            neg-scale-gradient (cond-> (->tensor (get-in parameter-buffers [:neg-scale :gradient]))
                                 (not= 1 n-channels)
-                                (assoc :dimensions (tensor/dimensions [n-channels n-pixels])
-                                       :index-system (ci/index-system
-                                                      (ci/monotonically-increasing-strategy input-size)
-                                                      :idx-denominator n-pixels)))
+                                (assoc :dimensions (tensor/dimensions [n-channels 1])))
            scale-buffer (->tensor scale-buffer)]
        ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output
        ;;anyway

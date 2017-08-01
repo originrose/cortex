@@ -20,12 +20,14 @@ void ternary_op_constant(dtype* dest, const general_index_system& dest_sys,
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
+    int max_shape[5];
+    general_index_system::get_max_shape(dest_sys, x_sys, y_sys, max_shape );
     dtype arg_buf[3];
-    arg_buf[0] = x[x_sys(elem_idx)] * x_alpha;
-    arg_buf[1] = y[y_sys(elem_idx)] * y_alpha;
+    arg_buf[0] = x[x_sys(elem_idx, max_shape)] * x_alpha;
+    arg_buf[1] = y[y_sys(elem_idx, max_shape)] * y_alpha;
     arg_buf[2] = z;
 
-    dest[dest_sys(elem_idx)]
+    dest[dest_sys(elem_idx, max_shape)]
       = operation( arg_buf[x_arg_idx],
 		   arg_buf[y_arg_idx],
 		   arg_buf[z_arg_idx] );

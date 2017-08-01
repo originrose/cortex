@@ -19,10 +19,12 @@ void ternary_op(dtype* dest, const general_index_system& dest_sys,
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    dest[dest_sys(elem_idx)]
-      = operation( x[x_sys(elem_idx)] * x_alpha,
-		   y[y_sys(elem_idx)] * y_alpha,
-		   z[z_sys(elem_idx)] * z_alpha );
+    int max_shape[5];
+    general_index_system::get_max_shape(dest_sys, x_sys, y_sys, z_sys, max_shape );
+    dest[dest_sys(elem_idx, max_shape)]
+      = operation( x[x_sys(elem_idx, max_shape)] * x_alpha,
+		   y[y_sys(elem_idx, max_shape)] * y_alpha,
+		   z[z_sys(elem_idx, max_shape)] * z_alpha );
   }
 }
 

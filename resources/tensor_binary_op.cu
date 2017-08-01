@@ -18,9 +18,11 @@ void binary_op(dtype* dest, const general_index_system& dest_sys,
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    dest[dest_sys(elem_idx)]
-      = operation( lhs[lhs_sys(elem_idx)] * lhs_alpha,
-		   rhs[rhs_sys(elem_idx)] * rhs_alpha);
+    int max_shape[5];
+    general_index_system::get_max_shape(dest_sys, lhs_sys, rhs_sys, max_shape );
+    dest[dest_sys(elem_idx, max_shape)]
+      = operation( lhs[lhs_sys(elem_idx, max_shape)] * lhs_alpha,
+		   rhs[rhs_sys(elem_idx, max_shape)] * rhs_alpha);
   }
 }
 

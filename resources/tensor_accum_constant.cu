@@ -17,7 +17,7 @@ void accum_constant(dtype* dest, const general_index_system& dest_sys, dtype des
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    perform_cas(dest + dest_sys(elem_idx),
+    perform_cas(dest + dest_sys(elem_idx, dest_sys.rev_shape),
 		tensor::accum_constant_op<dtype>( dest_alpha,
 						  scalar,
 						  operation ) );

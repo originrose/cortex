@@ -314,12 +314,12 @@ that rerequires the items to have the same element count."
 
 
 (defn- dimensions->column-stride
-  ^long [{:keys [strides]}]
+  ^long [{:keys [shape strides]}]
   (long
    (let [dim-count (count strides)]
      (if (> dim-count 1)
        (get strides (- dim-count 2))
-       (get strides 0 1)))))
+       (get shape 0 1)))))
 
 
 (defn- dimensions->num-columns

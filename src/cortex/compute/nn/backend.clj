@@ -109,7 +109,7 @@ computelayer/forward,backward."
 
 (defn biased-multiply!
   [backend input weights bias output]
-  (let [input (->ct-tensor input)
+  (let [input (->simple-batch-tensor input)
         weights (->ct-tensor weights)
         bias (->ct-tensor bias)
         output (->ct-tensor output)]

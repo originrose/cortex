@@ -18,8 +18,10 @@ void binary_op_constant(dtype* dest, const general_index_system& dest_sys,
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    dest[dest_sys(elem_idx)]
-      = operation( static_cast<dtype>(lhs[lhs_sys(elem_idx)] * lhs_alpha),
+    int max_shape[5];
+    general_index_system::get_max_shape(dest_sys, lhs_sys, max_shape );
+    dest[dest_sys(elem_idx, max_shape)]
+      = operation( static_cast<dtype>(lhs[lhs_sys(elem_idx, max_shape)] * lhs_alpha),
       		   scalar );
   }
 }

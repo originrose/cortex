@@ -12,7 +12,7 @@ void assign_constant(dtype* dest, const general_index_system& idx_system
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    dest[idx_system(elem_idx)] = val;
+    dest[idx_system(elem_idx, idx_system.rev_shape)] = val;
   }
 };
 

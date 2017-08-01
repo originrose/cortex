@@ -3,93 +3,77 @@
 
 
 namespace tensor { namespace index_system {
-    struct strategy_type
-    {
-      enum _enum
-      {
-	constant = 0,
-	monotonically_increasing,
-	monotonically_decreasing,
-	indexed,
-      };
-    };
-
-    template<typename strat_type_t, typename addr_layout_t>
-    struct specific_index_system
-    {
-      strat_type_t m_strategy;
-      addr_layout_t m_addrlayout;
-      __device__ specific_index_system(strat_type_t st, addr_layout_t ad)
-	: m_strategy(st)
-	, m_addrlayout(ad) {
-      }
-      __device__ int operator()(int idx) const {
-	return m_addrlayout(m_strategy(idx));
-      }
-    };
 
     struct general_index_system
     {
-      int type;
-      int c_or_len;
-      const int* indexes;
-      int num_columns;
-      int column_stride;
-      int idx_numer;
-      int idx_denom;
+      int rev_shape[5];
+      int rev_strides [5];
 
-      __host__ __device__ general_index_system(int t, int c_l, const int* idx,
-					       int n_c, int col_s,
-					       int _idx_numer, int _idx_denom
-	)
-	: type(t)
-	, c_or_len(c_l)
-	, indexes(idx)
-	, num_columns(n_c)
-	, column_stride(col_s)
-	, idx_numer( _idx_numer )
-	, idx_denom ( _idx_denom ){
+      __host__ __device__ general_index_system(int sh0, int sh1, int sh2, int sh3, int sh4,
+					       int st0, int st1, int st2, int st3, int st4) {
+	rev_shape[0] = sh0;
+	rev_shape[1] = sh1;
+	rev_shape[2] = sh2;
+	rev_shape[3] = sh3;
+	rev_shape[4] = sh4;
+	rev_strides[0] = st0;
+	rev_strides[1] = st1;
+	rev_strides[2] = st2;
+	rev_strides[3] = st3;
+	rev_strides[4] = st4;
       }
-      __device__ int get_index_from_strategy( int elem_idx ) const {
-	switch(type)
-	{
-	case strategy_type::constant:
-	  return c_or_len;
-	case strategy_type::monotonically_increasing:
-	  return elem_idx % c_or_len;
-	case strategy_type::monotonically_decreasing:
-	  return c_or_len - (elem_idx % c_or_len) - 1;
-	case strategy_type::indexed:
-	  return indexes[elem_idx % c_or_len];
-	};
-	return 0;
-      }
-      __device__ int idx_to_addr( int idx ) const {
-	idx = (idx * idx_numer) / idx_denom;
-	if( num_columns != column_stride ) {
-	  return idx % num_columns +
-	    (column_stride * (idx / num_columns));
+      __device__ int operator()(int elem_idx, const int max_shape[5] ) const {
+
+	int offset = 0;
+	for (int idx = 0; idx < 5; ++idx ) {
+	  offset += rev_strides[idx] * ( (elem_idx % max_shape[idx]) % rev_shape[idx] );
+	  elem_idx /= max_shape[idx];
 	}
-	else {
-	  return idx;
+	return offset;
+
+      }
+      static inline __device__
+      void get_max_shape( const general_index_system& sys1,
+			  const general_index_system& sys2,
+			  int max_shape[5] ) {
+	for (int idx = 0; idx < 5; ++idx ) {
+	  max_shape[idx] = max(sys1.rev_shape[idx], sys2.rev_shape[idx] );
 	}
       }
-      __device__ int operator()(int elem_idx ) const {
-	return idx_to_addr( get_index_from_strategy( elem_idx ) );
+      static inline __device__
+      void get_max_shape( const general_index_system& sys1,
+			  const general_index_system& sys2,
+			  const general_index_system& sys3,
+			  int max_shape[5] ) {
+	for (int idx = 0; idx < 5; ++idx ) {
+	  max_shape[idx] = max( max(sys1.rev_shape[idx], sys2.rev_shape[idx] ),
+				sys3.rev_shape[idx] );
+	}
+      }
+      static inline __device__
+      void get_max_shape( const general_index_system& sys1,
+			  const general_index_system& sys2,
+			  const general_index_system& sys3,
+			  const general_index_system& sys4,
+			  int max_shape[5] ) {
+	for (int idx = 0; idx < 5; ++idx ) {
+	  max_shape[idx] = max( max( max(sys1.rev_shape[idx], sys2.rev_shape[idx] ),
+				     sys3.rev_shape[idx] ),
+				sys4.rev_shape[idx] );
+	}
       }
     };
+
   }}
 
 
 #define EXPLODE_IDX_SYSTEM(varname)					\
-  int type##varname, int c_or_len##varname, const int* ptr##varname,	\
-    int num_cols##varname, int column_stride##varname,			\
-    int idx_numer##varname, int idx_denum##varname
+  int sh0##varname, int sh1##varname, int sh2##varname, int sh3##varname, int sh4##varname, \
+    int st0##varname, int st1##varname, int st2##varname, int st3##varname, int st4##varname
 
 #define ENCAPSULATE_IDX_SYSTEM(varname)					\
-  general_index_system(type##varname, c_or_len##varname, ptr##varname,	\
-		       num_cols##varname, column_stride##varname,	\
-		       idx_numer##varname, idx_denum##varname)
+  general_index_system( sh0##varname, sh1##varname, sh2##varname, sh3##varname, sh4##varname, \
+			st0##varname, st1##varname, st2##varname, st3##varname, st4##varname )
 
 
 
