@@ -392,10 +392,10 @@ that rerequires the items to have the same element count."
 
 
 (defn construct-tensor
-  (^Tensor [device dimensions buffer]
-   (let [buffer-ecount (ecount buffer)
-         shape (dimensions->shape dimensions)
-   (->Tensor device dimensions buffer)))
+  ^Tensor [device dimensions buffer]
+  (let [buffer-ecount (ecount buffer)
+        shape (dimensions->shape dimensions)]
+    (->Tensor device dimensions buffer)))
 
 
 (defn reinterpret-tensor
@@ -1003,7 +1003,9 @@ So either it is dense *or* num-columns is 1"
   ^long [^Tensor tensor]
   (if (dense? tensor)
     1
-    (tensor->column-stride tensor)))
+    (or (-> (get-in tensor [:dimensions :strides])
+            last)
+        1)))
 
 
 (defn gemv!

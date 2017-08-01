@@ -286,33 +286,46 @@ and then forward many times for every parameter of the network."
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
     (tensor/with-stream (nn-backend/get-stream)
-      (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
-            input (->tensor (first-buffer input-buffers))
-            output (->tensor (first-buffer output-buffers))
+      (let [n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
+            spatial? (not= 1 n-channels)
+            ;;Construct the tensors carefully to ensure that broadcasting will work as expected.
+            ->batch-tensor #(->batch-tensor %
+                                            (math/batch-size (first-buffer input-buffers))
+                                            (graph/node->input-dimension layer)
+                                            spatial?)
+            ->tensor #(cond-> (math/array->cortex-tensor %)
+                        spatial?
+                        (assoc :dimensions (tensor/dimensions [n-channels 1])))
+
+            input (->batch-tensor (first-buffer input-buffers))
+            output (->batch-tensor (first-buffer output-buffers))
             [num-batches input-size] (tensor/shape input)
             input-size (long input-size)
-            n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
             n-pixels (quot input-size n-channels)
-            neg-scale (cond-> (->tensor (get-in parameter-buffers [:neg-scale :buffer]))
-                        (not= 1 n-channels)
-                        (assoc :dimensions (tensor/dimensions [n-channels 1])))
-            scale-buffer (->tensor scale-buffer)]
+            neg-scale (->tensor (get-in parameter-buffers [:neg-scale :buffer]))
+            scale-buffer (->batch-tensor scale-buffer)]
         (tensor/ternary-op! scale-buffer 1.0 input 1.0 neg-scale 1.0 1.0 :select)
         (tensor/binary-op! output 1.0 input 1.0 scale-buffer :*))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
     (tensor/with-stream (nn-backend/get-stream)
-     (let [->tensor #(math/array->cortex-tensor (math/as-2d-batch-matrix %))
-           input-gradient (->tensor (first-gradient input-buffers))
-           input (->tensor (first-buffer input-buffers))
-           output-gradient (->tensor (first-gradient output-buffers))
-           n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
+      (let [n-channels (long (cortex-layers/prelu-layer->prelu-size layer))
+            spatial? (not= 1 n-channels)
+            ;;Construct the tensors carefully to ensure that broadcasting will work as expected.
+            ->batch-tensor #(->batch-tensor %
+                                            (math/batch-size (first-buffer input-buffers))
+                                            (graph/node->input-dimension layer)
+                                            spatial?)
+            ->tensor #(cond-> (math/array->cortex-tensor %)
+                        spatial?
+                        (assoc :dimensions (tensor/dimensions [n-channels 1])))
+           input-gradient (->batch-tensor (first-gradient input-buffers))
+           input (->batch-tensor (first-buffer input-buffers))
+           output-gradient (->batch-tensor (first-gradient output-buffers))
            [num-batches input-size] (tensor/shape input)
            n-pixels (quot (long input-size) n-channels)
-           neg-scale-gradient (cond-> (->tensor (get-in parameter-buffers [:neg-scale :gradient]))
-                                (not= 1 n-channels)
-                                (assoc :dimensions (tensor/dimensions [n-channels 1])))
-           scale-buffer (->tensor scale-buffer)]
+           neg-scale-gradient (->tensor (get-in parameter-buffers [:neg-scale :gradient]))
+           scale-buffer (->batch-tensor scale-buffer)]
        ;;use input gradient as temp buffer.  Layers are expect to completely overwrite the output
        ;;anyway
        (tensor/binary-op! input-gradient 1.0 output-gradient 1 input :*)
