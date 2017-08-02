@@ -1298,6 +1298,72 @@ softmax: https://en.wikipedia.org/wiki/Softmax_function"
   output)
 
 
+;; (defn convolution-descriptor
+;;   "Create a descriptor.  This will probably be tracked by the resource system.  resource/release is guaranteed
+;; to be a valid call on the return value."
+;;   [datatype out-channels in-channels kern-width kern-height
+;;    pad-x pad-y stride-x stride-y]
+;;   ;;no stream required
+;;   (tm/convolution-descriptor datatype out-channels in-channels kern-width kern-height pad-x pad-y stride-x stride-y))
+
+
+;; (defn get-convolution-output-dimensions
+;;   [conv-descriptor]
+;;   (tm/get-convolution-output-dimensions conv-descriptor))
+
+
+;; (defn choose-convolution-algorithms
+;;   [descriptor max-ideal-workspace-size {:keys [use-defaults?]}]
+;;   (tm/choose-convolution-algorithms (check-stream) descriptor max-workspace-size use-defaults?))
+
+
+;; (defn convolution-forward!
+;;   "Perform convolution forward.  Input,output must be 4d tensors while weights
+;; must be a 2d tensor.  "
+;;   [output input weights workspace conv-descriptor algorithms]
+;;   (ensure-datatypes (get-datatype output) input weights)
+;;   (ensure-device output input weights)
+;;   (tm/convolution-forward! (check-stream)
+;;                            (tensor->buffer output) (tensor->dimensions output)
+;;                            (tensor->buffer input) (tensor->dimensions input)
+;;                            (tensor->buffer weights) (tensor->dimensions weights)
+;;                            (tensor->buffer workspace) (ecount workspace)
+;;                            conv-descriptor)
+;;   output)
+
+
+;; (defn convolution-backward-bias!
+;;   [bias-gradient output-gradient]
+;;   (ensure-datatypes (get-datatype bias-gradient) output-gradient)
+;;   (ensure-device bias-gradient output-gradient)
+;;   (tm/convolution-backward-bias! (check-stream)
+;;                                  (tensor->buffer bias-gradient) (tensor->dimensions bias-gradient)
+;;                                  (tensor->buffer output-gradient) (tensor->dimensions output-gradient))
+;;   bias-gradient)
+
+
+;; (defn convolution-backward-weights!
+;;   [weight-gradient output-gradient input workspace conv-descriptor algorithms]
+;;   (tm/convolution-backward-weights! (check-stream)
+;;                                     (tensor->buffer weight-gradient) (tensor->dimensions weight-gradient)
+;;                                     (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
+;;                                     (tensor->buffer input) (tensor->dimensions input)
+;;                                     (tensor->buffer workspace) (ecount workspace)
+;;                                     conv-descriptor algorithms)
+;;   weight-gradient)
+
+
+;; (defn convolution-backward-data!
+;;   [input-gradient output-gradient weights workspace conv-descriptor algorithms]
+;;   (tm/convolution-backward-data! (check-stream)
+;;                                  (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
+;;                                  (tensor->buffer output-gradient) (tensor->dimensions input-gradient)
+;;                                  (tensor->buffer weights) (tensor->dimensions weights)
+;;                                  (tensor->buffer workspace) (ecount workspace)
+;;                                  conv-descriptor algorithms)
+;;   input-gradient)
+
+
 (extend-type Tensor
   mp/PVectorView
   (as-vector [m]
