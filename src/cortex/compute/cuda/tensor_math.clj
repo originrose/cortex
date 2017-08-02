@@ -688,11 +688,11 @@
                                          (value->ptr 0 datatype)
                                          tensor
                                          (->ptr input-gradient)))))))
-  (softmax! [stream
-             output
-             input
-             batch-count
-             element-count]
+  (softmax-eltwise! [stream
+                     output
+                     input
+                     batch-count
+                     element-count]
     (resource/with-resource-context
       (let [datatype (dtype/get-datatype output)
             tensor (cuda-base/tensor datatype batch-count 1 1 element-count)]
@@ -702,6 +702,28 @@
           (cudnn/cudnnSoftmaxForward cudnn-context
                                      cudnn/CUDNN_SOFTMAX_ACCURATE
                                      cudnn/CUDNN_SOFTMAX_MODE_INSTANCE
+                                     (value->ptr 1 datatype)
+                                     tensor
+                                     (->ptr input)
+                                     (value->ptr 0 datatype)
+                                     tensor
+                                     (->ptr output)))))))
+
+  (softmax-spatial! [stream
+                     output
+                     input
+                     batch-count
+                     channel-count
+                     element-count]
+    (resource/with-resource-context
+      (let [datatype (dtype/get-datatype output)
+            tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnSoftmaxForward cudnn-context
+                                     cudnn/CUDNN_SOFTMAX_ACCURATE
+                                     cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
                                      (value->ptr 1 datatype)
                                      tensor
                                      (->ptr input)

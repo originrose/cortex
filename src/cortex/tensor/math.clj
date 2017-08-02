@@ -161,8 +161,15 @@ running means, variances using a running average
                          output
                          op
                          element-count])
-  (softmax! [stream
-             output
-             input
-             batch-count
-             element-count]))
+  (softmax-eltwise! [stream
+                     output
+                     input
+                     batch-count
+                     element-count])
+
+  (softmax-spatial! [stream
+                     output
+                     input
+                     batch-count
+                     channel-count
+                     element-count]))

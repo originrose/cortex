@@ -504,6 +504,18 @@ for the cuda backend."
                       0.03205860328008499, 0.08714431874203256, 0.2368828180899101,
                       0.6439142598879722]
                      (ct/to-double-array output)
+                     1e-4)))
+   (let [img-dim 4
+         input (ct/->tensor [(->> [1 2 3 4]
+                                   (mapv #(repeat (* img-dim img-dim) %)))])
+         output (ct/new-tensor [1 4 (* img-dim img-dim)])]
+     (ct/softmax! output input)
+     (is (m/equals   (->> [0.03205860328008499 0.08714431874203257
+                           0.23688281808991013 0.6439142598879724]
+                          (mapv #(repeat (* img-dim img-dim) %))
+                          flatten
+                          vec)
+                     (ct/to-double-array output)
                      1e-4)))))
 
 

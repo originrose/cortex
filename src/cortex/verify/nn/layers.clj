@@ -356,6 +356,32 @@
            (m/eseq input-gradient)))))
 
 
+(defn softmax-image
+  [context]
+  (let [img-dim 5
+        batch-size 1
+        n-channels 4
+        input-range (range 1 (+ n-channels 1))
+        input (->> input-range
+                   (mapv #(repeat (* img-dim img-dim) %)))
+        output-gradient input
+        {:keys [output input-gradient]}
+        (forward-backward-test [(layers/input img-dim img-dim n-channels)
+                                (layers/softmax)]
+                               context batch-size input output-gradient)
+        output-range [0.03205860328008499 0.08714431874203257
+                      0.23688281808991013 0.6439142598879724]]
+    (is (m/equals (->> output-range
+                       (mapv #(repeat (* img-dim img-dim) %))
+                       flatten
+                       vec)
+                  output
+                  1e-4))
+    (is (m/equals (vec (flatten input))
+                  input-gradient
+                  1e-6))))
+
+
 (defn softmax-batch-channels
   [context]
   (let [batch-size 10

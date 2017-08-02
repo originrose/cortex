@@ -1277,7 +1277,11 @@ See batch-normalize-update-and-apply!"
   "Perform a softmax calculation across the last n-dimension of input, output.
 The first dimension is considered the batch count, the last n-dimensions are squashed
 and the softmax operation is performed across all of them.
-softmax: https://en.wikipedia.org/wiki/Softmax_function"
+softmax: https://en.wikipedia.org/wiki/Softmax_function
+
+If the input has 3 dimensions, then the first dimensions is interpreted
+as a batch-count, the second as a channel-count and the third as an element
+count.  This will perform per-element, per-batch spatial softmax across the channels."
   ^Tensor [output input]
   (ensure-datatypes (get-datatype output) input)
   (ensure-same-device output input)
@@ -1287,14 +1291,20 @@ softmax: https://en.wikipedia.org/wiki/Softmax_function"
     "Input, output shapes do not match"
     {:input-shape (shape input)
      :output-shape (shape output)})
-  (let [input (as-batch-matrix input)
-        output (as-batch-matrix output)
-        input-shape (shape input)]
-    (tm/softmax! (check-stream)
-                 (tensor->buffer output)
-                 (tensor->buffer input)
-                 (first input-shape)
-                 (second input-shape)))
+  (if (= 3 (count (shape input)))
+    (apply tm/softmax-spatial!
+           (check-stream)
+           (tensor->buffer output)
+           (tensor->buffer input)
+           (shape input))
+    (let [input (as-batch-matrix input)
+          output (as-batch-matrix output)
+          input-shape (shape input)]
+      (tm/softmax-eltwise! (check-stream)
+                           (tensor->buffer output)
+                           (tensor->buffer input)
+                           (first input-shape)
+                           (second input-shape))))
   output)
 
 

@@ -138,12 +138,14 @@ a datastructure that shares the backing store."
 (defn- softmax-tensor
   [layer math-ary]
   (let [channels (long (get layer :output-channels))
-        ary-ecount (math/ecount math-ary)]
+        ary-ecount (math/ecount math-ary)
+        spatial? (and (= 1 channels)
+                      (not= 1 (get (graph/node->input-dimension layer) :channels)))]
     (if (> channels 1)
-      (tensor/reinterpret-tensor
-       (math/array->cortex-tensor math-ary)
-       (tensor/dimensions [(quot ary-ecount channels) channels]))
-      (math/array->cortex-tensor (math/as-2d-batch-matrix math-ary)))))
+      (tensor/reinterpret-tensor (math/array->cortex-tensor math-ary)
+                                 (tensor/dimensions [(quot ary-ecount channels) channels]))
+      (->batch-tensor math-ary (math/batch-size math-ary)
+                      (graph/node->input-dimension layer) spatial?))))
 
 
 (defrecord SoftmaxLayer [layer]
