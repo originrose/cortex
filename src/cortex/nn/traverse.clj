@@ -210,7 +210,7 @@
                       :outgoing incoming)))))
 
 
-(defn- remove-non-trainable
+(defn remove-non-trainable
   [network traversal]
   (-> (reduce (fn [[keep-set traversal] {:keys [incoming id] :as item}]
                 (let [keep? (or (seq (filter #(contains? keep-set (get % :id)) incoming))

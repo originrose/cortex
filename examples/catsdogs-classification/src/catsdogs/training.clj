@@ -1,5 +1,5 @@
 (ns catsdogs.training
-  (require [clojure.java.io :as io]))
+  (:require [clojure.java.io :as io]))
 
 ;;;
 ; SETUP: PARAMETERS
@@ -85,11 +85,12 @@
   ; this will run forever
   ; exit the process when the value is high enough
   (require '[cortex.experiment.classification :as classification])
-  (classification/perform-experiment
-    (initial-description image-size image-size num-classes)
-                                   train-ds
-                                   test-ds
-                                   observation->image
-                                   class-mapping
-                                   {})
-)
+  (let [listener (classification/create-listener observation->image
+                                                 class-mapping
+                                                 {})]
+    (classification/perform-experiment
+     (initial-description image-size image-size num-classes)
+     train-ds
+     test-ds
+     listener))
+  )

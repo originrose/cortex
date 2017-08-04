@@ -12,7 +12,8 @@
             [cortex.nn.network :as network]
             [cortex.nn.execute :as execute]
             [taoensso.nippy :as nippy]
-            [cortex.nn.traverse :as traverse])
+            [cortex.nn.traverse :as traverse]
+            [cortex.graph :as graph])
   (:import [java.io StringReader FileOutputStream]))
 
 
@@ -259,6 +260,60 @@ whitespace = #'\\s*'")
                     :caffe-top (keyword input-name)))))
 
 
+(defonce crap-atom (atom nil))
+
+(defn- detect-split-join
+  "The layers are in execution order in the prototxt file.  The problem is to build a
+dependency graph from the layer sequence.  Caffe allows implementors to specify that
+a layer write to the same location as it reads from in some cases so simply using inputs/outputs
+doesn't quite work."
+  [layer-seq]
+  (let [{:keys [nodes edges output-map] :as graph}
+        (reduce (fn [{:keys [nodes edges output-map]} layer]
+                  (let [layer-id (get layer :id)
+                        parent (get output-map (get layer :caffe-bottom))]
+                    {:nodes (assoc nodes layer-id layer)
+                     :edges (cond-> edges
+                              parent
+                              (conj [parent layer-id]))
+                     :output-map (assoc output-map (get layer :caffe-top) layer-id)}))
+                {:nodes {} :edges []}
+                layer-seq)
+        parents (graph/parent->child-map graph)
+        children (graph/child->parent-map graph)
+        splits (->> parents
+                    (filter #(> (count (second %)) 1))
+                    (mapv first))
+        joins (->> children
+                   (filter #(> (count (second %)) 1))
+                   (mapv first))
+        graph (reduce (fn [{:keys [nodes edges]} [id type]]
+                        (let [new-id (keyword (str (name id) "-" (name type)))]
+                          {:nodes (assoc nodes new-id {:type type :id new-id})
+                           :edges (condp = type
+                                    :split
+                                    (concat (map (fn [[k v]]
+                                                   [(if (= k id) new-id k)
+                                                    v])
+                                                 edges)
+                                            [[id new-id]])
+                                    :join
+                                    (concat (map (fn [[k v]]
+                                                   [k
+                                                    (if (= v id) new-id v)])
+                                                 edges)
+                                            [[new-id id]]))}))
+                      graph
+                      (concat (map vector splits (repeat :split))
+                              (map vector joins (repeat :join))))
+        c-to-p-map (graph/child->parent-map graph)]
+    (->> (graph/dfs-seq graph)
+         (mapv (fn [id]
+                 (cond-> (get-in graph [:nodes id])
+                   (contains? c-to-p-map id)
+                   (assoc :parents (vec (get c-to-p-map id)))))))))
+
+
 (defn caffe-h5->model
   [fname & {:keys [trim]}]
   (resource/with-resource-context
@@ -270,8 +325,10 @@ whitespace = #'\\s*'")
                         first
                         parse-prototxt
                         (reduce recurse-parse-prototxt {}))
-          layer-list (vec (concat (check-for-input-params prototxt)
-                                  (map prototxt-layer->desc (:layer prototxt))))
+          layer-list (vec (->> (concat (check-for-input-params prototxt)
+                                       (map prototxt-layer->desc (:layer prototxt)))
+                               (detect-split-join)))
+
           layer-map (->> (map-indexed (fn [idx desc]
                                         [(:id desc) (assoc desc :layer-index idx)])
                                       layer-list)

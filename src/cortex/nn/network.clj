@@ -106,6 +106,34 @@
    {:compute-graph (graph/empty-graph)}))
 
 
+(defn- order-desc-nodes
+  "The add-node function requires that parents are realized before children.
+So we want to make sure that the description sequence respects this in the cases where
+parents are specified concretely."
+  [desc-seq]
+  (let [[edges nodes] (reduce (fn [[edges nodes previous-node] desc]
+                                (let [desc-id (get desc :id (UUID/randomUUID))
+                                      node (cond-> (assoc desc ::gen-id desc-id)
+                                             (and (not (contains? desc :parents))
+                                                  (nil? previous-node))
+                                             (assoc :parents []))
+                                      nodes (assoc nodes desc-id node)
+                                      parents (if previous-node
+                                                (get desc :parents [(get previous-node ::gen-id)])
+                                                (get desc :parents))]
+                                  [(->> (concat edges
+                                                (map vector parents (repeat desc-id)))
+                                        vec)
+                                   nodes
+                                   node]))
+                              [[] {} nil]
+                              desc-seq)]
+    (->> (graph/dfs-seq {:edges edges :nodes nodes})
+         (map nodes)
+         (remove nil?)
+         (mapv #(dissoc % ::gen-id)))))
+
+
 (defn linear-network
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
@@ -118,7 +146,8 @@
        (-> (first
              (reduce add-node-to-graph
                      [graph nil]
-                     (flatten network-desc)))
+                     (-> (flatten network-desc)
+                         order-desc-nodes)))
            generate-output-losses
            ;;Calculate dimensions flowing through the graph.  We need input sizes for this
            ;;but now output sizes as output sizes are derived from input sizes

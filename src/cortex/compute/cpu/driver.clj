@@ -2,12 +2,12 @@
   (:require [cortex.compute.driver :as drv]
             [cortex.compute.math :as c-math]
             [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
+            [think.datatype.marshal :as marshal]
             [clojure.core.async :as async]
             [think.resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
             [cortex.compute.array-view-math :as avm]
-            [think.datatype.marshal :as marshal]
             [think.parallel.core :as parallel])
   (:import [java.nio ByteBuffer IntBuffer ShortBuffer LongBuffer
             FloatBuffer DoubleBuffer Buffer]
@@ -51,7 +51,8 @@
 (extend-type CPUStream
   resource/PResource
   (release-resource [impl]
-    (async/close! (.input-chan impl))))
+    (when (.input-chan impl)
+      (async/close! (.input-chan impl)))))
 
 
 (defn get-memory-info
@@ -62,7 +63,8 @@
 
 (defn cpu-stream
   ([device error-atom]
-   (let [^CPUStream retval (->CPUStream device (async/chan 16) (async/chan) error-atom)]
+   (let [^CPUStream retval (->CPUStream device (async/chan 16)
+                                        (async/chan) error-atom)]
      (async/thread
        (loop [next-val (async/<!! (:input-chan retval))]
          (when next-val
@@ -183,7 +185,6 @@ Use with care; the synchonization primitives will just hang with this stream."
   resource/PResource
   (release-resource [event]))
 
-
 (defn driver
   [& {:keys [num-devices]
       :or {num-devices 1}}]
@@ -222,10 +223,44 @@ Use with care; the synchonization primitives will just hang with this stream."
     (dtype/make-view elem-type elem-count)))
 
 
+(defn- in-range?
+  [^long lhs-off ^long lhs-len ^long rhs-off ^long rhs-len]
+  (or (and (>= rhs-off lhs-off)
+           (< rhs-off (+ lhs-off lhs-len)))
+      (and (>= lhs-off rhs-off)
+           (< lhs-off (+ rhs-off rhs-len)))))
+
+
+(defmacro array-view-pbuffer-impl
+  [view-type cast-fn copy-fn dtype-fn]
+  `(extend-type ~view-type
+     drv/PBuffer
+     (sub-buffer-impl [buffer# offset# length#]
+       (dtype/->view buffer# offset# length#))
+     (alias? [lhs-dev-buffer# rhs-dev-buffer#]
+       (when (identical? (type lhs-dev-buffer#)
+                         (type rhs-dev-buffer#))
+         (let [lhs-buf# (~cast-fn lhs-dev-buffer#)
+               rhs-buf# (~cast-fn rhs-dev-buffer#)]
+           (and (identical? (.data lhs-buf#)
+                            (.data rhs-buf#))
+                (= (.offset lhs-buf#)
+                   (.offset rhs-buf#))))))
+     (partially-alias? [lhs-dev-buffer# rhs-dev-buffer#]
+       (when (identical? (type lhs-dev-buffer#)
+                         (type rhs-dev-buffer#))
+         (let [lhs-buf# (~cast-fn lhs-dev-buffer#)
+               rhs-buf# (~cast-fn rhs-dev-buffer#)]
+           (and (identical? (.data lhs-buf#)
+                            (.data rhs-buf#))
+                (in-range? (.offset lhs-buf#) (.length lhs-buf#)
+                           (.offset rhs-buf#) (.length rhs-buf#))))))))
+
+
+(marshal/array-view-iterator array-view-pbuffer-impl)
+
+
 (extend-type ArrayViewBase
-  drv/PBuffer
-  (sub-buffer-impl [buffer offset length]
-    (dtype/->view buffer offset length))
   resource/PResource
   (release-resource [_]))
 
