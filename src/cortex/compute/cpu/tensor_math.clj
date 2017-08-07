@@ -6,9 +6,14 @@
             [cortex.compute.cpu.driver :as cpu-driver]
             [think.parallel.core :as parallel]
             [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.compute.math-util :as cmu])
+            [cortex.compute.math-util :as cmu]
+            [cortex.compute.driver :as drv]
+            [think.resource.core :as resource]
+            [cortex.tensor :as tensor])
   (:import [cortex.compute.cpu.driver CPUStream]
-           [com.github.fommil.netlib BLAS]))
+           [com.github.fommil.netlib BLAS]
+           [think.datatype DoubleArrayView FloatArrayView
+            LongArrayView IntArrayView ShortArrayView ByteArrayView]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -1312,3 +1317,31 @@ arg: >= 0."
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-spatial!])
        output input batch-count channel-count element-count))))
+
+
+(defn as-tensor
+  [java-array]
+  (tensor/construct-tensor (drv/get-device tensor/*stream*)
+                           (tensor/dimensions [(tensor/ecount java-array)])
+                           (dtype/->view java-array)))
+
+(defn as-java-array
+  [cpu-tensor]
+  (let [dev-buffer (tensor/tensor->buffer cpu-tensor)]
+    (condp = (dtype/get-datatype dev-buffer)
+      :byte (.data ^ByteArrayView dev-buffer)
+      :short (.data ^ShortArrayView dev-buffer)
+      :int (.data ^IntArrayView dev-buffer)
+      :long (.data ^LongArrayView dev-buffer)
+      :float (.data ^FloatArrayView dev-buffer)
+      :double (.data ^DoubleArrayView dev-buffer)
+      )))
+
+
+(defmacro tensor-context
+  [& body]
+  `(resource/with-resource-context
+     (let [device# (drv/default-device (cpu-driver/driver))
+           stream# (drv/create-stream :device device#)]
+       (tensor/with-stream stream#
+         ~@body))))
