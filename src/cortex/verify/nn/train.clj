@@ -1,30 +1,31 @@
 (ns cortex.verify.nn.train
-  (:require
-    [clojure.test :refer :all]
-    [clojure.pprint :as pprint]
-    [clojure.core.matrix :as m]
-    [think.resource.core :as resource]
-    [cortex.loss :as loss]
-    [cortex.optimize :as opt]
-    [cortex.optimize.adam :as adam]
-    [cortex.optimize.adadelta :as adadelta]
-    [cortex.nn.layers :as layers]
-    [cortex.nn.execute :as execute]
-    [cortex.nn.traverse :as traverse]
-    [cortex.nn.network :as network]
-    [cortex.compute.driver :as drv]
-    [cortex.compute.nn.backend :as nn-backend]
-    [cortex.verify.nn.data
-     :refer [CORN-DATA CORN-LABELS CORN-DATASET
-             mnist-training-dataset*
-             mnist-test-dataset*]
-     :as data]))
+  (:require [clojure.test :refer :all]
+            [clojure.pprint :as pprint]
+            [clojure.core.matrix :as m]
+            [think.resource.core :as resource]
+            [cortex.loss.core :as loss]
+            [cortex.loss.softmax :as softmax]
+            [cortex.optimize :as opt]
+            [cortex.optimize.adam :as adam]
+            [cortex.optimize.adadelta :as adadelta]
+            [cortex.nn.layers :as layers]
+            [cortex.nn.execute :as execute]
+            [cortex.nn.traverse :as traverse]
+            [cortex.nn.network :as network]
+            [cortex.compute.driver :as drv]
+            [cortex.compute.nn.backend :as nn-backend]
+            [cortex.verify.nn.data
+             :refer [CORN-DATA CORN-LABELS CORN-DATASET
+                     mnist-training-dataset*
+                     mnist-test-dataset*]
+             :as data]))
 
 
 (def MNIST-NETWORK
   [(layers/input 28 28 1 :id :data)
    (layers/convolutional 5 0 1 20 :weights {:l2-regularization 1e-3})
    (layers/max-pooling 2 0 2)
+   (layers/batch-normalization :mode :spatial)
    (layers/dropout 0.9)
    (layers/relu)
    (layers/local-response-normalization)
@@ -123,7 +124,7 @@
 
 (defn percent=
   [a b]
-  (loss/evaluate-softmax a b))
+  (softmax/evaluate-softmax a b))
 
 
 (defn train-mnist

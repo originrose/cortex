@@ -16,11 +16,14 @@
   (execute/compute-context :backend :cpu
                            :datatype test-utils/*datatype*))
 
+;; Test creating a context which falls back to CPU after trying GPU first (default behavior)
+(def-double-float-test corn-fallback
+  (verify-train/test-corn (execute/compute-context :datatype test-utils/*datatype*)))
 
 (def-double-float-test corn
   (verify-train/test-corn (create-context)))
 
-(def-double-float-test mnist
+(deftest mnist
   (verify-train/train-mnist (create-context)))
 
 (def-double-float-test dataset-batch-size-mismatch

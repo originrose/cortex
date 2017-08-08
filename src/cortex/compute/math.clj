@@ -1,14 +1,15 @@
 (ns cortex.compute.math
-  "Basic math abstracting that provides a set of mathematical operations on streams an an aggregate
-datatype that combines a buffer of data with a description of that data (named a tensor).
-These operations are expected to be provided and uniform across drivers and code written to the interfaces
-in here should be 100% portable across different compute drivers."
+  "Basic math abstracting that provides a set of mathematical operations on streams an an
+  aggregate datatype that combines a buffer of data with a description of that data (named a
+  tensor).  These operations are expected to be provided and uniform across drivers and code
+  written to the interfaces in here should be 100% portable across different compute drivers."
   (:require [clojure.core.matrix.protocols :as mp]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
-            [think.resource.core :as resource]))
+            [think.resource.core :as resource]
+            [cortex.tensor :as ct]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -25,6 +26,14 @@ in here should be 100% portable across different compute drivers."
   "Create a flat distribution between (0,1] with any number equally likely."
   ([]
    {:type :flat}))
+
+
+(def math-binary-operations
+  [:plus ;;a*x + b*y
+   :mul ;;a*x * b*y
+   :div ;;a*x / b*y
+   ])
+
 
 (defprotocol PMath
   "Base math abstraction.  Note the constants (alpha, beta) must be in the same
@@ -47,21 +56,18 @@ in here should be 100% portable across different compute drivers."
     "C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C.
 All arguments come in as row major.")
   (sum-impl [stream alpha x beta y result]
-    "result = a*x + b*y.
-This function can be used as an accumulator assuming (ecount y) < (ecount x) and
-(rem (ecount x) (ecount y)) == 0.
-It is used in fact when accumulating batch gradients and so x is several times the length
-of y.  Implementations need to use a threadsafe compare-and-set type implementation because result
-could be x or y.")
+    "result = a*x + b*y.  This function can be used as an accumulator assuming (ecount y) <
+(ecount x) and (rem (ecount x) (ecount y)) == 0.  It is used in fact when accumulating batch
+gradients and so x is several times the length of y.  Implementations need to use a threadsafe
+compare-and-set type implementation because result could be x or y.")
   (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
     "Generalized gemv implementation function.  A is a row-major matrix.")
   (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride]
-    "given a matrix and vector, multiply each row by the corresponding element in the vector.  Place result in C.
-Used for scaling the rows of a matrix.")
+    "given a matrix and vector, multiply each row by the corresponding element in the vector.
+Place result in C.  Used for scaling the rows of a matrix.")
   (elem-mul [stream alpha a inc-a b inc-b res inc-res]
     "res  = alpha* a * b.  This is an elementwise multiply where result is expected
-to be same length as a and b.")
-
+to be same length as a and b. The inc params are related to strides.")
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     "Given a vector that contains x^2,
 a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
@@ -148,8 +154,7 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   (= (mp/element-count tensor) (.width tensor)))
 
 (defn is-tensor-2d-complete?
-  "Could a tensor be represented with 2 dimensions
-  with no loss of information"
+  "Could a tensor be represented with 2 dimensions with no loss of information"
   [^Tensor tensor]
   (and (= 1 (.batch-size tensor))
        (= 1 (.channel-count tensor))))
@@ -389,9 +394,12 @@ versions of cortex (meaning only contains java base types)."
                                                    [b-col-count b-row-count]
                                                    [b-row-count b-col-count])
            c-shape [c-row-count c-col-count]]
-       (when-not-error (= a-col-count b-row-count) (format "A %s col count doesn't match B %s row count" a-shape b-shape))
-       (when-not-error (= a-row-count c-row-count) (format "C %s row count doesn't match A %s row count" c-shape a-shape))
-       (when-not-error (= b-col-count c-col-count) (format "C %s col count doesn't match B %s col count" c-shape b-shape))
+       (when-not-error (= a-col-count b-row-count)
+         (format "A %s col count doesn't match B %s row count" a-shape b-shape))
+       (when-not-error (= a-row-count c-row-count)
+         (format "C %s row count doesn't match A %s row count" c-shape a-shape))
+       (when-not-error (= b-col-count c-col-count)
+         (format "C %s col count doesn't match B %s col count" c-shape b-shape))
        (gemm-impl stream trans-a? trans-b? a-row-count a-col-count b-col-count
                   alpha A a-colstride
                   B b-colstride
@@ -420,16 +428,18 @@ versions of cortex (meaning only contains java base types)."
 
 
 (defn sum
-  "c = ax + by.  C may be either x or y.  Implementations must support y
-being smaller than X so it can act as an accumulator for X."
+  "c = ax + by.  C may be either x or y.  Implementations must support y being smaller than X so
+  it can act as an accumulator for X."
   ([stream alpha x beta y result]
    (let [x-elems (long (ecount x))
          y-elems (long (ecount y))
          res-elems (long (ecount result))]
      (if-not (zero? (rem (max x-elems y-elems) (min x-elems y-elems)))
-       (throw (Exception. (format "Sum: Lengths of x (%s) and y (%s) are not commensurate" x-elems y-elems))))
+       (throw (Exception. (format "Sum: Lengths of x (%s) and y (%s) are not commensurate"
+                                  x-elems y-elems))))
      (if-not (zero? (rem (max x-elems res-elems) (min x-elems res-elems)))
-       (throw (Exception. (format "Sum: Lengths of x (%s) and res (%s) are not commensurate" x-elems res-elems))))
+       (throw (Exception. (format "Sum: Lengths of x (%s) and res (%s) are not commensurate"
+                                  x-elems res-elems))))
      (sum-impl stream alpha (device-buffer x) beta (device-buffer y) (device-buffer result))))
   ([stream alpha x beta y]
    (sum stream alpha x beta y y)))
@@ -473,3 +483,18 @@ and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 ou
        (apply interleave)
        (partition (count data-array-seq))
        vec))
+
+
+(defn array->cortex-tensor
+  [^DeviceArray ary]
+  (let [ary-tens (.tensor ary)
+        tens-shape (->> [:batch-size :channel-count :height :width]
+                        (map #(get ary-tens % 1))
+                        (drop-while #(= 1 %))
+                        vec)
+        tens-shape (if (= 0 (count tens-shape))
+                     [1]
+                     tens-shape)]
+    (ct/construct-tensor (drv/current-device)
+                         (ct/dimensions tens-shape)
+                         (device-buffer ary))))

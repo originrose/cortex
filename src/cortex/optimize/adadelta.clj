@@ -66,6 +66,7 @@
                              decay epsilon grad-sq-accum-view dx-sq-accum-view))))]
     (setup-optimizer backend optimizer step-fn)))
 
+
 (defn cuda-adadelta-step-float!
   [backend typed-cuda-fn gradient parameters gradient-alpha
    decay epsilon grad-accum dx-accum item-count]
@@ -75,6 +76,7 @@
    grad-accum dx-accum
    (float gradient-alpha)
    gradient parameters item-count))
+
 
 (defn cuda-adadelta-step-double!
   [backend typed-cuda-fn gradient parameters gradient-alpha

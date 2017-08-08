@@ -2,24 +2,24 @@
   "Internal machinery needed to make execute work.  Ideally this machinery is used during
   execute, layer unit tests, and gradient checking in such a way that once the layer unit tests
   work someone has some confidence that this module is correct."
-  (:require [clojure.pprint :as pprint]
-            [cortex.nn.network :as network]
+  (:require [clojure.pprint]
             [clojure.core.matrix :as m]
-            [cortex.compute.nn.backend :as backend]
-            [cortex.compute.driver :as drv]
-            [cortex.graph :as graph]
-            [cortex.compute.loss :as compute-loss]
+            [clojure.core.matrix.macros :refer [c-for]]
             [think.datatype.core :as dtype]
+            [cortex.optimize :as optimize]
+            [cortex.graph :as graph]
+            [cortex.nn.network :as network]
             [cortex.nn.traverse :as traverse]
             [cortex.nn.layers :as layers]
+            [cortex.compute.nn.backend :as backend]
+            [cortex.compute.driver :as drv]
             [cortex.compute.nn.layers :as compute-layers]
-            [cortex.optimize :as optimize]
             [cortex.compute.nn.protocols :as compute-protocols]
             [cortex.compute.math :as math]
-            [cortex.loss :as loss]
-            [cortex.util :as util]
+            [cortex.loss.core :as loss]
+            [cortex.loss.util :as loss-util]
             [cortex.buffer-initialization :as buf-init]
-            [clojure.core.matrix.macros :refer [c-for]]))
+            [cortex.util :as util]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -85,9 +85,10 @@
         datatype (datatype network)
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))]
-    (reduce (fn [compute-buffers {:keys [key non-trainable? buffer-id] :as parameter}]
-              (let [gradients? (and (not non-trainable?) gradients?)
-                    numeric-gradients? (and (not non-trainable?) numeric-gradients?)
+    (reduce (fn [compute-buffers {:keys [key buffer-id] :as parameter}]
+              (let [param-gradients? (get parameter :gradients?)
+                    gradients? (and param-gradients? gradients?)
+                    numeric-gradients? (and param-gradients? numeric-gradients?)
                     l2-max-constraint (double (get parameter :l2-max-constraint 0.0))]
                 (update compute-buffers buffer-id
                         (fn [compute-buffer]
@@ -164,10 +165,10 @@
         (->> loss-function
              (mapv (fn [loss-term]
                      (let [term-gradients (generate-loss-term-gradients network backend loss-term)]
-                       {:compute-term (compute-loss/create-compute-loss-term backend
-                                                                             network
-                                                                             loss-term
-                                                                             batch-size)
+                       {:compute-term (loss-util/create-compute-loss-term backend
+                                                                          network
+                                                                          loss-term
+                                                                          batch-size)
                         :gradients term-gradients
                         :loss-term loss-term}))))]
     [network loss-function]))
@@ -600,17 +601,18 @@ traversal with the inputs and outputs mapped to specific buffers."
 
 (defmethod perform-pass :default
   [pass-direction network pass-function {:keys [incoming id outgoing]}]
-  (comment
-    (let [backend (backend network)
-          to-double #(vec (backend/to-double-array backend %))]
-      (clojure.pprint/pprint (mapv (fn [{:keys [buffer gradient]}]
-                                     [:incoming {:buffer (to-double buffer)}])
-                                   incoming))))
-  (let [id->output-map (generate-node-id->output-map network)]
-    (pass-function
-     (get-in network [:compute-binding :nodes id])
-     (resolve-node-arguments network id id->output-map)
-     incoming outgoing)))
+  (let [id->output-map (generate-node-id->output-map network)
+        retval (pass-function
+                (get-in network [:compute-binding :nodes id])
+                (resolve-node-arguments network id id->output-map)
+                incoming outgoing)]
+    ;;If you get a network that is producing NAN's, then this may be a decent way to find it fast.
+    (comment
+      (let [double-data (vec (backend/to-double-array (backend network) (get (first outgoing) :buffer)))]
+        (when (seq (filter #(Double/isNaN %) double-data))
+          (println "NAN detected on layer" id)
+          (clojure.pprint/pprint (vec (take 200 double-data))))))
+    retval))
 
 
 
@@ -755,23 +757,24 @@ traversal with the inputs and outputs mapped to specific buffers."
         buffer-alpha (/ 1.0 (double (batch-size network)))]
     ;; Call compute-parameters! on all of the paramter buffers
     (reduce (fn [offset {:keys [buffer gradient
-                                learning-attenuation non-trainable?]
-                         :or {learning-attenuation 1.0} :as parameter}]
-              (let [elem-count (long (m/ecount buffer))
-                    l2-max-constraint (double (get parameter :l2-max-constraint 0))
-                    ;;For some things it is easier to just
-                    ;;work at the flat buffer level and
-                    ;;not at the device array level.
-                    gradient-buf (math/device-buffer gradient)
-                    param-buf (math/device-buffer buffer)]
-                (when-not non-trainable?
-                  (optimize/compute-parameters! optimizer
-                                                (optimizer-parameters network)
-                                                (* buffer-alpha learning-attenuation)
-                                                offset gradient buffer)
-                  (when (is-l2-max-constraint-valid? parameter)
-                    (apply-l2-max-constraint network parameter)))
-                (+ offset elem-count)))
+                                learning-attenuation gradients?]
+                         :or {learning-attenuation 1.0
+                              gradients? true} :as parameter}]
+              (when gradients?
+               (let [elem-count (long (m/ecount buffer))
+                     l2-max-constraint (double (get parameter :l2-max-constraint 0))
+                     ;;For some things it is easier to just
+                     ;;work at the flat buffer level and
+                     ;;not at the device array level.
+                     gradient-buf (math/device-buffer gradient)
+                     param-buf (math/device-buffer buffer)]
+                 (optimize/compute-parameters! optimizer
+                                               (optimizer-parameters network)
+                                               (* buffer-alpha learning-attenuation)
+                                               offset gradient buffer)
+                 (when (is-l2-max-constraint-valid? parameter)
+                   (apply-l2-max-constraint network parameter))
+                 (+ offset elem-count))))
             0
             parameters)
 
@@ -814,7 +817,7 @@ any loss-specific parameter buffers."
   (let [backend (backend network)
         buffer-map (-> (resolve-node-arguments network (get loss-term :id))
                        (util/deep-merge gradients))]
-    (compute-loss/compute-loss-gradient compute-term buffer-map)
+    (loss-util/compute-loss-gradient compute-term buffer-map)
     ;;Useful debugging tool.
     (comment
       (clojure.pprint/pprint

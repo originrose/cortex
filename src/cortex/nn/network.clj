@@ -1,17 +1,16 @@
 (ns cortex.nn.network
   "Translation from cortex layer vectors into actual network graphs."
-  (:require
-    [clojure.set :as c-set]
-    [clojure.pprint :as pprint]
-    [clojure.core.matrix :as m]
-    [clojure.core.matrix.macros :refer [c-for]]
-    [think.datatype.core :as dtype]
-    [cortex.graph :as graph]
-    [cortex.argument :as arg]
-    [cortex.loss :as loss]
-    [cortex.compute.driver :as drv]
-    [cortex.compute.math :as math]
-    [cortex.nn.layers :as layers])
+  (:require [clojure.set :as c-set]
+            [clojure.pprint :as pprint]
+            [clojure.core.matrix :as m]
+            [clojure.core.matrix.macros :refer [c-for]]
+            [think.datatype.core :as dtype]
+            [cortex.graph :as graph]
+            [cortex.argument :as arg]
+            [cortex.loss.core :as loss]
+            [cortex.compute.driver :as drv]
+            [cortex.compute.math :as math]
+            [cortex.nn.layers :as layers])
   (:import [java.util UUID]))
 
 
@@ -107,6 +106,34 @@
    {:compute-graph (graph/empty-graph)}))
 
 
+(defn- order-desc-nodes
+  "The add-node function requires that parents are realized before children.
+So we want to make sure that the description sequence respects this in the cases where
+parents are specified concretely."
+  [desc-seq]
+  (let [[edges nodes] (reduce (fn [[edges nodes previous-node] desc]
+                                (let [desc-id (get desc :id (UUID/randomUUID))
+                                      node (cond-> (assoc desc ::gen-id desc-id)
+                                             (and (not (contains? desc :parents))
+                                                  (nil? previous-node))
+                                             (assoc :parents []))
+                                      nodes (assoc nodes desc-id node)
+                                      parents (if previous-node
+                                                (get desc :parents [(get previous-node ::gen-id)])
+                                                (get desc :parents))]
+                                  [(->> (concat edges
+                                                (map vector parents (repeat desc-id)))
+                                        vec)
+                                   nodes
+                                   node]))
+                              [[] {} nil]
+                              desc-seq)]
+    (->> (graph/dfs-seq {:edges edges :nodes nodes})
+         (map nodes)
+         (remove nil?)
+         (mapv #(dissoc % ::gen-id)))))
+
+
 (defn linear-network
   "Build the network, ensure the weights and biases are in place and of the
   appropriate sizes."
@@ -119,7 +146,8 @@
        (-> (first
              (reduce add-node-to-graph
                      [graph nil]
-                     (flatten network-desc)))
+                     (-> (flatten network-desc)
+                         order-desc-nodes)))
            generate-output-losses
            ;;Calculate dimensions flowing through the graph.  We need input sizes for this
            ;;but now output sizes as output sizes are derived from input sizes
@@ -350,3 +378,17 @@ opposed to networks), but consider:
                                    [k (layer->buffer-shape network layer k)])))))
          (pprint/print-table (concat ["type" "input" "output"] parameter-keys)))
     (println "Parameter count:" (graph/parameter-count (:compute-graph network)))))
+
+
+(defn find-network-fail
+  "Sometimes we get descriptions that are quite large that fail to build.  This is a debugging tool
+to pair down the description until it builds which helps to quickly find the failure."
+  [network-desc]
+  (->> (range 10 (count network-desc))
+       (map #(take % network-desc))
+       (take-while #(try
+                      (linear-network %)
+                      (catch Throwable e
+                        nil)))
+       last
+       count))

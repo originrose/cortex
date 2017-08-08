@@ -5,10 +5,15 @@ on them that pertails exactly to that implementation.  They are expected to be t
 of extra keys/information on the descriptions.  Because of this the description
 constructors are all variable args with the extra arguments expected to be
   keyword-value pairs and are assoc'd into the description map."
-  (:require [cortex.util :refer [merge-args arg-list->arg-map] :as util]
-            [cortex.loss :as loss]
+  (:require [cortex.util :refer [merge-args arg-list->arg-map]]
             [cortex.graph :as graph]
-            [cortex.buffer-initialization :as buf-init]))
+            [cortex.buffer-initialization :as buf-init]
+            [cortex.loss.core :as loss]
+            [cortex.loss.mse]
+            [cortex.loss.center]
+            [cortex.loss.softmax]
+            [cortex.loss.censor]
+            [cortex.loss.regularization]))
 
 
 ;; Helpers
@@ -50,6 +55,11 @@ constructors are all variable args with the extra arguments expected to be
 (defmethod graph/initialize-graph-parameter-buffer :relu
   [graph node argument shape initialization]
   (buf-init/initialize-buffer {:type :relu
+                               :shape shape}))
+
+(defmethod graph/initialize-graph-parameter-buffer :orthogonal
+  [graph node argument shape initialization]
+  (buf-init/initialize-buffer {:type :orthogonal
                                :shape shape}))
 
 (defmethod graph/initialize-graph-parameter-buffer :xavier
@@ -448,14 +458,24 @@ a few compatibility issues."
    :passes #{:training :inference}})
 
 
-;; Pooling Layers
-
 (defn max-pooling
+    "Max pooling with one of three possible pooling operations (:pool-op):
+:max - default, take the max excluding padding.
+:avg - Take the average including padding.
+:avg-exc-pad - Take the average excluding padding."
   ([{:keys [kernel-dim pad stride ceil] :as args}]
    (assert (and kernel-dim pad stride))
-   [(apply convolutional-type-layer :max-pooling
-           kernel-dim kernel-dim pad pad
-           stride stride 0 :ceil ceil)])
+   (let [retval (-> (apply convolutional-type-layer :max-pooling
+                          kernel-dim kernel-dim pad pad
+                          stride stride 0 :ceil args)
+                   (#(if (contains? % :pool-op)
+                       %
+                       (assoc % :pool-op :max))))]
+    (when-not (get #{:max :avg :avg-exc-pad} (get retval :pool-op))
+      (throw (ex-info "Max pooling layers have three possible pool operations:"
+                      {:possible-operation-set #{:max :avg :avg-exc-pad}
+                       :pool-op (get retval :pool-op)})))
+    [retval]))
   ([kernel-dim pad stride & args]
    [(apply convolutional-type-layer :max-pooling
            kernel-dim kernel-dim pad pad
@@ -482,36 +502,53 @@ a few compatibility issues."
 https://arxiv.org/pdf/1502.03167v3.pdf.
 ave-factor is the exponential falloff for the running averages of mean and variance
 while epsilon is the stabilization factor for the variance (because we need inverse variance
-and we don't want to divide by zero."
-  [& {:keys [ave-factor epsilon]
+and we don't want to divide by zero.
+
+Batch normalization can work in two modes; :elementwise where it normalizes each parameter
+across batches and :spatial where it normalizes each channel across all elements and batches."
+  [& {:keys [ave-factor epsilon mode]
       :or {ave-factor 0.9
            epsilon 1e-4}
       :as arg-map}]
   (when (< (double epsilon) 1e-5)
     (throw (Exception. "batch-normalization minimum epsilon is 1e-5.
 This is for cudnn compatibility.")))
+  (when-not (contains? #{:elementwise :spatial} (get arg-map :mode :elementwise))
+    (throw (ex-info "Batch normalization can either be elementwise or spatial"
+                    {:mode (get arg-map :mode)})))
   [(merge
     {:type :batch-normalization
      :average-factor ave-factor
-     :epsilon epsilon}
+     :epsilon epsilon
+     :mode :elementwise}
     (dissoc arg-map :epsilon))])
+
+
+(defn batch-norm-param-shape
+  [graph node argument]
+  (condp = (get node :mode :elementwise)
+    :elementwise
+    (linear-bias-parameter-shape graph node argument)
+    :spatial
+    (let [dims (graph/node->input-dimension node)]
+      [(get dims :channels)])))
 
 
 (defmethod graph/get-node-metadata :batch-normalization
   [desc]
   {:arguments
-   {:scale {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+   {:scale {:shape-fn :cortex.nn.layers/batch-norm-param-shape
             :initialization {:type :constant :value 1}
             :gradients? true
             :type :parameter}
-    :bias {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+    :bias {:shape-fn :cortex.nn.layers/batch-norm-param-shape
            :initialization {:type :constant :value 0}
            :gradients? true
            :type :parameter}
-    :means {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+    :means {:shape-fn :cortex.nn.layers/batch-norm-param-shape
             :initialization {:type :constant :value 0}
             :type :parameter}
-    :variances {:shape-fn :cortex.nn.layers/linear-bias-parameter-shape
+    :variances {:shape-fn :cortex.nn.layers/batch-norm-param-shape
                 :initialization {:type :constant :value 0}
                 :type :parameter}}
    :passes #{:training :inference}})
@@ -580,11 +617,14 @@ input dimensions."
   (let [input-dims (mapv #(-> (graph/get-node graph %)
                               (graph/ensure-single-output-dimensions node)
                               (assoc :id %))
-                         p-id-seq)]
+                         p-id-seq)
+        input-dims-set (set (map #(dissoc % :id) input-dims))]
     (assoc node
            :input-dimensions input-dims
-           :output-dimensions [(graph/create-node-dimensions
-                                (apply max (map graph/dimensions->size input-dims)))])))
+           :output-dimensions (if (= 1 (count input-dims-set))
+                                [(first input-dims-set)]
+                                [(graph/create-node-dimensions
+                                  (apply max (map graph/dimensions->size input-dims)))]))))
 
 
 (defmethod graph/get-node-metadata :join

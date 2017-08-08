@@ -1,15 +1,14 @@
 (ns cortex.compute.verify.loss
   (:require [clojure.test :refer :all]
-            [cortex.compute.loss :as compute-loss]
-            [cortex.loss :as cortex-loss]
-            [cortex.compute.nn.backend :as backend]
             [clojure.core.matrix :as m]
+            [cortex.compute.nn.backend :as backend]
             [cortex.compute.driver :as drv]
             [cortex.compute.math :as math]
             [cortex.graph :as graph]
             [cortex.nn.layers :as layers]
-            [cortex.nn.network :as network]))
-
+            [cortex.nn.network :as network]
+            [cortex.loss.util :as util]
+            [cortex.loss.core :as cortex-loss]))
 
 
 (defn center-loss
@@ -66,14 +65,14 @@
                                                {:feature {:buffer (backend/array backend features batch-size)
                                                           :gradient (backend/new-array backend [n-features]
                                                                                        batch-size)}})
-         loss-term (compute-loss/create-compute-loss-term backend {:compute-graph graph} loss-term batch-size)
+         loss-term (util/create-compute-loss-term backend {:compute-graph graph} loss-term batch-size)
          nonzero-classes [1 0 1 1 0]
          adjusted-centers (mapv #(if (zero? %)
                                    (vec (repeat n-features 1.0))
                                    (vec (repeat n-features (+ (* alpha center-val)
                                                               (* (- 1.0 alpha) feature-val)))))
                                 nonzero-classes)]
-     (compute-loss/compute-loss-gradient loss-term argument-map)
+     (util/compute-loss-gradient loss-term argument-map)
      (let [output-gradients (->> (backend/to-double-array backend (get-in argument-map [:output :gradient]))
                                  (partition n-features)
                                  (mapv vec))]

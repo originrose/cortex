@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [cortex.verify.nn.layers :as verify-layers]
             [cortex.compute.cpu.backend :as cpu-backend]
+            [cortex.compute.cpu.tensor-math]
             [cortex.nn.execute :as execute]
             [cortex.compute.verify.utils
              :refer [def-double-float-test]
@@ -53,6 +54,12 @@
 
 (def-double-float-test pool-layer
   (verify-layers/pool-layer-basic (create-context)))
+
+(def-double-float-test pool-layer-avg
+  (verify-layers/pool-layer-avg (create-context)))
+
+(def-double-float-test pool-layer-avg-exc-pad
+  (verify-layers/pool-layer-avg-exc-pad (create-context)))
 
 (def-double-float-test dropout-bernoulli
   (verify-layers/dropout-bernoulli (create-context)))
