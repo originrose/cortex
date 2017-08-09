@@ -366,14 +366,15 @@ If the input contains no channels then you get a scale factor per input paramete
   calculations must be "
   ([{:keys [kernel-dim pad stride num-kernels floor] :as args}]
    (assert (and kernel-dim pad stride num-kernels))
-   (convolutional kernel-dim pad stride num-kernels floor))
+   [(assoc
+     (apply convolutional-type-layer :convolutional kernel-dim kernel-dim
+            pad pad stride stride num-kernels :floor (flatten (seq args)))
+     :dimension-op :floor)])
   ([kernel-dim pad stride num-kernels & args]
    ;;We have to force the dimension operation to be floor for convolutional operations
    ;;due to cudnn compatibility constraints
-   [(assoc
-     (apply convolutional-type-layer :convolutional kernel-dim kernel-dim
-            pad pad stride stride num-kernels :floor args)
-     :dimension-op :floor)]))
+   (convolutional (merge-args {:kernel-dim kernel-dim :pad pad :stride stride
+                               :num-kernels num-kernels} args))))
 
 
 (defn- convolutional-weight-parameter-shape
@@ -467,7 +468,7 @@ a few compatibility issues."
    (assert (and kernel-dim pad stride))
    (let [retval (-> (apply convolutional-type-layer :max-pooling
                           kernel-dim kernel-dim pad pad
-                          stride stride 0 :ceil args)
+                          stride stride 0 :ceil (flatten (seq args)))
                    (#(if (contains? % :pool-op)
                        %
                        (assoc % :pool-op :max))))]
@@ -477,9 +478,7 @@ a few compatibility issues."
                        :pool-op (get retval :pool-op)})))
     [retval]))
   ([kernel-dim pad stride & args]
-   [(apply convolutional-type-layer :max-pooling
-           kernel-dim kernel-dim pad pad
-           stride stride 0 :ceil args)]))
+   (max-pooling (merge-args {:kernel-dim kernel-dim :pad pad :stride stride} args))))
 
 
 (defmethod graph/build-node :max-pooling
