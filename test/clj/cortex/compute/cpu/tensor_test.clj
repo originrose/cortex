@@ -71,3 +71,7 @@
 
 (def-all-dtype-test ternary-op-select
   (verify-tensor/ternary-op-select (driver) *datatype*))
+
+
+(def-all-dtype-test transpose
+  (verify-tensor/transpose (driver) *datatype*))

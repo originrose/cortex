@@ -1298,6 +1298,23 @@ softmax: https://en.wikipedia.org/wiki/Softmax_function"
   output)
 
 
+(defn transpose
+  "Transpose the tensor returning a new tensor that shares the backing store but indexes
+into it in a different order."
+  [tensor reorder-vec]
+  (when-not-error (= (count (distinct reorder-vec))
+                     (count (shape tensor)))
+    "Every dimensions must be represented in the reorder vector"
+    {:shape (shape tensor)
+     :reorder-vec reorder-vec})
+  (let [{:keys [shape strides]} (tensor->dimensions tensor)
+        shape (mapv #(get shape %) reorder-vec)
+        stride (mapv #(get strides %) reorder-vec)]
+    (assoc tensor :dimensions
+           {:shape shape
+            :strides stride})))
+
+
 (extend-type Tensor
   mp/PVectorView
   (as-vector [m]

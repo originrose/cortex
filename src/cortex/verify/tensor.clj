@@ -530,3 +530,22 @@ for the cuda backend."
      (ct/ternary-op! dest 1 x-arg 1.0 -1 3.0 2.0 :select)
      (is (m/equals [-1 -1 -1 -1 -1 6 6 6 6 6]
                    (ct/to-double-array dest))))))
+
+
+(defn transpose
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [img-dim 4
+         img-tensor (ct/->tensor
+                     (->> (repeat (* img-dim img-dim) [1 2 3])
+                          (partition img-dim)))
+         planar-tensor (ct/transpose img-tensor [2 0 1])
+         rgb-tensor (ct/transpose planar-tensor [1 2 0])]
+     (is (m/equals (flatten (concat (repeat (* img-dim img-dim) 1)
+                                    (repeat (* img-dim img-dim) 2)
+                                    (repeat (* img-dim img-dim) 3)))
+                   (ct/to-double-array planar-tensor)))
+
+     (is (m/equals (flatten (repeat (* img-dim img-dim) [1 2 3]))
+                   (ct/to-double-array rgb-tensor))))))
