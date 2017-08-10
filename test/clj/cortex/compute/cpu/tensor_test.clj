@@ -4,6 +4,7 @@
              :refer [def-double-float-test
                      def-all-dtype-test
                      *datatype*
+                     def-int-long-test
                      test-wrapper]]
             [clojure.test :refer :all]
             [cortex.compute.cpu.driver :refer [driver]]
@@ -75,3 +76,7 @@
 
 (def-all-dtype-test transpose
   (verify-tensor/transpose (driver) *datatype*))
+
+
+(def-int-long-test mask
+  (verify-tensor/mask (driver) *datatype*))

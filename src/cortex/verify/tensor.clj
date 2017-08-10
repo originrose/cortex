@@ -549,3 +549,36 @@ for the cuda backend."
 
      (is (m/equals (flatten (repeat (* img-dim img-dim) [1 2 3]))
                    (ct/to-double-array rgb-tensor))))))
+
+
+(defn mask
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [r-pix (int 1)
+         g-pix (int 2)
+         b-pix (int 3)
+         ;;Load a single image to r,g,b planes
+         rgba (+ r-pix
+                 (bit-shift-left g-pix 8)
+                 (bit-shift-left b-pix 16)
+                 (bit-shift-left (int 255) 24))
+         img-dim 4
+         img-tensor (ct/->tensor
+                     (->> (repeat (* img-dim img-dim) rgba)
+                          (partition img-dim)))
+         mask-tensor (assoc (ct/->tensor [0xFF
+                                          (bit-shift-left 0xFF 8)
+                                          (bit-shift-left 0xFF 16)])
+                            :dimensions (ct/dimensions [3 1 1]))
+         div-tensor (assoc (ct/->tensor [1
+                                         (bit-shift-left 1 8)
+                                         (bit-shift-left 1 16)])
+                           :dimensions (ct/dimensions [3 1 1]))
+         result (ct/new-tensor [3 img-dim img-dim])]
+     (ct/binary-op! result 1.0 img-tensor 1.0 mask-tensor :bit-and)
+     (ct/binary-op! result 1.0 result 1.0 div-tensor :/)
+     (is (m/equals (flatten (concat (repeat (* img-dim img-dim) 1)
+                                    (repeat (* img-dim img-dim) 2)
+                                    (repeat (* img-dim img-dim) 3)))
+                   (ct/to-double-array result))))))

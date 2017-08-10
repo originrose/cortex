@@ -4,6 +4,7 @@
              :refer [def-double-float-test
                      def-all-dtype-test
                      def-cas-dtype-test
+                     def-int-long-test
                      *datatype*
                      test-wrapper]]
             [clojure.test :refer :all]))
@@ -80,3 +81,7 @@
 
 (def-all-dtype-test transpose
   (verify-tensor/transpose (create-driver) *datatype*))
+
+
+(def-int-long-test mask
+  (verify-tensor/mask (create-driver) *datatype*))

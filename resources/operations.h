@@ -14,6 +14,11 @@ namespace tensor { namespace operations {
       return lhs < rhs ? lhs : rhs;
     }
 
+    template<typename dtype>
+    __device__ inline dtype op_bit_and(dtype lhs, dtype rhs) {
+      return (dtype) ((int) lhs & (int) rhs);
+    }
+
     struct operation_type
     {
       enum _enum
@@ -24,6 +29,7 @@ namespace tensor { namespace operations {
 	divide,
 	min,
 	max,
+	bit_and,
       };
     };
 
@@ -49,6 +55,8 @@ namespace tensor { namespace operations {
 	  return op_max(lhs, rhs);
 	case operation_type::min:
 	  return op_min(lhs, rhs);
+	case operation_type::bit_and:
+	  return op_bit_and(lhs,rhs);
 	};
 	return (dtype) 0;
       }

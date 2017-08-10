@@ -708,17 +708,28 @@ and the rest of the dimensions being squashed into n-rows."
                     (max (ecount src) (ecount dest)))))))
 
 
-(defn- ensure-ecounts-commensurate
-  [x y]
-  (let [n-x (ecount x)
-        n-y (ecount y)
-        min-ec (min n-x n-y)
-        max-ec (long (max n-x n-y))]
-    (when-not (= 0 min-ec)
-      (when-not-error (= 0 (rem max-ec min-ec))
-        "Element counts are not commensurate"
-        {:x-ecount (ecount x)
-         :y-ecount (ecount y)}))))
+(defn- ensure-broadcast-rules
+  [& args]
+  (let [shape-seq (mapv shape args)
+        max-dim-count (long (apply max (map count shape-seq)))
+        ;;1-extend the shapes
+        shape-seq (mapv (fn [shp]
+                          (->> (concat (repeat (- max-dim-count (count shp)) 1)
+                                       shp)
+                               vec))
+                        shape-seq)
+        max-shape-vec (->> (apply map (fn [& args]
+                                        (apply max args))
+                                  shape-seq)
+                           vec)]
+    (when-not-error (every? (fn [shp]
+                              (every? #(= 0 (long %))
+                                      (map #(rem (long %1) (long %2))
+                                           max-shape-vec shp)))
+                            shape-seq)
+      "Shapes are not broadcast-compatible (dimension counts must be commensurate)"
+      {:shapes shape-seq
+       :max-shapes max-shape-vec})))
 
 
 (defn- perform-unary-op
@@ -750,7 +761,7 @@ and the rest of the dimensions being squashed into n-rows."
       (do
         (ensure-datatypes (get-datatype dest) x)
         (ensure-same-device dest x)
-        (ensure-ecounts-commensurate dest x)
+        (ensure-broadcast-rules dest x)
         (check-partial-alias dest x)
         (tm/unary-op! (check-stream)
                       (tensor->buffer dest) (tensor->dimensions dest)
@@ -784,7 +795,7 @@ and the rest of the dimensions being squashed into n-rows."
 
 (defn- binary-op-constant!
   [dest alpha x beta y op reverse-operands?]
-  (ensure-ecounts-commensurate dest x)
+  (ensure-broadcast-rules dest x)
   (ensure-datatypes (dtype/get-datatype dest) x)
   (let [y (* (double beta) (double y))
         device (tensor->device dest)]
@@ -825,7 +836,7 @@ and the rest of the dimensions being squashed into n-rows."
             [alpha beta y rev-ops?] (if x-alias?
                                       [alpha beta y false]
                                       [beta alpha x true])]
-        (ensure-ecounts-commensurate dest y)
+        (ensure-broadcast-rules dest y)
         (ensure-datatypes (get-datatype dest) y)
         (check-partial-alias dest y)
         (tm/binary-accum!
@@ -835,9 +846,7 @@ and the rest of the dimensions being squashed into n-rows."
          (max (ecount dest)
               (ecount y)) op rev-ops?))
       (do
-        (ensure-ecounts-commensurate dest x)
-        (ensure-ecounts-commensurate dest y)
-        (ensure-ecounts-commensurate x y)
+        (ensure-broadcast-rules dest x y)
         (ensure-datatypes (get-datatype x) y dest)
         (check-partial-alias dest x y)
         (tm/binary-op!
@@ -909,7 +918,7 @@ Datatypes must match."
         (apply ensure-datatypes (get-datatype dest) tensors)
         (apply ensure-same-device dest tensors)
         (doseq [tens tensors]
-          (ensure-ecounts-commensurate dest tens))
+          (ensure-broadcast-rules dest tens))
         (case num-tensor-args
           3 (tm/ternary-op! (check-stream)
                             (tensor->buffer dest) (tensor->dimensions dest)
