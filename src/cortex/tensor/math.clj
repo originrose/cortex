@@ -167,23 +167,24 @@ running means, variances using a running average
              batch-count
              element-count])
 
-  (convolution-descriptor [datatype out-channels in-channels kern-width kern-height
+  (convolution-descriptor [stream
+                           datatype out-channels in-channels kern-width kern-height
                            pad-x pad-y stride-x stride-y]
     "Return an implementation-specific descriptor to be used with the resulting convolution calls.
 resource/release *must* be a valid call on the returned value.")
 
-  (get-convolution-output-dimensions [conv-descriptor]
-    "Return a map of {:width :height } so that clients can double check that allocated buffers
-match what the implementation expects.")
-
-  (choose-convolution-algorithms [stream conv-descriptor max-ideal-workspace-size use-defaults?])
+  (choose-convolution-algorithms [stream conv-descriptor
+                                  input-width input-height
+                                  output-width output-height
+                                  batch-size
+                                  max-ideal-workspace-size use-defaults?])
 
   (convolution-forward! [stream
                          output output-dims
                          input input-dims
                          weights weight-dims
                          workspace workspace-ecount
-                         conv-descriptor])
+                         conv-descriptor algorithms])
 
 
   (convolution-backward-bias! [stream

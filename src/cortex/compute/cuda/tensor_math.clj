@@ -7,9 +7,11 @@
             [cortex.compute.math-util :as cmu]
             [think.resource.core :as resource])
   (:import [cortex.compute.cuda.driver CudaStream]
-           [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer
+           [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer SizeTPointer
             cublas cublas$cublasContext
-            cudnn cudnn$cudnnContext]))
+            cudnn cudnn$cudnnContext
+            cudnn$cudnnConvolutionStruct
+            cudnn$cudnnFilterStruct]))
 
 
 (set! *warn-on-reflection* true)
@@ -185,6 +187,12 @@
   [arg-order]
   (->> (cpu-tens-math/arg-order->indexes arg-order)
        (mapv #(byte %))))
+
+
+(defrecord ConvDesc [^cudnn$cudnnConvolutionStruct conv-desc
+                     ^cudnn$cudnnFilterStruct filter-desc]
+  resource/PResource
+  (release-resource [this]))
 
 
 (extend-type CudaStream
@@ -707,4 +715,168 @@
                                      (->ptr input)
                                      (value->ptr 0 datatype)
                                      tensor
-                                     (->ptr output))))))))
+                                     (->ptr output)))))))
+
+  (convolution-descriptor [stream
+                           datatype out-channels in-channels kern-width kern-height
+                           pad-x pad-y stride-x stride-y]
+    (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
+          ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
+          tensor-datatype (cuda-base/dtype->cudnn datatype)]
+      (cuda-base/cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
+      (cuda-base/cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
+      (resource/track conv-desc)
+      (resource/track filter-desc)
+      (cuda-base/cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
+                                                              tensor-datatype
+                                                              cudnn/CUDNN_TENSOR_NCHW
+                                                              out-channels in-channels
+                                                              kern-width kern-height))
+      (cuda-base/cudnn-call (cudnn/cudnnSetConvolution2dDescriptor conv-desc
+                                                                   pad-y pad-x
+                                                                   stride-y stride-x
+                                                                   1 1
+                                                                   cudnn/CUDNN_CROSS_CORRELATION))
+
+      (->ConvDesc conv-desc filter-desc)))
+
+  (choose-convolution-algorithms [stream conv-descriptor
+                                  input-width input-height
+                                  output-width output-height
+                                  batch-size
+                                  max-ideal-workspace-size use-defaults?]
+    ;;game on
+    (resource/with-resource-context
+      (let [{:keys [datatype out-channels in-channels kern-width kern-height
+                    pad-x pad-y stride-x stride-y descriptor]} conv-descriptor
+            input-tensor (cuda-base/tensor datatype batch-size in-channels input-width input-height)
+            output-tensor (cuda-base/tensor datatype batch-size out-channels output-width output-height)
+            ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
+            ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
+            forward-algo (IntPointer. 1)
+            forward-workspace-size (SizeTPointer. 1)
+            backward-filter-algo (IntPointer. 1)
+            backward-filter-workspace-size (SizeTPointer. 1)
+            backward-data-algo (IntPointer. 1)
+            backward-data-workspace-size (SizeTPointer. 1)
+            output-size-check (int-array 4)
+            max-ideal-workspace-size (long max-ideal-workspace-size)]
+
+        (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionNdForwardOutputDim conv-desc
+                                                                          input-tensor
+                                                                          filter-desc
+                                                                          4
+                                                                          output-size-check))
+
+        ;;If these don't match we get memory overwrite or over-read errors
+        (let [[n c h w] (vec output-size-check)]
+          (when-not (and (= h output-height)
+                         (= w output-width))
+            (throw (Exception. (format "Calculated output dimensions %s and cudnn output dimensions %s are off"
+                                       [h w] [output-height output-width])))))
+        (cuda-base/cudnn-with-stream
+         stream
+
+         (if-not use-defaults?
+           (do
+            (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionForwardAlgorithm
+                                   cudnn-context
+                                   input-tensor
+                                   filter-desc
+                                   conv-desc
+                                   output-tensor
+                                   cudnn/CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT
+                                   max-ideal-workspace-size
+                                   forward-algo))
+            (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterAlgorithm
+                                   cudnn-context
+                                   input-tensor
+                                   output-tensor
+                                   conv-desc
+                                   filter-desc
+                                   cudnn/CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT
+                                   max-ideal-workspace-size
+                                   backward-filter-algo))
+            (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataAlgorithm
+                                   cudnn-context
+                                   filter-desc
+                                   output-tensor
+                                   conv-desc
+                                   input-tensor
+                                   cudnn/CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT
+                                   max-ideal-workspace-size
+                                   backward-data-algo)))
+           (do
+             (dtype/set-value! forward-algo 0 cudnn/CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM)
+             (dtype/set-value! backward-filter-algo 0 cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0)
+             (dtype/set-value! backward-data-algo 0 cudnn/CUDNN_CONVOLUTION_BWD_DATA_ALGO_0)))
+
+
+         (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionForwardWorkspaceSize
+                                cudnn-context
+                                input-tensor
+                                filter-desc
+                                conv-desc
+                                output-tensor
+                                (.get forward-algo)
+                                forward-workspace-size))
+
+         (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterWorkspaceSize
+                                cudnn-context
+                                input-tensor
+                                output-tensor
+                                conv-desc
+                                filter-desc
+                                (.get backward-filter-algo)
+                                backward-filter-workspace-size))
+
+         (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataWorkspaceSize
+                                cudnn-context
+                                filter-desc
+                                output-tensor
+                                conv-desc
+                                input-tensor
+                                (.get backward-data-algo)
+                                backward-data-workspace-size)))
+        {:forward {:algorithm (dtype/get-value forward-algo 0)
+                   :workspace-size (.get forward-workspace-size)}
+         :backward-filter {:algorithm (dtype/get-value backward-filter-algo 0)
+                           :workspace-size (.get backward-filter-workspace-size)}
+         :backward-data {:algorithm (dtype/get-value backward-data-algo 0)
+                         :workspace-size (.get backward-data-workspace-size 0)}
+         :workspace-size (long (max (long (.get forward-workspace-size))
+                                    (long (.get backward-filter-workspace-size))
+                                    (long (.get backward-data-workspace-size))))})))
+
+  (convolution-forward! [stream
+                         output output-dims
+                         input input-dims
+                         weights weight-dims
+                         workspace workspace-ecount
+                         conv-descriptor algorithms]
+    (resource/with-resource-context
+      (cuda-base/cudnn-with-stream
+       stream
+       (let [[batch-size in-channels in-height in-width] (get input-dims :shape)
+             [batch-size out-channels out-height out-width] (get output-dims :shape)
+             {:keys [datatype descriptor]} conv-descriptor
+             input-tensor (cuda-base/tensor datatype batch-size in-channels in-width in-height)
+             output-tensor (cuda-base/tensor datatype batch-size out-channels out-width out-height)
+             ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
+             ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
+             forward-algorithm (long (get-in algorithms [:forward :algorithm]))]
+         (cuda-base/cudnn-call
+          (cudnn/cudnnConvolutionForward
+           cudnn-context
+           (value->ptr 1 datatype)
+                    input-tensor
+                    (->ptr input)
+                    filter-desc
+                    (->ptr weights)
+                    conv-desc
+                    forward-algorithm
+                    (->ptr workspace)
+                    (int workspace-ecount)
+                    (value->ptr 0 datatype)
+                    output-tensor
+                    (->ptr output))))))))

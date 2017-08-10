@@ -76,3 +76,7 @@
 
 (def-all-dtype-test ternary-op-select
   (verify-tensor/ternary-op-select (create-driver) *datatype*))
+
+
+(deftest convolution-operator
+  (verify-tensor/convolution-operator (create-driver) *datatype*))

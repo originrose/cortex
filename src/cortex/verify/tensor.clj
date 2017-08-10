@@ -530,3 +530,37 @@ for the cuda backend."
      (ct/ternary-op! dest 1 x-arg 1.0 -1 3.0 2.0 :select)
      (is (m/equals [-1 -1 -1 -1 -1 6 6 6 6 6]
                    (ct/to-double-array dest))))))
+
+
+(defn convolution-operator
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [batch-size 3
+         num-in-channels 4
+         num-out-channels 3
+         input-dim 4
+         input (ct/->tensor (repeat batch-size (repeat num-in-channels (partition input-dim (range 1 17)))))
+         conv-desc (ct/convolution-descriptor datatype num-out-channels num-in-channels
+                                              3 3 0 0 1 1)
+         {:keys [output-width output-height]} (ct/get-convolution-output-dimensions conv-desc input-dim input-dim)
+         output-width (long output-width)
+         output-height (long output-height)
+         output (ct/new-tensor [batch-size num-out-channels output-height output-width])
+         output-gradient (assoc (ct/->tensor (repeat (* batch-size
+                                                        output-width output-height
+                                                        num-out-channels) 1))
+                                :dimensions
+                                (ct/dimensions [batch-size num-out-channels
+                                                output-height output-width]))
+         algorithms (ct/choose-convolution-algorithms conv-desc input-dim input-dim batch-size 1000)
+         workspace (ct/new-tensor [(long (get algorithms :workspace-size))])
+         weights (ct/->tensor (take num-out-channels
+                                    (partition (* 3 3 num-in-channels) (range))))]
+     (ct/convolution-forward! output input weights workspace conv-desc algorithms)
+     (is (m/equals   [4092.0, 4722.0, 6612.0, 7242.0, 11868.0, 13794.0, 19572.0, 21498.0,
+                      19644.0, 22866.0, 32532.0, 35754.0, 4092.0, 4722.0, 6612.0, 7242.0,
+                      11868.0, 13794.0, 19572.0, 21498.0, 19644.0, 22866.0, 32532.0,
+                      35754.0, 4092.0, 4722.0, 6612.0, 7242.0, 11868.0, 13794.0, 19572.0,
+                      21498.0, 19644.0, 22866.0, 32532.0, 35754.0]
+                   (ct/to-double-array output))))))

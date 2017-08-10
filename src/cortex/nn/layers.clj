@@ -358,7 +358,7 @@ of the output of a conv-net ignoring channels.  Caffe does this slightly differe
 for pooling verse convolutional layers.  Furthermore keras does this differently
 than caffe for pooling layers so this exact calculation has been the source of
 a few compatibility issues."
-  [input-dim pad kernel-size stride dimension-op]
+  ^long [input-dim pad kernel-size stride dimension-op]
   (let [partial-result (/ (- (+ (double input-dim)
                                 (* 2 (double pad)))
                              (double kernel-size))
