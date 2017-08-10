@@ -85,3 +85,7 @@
 
 (def-int-long-test mask
   (verify-tensor/mask (create-driver) *datatype*))
+
+
+(def-all-dtype-test select
+  (verify-tensor/select (create-driver) *datatype*))

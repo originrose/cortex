@@ -582,3 +582,41 @@ for the cuda backend."
                                     (repeat (* img-dim img-dim) 2)
                                     (repeat (* img-dim img-dim) 3)))
                    (ct/to-double-array result))))))
+
+
+(defn select
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [mat-tens (ct/->tensor (repeat 2 (partition 3 (range 9))))]
+     (let [sel-tens (ct/select mat-tens :all :all [1 2])]
+      (is (m/equals (flatten (repeat 2 [1 2 4 5 7 8]))
+                    (ct/to-double-array sel-tens)))
+      (is (m/equals [2 3 2]
+                    (m/shape sel-tens))))
+     (let [sel-tens (ct/select mat-tens :all :all [2])]
+       (is (m/equals (flatten (repeat 2 [2 5 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3 1]
+                     (m/shape sel-tens))))
+     (let [sel-tens (ct/select mat-tens :all :all 2)]
+       (is (m/equals (flatten (repeat 2 [2 5 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3]
+                     (m/shape sel-tens))))
+
+     (let [sel-tens (ct/select mat-tens :all [1 2] :all)]
+      (is (m/equals (flatten (repeat 2 [3 4 5 6 7 8]))
+                    (ct/to-double-array sel-tens)))
+      (is (m/equals [2 2 3]
+                    (m/shape sel-tens))))
+     (let [sel-tens (ct/select mat-tens :all [2] :all)]
+       (is (m/equals (flatten (repeat 2 [6 7 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 1 3]
+                     (m/shape sel-tens))))
+     (let [sel-tens (ct/select mat-tens :all 0 :all)]
+       (is (m/equals (flatten (repeat 2 [0 1 2]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3]
+                     (m/shape sel-tens)))))))
