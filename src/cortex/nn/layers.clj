@@ -99,22 +99,40 @@ constructors are all variable args with the extra arguments expected to be
 
 
 (defn input
+  ([arg]
+   (let [arg (if (map? arg) arg {:width arg})
+         {:keys [width height channels]
+          :or {height   1
+               channels 1}
+          :as args} arg]
+     (assert width)
+     [(merge
+       {:type :input
+        :output-size     (* width height channels)
+        :output-width    width
+        :output-height   height
+        :output-channels channels}
+       args)]))
   ([width height channels & args]
    [(merge-args
      {:type :input
-      :output-size (* width height channels)
-      :output-width width
-      :output-height height
+      :output-size     (* width height channels)
+      :output-width    width
+      :output-height   height
       :output-channels channels}
-     args)])
-  ([output-size]
-   (input output-size 1 1)))
+     args)]))
 
 ;; Linear layer
 
 (defn linear
-  [num-output & args]
-  [(merge-args {:type :linear :output-size num-output} args)])
+  ([arg]
+   (let [args (if (map? arg)
+                arg
+                {:output-size arg})]
+     (assert (:output-size args))
+     [(assoc args :type :linear)]))
+  ([output-size & args]
+   (linear (merge-args {:output-size output-size} args))))
 
 
 (defn linear-weight-parameter-shape
@@ -245,24 +263,38 @@ If the input contains no channels then you get a scale factor per input paramete
 
 (defn dropout
   "Bernoulli dropout where random (flat distribution) activations are zeroed out.
-Probability is the probability that an activation will survive so a probability of
-1 means no dropout while a probability of will zero out the activation vector."
-  [probability & args]
-  [(merge-args
-    {:type :dropout :distribution :bernoulli :probability probability}
-    args)])
+  Probability is the probability that an activation will survive so a probability of
+  1 means no dropout while a probability of will zero out the activation vector."
+  ([arg]
+   (let [args (if (map? arg)
+                arg
+                {:probability arg})]
+     (assert (:probability args))
+     [(assoc args :type :dropout :distribution :bernoulli)]))
+  ([probability & args]
+   [(merge-args
+     {:type :dropout :distribution :bernoulli :probability probability}
+     args)]))
 
 
 (defn multiplicative-dropout
   "Gaussian dropout where the activation vector is multiplied by a gaussian
-vector centered around (1,variance).  Note that this means the variance
-argument has an opposite effect of traditional dropout's probability in that
-a variance of 1 is actually quite a lot of variance and a variance of 0 means
-no change to the input."
-  [variance & args]
-  [(merge-args
-    {:type :dropout :distribution :gaussian :variance variance}
-    args)])
+  vector centered around (1,variance).  Note that this means the variance
+  argument has an opposite effect of traditional dropout's probability in that
+  a variance of 1 is actually quite a lot of variance and a variance of 0 means
+  no change to the input."
+  ([arg]
+   (let [args (if (map? arg)
+                arg
+                {:variance arg})]
+     (assert (:variance args))
+     [(assoc args
+             :type :dropout
+             :ditribution :gaussian)]))
+  ([variance & args]
+   [(merge-args
+     {:type :dropout :distribution :gaussian :variance variance}
+     args)]))
 
 
 (defmethod graph/get-node-metadata :dropout
@@ -331,14 +363,18 @@ no change to the input."
 
 (defn convolutional
   "Create a convolutional layer.  The dimension operation used for height/width
-calculations must be "
-  [kernel-dim pad stride num-kernels & args]
-  ;;We have to force the dimension operation to be floor for convolutional operations
-  ;;due to cudnn compatibility constraints
-  [(assoc
-    (apply convolutional-type-layer :convolutional kernel-dim kernel-dim
-           pad pad stride stride num-kernels :floor args)
-    :dimension-op :floor)])
+  calculations must be "
+  ([{:keys [kernel-dim pad stride num-kernels floor] :as args}]
+   (assert (and kernel-dim pad stride num-kernels))
+   [(assoc
+     (apply convolutional-type-layer :convolutional kernel-dim kernel-dim
+            pad pad stride stride num-kernels :floor (flatten (seq args)))
+     :dimension-op :floor)])
+  ([kernel-dim pad stride num-kernels & args]
+   ;;We have to force the dimension operation to be floor for convolutional operations
+   ;;due to cudnn compatibility constraints
+   (convolutional (merge-args {:kernel-dim kernel-dim :pad pad :stride stride
+                               :num-kernels num-kernels} args))))
 
 
 (defn- convolutional-weight-parameter-shape
@@ -424,14 +460,15 @@ a few compatibility issues."
 
 
 (defn max-pooling
-  "Max pooling with one of three possible pooling operations (:pool-op):
+    "Max pooling with one of three possible pooling operations (:pool-op):
 :max - default, take the max excluding padding.
 :avg - Take the average including padding.
 :avg-exc-pad - Take the average excluding padding."
-  [kernel-dim pad stride & args]
-  (let [retval (-> (apply convolutional-type-layer :max-pooling
+  ([{:keys [kernel-dim pad stride ceil] :as args}]
+   (assert (and kernel-dim pad stride))
+   (let [retval (-> (apply convolutional-type-layer :max-pooling
                           kernel-dim kernel-dim pad pad
-                          stride stride 0 :ceil args)
+                          stride stride 0 :ceil (flatten (seq args)))
                    (#(if (contains? % :pool-op)
                        %
                        (assoc % :pool-op :max))))]
@@ -440,6 +477,8 @@ a few compatibility issues."
                       {:possible-operation-set #{:max :avg :avg-exc-pad}
                        :pool-op (get retval :pool-op)})))
     [retval]))
+  ([kernel-dim pad stride & args]
+   (max-pooling (merge-args {:kernel-dim kernel-dim :pad pad :stride stride} args))))
 
 
 (defmethod graph/build-node :max-pooling
