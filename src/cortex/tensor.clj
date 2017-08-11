@@ -238,7 +238,7 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
 This is necessary for external library interfaces (blas, cudnn).  An example would be after almost any
 transpose that is not made concrete this condition will probably not hold."
   [{:keys [shape strides]}]
-  (apply > strides))
+  (apply >= strides))
 
 
 (defn dimensions->most-rapidly-changing
@@ -1099,7 +1099,7 @@ Datatypes must match."
     "External libraries (blas (gemm gemv) and cudnn require dimensions access to be increasing"
     {:dimensions-increasing (mapv vector
                                  (map :dimensions tensors)
-                                 (map (comp dimensions-access-increasing? (map :dimensions tensors))))}))
+                                 (map (comp dimensions-access-increasing? :dimensions) tensors))}))
 
 
 (defn gemm!
