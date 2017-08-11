@@ -590,10 +590,10 @@ for the cuda backend."
    driver datatype
    (let [mat-tens (ct/->tensor (repeat 2 (partition 3 (range 9))))]
      (let [sel-tens (ct/select mat-tens :all :all [1 2])]
-      (is (m/equals (flatten (repeat 2 [1 2 4 5 7 8]))
-                    (ct/to-double-array sel-tens)))
-      (is (m/equals [2 3 2]
-                    (m/shape sel-tens))))
+       (is (m/equals (flatten (repeat 2 [1 2 4 5 7 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3 2]
+                     (m/shape sel-tens))))
      (let [sel-tens (ct/select mat-tens :all :all [2])]
        (is (m/equals (flatten (repeat 2 [2 5 8]))
                      (ct/to-double-array sel-tens)))
@@ -603,20 +603,70 @@ for the cuda backend."
        (is (m/equals (flatten (repeat 2 [2 5 8]))
                      (ct/to-double-array sel-tens)))
        (is (m/equals [2 3]
-                     (m/shape sel-tens))))
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
 
      (let [sel-tens (ct/select mat-tens :all [1 2] :all)]
-      (is (m/equals (flatten (repeat 2 [3 4 5 6 7 8]))
-                    (ct/to-double-array sel-tens)))
-      (is (m/equals [2 2 3]
-                    (m/shape sel-tens))))
+       (is (m/equals (flatten (repeat 2 [3 4 5 6 7 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 2 3]
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
      (let [sel-tens (ct/select mat-tens :all [2] :all)]
        (is (m/equals (flatten (repeat 2 [6 7 8]))
                      (ct/to-double-array sel-tens)))
        (is (m/equals [2 1 3]
-                     (m/shape sel-tens))))
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
+
      (let [sel-tens (ct/select mat-tens :all 0 :all)]
        (is (m/equals (flatten (repeat 2 [0 1 2]))
                      (ct/to-double-array sel-tens)))
        (is (m/equals [2 3]
-                     (m/shape sel-tens)))))))
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
+
+     (let [sel-tens (ct/select mat-tens [1] [1] :all)]
+       (is (m/equals [3 4 5]
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [1 1 3]
+                     (m/shape sel-tens)))
+       (is (ct/dense? sel-tens)))
+
+     (let [sel-tens (ct/select mat-tens 1 1 :all)]
+       (is (m/equals [3 4 5]
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [3]
+                     (m/shape sel-tens)))
+       (is (ct/dense? sel-tens))
+       (is (ct/as-vector sel-tens)))
+
+     (let [sel-tens (ct/select mat-tens 1 :all 2)]
+       (is (m/equals [2 5 8]
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [3]
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens)))))))
+
+
+(defn select-transpose-interaction
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [img-dim 4
+         mat-tens (ct/->tensor (partition img-dim (repeat (* img-dim img-dim) [1 2 3])))
+         planar-tens (ct/transpose mat-tens [2 0 1])
+         n-pixels (* img-dim img-dim)]
+     (let [r-tens (ct/select planar-tens 0 :all :all)
+           g-tens (ct/select planar-tens 1 :all :all)
+           b-tens (ct/select planar-tens 2 :all :all)]
+       (is (m/equals (repeat n-pixels 1) (ct/to-double-array r-tens)))
+       (is (m/equals (repeat n-pixels 2) (ct/to-double-array g-tens)))
+       (is (m/equals (repeat n-pixels 3) (ct/to-double-array b-tens)))
+       (let [bgr-tens (ct/new-tensor [img-dim img-dim 3])
+             bgr-planes (ct/transpose bgr-tens [2 0 1])]
+         (m/assign! (ct/select bgr-planes 0 :all :all) b-tens)
+         (m/assign! (ct/select bgr-planes 1 :all :all) g-tens)
+         (m/assign! (ct/select bgr-planes 2 :all :all) r-tens)
+         (is (m/equals (flatten (partition img-dim (repeat (* img-dim img-dim) [3 2 1])))
+                       (ct/to-double-array bgr-tens))))))))

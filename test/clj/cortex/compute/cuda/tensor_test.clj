@@ -89,3 +89,7 @@
 
 (def-all-dtype-test select
   (verify-tensor/select (create-driver) *datatype*))
+
+
+(def-all-dtype-test select-transpose-interaction
+  (verify-tensor/select-transpose-interaction (create-driver) *datatype*))

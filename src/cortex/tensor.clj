@@ -140,19 +140,23 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
                                          last-stride (long (get new-strides last-idx))
                                          cur-dim (long (get rev-shape last-idx))
                                          min-next-stride (* last-stride cur-dim)]
-                                     (when cur-stride
-                                       (when-not-error (<= min-next-stride (long cur-stride))
-                                         "Invalid stride (too small) detected"
-                                         {:dimension-index dim-idx
-                                          :shape shape
-                                          :strides strides
-                                          :current-stride cur-stride
-                                          :min-possible-stride min-next-stride}))
                                      (conj new-strides (or cur-stride min-next-stride))))))
                              []
                              (range (count shape)))
                      reverse
-                     vec)]
+                     vec)
+        sorted-shape-stride (->> (map vector shape strides)
+                                 (sort-by second >))
+        max-stride (apply max 0 (map second sorted-shape-stride))
+        elem-count (apply * 1 (drop 1 (map first sorted-shape-stride)))]
+    (when-not-error (<= (long elem-count)
+                        (long max-stride))
+      "Stride appears to be too small for element count"
+      {:max-stride max-stride
+       :elem-count elem-count
+       :strides strides
+       :shape shape})
+
     {:shape (vec shape)
      :strides strides
      :names names}))
@@ -217,8 +221,24 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
 
 (defn dimensions-dense?
   [{:keys [shape strides]}]
-  (= (long (first strides))
-     (apply * (drop 1 shape))))
+  ;;If we have a 1 dimensional shape then it's stride doesn't count
+  (let [[shape strides] (->> (map vector shape strides)
+                             (remove #(= 1 (first %)))
+                             (sort-by second >)
+                             ((fn [shp-strd]
+                                [(mapv first shp-strd)
+                                 (mapv second shp-strd)])))
+        max-stride (first strides)
+        shape-num (apply * 1 (drop 1 shape))]
+    (= max-stride shape-num)))
+
+
+(defn dimensions-access-increasing?
+  "Are these dimensions setup such a naive seq through the data will be accessing memory in order.
+This is necessary for external library interfaces (blas, cudnn).  An example would be after almost any
+transpose that is not made concrete this condition will probably not hold."
+  [{:keys [shape strides]}]
+  (apply > strides))
 
 
 (defn dimensions->most-rapidly-changing
@@ -541,8 +561,13 @@ that rerequires the items to have the same element count."
   (reinterpret-tensor tensor (dimensions (tensor->2d-shape tensor))))
 
 (defn as-dense
+  "As dense has some preconditions that are implied which are that a memcpy call would succeed
+as one expects.  This means actually 2 conditions are checked:
+1.  dense?
+2.  dimensions-monotonic-increasing"
   ^Tensor [tensor]
-  (when (dense? tensor)
+  (when (and (dense? tensor)
+             (dimensions-access-increasing? (tensor->dimensions tensor)))
     tensor))
 
 (declare new-tensor)
@@ -790,6 +815,8 @@ and the rest of the dimensions being squashed into n-rows."
   (and (= (ecount dest) (ecount src))
        (dense? dest)
        (dense? src)
+       (dimensions-access-increasing? (tensor->dimensions dest))
+       (dimensions-access-increasing? (tensor->dimensions src))
        (= (get-datatype dest)
           (get-datatype src))))
 
@@ -1066,12 +1093,22 @@ Datatypes must match."
     {:datatype dtype}))
 
 
+(defn- ensure-external-library-compatible
+  [& tensors]
+  (when-not-error (every? dimensions-access-increasing? (map :dimensions tensors))
+    "External libraries (blas (gemm gemv) and cudnn require dimensions access to be increasing"
+    {:dimensions-increasing (mapv vector
+                                 (map :dimensions tensors)
+                                 (map (comp dimensions-access-increasing? (map :dimensions tensors))))}))
+
+
 (defn gemm!
   "C = alpha * (trans-a? A) * (trans-b? B) + beta * C."
   ^Tensor [C trans-a? trans-b? alpha A B beta]
   (ensure-datatypes (get-datatype C) A B)
   (ensure-same-device C A B)
   (ensure-cudnn-datatype (get-datatype C) "gemm")
+  (ensure-external-library-compatible C A B)
   (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? A)
         [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? B)
         [c-row-count c-col-count :as c-shape] (tensor->2d-shape C)
@@ -1129,6 +1166,7 @@ So either it is dense *or* num-columns is 1"
   (ensure-same-device c A x)
   (ensure-cudnn-datatype (get-datatype c) "gemv")
   (ensure-vector-indexable x c)
+  (ensure-external-library-compatible c A x)
   (let [[a-row-count a-col-count] (tensor->2d-shape A)
         inc-x (blas-vector-increment x)
         inc-c (blas-vector-increment c)
@@ -1156,6 +1194,7 @@ preconditions and then returns the type of batch normalization required (spatial
     (apply ensure-datatypes (get-datatype (first all-args)) all-args)
     (apply ensure-same-device all-args)
     (ensure-cudnn-datatype (get-datatype (first io-args)) "batch-normalize")
+    (apply ensure-external-library-compatible (concat io-args mean-var-bias-scale-args))
     (when-not-error (> (double epsilon) 1e-5)
       "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
       {:epsilon epsilon})
@@ -1368,6 +1407,7 @@ See batch-normalize-update-and-apply!"
   (ensure-datatypes (get-datatype input-gradient) output output-gradient)
   (ensure-same-device input-gradient output output-gradient)
   (ensure-cudnn-datatype (get-datatype input-gradient) "activation-gradient!")
+  (ensure-external-library-compatible input-gradient output-gradient output)
   (when-not-error (contains? #{:logistic :tanh :relu} op)
     "Only :logistic :tanh and :relu are supported"
     {:operation op})
@@ -1396,6 +1436,7 @@ softmax: https://en.wikipedia.org/wiki/Softmax_function"
   (ensure-datatypes (get-datatype output) input)
   (ensure-same-device output input)
   (ensure-cudnn-datatype (get-datatype input) "softmax!")
+  (ensure-external-library-compatible input output)
   (when-not-error (= (shape output)
                      (shape input))
     "Input, output shapes do not match"
