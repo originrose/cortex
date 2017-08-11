@@ -70,6 +70,10 @@
   (verify-tensor/softmax (driver) *datatype*))
 
 
+(def-double-float-test convolution-operator
+  (verify-tensor/convolution-operator (driver) *datatype*))
+
+
 (def-all-dtype-test ternary-op-select
   (verify-tensor/ternary-op-select (driver) *datatype*))
 

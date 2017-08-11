@@ -4,10 +4,13 @@
             [cortex.tensor.math :as tm]
             [clojure.math.combinatorics :as combo]
             [cortex.compute.cpu.driver :as cpu-driver]
+            [cortex.compute.driver :as compute-drv]
             [think.parallel.core :as parallel]
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.math-util :as cmu]
-            [cortex.tensor :as ct])
+            [cortex.tensor :as ct]
+            [think.resource.core :as resource]
+            [cortex.nn.impl :as impl])
   (:import [cortex.compute.cpu.driver CPUStream]
            [com.github.fommil.netlib BLAS]))
 
@@ -910,6 +913,53 @@
                    (.diveq output# (+ idx# batch-offset#) sum-val#))))))))
 
 
+(defn- ->old-skool-conv-desc
+  [conv-desc
+   input-width input-height output-width output-height]
+  (assoc conv-desc
+         :input-channels (:in-channels conv-desc)
+         :output-channels (:out-channels conv-desc)
+         :input-width (long input-width)
+         :input-height (long input-height)
+         :output-width (long output-width)
+         :output-height (long output-height)))
+
+
+(defmacro cpu-planar-input->convolution!-impl
+  [datatype]
+  `(fn [input# output# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)]
+       (impl/convolution-outer-kernel
+        config#
+        :convolutional
+        (impl/convolution-roll-unroll-inner-kernel
+         (let [input-val# (datatype->cast-fn ~datatype
+                           (if ~'input-valid?
+                             (v-aget input-ary# ~'input-addr)
+                             0.0))]
+           (v-aset output-ary# ~'output-conv-addr input-val#)))))))
+
+
+(defmacro cpu-convolution->planar-output!-impl
+  [datatype]
+  `(fn [conv-input-gradient# input-gradient# config#]
+     ;;I am using input to mean upstream or in this case destination so that
+     ;;this code can look as similar to the code above as possible
+     ;;This function is extremely confusing but the macros name local variables
+     ;;a certain way so in this case input-addr means output-addr.
+     (let [output-ary# (datatype->view-cast-fn ~datatype input-gradient#)
+           input-ary# (datatype->view-cast-fn ~datatype conv-input-gradient#)]
+       ;;Zero accumulator
+       (impl/convolution-outer-kernel
+        config# :convolutional
+        (impl/convolution-roll-unroll-inner-kernel
+         (when ~'input-valid?
+           (let [output-val# (v-aget output-ary# ~'input-addr)
+                 input-val# (v-aget input-ary# ~'output-conv-addr)]
+             (v-aset output-ary# ~'input-addr (+ input-val# output-val#)))))))))
+
+
 (defonce cpu-nn-ops-types [:float :double])
 
 
@@ -924,7 +974,9 @@
        :batch-normalize-update-spatial! `(batch-normalize-update-spatial-impl ~ops-type)
        :batch-normalize-gradients-eltwise! `(batch-normalize-gradients-eltwise-impl ~ops-type)
        :batch-normalize-gradients-spatial! `(batch-normalize-gradients-spatial-impl ~ops-type)
-       :softmax! `(softmax-forward-impl ~ops-type)}])
+       :softmax! `(softmax-forward-impl ~ops-type)
+       :planar-input->convolution! `(cpu-planar-input->convolution!-impl ~ops-type)
+       :convolution->planar-output! `(cpu-convolution->planar-output!-impl ~ops-type)}])
    (into {})))
 
 
@@ -973,6 +1025,22 @@
 (def activation-backward-table
   {:double (act-backward-impl :double)
    :float (act-backward-impl :float)})
+
+
+(defrecord ConvDesc []
+  resource/PResource
+  (release-resource [this]))
+
+
+(defn slice-batches
+  [& args]
+  (let [num-batches (first (ct/shape (first args)))]
+    (map (fn [batch-idx]
+           (mapv (fn [arg]
+                   (let [dim-count (count (ct/shape arg))]
+                     (apply ct/select arg batch-idx (repeat (- dim-count 1) :all))))
+                 args))
+         (range num-batches))))
 
 
 (extend-type CPUStream
@@ -1219,4 +1287,133 @@
              element-count]
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax!])
-       output input batch-count element-count))))
+       output input batch-count element-count)))
+
+
+  (convolution-descriptor [stream
+                           datatype out-channels in-channels kern-width kern-height
+                           pad-x pad-y stride-x stride-y]
+    (->ConvDesc))
+
+
+  (choose-convolution-algorithms [stream conv-descriptor
+                                  input-width input-height
+                                  output-width output-height
+                                  batch-size
+                                  max-ideal-workspace-size use-defaults?]
+    (let [kernel-stride (* (long (get conv-descriptor :kernel-width))
+                           (long (get conv-descriptor :kernel-height)))
+          n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+          n-rows (* (long output-width) (long output-height))
+          workspace-size (* n-cols n-rows (long batch-size))]
+      {:workspace-size workspace-size}))
+
+
+  (convolution-forward! [stream
+                         output output-dims
+                         input input-dims
+                         weights weight-dims
+                         workspace workspace-ecount
+                         conv-descriptor algorithms]
+    (let [dev (compute-drv/get-device stream)
+          kernel-stride (* (long (get conv-descriptor :kernel-width))
+                           (long (get conv-descriptor :kernel-height)))
+          [batch-size in-chan in-height in-width] (get input-dims :shape)
+          [_ out-chan output-width output-height] (get output-dims :shape)
+          n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+          n-rows (* (long output-width) (long output-height))
+          batch-size (long (first (get output-dims :shape)))
+          weights (ct/->Tensor dev weight-dims weights)
+          old-skool-desc (->old-skool-conv-desc conv-descriptor
+                                                in-width in-height
+                                                output-width output-height)
+          output-tens (ct/->Tensor dev output-dims output)
+          input-tens (ct/->Tensor dev input-dims input)
+          input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)]
+      (cpu-driver/with-stream-dispatch stream
+        (ct/with-stream (cpu-driver/main-thread-cpu-stream)
+          (let [batch-data (slice-batches output-tens input-tens input-convolved)]
+            (->> batch-data
+                 (pmap (fn [[output input input-convolved]]
+                         ;;unroll to full matrix
+                         ((get-in cpu-nn-ops [(ct/get-datatype output) :planar-input->convolution!])
+                          (ct/tensor->buffer input) (ct/tensor->buffer input-convolved) old-skool-desc)
+                         ;;big gemm
+                         ;;reshape output to be [n-channels (height * width)]
+                         (ct/gemm! (ct/as-batch-matrix output) false true 1.0 weights input-convolved 1.0)))
+                 dorun))))))
+
+  (convolution-backward-weights! [stream
+                                  weight-gradient weight-gradient-dims
+                                  output-gradient output-gradient-dims
+                                  input input-dims
+                                  workspace workspace-ecount
+                                  conv-descriptor algorithms]
+    (cpu-driver/with-stream-dispatch stream
+      (try
+       (let [dev (compute-drv/get-device stream)
+             kernel-stride (* (long (get conv-descriptor :kernel-width))
+                              (long (get conv-descriptor :kernel-height)))
+             [batch-size in-chan in-height in-width] (get input-dims :shape)
+             [_ out-chan output-width output-height] (get output-gradient-dims :shape)
+             n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+             n-rows (* (long output-width) (long output-height))
+             batch-size (long (first (get output-gradient-dims :shape)))
+             weight-gradient-tens (ct/->Tensor dev weight-gradient-dims weight-gradient)
+             old-skool-desc (->old-skool-conv-desc conv-descriptor
+                                                   in-width in-height
+                                                   output-width output-height)
+             output-gradient-tens (ct/->Tensor dev output-gradient-dims output-gradient)
+             input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+             slice-data (slice-batches output-gradient-tens input-convolved)]
+         (ct/with-stream (cpu-driver/main-thread-cpu-stream)
+           (doseq [[output-gradient input-convolved] slice-data]
+
+             (ct/gemm! weight-gradient-tens false false
+                       1.0 (ct/as-batch-matrix output-gradient) input-convolved
+                       1.0))))
+       (catch Throwable e (println e)))))
+
+  (convolution-backward-data! [stream
+                               input-gradient input-gradient-dims
+                               output-gradient output-gradient-dims
+                               weights weights-dims
+                               workspace workspace-ecount
+                               conv-descriptor algorithms]
+    (cpu-driver/with-stream-dispatch stream
+      (ct/with-stream
+        (cpu-driver/main-thread-cpu-stream)
+        (try
+          (let [dev (compute-drv/get-device stream)
+                kernel-stride (* (long (get conv-descriptor :kernel-width))
+                                 (long (get conv-descriptor :kernel-height)))
+                [batch-size in-chan in-height in-width] (get input-gradient-dims :shape)
+                [_ out-chan output-width output-height] (get output-gradient-dims :shape)
+                n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+                n-rows (* (long output-width) (long output-height))
+                batch-size (long (first (get output-gradient-dims :shape)))
+                output-gradient (ct/->Tensor dev output-gradient-dims output-gradient)
+                input-gradient (ct/->Tensor dev input-gradient-dims input-gradient)
+                input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+                weights (ct/->Tensor dev weights-dims weights)
+                datatype (dtype/get-datatype weights)]
+            (println {:output-gradient-shape (ct/shape output-gradient)
+                      :input-gradient-shape (ct/shape input-gradient)})
+            (->> (slice-batches input-gradient output-gradient input-convolved)
+                 (map (fn [[input-gradient output-gradient input-convolved]]
+                         (println {:output-gradient-shape (ct/shape output-gradient)
+                                   :input-gradient-shape (ct/shape input-gradient)})
+                         (ct/assign! input-gradient 0)
+                         (ct/gemm! input-convolved true false
+                                   1.0 (ct/as-batch-matrix output-gradient) weights
+                                   0.0)
+                         ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
+                          (ct/tensor->buffer input-convolved)
+                          (ct/tensor->buffer input-gradient)
+                          (->old-skool-conv-desc conv-descriptor
+                                                 in-width in-height
+                                                 output-width output-height))))
+                 dorun))
+          (catch Throwable e (println e))))
+      )
+    ))

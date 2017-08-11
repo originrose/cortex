@@ -79,7 +79,7 @@
   (verify-tensor/ternary-op-select (create-driver) *datatype*))
 
 
-(deftest convolution-operator
+(def-double-float-test convolution-operator
   (verify-tensor/convolution-operator (create-driver) *datatype*))
 
 

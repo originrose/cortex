@@ -1462,8 +1462,8 @@ to be a valid call on the return value."
   {:datatype datatype
    :out-channels out-channels
    :in-channels in-channels
-   :kern-width kern-width
-   :kern-height kern-height
+   :kernel-width kern-width
+   :kernel-height kern-height
    :pad-x pad-x
    :pad-y pad-y
    :stride-x stride-x
@@ -1499,10 +1499,10 @@ a few compatibility issues."
 }"
   [conv-descriptor input-width input-height]
   {:output-width (get-padded-strided-dimension input-width (:pad-x conv-descriptor)
-                                               (:kern-width conv-descriptor) (:stride-x conv-descriptor)
+                                               (:kernel-width conv-descriptor) (:stride-x conv-descriptor)
                                                :floor)
    :output-height (get-padded-strided-dimension input-height (:pad-y conv-descriptor)
-                                                (:kern-height conv-descriptor) (:stride-y conv-descriptor)
+                                                (:kernel-height conv-descriptor) (:stride-y conv-descriptor)
                                                 :floor)})
 
 
@@ -1527,17 +1527,17 @@ where direction may be:
 (defn- ensure-conv-weight-dims-match
   [input weights conv-descriptor]
   (let [[batch-size _] (shape (as-batch-matrix input))
-        {:keys [kern-width kern-height in-channels out-channels]} conv-descriptor
+        {:keys [kernel-width kernel-height in-channels out-channels]} conv-descriptor
         [out-size in-size] (shape (as-2d-matrix weights))]
     (when-not-error (dense? weights)
       "Convolution weights must be dense tensors"
       {})
     (when-not-error (= (long in-size)
-                       (* (long kern-width) (long kern-height) (long in-channels)))
-      "Weight column length does not equal kern-width * kern-height * in-channels"
+                       (* (long kernel-width) (long kernel-height) (long in-channels)))
+      "Weight column length does not equal kernel-width * kernel-height * in-channels"
       {:weight-column-len in-size
-       :kern-width kern-width
-       :kern-height kern-height
+       :kernel-width kernel-width
+       :kernel-height kernel-height
        :in-channels in-channels})
     (when-not-error (= (long out-size)
                        (long out-channels))
@@ -1548,7 +1548,7 @@ where direction may be:
 
 (defn- ensure-conv-io
   [conv-descriptor input-args output-args]
-  (let [{:keys [kern-width kern-height in-channels out-channels
+  (let [{:keys [kernel-width kernel-height in-channels out-channels
                 pad-x pad-y stride-x stride-y]} conv-descriptor
         [batch-size in-arg-channels in-height in-width] (shape (first input-args))
         {:keys [output-width output-height]} (get-convolution-output-dimensions conv-descriptor in-height in-width)
@@ -1592,17 +1592,6 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
   output)
 
 
-(defn convolution-backward-bias!
-  [bias-gradient output-gradient workspace]
-  (ensure-datatypes (get-datatype bias-gradient) output-gradient)
-  (ensure-same-device bias-gradient output-gradient)
-  (tm/convolution-backward-bias! (check-stream)
-                                 (tensor->buffer bias-gradient) (tensor->dimensions bias-gradient)
-                                 (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
-                                 (tensor->buffer workspace) (ecount workspace))
-  bias-gradient)
-
-
 (defn convolution-backward-weights!
   [weight-gradient output-gradient input workspace conv-descriptor algorithms]
   (tm/convolution-backward-weights! (check-stream)
@@ -1618,7 +1607,7 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
   [input-gradient output-gradient weights workspace conv-descriptor algorithms]
   (tm/convolution-backward-data! (check-stream)
                                  (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
-                                 (tensor->buffer output-gradient) (tensor->dimensions input-gradient)
+                                 (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
                                  (tensor->buffer weights) (tensor->dimensions weights)
                                  (tensor->buffer workspace) (ecount workspace)
                                  conv-descriptor algorithms)

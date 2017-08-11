@@ -179,18 +179,13 @@ resource/release *must* be a valid call on the returned value.")
                                   batch-size
                                   max-ideal-workspace-size use-defaults?])
 
+
   (convolution-forward! [stream
                          output output-dims
                          input input-dims
                          weights weight-dims
                          workspace workspace-ecount
                          conv-descriptor algorithms])
-
-
-  (convolution-backward-bias! [stream
-                               bias-gradient bias-gradient-dims
-                               output-gradient output-gradient-dims
-                               workspace workspace-ecount])
 
 
   (convolution-backward-weights! [stream
@@ -202,7 +197,7 @@ resource/release *must* be a valid call on the returned value.")
 
   (convolution-backward-data! [stream
                                input-gradient input-gradient-dims
-                               output-gradient input-gradient-dims
+                               output-gradient output-gradient-dims
                                weights weights-dims
                                workspace workspace-ecount
                                conv-descriptor algorithms]))
