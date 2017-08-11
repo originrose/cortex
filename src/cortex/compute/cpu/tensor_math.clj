@@ -6,37 +6,14 @@
             [cortex.compute.cpu.driver :as cpu-driver]
             [think.parallel.core :as parallel]
             [clojure.core.matrix.macros :refer [c-for]]
-            [cortex.compute.math-util :as cmu])
+            [cortex.compute.math-util :as cmu]
+            [cortex.tensor :as ct])
   (:import [cortex.compute.cpu.driver CPUStream]
            [com.github.fommil.netlib BLAS]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
 (set! *warn-on-reflection* true)
-
-
-(defn elem-idx->addr
-  "Precondition:  rev-shape, rev-max-shape, strides are same length.
-rev-max-shape: maxes of all shapes passed in, reversed
-rev-shape: reverse shape.
-rev-strides: reverse strides.
-arg: >= 0."
-  ^long [rev-shape rev-strides rev-max-shape arg]
-  (long (let [num-items (count rev-shape)]
-          (loop [idx (long 0)
-                 arg (long arg)
-                 offset (long 0)]
-            (if (and (> arg 0)
-                     (< idx num-items))
-              (let [next-max (long (rev-max-shape idx))
-                    next-stride (long (rev-strides idx))
-                    next-dim (long (rev-shape idx))
-                    max-idx (rem arg next-max)
-                    shape-idx (rem arg next-dim)]
-                (recur (inc idx)
-                       (quot arg next-max)
-                       (+ offset (* next-stride shape-idx))))
-              offset)))))
 
 
 ;;Need the interface to get correct type hinting to avoid boxing/unboxing every index.
@@ -47,21 +24,13 @@ arg: >= 0."
 (defrecord ElemIdxToAddr [rev-shape rev-strides rev-max-shape]
   ElemIdxToAddressFunction
   (^long idx_to_address [this ^long arg]
-   (elem-idx->addr rev-shape rev-strides rev-max-shape arg)))
+   (ct/elem-idx->addr rev-shape rev-strides rev-max-shape arg)))
 
 
 (defn ^:private get-elem-dims->address
-  ^ElemIdxToAddressFunction [{:keys [shape strides]} max-shape]
-  (let [max-shape-count (count max-shape)
-        rev-shape (->> (concat (reverse shape)
-                               (repeat 1))
-                       (take max-shape-count)
-                       vec)
-        rev-strides (->> (concat (reverse strides)
-                                 (repeat (first strides)))
-                         (take max-shape-count)
-                         vec)]
-    (->ElemIdxToAddr rev-shape rev-strides (vec (reverse max-shape)))))
+  ^ElemIdxToAddressFunction [dims max-shape]
+  (let [{:keys [reverse-shape reverse-strides]} (ct/dimension->reverse-data dims max-shape)]
+    (->ElemIdxToAddr reverse-shape reverse-strides (vec (reverse max-shape)))))
 
 
 (defmacro ^:private assign-constant-impl
@@ -126,14 +95,8 @@ arg: >= 0."
 
 (defn max-shape-from-dimensions
   [& args]
-  (let [shapes (mapv :shape args)
-        max-count (apply max 0 (map count shapes))
-        rev-shapes (map (comp vec reverse) shapes)]
-    (->> (range max-count)
-         (map (fn [idx]
-                (apply max 0 (map #(get % idx 0) rev-shapes))))
-         reverse
-         vec)))
+  (-> (apply ct/dimension-seq->max-shape args)
+      :max-shape))
 
 
 (defmacro ^:private marshalling-assign-fn
@@ -237,7 +200,7 @@ arg: >= 0."
 
 
 (def ^:private operations
-  [:+ :- :* :/ :max :min])
+  [:+ :- :* :/ :max :min :bit-and])
 
 
 (defmacro ^:private perform-operation-impl
@@ -249,7 +212,8 @@ arg: >= 0."
     :* `(* ~x ~y)
     ;;Math/max and friends aren't defined for all primitives leading to reflection warnings.
     :max `(if (> ~x ~y) ~x ~y)
-    :min `(if (> ~x ~y) ~y ~x)))
+    :min `(if (> ~x ~y) ~y ~x)
+    :bit-and `(bit-and (unchecked-int ~x) (unchecked-int ~y))))
 
 
 (defmacro ^:private perform-op-rev-ops

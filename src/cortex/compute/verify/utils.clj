@@ -29,6 +29,19 @@
           ~@body)))))
 
 
+(defmacro def-int-long-test
+  [test-name & body]
+  (let [int-test-name (str test-name "-i")
+        long-test-name (str test-name "-l")]
+   `(do
+      (deftest ~(symbol int-test-name)
+        (with-bindings {#'*datatype* :int}
+          ~@body))
+      (deftest ~(symbol long-test-name)
+        (with-bindings {#'*datatype* :long}
+          ~@body)))))
+
+
 (defmacro def-all-dtype-test
   [test-name & body]
   (let [double-test-name (str test-name "-d")
