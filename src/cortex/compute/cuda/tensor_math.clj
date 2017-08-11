@@ -35,13 +35,14 @@
 
 (defn- operation->cuda
   ([operation]
-   [(condp = operation
-       :+ (int 0)
-       :- (int 1)
-       :* (int 2)
-       :/ (int 3)
-       :min (int 4)
-       :max (int 5))])
+   [(int (condp = operation
+           :+ 0
+           :- 1
+           :* 2
+           :/ 3
+           :min 4
+           :max 5
+           :bit-and 6))])
   ([operation rev-ops?]
    (conj (operation->cuda operation)
          (int (if rev-ops? 1 0)))))
