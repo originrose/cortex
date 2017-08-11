@@ -1397,12 +1397,8 @@
                 input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
                 weights (ct/->Tensor dev weights-dims weights)
                 datatype (dtype/get-datatype weights)]
-            (println {:output-gradient-shape (ct/shape output-gradient)
-                      :input-gradient-shape (ct/shape input-gradient)})
             (->> (slice-batches input-gradient output-gradient input-convolved)
                  (map (fn [[input-gradient output-gradient input-convolved]]
-                         (println {:output-gradient-shape (ct/shape output-gradient)
-                                   :input-gradient-shape (ct/shape input-gradient)})
                          (ct/assign! input-gradient 0)
                          (ct/gemm! input-convolved true false
                                    1.0 (ct/as-batch-matrix output-gradient) weights
