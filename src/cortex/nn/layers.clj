@@ -181,9 +181,8 @@ constructors are all variable args with the extra arguments expected to be
 (defmethod graph/build-node :softmax
   [graph node predecessor-seq successor-ids]
   (let [previous (graph/ensure-single-parent graph node predecessor-seq)]
-   (-> (graph/carry-input-dims-forward previous node)
-       (assoc :output-size (graph/node->output-size previous)
-              :output-channels (get node :output-channels 1)))))
+    (-> (graph/carry-io-dims-forward previous node)
+        (assoc :output-channels (get node :output-channels 1)))))
 
 
 (defmethod graph/get-node-metadata :softmax

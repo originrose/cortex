@@ -161,11 +161,19 @@ running means, variances using a running average
                          output
                          op
                          element-count])
-  (softmax! [stream
-             output
-             input
-             batch-count
-             element-count])
+
+  (softmax-eltwise! [stream
+                     output
+                     input
+                     batch-count
+                     element-count])
+
+  (softmax-spatial! [stream
+                     output
+                     input
+                     batch-count
+                     channel-count
+                     element-count])
 
   (convolution-descriptor [stream
                            datatype out-channels in-channels kern-width kern-height
@@ -194,6 +202,7 @@ resource/release *must* be a valid call on the returned value.")
                                   input input-dims
                                   workspace workspace-ecount
                                   conv-descriptor algorithms])
+
 
   (convolution-backward-data! [stream
                                input-gradient input-gradient-dims input-gradient-alpha

@@ -401,6 +401,19 @@ a vector of floats."
               node-id)))
 
 
+(defn leaf->root-seq
+  [graph node-id]
+  (let [c->p-map (-> (child->parent-map graph)
+                     (assoc :roots [node-id]))]
+    (->> (tree-seq #(contains? c->p-map %)
+                   #(get c->p-map %)
+                   :roots)
+         (drop 1)
+         (reverse)
+         distinct
+         (reverse))))
+
+
 (defn create-node-dimensions
   "Create a node dimension map.  Dimensions are a map of
 :channels :height :width with the last item (width) being the most

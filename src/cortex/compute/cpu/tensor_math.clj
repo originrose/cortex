@@ -8,12 +8,14 @@
             [think.parallel.core :as parallel]
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.math-util :as cmu]
-            [cortex.tensor :as ct]
+            [cortex.compute.driver :as drv]
             [think.resource.core :as resource]
+            [cortex.tensor :as ct]
             [cortex.nn.impl :as impl])
   (:import [cortex.compute.cpu.driver CPUStream]
            [com.github.fommil.netlib BLAS]
-           [think.datatype DoubleArrayView]))
+           [think.datatype DoubleArrayView FloatArrayView
+            LongArrayView IntArrayView ShortArrayView ByteArrayView]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -873,46 +875,91 @@
                                      output# input# batch-means# batch-variances#
                                      scale# bias# epsilon#)))
 
-(defmacro array-max
-  [ary n-items start-idx datatype]
-  `(loop [idx# 1
-          max-val# (v-aget ~ary ~start-idx)]
-     (if (< idx# ~n-items)
-       (recur (inc idx#)
-              (Math/max (datatype->cast-fn ~datatype max-val#) (v-aget ~ary (+ ~start-idx idx#))))
-       max-val#)))
 
-(defmacro array-sum
-  [ary n-items start-idx]
-  `(loop [idx# 1
-          sum-val# (v-aget ~ary ~start-idx)]
-     (if (< idx# ~n-items)
-       (recur (inc idx#)
-              (+ sum-val# (v-aget ~ary (+ ~start-idx idx#))))
-       sum-val#)))
+(definterface SoftmaxOffsetter
+  (^long outer_loop_count [])
+  (^long parallel_count [])
+  (^long idx_count [])
+  (^long idx_to_offset [^long outer-idx ^long var-idx ^long elem-idx]))
 
 
-(defmacro softmax-forward-impl
+(defrecord SoftmaxEltwiseOffsetter [^long batch-count ^long element-count]
+  SoftmaxOffsetter
+  (^long outer_loop_count [_] 1)
+  (^long parallel_count [_] batch-count)
+  (^long idx_count [_] element-count)
+  (^long idx_to_offset [_ ^long outer-idx ^long par-idx ^long elem-idx]
+    (+ elem-idx
+       (* par-idx element-count))))
+
+
+(defrecord SoftmaxSpatialOffsetter [^long batch-count ^long channel-count ^long element-count]
+  SoftmaxOffsetter
+  (^long outer_loop_count [_] batch-count)
+  (^long parallel_count [_] element-count)
+  (^long idx_count [_] channel-count)
+  (^long idx_to_offset [_ ^long batch-idx ^long elem-idx ^long chan-idx]
+   (+ elem-idx
+      (* chan-idx element-count )
+      (* batch-idx (* element-count channel-count)))))
+
+
+(defmacro softmax-impl
+  [datatype offsetter output input]
+  `(let [^SoftmaxOffsetter offsetter# ~offsetter
+         output# (datatype->view-cast-fn ~datatype ~output)
+         input# (datatype->view-cast-fn ~datatype ~input)
+         out-loop# (.outer_loop_count offsetter#)
+         par-loop# (.parallel_count offsetter#)
+         idx-loop# (.idx_count offsetter#)]
+     (c-for
+      [outer-idx# 0 (< outer-idx# out-loop#) (inc outer-idx#)]
+      (parallel/parallel-for
+       par-idx# par-loop#
+       (let [max-val# (datatype->cast-fn ~datatype
+                                         (loop [idx# 1
+                                                max-val# (v-aget input# (.idx_to_offset offsetter#
+                                                                                        outer-idx#
+                                                                                        par-idx#
+                                                                                        0))]
+                                           (if (< idx# idx-loop#)
+                                             (recur (inc idx#) (max max-val#
+                                                                    (v-aget input# (.idx_to_offset offsetter#
+                                                                                                   outer-idx#
+                                                                                                   par-idx#
+                                                                                                   idx#))))
+                                             max-val#)))]
+         (c-for
+          [idx# 0 (< idx# idx-loop#) (inc idx#)]
+          (v-aset output# (.idx_to_offset offsetter# outer-idx# par-idx# idx#)
+                  (Math/exp (- (v-aget input# (.idx_to_offset offsetter# outer-idx# par-idx# idx#))
+                               max-val#))))
+         ;;perform normalization with array sum.
+         (let [sum-val# (datatype->cast-fn ~datatype
+                                           (sum-double-var idx# idx-loop#
+                                                           (v-aget output# (.idx_to_offset offsetter#
+                                                                                           outer-idx#
+                                                                                           par-idx#
+                                                                                           idx#))))]
+           (c-for [idx# 0 (< idx# idx-loop#) (inc idx#)]
+                  (.diveq output# (.idx_to_offset offsetter#
+                                                  outer-idx#
+                                                  par-idx#
+                                                  idx#)
+                          sum-val#))))))))
+
+
+(defmacro softmax-eltwise-forward-impl
   [datatype]
   `(fn [output# input# batch-count# element-count#]
-     (let [output# (datatype->view-cast-fn ~datatype output#)
-           input# (datatype->view-cast-fn ~datatype input#)
-           batch-count# (long batch-count#)
-           element-count# (long element-count#)]
-       (parallel/parallel-for
-        batch-idx# batch-count#
-        (let [batch-offset# (* batch-idx# element-count#)
-              max-val# (datatype->cast-fn ~datatype
-                                          (array-max input# element-count# batch-offset# ~datatype))]
-          (c-for
-           [idx# 0 (< idx# element-count#) (inc idx#)]
-           (v-aset output# (+ idx# batch-offset#)
-                   (Math/exp (- (v-aget input# (+ idx# batch-offset#))
-                                max-val#))))
-          ;;perform normalization with array sum.
-          (let [sum-val# (datatype->cast-fn ~datatype (array-sum output# element-count# batch-offset#))]
-            (c-for [idx# 0 (< idx# element-count#) (inc idx#)]
-                   (.diveq output# (+ idx# batch-offset#) sum-val#))))))))
+     (softmax-impl ~datatype (->SoftmaxEltwiseOffsetter batch-count# element-count#) output# input#)))
+
+
+(defmacro softmax-spatial-forward-impl
+  [datatype]
+  `(fn [output# input# batch-count# channel-count# element-count#]
+     (softmax-impl ~datatype (->SoftmaxSpatialOffsetter batch-count# channel-count# element-count#)
+                   output# input#)))
 
 
 (defn- ->old-skool-conv-desc
@@ -976,7 +1023,8 @@
        :batch-normalize-update-spatial! `(batch-normalize-update-spatial-impl ~ops-type)
        :batch-normalize-gradients-eltwise! `(batch-normalize-gradients-eltwise-impl ~ops-type)
        :batch-normalize-gradients-spatial! `(batch-normalize-gradients-spatial-impl ~ops-type)
-       :softmax! `(softmax-forward-impl ~ops-type)
+       :softmax-eltwise! `(softmax-eltwise-forward-impl ~ops-type)
+       :softmax-spatial! `(softmax-spatial-forward-impl ~ops-type)
        :planar-input->convolution! `(cpu-planar-input->convolution!-impl ~ops-type)
        :convolution->planar-output! `(cpu-convolution->planar-output!-impl ~ops-type)}])
    (into {})))
@@ -1282,21 +1330,29 @@
       ((get activation-backward-table (dtype/get-datatype input-gradient))
        input-gradient output-gradient output op element-count)))
 
-  (softmax! [stream
-             output
-             input
-             batch-count
-             element-count]
+  (softmax-eltwise! [stream
+                     output
+                     input
+                     batch-count
+                     element-count]
     (cpu-driver/with-stream-dispatch stream
-      ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax!])
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-eltwise!])
        output input batch-count element-count)))
 
+  (softmax-spatial! [stream
+                     output
+                     input
+                     batch-count
+                     channel-count
+                     element-count]
+    (cpu-driver/with-stream-dispatch stream
+      ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-spatial!])
+       output input batch-count channel-count element-count)))
 
   (convolution-descriptor [stream
                            datatype out-channels in-channels kern-width kern-height
                            pad-x pad-y stride-x stride-y]
     (->ConvDesc))
-
 
   (choose-convolution-algorithms [stream conv-descriptor
                                   input-width input-height
@@ -1309,7 +1365,6 @@
           n-rows (* (long output-width) (long output-height))
           workspace-size (* n-cols n-rows (long batch-size))]
       {:workspace-size workspace-size}))
-
 
   (convolution-forward! [stream
                          output output-dims output-alpha
@@ -1421,6 +1476,32 @@
                                                 in-width in-height
                                                 output-width output-height))))
                  dorun))
-          (catch Throwable e (println e))))
-      )
-    ))
+          (catch Throwable e (println e)))))))
+
+
+(defn as-tensor
+  [java-array]
+  (ct/construct-tensor (drv/get-device ct/*stream*)
+                       (ct/dimensions [(ct/ecount java-array)])
+                       (dtype/->view java-array)))
+
+(defn as-java-array
+  [cpu-tensor]
+  (let [dev-buffer (ct/tensor->buffer cpu-tensor)]
+    (condp = (dtype/get-datatype dev-buffer)
+      :byte (.data ^ByteArrayView dev-buffer)
+      :short (.data ^ShortArrayView dev-buffer)
+      :int (.data ^IntArrayView dev-buffer)
+      :long (.data ^LongArrayView dev-buffer)
+      :float (.data ^FloatArrayView dev-buffer)
+      :double (.data ^DoubleArrayView dev-buffer)
+      )))
+
+
+(defmacro tensor-context
+  [& body]
+  `(resource/with-resource-context
+     (let [device# (drv/default-device (cpu-driver/driver))
+           stream# (drv/create-stream :device device#)]
+       (ct/with-stream stream#
+         ~@body))))

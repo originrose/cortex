@@ -43,6 +43,9 @@
 (def-double-float-test softmax
   (verify-layers/softmax (create-context)))
 
+(def-double-float-test softmax-image
+  (verify-layers/softmax-image (create-context)))
+
 (def-double-float-test softmax-batch
   (verify-layers/softmax-batch (create-context)))
 
