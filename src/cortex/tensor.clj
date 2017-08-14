@@ -256,6 +256,7 @@ transpose that is not made concrete this condition will probably not hold."
   ^long [{:keys [shape]}]
   (first shape))
 
+
 (defn elem-idx->addr
   "Precondition:  rev-shape, rev-max-shape, strides are same length.
   rev-max-shape: maxes of all shapes passed in, reversed
@@ -490,6 +491,20 @@ that rerequires the items to have the same element count."
 (defn tensor->batch-shape
   [^Tensor tensor]
   (dimensions->batch-shape (tensor->dimensions tensor)))
+
+
+(defn in-place-reshape
+  [tensor shape]
+  (when-not-error (dense? tensor)
+    "In place reshape only implemented for dense tensors"
+    {:dimensions (tensor->dimensions tensor)})
+  (let [new-dims (dimensions shape)]
+    (when-not-error (<= (dimension-ecount new-dims)
+                        (ecount tensor))
+      "Reshaped dimensions are larger than tensor"
+      {:tensor-ecount (ecount tensor)
+       :reshape-ecount (dimension-ecount new-dims)})
+    (assoc tensor :dimensions new-dims)))
 
 
 
