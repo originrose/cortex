@@ -4,6 +4,7 @@
              :refer [def-double-float-test
                      def-all-dtype-test
                      def-cas-dtype-test
+                     def-int-long-test
                      *datatype*
                      test-wrapper]]
             [clojure.test :refer :all]))
@@ -76,3 +77,23 @@
 
 (def-all-dtype-test ternary-op-select
   (verify-tensor/ternary-op-select (create-driver) *datatype*))
+
+
+(def-double-float-test convolution-operator
+  (verify-tensor/convolution-operator (create-driver) *datatype*))
+
+
+(def-all-dtype-test transpose
+  (verify-tensor/transpose (create-driver) *datatype*))
+
+
+(def-int-long-test mask
+  (verify-tensor/mask (create-driver) *datatype*))
+
+
+(def-all-dtype-test select
+  (verify-tensor/select (create-driver) *datatype*))
+
+
+(def-all-dtype-test select-transpose-interaction
+  (verify-tensor/select-transpose-interaction (create-driver) *datatype*))

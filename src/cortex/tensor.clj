@@ -67,11 +67,6 @@ For indirect operations element count is num-indexes * num-columns.  After that 
 ;;Stream is dynamically bound at execution time presumably by an entity outside of the context
 ;;of this file.  Due to this clients of this file should not be manipulating stream.
 (def ^:dynamic *stream*)
-;;Similar to stream, the engine will set this variable and clients should not set
-;;the variable themselves.
-(def ^:dynamic *datatype* :double)
-
-
 (defmacro with-stream
   [stream & body]
   `(with-bindings {#'*stream* ~stream}
@@ -83,6 +78,15 @@ For indirect operations element count is num-indexes * num-columns.  After that 
   (let [retval *stream*]
     (when-not-error retval "Tensor stream is nil" {})
     retval))
+
+;;Similar to stream, the engine will set this variable and clients should not set
+;;the variable themselves.
+(def ^:dynamic *datatype* :double)
+
+(defmacro with-datatype
+  [dtype & body]
+  `(with-bindings {#'*datatype* ~dtype}
+     ~@body))
 
 (defn- ensure-datatypes
   [datatype & args]
@@ -140,19 +144,23 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
                                          last-stride (long (get new-strides last-idx))
                                          cur-dim (long (get rev-shape last-idx))
                                          min-next-stride (* last-stride cur-dim)]
-                                     (when cur-stride
-                                       (when-not-error (<= min-next-stride (long cur-stride))
-                                         "Invalid stride (too small) detected"
-                                         {:dimension-index dim-idx
-                                          :shape shape
-                                          :strides strides
-                                          :current-stride cur-stride
-                                          :min-possible-stride min-next-stride}))
                                      (conj new-strides (or cur-stride min-next-stride))))))
                              []
                              (range (count shape)))
                      reverse
-                     vec)]
+                     vec)
+        sorted-shape-stride (->> (map vector shape strides)
+                                 (sort-by second >))
+        max-stride (apply max 0 (map second sorted-shape-stride))
+        elem-count (apply * 1 (drop 1 (map first sorted-shape-stride)))]
+    (when-not-error (<= (long elem-count)
+                        (long max-stride))
+      "Stride appears to be too small for element count"
+      {:max-stride max-stride
+       :elem-count elem-count
+       :strides strides
+       :shape shape})
+
     {:shape (vec shape)
      :strides strides
      :names names}))
@@ -217,8 +225,24 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
 
 (defn dimensions-dense?
   [{:keys [shape strides]}]
-  (= (long (first strides))
-     (apply * (drop 1 shape))))
+  ;;If we have a 1 dimensional shape then it's stride doesn't count
+  (let [[shape strides] (->> (map vector shape strides)
+                             (remove #(= 1 (first %)))
+                             (sort-by second >)
+                             ((fn [shp-strd]
+                                [(mapv first shp-strd)
+                                 (mapv second shp-strd)])))
+        max-stride (first strides)
+        shape-num (apply * 1 (drop 1 shape))]
+    (= max-stride shape-num)))
+
+
+(defn dimensions-access-increasing?
+  "Are these dimensions setup such a naive seq through the data will be accessing memory in order.
+This is necessary for external library interfaces (blas, cudnn).  An example would be after almost any
+transpose that is not made concrete this condition will probably not hold."
+  [{:keys [shape strides]}]
+  (apply >= strides))
 
 
 (defn dimensions->most-rapidly-changing
@@ -231,6 +255,110 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
   "Get the size of the least rapidly changing dimension"
   ^long [{:keys [shape]}]
   (first shape))
+
+(defn elem-idx->addr
+  "Precondition:  rev-shape, rev-max-shape, strides are same length.
+  rev-max-shape: maxes of all shapes passed in, reversed
+  rev-shape: reverse shape.
+  rev-strides: reverse strides.
+  arg: >= 0."
+  ^long [rev-shape rev-strides rev-max-shape arg]
+  (long (let [num-items (count rev-shape)]
+          (loop [idx (long 0)
+                 arg (long arg)
+                 offset (long 0)]
+            (if (and (> arg 0)
+                     (< idx num-items))
+              (let [next-max (long (rev-max-shape idx))
+                    next-stride (long (rev-strides idx))
+                    next-dim (long (rev-shape idx))
+                    max-idx (rem arg next-max)
+                    shape-idx (rem arg next-dim)]
+                (recur (inc idx)
+                       (quot arg next-max)
+                       (+ offset (* next-stride shape-idx))))
+              offset)))))
+
+
+(defn elem-idx->addr-ary
+  "Precondition:  rev-shape, rev-max-shape, strides are same length.
+  rev-max-shape: maxes of all shapes passed in, reversed
+  rev-shape: reverse shape.
+  rev-strides: reverse strides.
+  arg: >= 0."
+  ^long [^ints rev-shape ^ints rev-strides ^ints rev-max-shape ^long arg]
+  (long (let [num-items (alength rev-shape)]
+          (loop [idx (long 0)
+                 arg (long arg)
+                 offset (long 0)]
+            (if (and (> arg 0)
+                     (< idx num-items))
+              (let [next-max (aget rev-max-shape idx)
+                    next-stride (aget rev-strides idx)
+                    next-dim (aget rev-shape idx)
+                    max-idx (rem arg next-max)
+                    shape-idx (rem arg next-dim)]
+                (recur (inc idx)
+                       (quot arg next-max)
+                       (+ offset (* next-stride shape-idx))))
+              offset)))))
+
+
+(defn- max-extend-strides
+  [shape strides max-count]
+  (let [num-items (count shape)
+        max-stride-idx (long
+                        (loop [idx 1
+                               max-idx 0]
+                          (if (< idx num-items)
+                            (do
+                              (recur (inc idx)
+                                     (long (if (> (long (get strides idx))
+                                                  (long (get strides max-idx)))
+                                             idx
+                                             max-idx))))
+                            max-idx)))
+        stride-val (* (long (get strides max-stride-idx))
+                      (long (get shape max-stride-idx)))]
+    (->> (concat (repeat (- (long max-count) (count strides))
+                         stride-val)
+                 strides)
+         vec)))
+
+(defn dimension->reverse-data
+  [{:keys [shape strides]} max-shape]
+  (let [max-shape-count (count max-shape)
+        rev-shape (->> (concat (reverse shape)
+                               (repeat 1))
+                       (take max-shape-count)
+                       vec)
+        rev-strides (->> (max-extend-strides shape strides max-shape-count)
+                         reverse
+                         vec)]
+    {:reverse-shape rev-shape
+     :reverse-strides rev-strides}))
+
+(defn dimension-seq->max-shape
+  "Given a sequence of dimensions return a map of:
+{:max-shape - the maximum dim across shapes for all dims
+ :dimensions -  new dimensions with their shape 1-extended to be equal lengths
+     and their strides max-extended to be the same length as the new shape."
+  [& args]
+  (let [shapes (map :shape args)
+        strides (map :strides args)
+        max-count (long (apply max 0 (map count shapes)))
+        strides (map (fn [shp stride]
+                       (max-extend-strides shp stride max-count))
+                     shapes strides)
+        shapes (map (fn [shp]
+                      (->> (concat (repeat (- max-count (count shp)) 1)
+                                   shp)
+                           vec))
+                    shapes)]
+    {:max-shape (vec (apply map (fn [& args]
+                                  (apply max 0 args))
+                            shapes))
+     :dimensions (mapv #(hash-map :shape %1 :strides %2) shapes strides)}))
 
 (defn- ensure-elementwise-compatible
   "Ensure these two tensors are compatible for an elementwise operation
@@ -462,8 +590,13 @@ that rerequires the items to have the same element count."
   (reinterpret-tensor tensor (dimensions (tensor->2d-shape tensor))))
 
 (defn as-dense
+  "As dense has some preconditions that are implied which are that a memcpy call would succeed
+as one expects.  This means actually 2 conditions are checked:
+1.  dense?
+2.  dimensions-monotonic-increasing"
   ^Tensor [tensor]
-  (when (dense? tensor)
+  (when (and (dense? tensor)
+             (dimensions-access-increasing? (tensor->dimensions tensor)))
     tensor))
 
 (declare new-tensor)
@@ -554,103 +687,138 @@ will determine the shape of the outgoing tensor."
     (construct-tensor device dimensions dev-buffer)))
 
 
+(defn transpose
+  "Transpose the tensor returning a new tensor that shares the backing store but indexes
+into it in a different order."
+  [tensor reorder-vec]
+  (when-not-error (= (count (distinct reorder-vec))
+                     (count (shape tensor)))
+    "Every dimensions must be represented in the reorder vector"
+    {:shape (shape tensor)
+     :reorder-vec reorder-vec})
+  (let [{:keys [shape strides]} (tensor->dimensions tensor)
+        shape (mapv #(get shape %) reorder-vec)
+        stride (mapv #(get strides %) reorder-vec)]
+    (assoc tensor :dimensions
+           {:shape shape
+            :strides stride})))
+
+
+(defn- reversev
+  [item-seq]
+  (vec (reverse item-seq)))
+
+
+(defn select
+  "Limited implementation of the core.matrix select function call.
+Same rules apply *Except* if you pass in an array of numbers for a dimension
+then they must be contiguous and monotonically increasing (a proper inclusive range).
+This is due to limitations of the current gpu implementation and a strong reluctance
+to add complexity there.  There must be an entry for every dimension of the tensor.
+see:
+https://cloojure.github.io/doc/core.matrix/clojure.core.matrix.html#var-select"
+  [tensor & args]
+  (let [data-shp (shape tensor)]
+    (when-not-error (= (count data-shp)
+                       (count args))
+      "arg count must match shape count"
+      {:shape data-shp
+       :args (vec args)})
+
+    (let [{:keys [shape strides]} (tensor->dimensions tensor)
+          rev-shape (reversev shape)
+          rev-strides (reversev strides)
+          ;;Convert all :all arguments to either numbers or vectors
+          ;;performing argument checking if possible.
+          rev-args (->> (map (fn [dim arg]
+                               (cond
+                                 (= arg :all)
+                                 (vec (range dim))
+                                 (sequential? arg)
+                                 (do
+                                   (when-not-error (apply < arg)
+                                     "Argument is not monotonicly increasing"
+                                     {:argument arg})
+                                   (when-not-error (> (long dim)
+                                                      (long (apply max 0 arg)))
+                                     "Argument out of range of dimension"
+                                     {:dimension dim
+                                      :argument arg})
+                                   (vec arg))
+                                 (number? arg) arg
+                                 :else
+                                 (throw (ex-info "argument to select of incorrect type"
+                                                 {:arg arg}))))
+                             shape args)
+                        reversev)
+          ;;Generate sequence of partial sums
+          rev-shape-products (reduce (fn [sums item]
+                                   (if sums
+                                     (conj sums (* (long item) (long (last sums))))
+                                     [item]))
+                                 nil
+                                 rev-shape)
+          first-elem-idx (reduce (fn [idx [arg prev-shape-product]]
+                                   (+ (long idx)
+                                      (* (long (or prev-shape-product 1))
+                                         (long (if (number? arg)
+                                                 arg
+                                                 (first arg))))))
+                                 0
+                                 (map vector rev-args
+                                      (concat [nil] rev-shape-products)))
+          elem-addr (elem-idx->addr rev-shape rev-strides rev-shape first-elem-idx)
+          tens-buffer (tensor->buffer tensor)
+          new-buffer (compute-drv/sub-buffer tens-buffer elem-addr
+                                             (- (ecount tens-buffer) elem-addr))
+          rev-arg-shape-strides (->> (map vector rev-args rev-strides)
+                                     (remove (comp number? first)))
+          new-strides (->> (map second rev-arg-shape-strides)
+                           reversev)
+          new-shape (->> (map (comp count first) rev-arg-shape-strides)
+                         reversev)]
+      (assoc tensor
+             :buffer new-buffer
+             :dimensions {:shape new-shape
+                          :strides new-strides}))))
+
+
 (defn subvector
   ^Tensor [^Tensor tensor offset & {:keys [length]}]
   (when-not-error (>= (long offset) 0)
     "Offset must be >= 0"
     {:offset offset})
-  (let [vec-tensor (as-vector tensor)
-        tens-ecount (ecount tensor)
-        offset (long offset)
-        new-len (long (or length
-                          (- (ecount tensor) offset)))]
-    (when (< new-len 0)
-      (throw (ex-info "new length of tensor is <= 0"
-                      {:tensor-ecount tens-ecount
-                       :offset offset
-                       :new-length new-len})))
-    (let [new-buf (compute-drv/sub-buffer (tensor->buffer tensor) offset new-len)]
-      (construct-tensor (tensor->device tensor) (dimensions [new-len]) new-buf))))
+  (select (as-vector tensor) (range offset (or length
+                                               (- (ecount tensor)
+                                                  (long offset))))))
 
 
 (defn submatrix
   "Create a sub matrix of tensor.  Tensor will be interpreted as width being n-cols
 and the rest of the dimensions being squashed into n-rows."
   ^Tensor [^Tensor tensor row-start row-length col-start col-length]
-  (let [row-start (long row-start)
-        row-length (long row-length)
-        col-start (long col-start)
-        col-length (long col-length)
-        [n-rows n-cols] (tensor->2d-shape tensor)
-        n-rows (long n-rows)
-        n-cols (long n-cols)
-        column-stride (tensor->column-stride tensor)
-        device (tensor->device tensor)]
-    (when (< row-start 0)
-      (throw (ex-info "Row start less than 0" {})))
-    (when (< col-start 0)
-      (throw (ex-info "Col start less than 0" {})))
-    (when (> (+ row-start row-length) n-rows)
-      (throw (ex-info "Required row length out of bounds"
-                      {:existing-row-length n-rows
-                       :row-start row-start
-                       :row-length row-length})))
-    (when (> (+ col-start col-length) n-cols)
-      (throw (ex-info "Required col length out of bounds"
-                      {:existing-col-length n-cols
-                       :col-start col-start
-                       :col-length col-length})))
-    (let [start-offset (+ (* column-stride row-start) col-start)
-          required-length (- (* row-length column-stride)
-                             col-start)
-          sub-buffer (compute-drv/sub-buffer (tensor->buffer tensor)
-                                             start-offset required-length)]
-      (construct-tensor (tensor->device tensor)
-                        (dimensions [row-length col-length] :strides [column-stride 1])
-                        sub-buffer))))
+  (select tensor
+          (range row-start (+ (long row-start) (long row-length)))
+          (range col-start (+ (long col-start) (long col-length)))))
 
-
-(defn- ensure-indexes
-  "Index tensors must be integers and they must all be dense and the same length."
-  [& args]
-  (apply ensure-datatypes :int args)
-  (when-not-error (every? dense? args)
-    "Index tensors must be dense; some passed in are not." {})
-  (let [first-len (ecount (first args))]
-    (when-not-error (every? #(= first-len (ecount %)) (rest args))
-      "Index tensors must all have matching element-counts"
-      {:element-counts (map ecount args)})))
 
 
 (defn rows
   "Returns a vector rows of dense vectors."
   [^Tensor tensor]
-  (let [[n-rows n-cols] (tensor->2d-shape tensor)
-        column-stride (tensor->column-stride tensor)
-        device (tensor->device tensor)
-        buffer (tensor->buffer tensor)]
-    (mapv (fn [^long idx]
-            (let [offset (* idx column-stride)
-                  new-buf (compute-drv/sub-buffer buffer offset n-cols)]
-              (construct-tensor device (dimensions [n-cols]) new-buf)))
-          (range n-rows))))
+  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
+    (map (fn [row-idx]
+           (select tensor row-idx (range n-cols)))
+         (range n-rows))))
 
 
 (defn columns
   "Returns a vector of matrixes with width of 1 but large column strides."
   [^Tensor tensor]
-  (let [[n-rows n-cols] (tensor->2d-shape tensor)
-        column-stride (tensor->column-stride tensor)
-        device (tensor->device tensor)
-        buffer (tensor->buffer tensor)
-        col-required-mem (* (- (long n-rows) 1) column-stride)
-        buf-ecount (ecount buffer)]
-    (mapv (fn [^long offset]
-            (let [new-buf (compute-drv/sub-buffer buffer offset (- buf-ecount offset))]
-              (construct-tensor device
-                                (dimensions [n-rows] :strides [column-stride])
-                                new-buf)))
-          (range n-cols))))
+  (let [[n-rows n-cols] (tensor->2d-shape tensor)]
+    (map (fn [col-idx]
+           (select tensor (range n-rows) col-idx))
+         (range n-cols))))
 
 
 (defmulti typed-assign!
@@ -676,6 +844,8 @@ and the rest of the dimensions being squashed into n-rows."
   (and (= (ecount dest) (ecount src))
        (dense? dest)
        (dense? src)
+       (dimensions-access-increasing? (tensor->dimensions dest))
+       (dimensions-access-increasing? (tensor->dimensions src))
        (= (get-datatype dest)
           (get-datatype src))))
 
@@ -708,17 +878,19 @@ and the rest of the dimensions being squashed into n-rows."
                     (max (ecount src) (ecount dest)))))))
 
 
-(defn- ensure-ecounts-commensurate
-  [x y]
-  (let [n-x (ecount x)
-        n-y (ecount y)
-        min-ec (min n-x n-y)
-        max-ec (long (max n-x n-y))]
-    (when-not (= 0 min-ec)
-      (when-not-error (= 0 (rem max-ec min-ec))
-        "Element counts are not commensurate"
-        {:x-ecount (ecount x)
-         :y-ecount (ecount y)}))))
+(defn- ensure-broadcast-rules
+  [& args]
+  (let [{:keys [max-shape dimensions]} (->> (map tensor->dimensions args)
+                                            (apply dimension-seq->max-shape))
+        shape-seq (map :shape dimensions)]
+    (when-not-error (every? (fn [shp]
+                              (every? #(= 0 (long %))
+                                      (map #(rem (long %1) (long %2))
+                                           max-shape shp)))
+                            shape-seq)
+      "Shapes are not broadcast-compatible (dimension counts must be commensurate)"
+      {:shapes shape-seq
+       :max-shapes max-shape})))
 
 
 (defn- perform-unary-op
@@ -750,7 +922,7 @@ and the rest of the dimensions being squashed into n-rows."
       (do
         (ensure-datatypes (get-datatype dest) x)
         (ensure-same-device dest x)
-        (ensure-ecounts-commensurate dest x)
+        (ensure-broadcast-rules dest x)
         (check-partial-alias dest x)
         (tm/unary-op! (check-stream)
                       (tensor->buffer dest) (tensor->dimensions dest)
@@ -784,7 +956,7 @@ and the rest of the dimensions being squashed into n-rows."
 
 (defn- binary-op-constant!
   [dest alpha x beta y op reverse-operands?]
-  (ensure-ecounts-commensurate dest x)
+  (ensure-broadcast-rules dest x)
   (ensure-datatypes (dtype/get-datatype dest) x)
   (let [y (* (double beta) (double y))
         device (tensor->device dest)]
@@ -825,7 +997,7 @@ and the rest of the dimensions being squashed into n-rows."
             [alpha beta y rev-ops?] (if x-alias?
                                       [alpha beta y false]
                                       [beta alpha x true])]
-        (ensure-ecounts-commensurate dest y)
+        (ensure-broadcast-rules dest y)
         (ensure-datatypes (get-datatype dest) y)
         (check-partial-alias dest y)
         (tm/binary-accum!
@@ -835,9 +1007,7 @@ and the rest of the dimensions being squashed into n-rows."
          (max (ecount dest)
               (ecount y)) op rev-ops?))
       (do
-        (ensure-ecounts-commensurate dest x)
-        (ensure-ecounts-commensurate dest y)
-        (ensure-ecounts-commensurate x y)
+        (ensure-broadcast-rules dest x y)
         (ensure-datatypes (get-datatype x) y dest)
         (check-partial-alias dest x y)
         (tm/binary-op!
@@ -909,7 +1079,7 @@ Datatypes must match."
         (apply ensure-datatypes (get-datatype dest) tensors)
         (apply ensure-same-device dest tensors)
         (doseq [tens tensors]
-          (ensure-ecounts-commensurate dest tens))
+          (ensure-broadcast-rules dest tens))
         (case num-tensor-args
           3 (tm/ternary-op! (check-stream)
                             (tensor->buffer dest) (tensor->dimensions dest)
@@ -952,12 +1122,22 @@ Datatypes must match."
     {:datatype dtype}))
 
 
+(defn- ensure-external-library-compatible
+  [& tensors]
+  (when-not-error (every? dimensions-access-increasing? (map :dimensions tensors))
+    "External libraries (blas (gemm gemv) and cudnn require dimensions access to be increasing"
+    {:dimensions-increasing (mapv vector
+                                 (map :dimensions tensors)
+                                 (map (comp dimensions-access-increasing? :dimensions) tensors))}))
+
+
 (defn gemm!
   "C = alpha * (trans-a? A) * (trans-b? B) + beta * C."
   ^Tensor [C trans-a? trans-b? alpha A B beta]
   (ensure-datatypes (get-datatype C) A B)
   (ensure-same-device C A B)
   (ensure-cudnn-datatype (get-datatype C) "gemm")
+  (ensure-external-library-compatible C A B)
   (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? A)
         [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? B)
         [c-row-count c-col-count :as c-shape] (tensor->2d-shape C)
@@ -1015,6 +1195,7 @@ So either it is dense *or* num-columns is 1"
   (ensure-same-device c A x)
   (ensure-cudnn-datatype (get-datatype c) "gemv")
   (ensure-vector-indexable x c)
+  (ensure-external-library-compatible c A x)
   (let [[a-row-count a-col-count] (tensor->2d-shape A)
         inc-x (blas-vector-increment x)
         inc-c (blas-vector-increment c)
@@ -1042,6 +1223,7 @@ preconditions and then returns the type of batch normalization required (spatial
     (apply ensure-datatypes (get-datatype (first all-args)) all-args)
     (apply ensure-same-device all-args)
     (ensure-cudnn-datatype (get-datatype (first io-args)) "batch-normalize")
+    (apply ensure-external-library-compatible (concat io-args mean-var-bias-scale-args))
     (when-not-error (> (double epsilon) 1e-5)
       "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
       {:epsilon epsilon})
@@ -1254,6 +1436,7 @@ See batch-normalize-update-and-apply!"
   (ensure-datatypes (get-datatype input-gradient) output output-gradient)
   (ensure-same-device input-gradient output output-gradient)
   (ensure-cudnn-datatype (get-datatype input-gradient) "activation-gradient!")
+  (ensure-external-library-compatible input-gradient output-gradient output)
   (when-not-error (contains? #{:logistic :tanh :relu} op)
     "Only :logistic :tanh and :relu are supported"
     {:operation op})
@@ -1286,6 +1469,7 @@ count.  This will perform per-element, per-batch spatial softmax across the chan
   (ensure-datatypes (get-datatype output) input)
   (ensure-same-device output input)
   (ensure-cudnn-datatype (get-datatype input) "softmax!")
+  (ensure-external-library-compatible input output)
   (when-not-error (= (shape output)
                      (shape input))
     "Input, output shapes do not match"
@@ -1306,6 +1490,184 @@ count.  This will perform per-element, per-batch spatial softmax across the chan
                            (first input-shape)
                            (second input-shape))))
   output)
+
+
+(defn- ensure-non-nil
+  [map-data]
+  (when-not-error (every? #(not (nil? (second %))) map-data)
+    "Arguments were nil:"
+    map-data))
+
+
+(defn convolution-descriptor
+  "Create a descriptor.  This will probably be tracked by the resource system.  resource/release is guaranteed
+to be a valid call on the return value."
+  [datatype out-channels in-channels kern-width kern-height
+   pad-x pad-y stride-x stride-y]
+  ;;no stream required
+  (ensure-non-nil {:out-channels out-channels
+                   :in-channels in-channels
+                   :kern-width kern-width
+                   :kern-height kern-height
+                   :pad-x pad-x
+                   :pad-y pad-y
+                   :stride-x stride-x
+                   :stride-y stride-y})
+  {:datatype datatype
+   :out-channels out-channels
+   :in-channels in-channels
+   :kernel-width kern-width
+   :kernel-height kern-height
+   :pad-x pad-x
+   :pad-y pad-y
+   :stride-x stride-x
+   :stride-y stride-y
+   :descriptor (tm/convolution-descriptor (check-stream)
+                                          datatype out-channels in-channels
+                                          kern-width kern-height pad-x pad-y
+                                          stride-x stride-y)})
+
+
+(defn- get-padded-strided-dimension
+  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
+of the output of a conv-net ignoring channels.  Caffe does this slightly different
+for pooling verse convolutional layers.  Furthermore keras does this differently
+than caffe for pooling layers so this exact calculation has been the source of
+a few compatibility issues."
+  [input-dim pad kernel-size stride dimension-op]
+  (let [partial-result (/ (- (+ (double input-dim)
+                                (* 2 (double pad)))
+                             (double kernel-size))
+                          (double stride))
+        partial-result (double (condp = dimension-op
+                                 :floor (Math/floor partial-result)
+                                 :ceil (Math/ceil partial-result)))]
+    (long (+ partial-result 1))))
+
+
+(defn get-convolution-output-dimensions
+  "Get the convolution output dimensions in the form of:
+{
+:width
+:height
+}"
+  [conv-descriptor input-width input-height]
+  {:output-width (get-padded-strided-dimension input-width (:pad-x conv-descriptor)
+                                               (:kernel-width conv-descriptor) (:stride-x conv-descriptor)
+                                               :floor)
+   :output-height (get-padded-strided-dimension input-height (:pad-y conv-descriptor)
+                                                (:kernel-height conv-descriptor) (:stride-y conv-descriptor)
+                                                :floor)})
+
+
+(defn choose-convolution-algorithms
+  "Choose the convolution algorithms.  This could be an expensive call.
+If use-defaults? is true then no tests are performed and the implementations are free to choose algorithms.
+The algorithm structure is in the form of:
+{:direction {:algorithm :workspace-size}}
+
+where direction may be:
+:forward :backward-bias :backward-weights :backward-data."
+  [descriptor input-width input-height batch-size
+   max-ideal-workspace-size & {:keys [use-defaults?]}]
+  (let [{:keys [output-width output-height]} (get-convolution-output-dimensions descriptor
+                                                                                input-width input-height)]
+    (tm/choose-convolution-algorithms (check-stream) descriptor
+                                      input-width input-height
+                                      output-width output-height
+                                      batch-size
+                                      max-ideal-workspace-size use-defaults?)))
+
+(defn- ensure-conv-weight-dims-match
+  [input weights conv-descriptor]
+  (let [[batch-size _] (shape (as-batch-matrix input))
+        {:keys [kernel-width kernel-height in-channels out-channels]} conv-descriptor
+        [out-size in-size] (shape (as-2d-matrix weights))]
+    (when-not-error (dense? weights)
+      "Convolution weights must be dense tensors"
+      {})
+    (when-not-error (= (long in-size)
+                       (* (long kernel-width) (long kernel-height) (long in-channels)))
+      "Weight column length does not equal kernel-width * kernel-height * in-channels"
+      {:weight-column-len in-size
+       :kernel-width kernel-width
+       :kernel-height kernel-height
+       :in-channels in-channels})
+    (when-not-error (= (long out-size)
+                       (long out-channels))
+      "Weight row count does not match out-channels"
+      {:weight-row-count out-size
+       :out-channels (long out-channels)})))
+
+
+(defn- ensure-conv-io
+  [conv-descriptor input-args output-args]
+  (let [{:keys [kernel-width kernel-height in-channels out-channels
+                pad-x pad-y stride-x stride-y]} conv-descriptor
+        [batch-size in-arg-channels in-height in-width] (shape (first input-args))
+        {:keys [output-width output-height]} (get-convolution-output-dimensions conv-descriptor in-height in-width)
+        in-channels (long in-channels)
+        out-chanenls (long out-channels)
+        output-width (long output-width)
+        output-height (long output-height)
+        expected-input-shape [batch-size in-channels in-height in-width]
+        expected-output-shape [batch-size out-channels output-width output-height]]
+    (when-not-error (every? dense? (concat input-args output-args))
+      "Convolution arguments must be dense tensors" {})
+    (doseq [input input-args]
+      (let [input-shape (shape (first input-args))]
+        (when-not-error (= expected-input-shape input-shape)
+          "Input dimensions do not match expected dimensions"
+          {:expected-shape expected-input-shape
+           :input-shape input-shape})))
+
+    (doseq [output output-args]
+      (let [output-shape (shape (first output-args))]
+        (when-not-error (= expected-output-shape output-shape)
+          "Output dimensions do not match expected dimensions"
+          {:expected-shape expected-output-shape
+           :output-shape output-shape})))))
+
+
+(defn convolution-forward!
+  "Perform convolution forward.  Input,output must be 4d tensors while weights
+must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspace-size]) ecount"
+  [output output-alpha input weights workspace conv-descriptor algorithms]
+  (ensure-datatypes (get-datatype output) input weights)
+  (ensure-same-device output input weights)
+  (ensure-conv-weight-dims-match input weights conv-descriptor)
+  (ensure-conv-io conv-descriptor [input] [output])
+  (tm/convolution-forward! (check-stream)
+                           (tensor->buffer output) (tensor->dimensions output) output-alpha
+                           (tensor->buffer input) (tensor->dimensions input)
+                           (tensor->buffer weights) (tensor->dimensions weights)
+                           (tensor->buffer workspace) (ecount workspace)
+                           conv-descriptor algorithms)
+  output)
+
+
+(defn convolution-backward-weights!
+  [weight-gradient weight-gradient-alpha output-gradient input workspace conv-descriptor algorithms]
+  (tm/convolution-backward-weights! (check-stream)
+                                    (tensor->buffer weight-gradient) (tensor->dimensions weight-gradient)
+                                    weight-gradient-alpha
+                                    (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
+                                    (tensor->buffer input) (tensor->dimensions input)
+                                    (tensor->buffer workspace) (ecount workspace)
+                                    conv-descriptor algorithms)
+  weight-gradient)
+
+
+(defn convolution-backward-data!
+  [input-gradient input-gradient-alpha output-gradient weights workspace conv-descriptor algorithms]
+  (tm/convolution-backward-data! (check-stream)
+                                 (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
+                                 input-gradient-alpha
+                                 (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
+                                 (tensor->buffer weights) (tensor->dimensions weights)
+                                 (tensor->buffer workspace) (ecount workspace)
+                                 conv-descriptor algorithms)
+  input-gradient)
 
 
 (extend-type Tensor

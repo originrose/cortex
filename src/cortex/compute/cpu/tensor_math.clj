@@ -4,12 +4,14 @@
             [cortex.tensor.math :as tm]
             [clojure.math.combinatorics :as combo]
             [cortex.compute.cpu.driver :as cpu-driver]
+            [cortex.compute.driver :as compute-drv]
             [think.parallel.core :as parallel]
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.math-util :as cmu]
             [cortex.compute.driver :as drv]
             [think.resource.core :as resource]
-            [cortex.tensor :as tensor])
+            [cortex.tensor :as ct]
+            [cortex.nn.impl :as impl])
   (:import [cortex.compute.cpu.driver CPUStream]
            [com.github.fommil.netlib BLAS]
            [think.datatype DoubleArrayView FloatArrayView
@@ -20,53 +22,22 @@
 (set! *warn-on-reflection* true)
 
 
-(defn elem-idx->addr
-  "Precondition:  rev-shape, rev-max-shape, strides are same length.
-rev-max-shape: maxes of all shapes passed in, reversed
-rev-shape: reverse shape.
-rev-strides: reverse strides.
-arg: >= 0."
-  ^long [rev-shape rev-strides rev-max-shape arg]
-  (long (let [num-items (count rev-shape)]
-          (loop [idx (long 0)
-                 arg (long arg)
-                 offset (long 0)]
-            (if (and (> arg 0)
-                     (< idx num-items))
-              (let [next-max (long (rev-max-shape idx))
-                    next-stride (long (rev-strides idx))
-                    next-dim (long (rev-shape idx))
-                    max-idx (rem arg next-max)
-                    shape-idx (rem arg next-dim)]
-                (recur (inc idx)
-                       (quot arg next-max)
-                       (+ offset (* next-stride shape-idx))))
-              offset)))))
-
-
 ;;Need the interface to get correct type hinting to avoid boxing/unboxing every index.
 (definterface ElemIdxToAddressFunction
   (^long idx_to_address [^long arg]))
 
 
-(defrecord ElemIdxToAddr [rev-shape rev-strides rev-max-shape]
+(defrecord ElemIdxToAddr [^ints rev-shape ^ints rev-strides ^ints rev-max-shape]
   ElemIdxToAddressFunction
   (^long idx_to_address [this ^long arg]
-   (elem-idx->addr rev-shape rev-strides rev-max-shape arg)))
+   (ct/elem-idx->addr-ary rev-shape rev-strides rev-max-shape arg)))
 
 
 (defn ^:private get-elem-dims->address
-  ^ElemIdxToAddressFunction [{:keys [shape strides]} max-shape]
-  (let [max-shape-count (count max-shape)
-        rev-shape (->> (concat (reverse shape)
-                               (repeat 1))
-                       (take max-shape-count)
-                       vec)
-        rev-strides (->> (concat (reverse strides)
-                                 (repeat (first strides)))
-                         (take max-shape-count)
-                         vec)]
-    (->ElemIdxToAddr rev-shape rev-strides (vec (reverse max-shape)))))
+  ^ElemIdxToAddressFunction [dims max-shape]
+  (let [{:keys [reverse-shape reverse-strides]} (ct/dimension->reverse-data dims max-shape)]
+    (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
+                     (int-array (vec (reverse max-shape))))))
 
 
 (defmacro ^:private assign-constant-impl
@@ -131,14 +102,8 @@ arg: >= 0."
 
 (defn max-shape-from-dimensions
   [& args]
-  (let [shapes (mapv :shape args)
-        max-count (apply max 0 (map count shapes))
-        rev-shapes (map (comp vec reverse) shapes)]
-    (->> (range max-count)
-         (map (fn [idx]
-                (apply max 0 (map #(get % idx 0) rev-shapes))))
-         reverse
-         vec)))
+  (-> (apply ct/dimension-seq->max-shape args)
+      :max-shape))
 
 
 (defmacro ^:private marshalling-assign-fn
@@ -242,7 +207,7 @@ arg: >= 0."
 
 
 (def ^:private operations
-  [:+ :- :* :/ :max :min])
+  [:+ :- :* :/ :max :min :bit-and])
 
 
 (defmacro ^:private perform-operation-impl
@@ -254,7 +219,8 @@ arg: >= 0."
     :* `(* ~x ~y)
     ;;Math/max and friends aren't defined for all primitives leading to reflection warnings.
     :max `(if (> ~x ~y) ~x ~y)
-    :min `(if (> ~x ~y) ~y ~x)))
+    :min `(if (> ~x ~y) ~y ~x)
+    :bit-and `(bit-and (unchecked-int ~x) (unchecked-int ~y))))
 
 
 (defmacro ^:private perform-op-rev-ops
@@ -996,6 +962,53 @@ arg: >= 0."
                    output# input#)))
 
 
+(defn- ->old-skool-conv-desc
+  [conv-desc
+   input-width input-height output-width output-height]
+  (assoc conv-desc
+         :input-channels (:in-channels conv-desc)
+         :output-channels (:out-channels conv-desc)
+         :input-width (long input-width)
+         :input-height (long input-height)
+         :output-width (long output-width)
+         :output-height (long output-height)))
+
+
+(defmacro cpu-planar-input->convolution!-impl
+  [datatype]
+  `(fn [input# output# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)]
+       (impl/convolution-outer-kernel
+        config#
+        :convolutional
+        (impl/convolution-roll-unroll-inner-kernel
+         (let [input-val# (datatype->cast-fn ~datatype
+                           (if ~'input-valid?
+                             (v-aget input-ary# ~'input-addr)
+                             0.0))]
+           (v-aset output-ary# ~'output-conv-addr input-val#)))))))
+
+
+(defmacro cpu-convolution->planar-output!-impl
+  [datatype]
+  `(fn [conv-input-gradient# input-gradient# config#]
+     ;;I am using input to mean upstream or in this case destination so that
+     ;;this code can look as similar to the code above as possible
+     ;;This function is extremely confusing but the macros name local variables
+     ;;a certain way so in this case input-addr means output-addr.
+     (let [output-ary# (datatype->view-cast-fn ~datatype input-gradient#)
+           input-ary# (datatype->view-cast-fn ~datatype conv-input-gradient#)]
+       ;;Zero accumulator
+       (impl/convolution-outer-kernel
+        config# :convolutional
+        (impl/convolution-roll-unroll-inner-kernel
+         (when ~'input-valid?
+           (let [output-val# (v-aget output-ary# ~'input-addr)
+                 input-val# (v-aget input-ary# ~'output-conv-addr)]
+             (v-aset output-ary# ~'input-addr (+ input-val# output-val#)))))))))
+
+
 (defonce cpu-nn-ops-types [:float :double])
 
 
@@ -1011,7 +1024,9 @@ arg: >= 0."
        :batch-normalize-gradients-eltwise! `(batch-normalize-gradients-eltwise-impl ~ops-type)
        :batch-normalize-gradients-spatial! `(batch-normalize-gradients-spatial-impl ~ops-type)
        :softmax-eltwise! `(softmax-eltwise-forward-impl ~ops-type)
-       :softmax-spatial! `(softmax-spatial-forward-impl ~ops-type)}])
+       :softmax-spatial! `(softmax-spatial-forward-impl ~ops-type)
+       :planar-input->convolution! `(cpu-planar-input->convolution!-impl ~ops-type)
+       :convolution->planar-output! `(cpu-convolution->planar-output!-impl ~ops-type)}])
    (into {})))
 
 
@@ -1060,6 +1075,22 @@ arg: >= 0."
 (def activation-backward-table
   {:double (act-backward-impl :double)
    :float (act-backward-impl :float)})
+
+
+(defrecord ConvDesc []
+  resource/PResource
+  (release-resource [this]))
+
+
+(defn slice-batches
+  [& args]
+  (let [num-batches (first (ct/shape (first args)))]
+    (map (fn [batch-idx]
+           (mapv (fn [arg]
+                   (let [dim-count (count (ct/shape arg))]
+                     (apply ct/select arg batch-idx (repeat (- dim-count 1) :all))))
+                 args))
+         (range num-batches))))
 
 
 (extend-type CPUStream
@@ -1316,18 +1347,147 @@ arg: >= 0."
                      element-count]
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-spatial!])
-       output input batch-count channel-count element-count))))
+       output input batch-count channel-count element-count)))
+
+  (convolution-descriptor [stream
+                           datatype out-channels in-channels kern-width kern-height
+                           pad-x pad-y stride-x stride-y]
+    (->ConvDesc))
+
+  (choose-convolution-algorithms [stream conv-descriptor
+                                  input-width input-height
+                                  output-width output-height
+                                  batch-size
+                                  max-ideal-workspace-size use-defaults?]
+    (let [kernel-stride (* (long (get conv-descriptor :kernel-width))
+                           (long (get conv-descriptor :kernel-height)))
+          n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+          n-rows (* (long output-width) (long output-height))
+          workspace-size (* n-cols n-rows (long batch-size))]
+      {:workspace-size workspace-size}))
+
+  (convolution-forward! [stream
+                         output output-dims output-alpha
+                         input input-dims
+                         weights weight-dims
+                         workspace workspace-ecount
+                         conv-descriptor algorithms]
+    (let [dev (compute-drv/get-device stream)
+          kernel-stride (* (long (get conv-descriptor :kernel-width))
+                           (long (get conv-descriptor :kernel-height)))
+          [batch-size in-chan in-height in-width] (get input-dims :shape)
+          [_ out-chan output-width output-height] (get output-dims :shape)
+          n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+          n-rows (* (long output-width) (long output-height))
+          batch-size (long (first (get output-dims :shape)))
+          weights (ct/->Tensor dev weight-dims weights)
+          old-skool-desc (->old-skool-conv-desc conv-descriptor
+                                                in-width in-height
+                                                output-width output-height)
+          output-tens (ct/->Tensor dev output-dims output)
+          input-tens (ct/->Tensor dev input-dims input)
+          input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)]
+      (cpu-driver/with-stream-dispatch stream
+        (ct/with-stream (cpu-driver/main-thread-cpu-stream)
+          (let [batch-data (slice-batches output-tens input-tens input-convolved)]
+            (->> batch-data
+                 (pmap (fn [[output input input-convolved]]
+                         ((get-in cpu-nn-ops [(ct/get-datatype output) :planar-input->convolution!])
+                          (ct/tensor->buffer input) (ct/tensor->buffer input-convolved) old-skool-desc)
+                         ;;big gemm
+                         ;;reshape output to be [n-channels (height * width)]
+                         (ct/gemm! (ct/as-batch-matrix output) false true 1.0 weights input-convolved
+                                   (double output-alpha))))
+                 dorun))))))
+
+  (convolution-backward-weights! [stream
+                                  weight-gradient weight-gradient-dims weight-gradient-alpha
+                                  output-gradient output-gradient-dims
+                                  input input-dims
+                                  workspace workspace-ecount
+                                  conv-descriptor algorithms]
+    (cpu-driver/with-stream-dispatch stream
+      (try
+       (let [dev (compute-drv/get-device stream)
+             kernel-stride (* (long (get conv-descriptor :kernel-width))
+                              (long (get conv-descriptor :kernel-height)))
+             [batch-size in-chan in-height in-width] (get input-dims :shape)
+             [_ out-chan output-width output-height] (get output-gradient-dims :shape)
+             n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+             n-rows (* (long output-width) (long output-height))
+             batch-size (long (first (get output-gradient-dims :shape)))
+             weight-gradient-tens (ct/->Tensor dev weight-gradient-dims weight-gradient)
+             old-skool-desc (->old-skool-conv-desc conv-descriptor
+                                                   in-width in-height
+                                                   output-width output-height)
+             output-gradient-tens (ct/->Tensor dev output-gradient-dims output-gradient)
+             input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+             slice-data (slice-batches output-gradient-tens input-convolved)]
+         (ct/with-stream (cpu-driver/main-thread-cpu-stream)
+           (doseq [[output-gradient input-convolved idx] (map #(conj (vec %1) %2) slice-data (range))]
+             (let [weight-gradient-alpha (double (if (= 0 idx)
+                                                   weight-gradient-alpha
+                                                   1.0))]
+               (ct/gemm! weight-gradient-tens false false
+                         1.0 (ct/as-batch-matrix output-gradient) input-convolved
+                         (double weight-gradient-alpha))))))
+       (catch Throwable e (println e)))))
+
+  (convolution-backward-data! [stream
+                               input-gradient input-gradient-dims input-gradient-alpha
+                               output-gradient output-gradient-dims
+                               weights weights-dims
+                               workspace workspace-ecount
+                               conv-descriptor algorithms]
+    (cpu-driver/with-stream-dispatch stream
+      (ct/with-stream
+        (cpu-driver/main-thread-cpu-stream)
+        (try
+          (let [dev (compute-drv/get-device stream)
+                kernel-stride (* (long (get conv-descriptor :kernel-width))
+                                 (long (get conv-descriptor :kernel-height)))
+                [batch-size in-chan in-height in-width] (get input-gradient-dims :shape)
+                [_ out-chan output-width output-height] (get output-gradient-dims :shape)
+                n-cols (* kernel-stride (long (get conv-descriptor :in-channels)))
+                n-rows (* (long output-width) (long output-height))
+                batch-size (long (first (get output-gradient-dims :shape)))
+                output-gradient (ct/->Tensor dev output-gradient-dims output-gradient)
+                input-gradient (ct/->Tensor dev input-gradient-dims input-gradient)
+                input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+                weights (ct/->Tensor dev weights-dims weights)
+                datatype (dtype/get-datatype weights)
+                input-gradient-alpha (double 0.0)]
+            (cond
+              (= 0.0 input-gradient-alpha)
+              (ct/assign! input-gradient 0)
+              (= 1.0 input-gradient-alpha)
+              input-gradient
+              :else
+              (ct/binary-op! input-gradient 1.0 input-gradient 1.0 input-gradient-alpha :*))
+            (->> (slice-batches input-gradient output-gradient input-convolved)
+                 (map (fn [[input-gradient output-gradient input-convolved]]
+                        (ct/gemm! input-convolved true false
+                                  1.0 (ct/as-batch-matrix output-gradient) weights
+                                  0.0)
+                        ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
+                         (ct/tensor->buffer input-convolved)
+                         (ct/tensor->buffer input-gradient)
+                         (->old-skool-conv-desc conv-descriptor
+                                                in-width in-height
+                                                output-width output-height))))
+                 dorun))
+          (catch Throwable e (println e)))))))
 
 
 (defn as-tensor
   [java-array]
-  (tensor/construct-tensor (drv/get-device tensor/*stream*)
-                           (tensor/dimensions [(tensor/ecount java-array)])
-                           (dtype/->view java-array)))
+  (ct/construct-tensor (drv/get-device ct/*stream*)
+                       (ct/dimensions [(ct/ecount java-array)])
+                       (dtype/->view java-array)))
 
 (defn as-java-array
   [cpu-tensor]
-  (let [dev-buffer (tensor/tensor->buffer cpu-tensor)]
+  (let [dev-buffer (ct/tensor->buffer cpu-tensor)]
     (condp = (dtype/get-datatype dev-buffer)
       :byte (.data ^ByteArrayView dev-buffer)
       :short (.data ^ShortArrayView dev-buffer)
@@ -1343,5 +1503,5 @@ arg: >= 0."
   `(resource/with-resource-context
      (let [device# (drv/default-device (cpu-driver/driver))
            stream# (drv/create-stream :device device#)]
-       (tensor/with-stream stream#
+       (ct/with-stream stream#
          ~@body))))

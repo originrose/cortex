@@ -161,6 +161,7 @@ running means, variances using a running average
                          output
                          op
                          element-count])
+
   (softmax-eltwise! [stream
                      output
                      input
@@ -172,4 +173,40 @@ running means, variances using a running average
                      input
                      batch-count
                      channel-count
-                     element-count]))
+                     element-count])
+
+  (convolution-descriptor [stream
+                           datatype out-channels in-channels kern-width kern-height
+                           pad-x pad-y stride-x stride-y]
+    "Return an implementation-specific descriptor to be used with the resulting convolution calls.
+resource/release *must* be a valid call on the returned value.")
+
+  (choose-convolution-algorithms [stream conv-descriptor
+                                  input-width input-height
+                                  output-width output-height
+                                  batch-size
+                                  max-ideal-workspace-size use-defaults?])
+
+
+  (convolution-forward! [stream
+                         output output-dims output-alpha
+                         input input-dims
+                         weights weight-dims
+                         workspace workspace-ecount
+                         conv-descriptor algorithms])
+
+
+  (convolution-backward-weights! [stream
+                                  weight-gradient weight-gradient-dims weight-gradient-alpha
+                                  output-gradient output-gradient-dims
+                                  input input-dims
+                                  workspace workspace-ecount
+                                  conv-descriptor algorithms])
+
+
+  (convolution-backward-data! [stream
+                               input-gradient input-gradient-dims input-gradient-alpha
+                               output-gradient output-gradient-dims
+                               weights weights-dims
+                               workspace workspace-ecount
+                               conv-descriptor algorithms]))

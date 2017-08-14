@@ -13,7 +13,8 @@ implementation as possible."
             [think.datatype.core :as dtype]
             [cortex.graph :as graph]
             [cortex.nn.layers :as cortex-layers]
-            [cortex.tensor :as tensor]))
+            [cortex.tensor :as tensor]
+            [cortex.util :as util]))
 
 
 (set! *warn-on-reflection* true)
@@ -287,6 +288,72 @@ and then forward many times for every parameter of the network."
                         (nn-backend/new-array backend (cortex-layers/batch-norm-param-shape
                                                        nil layer nil))
                         (atom 1.0)))
+
+(defn- ->conv-tensor
+  [dimensions batch-size io-buf]
+  (assoc (math/array->cortex-tensor io-buf)
+         :dimensions (tensor/dimensions
+                      [batch-size (get dimensions :channels)
+                       (get dimensions :height)
+                       (get dimensions :width)])))
+
+
+(defrecord ConvolutionLayer [backend layer conv-desc algorithms workspace]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [batch-size (math/batch-size (first-buffer input-buffers))
+            output (->conv-tensor (graph/node->output-dimension layer) batch-size (first-buffer output-buffers))
+            input (->conv-tensor (graph/node->input-dimension layer) batch-size (first-buffer input-buffers))
+            weights (math/array->cortex-tensor (get-in parameter-buffers [:weights :buffer]))
+            ;;Setup bias so it broadcasts correctly over the output
+            bias (assoc (math/array->cortex-tensor (get-in parameter-buffers [:bias :buffer]))
+                        :dimensions (tensor/dimensions [(get conv-desc :out-channels) 1 1]))]
+        (m/assign! output bias)
+        (tensor/convolution-forward! output 1.0 input weights workspace conv-desc algorithms))))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [batch-size (math/batch-size (first-buffer input-buffers))
+            output (->conv-tensor (graph/node->output-dimension layer) batch-size (first-buffer output-buffers))
+            output-gradient (->conv-tensor (graph/node->output-dimension layer) batch-size
+                                           (first-gradient output-buffers))
+            input (->conv-tensor (graph/node->input-dimension layer) batch-size (first-buffer input-buffers))
+            input-gradient (->conv-tensor (graph/node->input-dimension layer) batch-size
+                                          (first-gradient input-buffers))
+            weights (math/array->cortex-tensor (get-in parameter-buffers [:weights :buffer]))
+
+            weight-gradient (math/array->cortex-tensor (get-in parameter-buffers [:weights :gradient]))
+            [_ out-chan out-height out-width] (m/shape output-gradient)
+            bias-gradient (assoc (math/array->cortex-tensor (get-in parameter-buffers [:bias :gradient]))
+                                 :dimensions (tensor/dimensions [out-chan 1 1]))]
+
+        (tensor/binary-op! bias-gradient 1.0 output-gradient 1.0 bias-gradient :+)
+        (tensor/convolution-backward-weights! weight-gradient 0.0 output-gradient input
+                                              workspace conv-desc algorithms)
+        (tensor/convolution-backward-data! input-gradient 0.0 output-gradient weights
+                                           workspace conv-desc algorithms)))))
+
+
+(defmethod create :convolutional
+  [backend layer batch-size]
+  (tensor/with-datatype (dtype/get-datatype backend)
+   (tensor/with-stream (nn-backend/get-stream)
+     (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y
+                   num-kernels]} layer
+           {:keys [channels height width]} (graph/node->input-dimension layer)
+           output-dims (graph/node->output-dimension layer)
+           output-width (get output-dims :width)
+           output-height (get output-dims :height)
+           conv-desc (tensor/convolution-descriptor (dtype/get-datatype backend)
+                                                    num-kernels channels
+                                                    kernel-width kernel-height
+                                                    pad-x pad-y
+                                                    stride-x stride-y)
+           algorithms (tensor/choose-convolution-algorithms conv-desc width height
+                                                            batch-size 100000)
+           workspace (tensor/new-tensor [(get algorithms :workspace-size)])]
+       (->ConvolutionLayer backend layer conv-desc algorithms workspace)))))
 
 
 (defrecord Prelu [backend layer scale-buffer]
