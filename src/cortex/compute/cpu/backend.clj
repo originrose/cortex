@@ -62,8 +62,6 @@
 
 (defprotocol PCPUNetworkImpl
   "Implementation of various functions based on buffer datatype."
-  (cpu-planar-input->convolution! [input input-convolved conv-config])
-  (cpu-convolution->planar-output! [input-convolved input-gradient conv-config])
   (cpu-fill [buffer value])
   (cpu-max-pooling-forward [input output conv-config])
   (cpu-max-pooling-backward [input output input-gradient output-gradient conv-config])
@@ -154,38 +152,6 @@
               (+ sum-val# (v-aget ~ary (+ ~start-idx idx#))))
        sum-val#)))
 
-
-(defmacro cpu-planar-input->convolution!-impl
-  [input output config cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         output-ary# (ArrayView/toView ~output)]
-     (impl/convolution-outer-kernel
-      ~config
-      :convolutional
-      (impl/convolution-roll-unroll-inner-kernel
-       (let [input-val# (~cast-fn (if ~'input-valid?
-                                    (v-aget input-ary# ~'input-addr)
-                                    0.0))]
-         (v-aset output-ary# ~'output-conv-addr input-val#))))))
-
-
-(defmacro cpu-convolution->planar-output!-impl
-  "Sum the convolution up to the planar input."
-  [conv-input-gradient input-gradient config cast-fn]
-  ;;I am using input to mean upstream or in this case destination so that
-  ;;this code can look as similar to the code above as possible
-  ;;This function is extremely confusing but the macros name local variables
-  ;;a certain way so in this case input-addr means output-addr.
-  `(let [output-ary# (ArrayView/toView ~input-gradient)
-         input-ary# (ArrayView/toView ~conv-input-gradient)]
-     ;;Zero accumulator
-     (impl/convolution-outer-kernel
-      ~config :convolutional
-      (impl/convolution-roll-unroll-inner-kernel
-       (when ~'input-valid?
-         (let [output-val# (v-aget output-ary# ~'input-addr)
-               input-val# (v-aget input-ary# ~'output-conv-addr)]
-           (v-aset output-ary# ~'input-addr (+ input-val# output-val#))))))))
 
 (defmacro cpu-max-pooling-forward-impl
   [input output config cast-fn]
@@ -584,13 +550,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (extend-type DoubleArrayView
   PCPUNetworkImpl
-  (cpu-planar-input->convolution! [input ^DoubleArrayView input-convolved
-                                   conv-config]
-    (cpu-planar-input->convolution!-impl input input-convolved conv-config double))
-  (cpu-convolution->planar-output! [input-convolved ^DoubleArrayView input-gradient
-                                    conv-config]
-    (cpu-convolution->planar-output!-impl input-convolved input-gradient conv-config double))
-
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (double value)))
@@ -626,10 +585,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 
 (extend-type FloatArrayView
   PCPUNetworkImpl
-  (cpu-planar-input->convolution! [input ^FloatArrayView input-convolved conv-config]
-    (cpu-planar-input->convolution!-impl input input-convolved conv-config float))
-  (cpu-convolution->planar-output! [input-convolved ^FloatArrayView input-gradient conv-config]
-    (cpu-convolution->planar-output!-impl input-convolved input-gradient conv-config float))
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (float value)))
@@ -700,118 +655,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
            :output-height (get output-dims :height)
            :output-size (graph/dimensions->size output-dims))))
 
-
-(defrecord ConvolutionalLayer [backend conv-config input-convolved ones])
-
-(defn convolution-matrix
-  [config backend batch-size]
-  (let [output-width (long (:output-width config))
-        output-height (long (:output-height config))
-        kernel-stride (* (long (get config :kernel-width))
-                         (long (get config :kernel-height)) )
-        n-cols (* kernel-stride (long (:input-channels config)))
-        n-rows (* output-width output-height)]
-    (nn-backend/new-array backend [n-rows n-cols] batch-size)))
-
-
-(defn conv-layer [backend conv-config ^long batch-size]
-  (let [conv-config (conv-type-layer->conv-config conv-config)
-        num-out-pixels (* (long (:output-width conv-config))
-                          (long (:output-height conv-config)))]
-    (->ConvolutionalLayer backend conv-config
-                          (convolution-matrix conv-config backend batch-size)
-                          (nn-backend/allocate-ones backend num-out-pixels))))
-
-(extend-type ConvolutionalLayer
-  compute-protocols/ComputeLayer
-  (forward [layer parameter-buffers input-buffers output-buffers]
-    (let [{:keys [num-kernels] :as conv-config} (.conv-config layer)
-          output-width (long (:output-width conv-config))
-          output-height (long (:output-height conv-config))
-          num-out-pixels (* output-width output-height)
-          num-out-channels (long num-kernels)
-          cpu-stream (drv/get-stream (.backend layer))
-          current-thread-stream (cpu-drv/main-thread-cpu-stream)
-          input (compute-layers/first-buffer input-buffers)
-          output (compute-layers/first-buffer output-buffers)
-          weights (get-in parameter-buffers [:weights :buffer])
-          bias (get-in parameter-buffers [:bias :buffer])]
-      ;;In parallel process each item of the batch.
-      ;;This allows us to take advantage of at least
-      ;;*some* multithreading without having to explicity program much of it.
-      (cpu-drv/with-stream-dispatch cpu-stream
-        (doall (pmap (fn [[input output input-convolved]]
-                      ;;Redefine output to be the correct shape
-                      (let [output (math/with-tensor
-                                     output
-                                     (math/tensor num-out-channels num-out-pixels))]
-                        (cpu-planar-input->convolution! (device-array->view input)
-                                                        (device-array->view input-convolved)
-                                                        (.conv-config layer))
-                        ;;set the output to the bias...can't think of another way of doing this.
-                        (math/gemm current-thread-stream true false
-                                   1.0 bias (.ones layer)
-                                   0.0 output)
-                        (math/gemm current-thread-stream false true
-                                   1.0 weights input-convolved
-                                   1.0 output)))
-                    (math/batched-data-to-per-input-data
-                     [input output (.input-convolved layer)]))))))
-
-  (backward [layer parameter-buffers output-buffers input-buffers]
-    (let [{:keys [num-kernels] :as conv-config} (.conv-config layer)
-          output-width (long (:output-width conv-config))
-          output-height (long (:output-height conv-config))
-          num-out-pixels (* output-width output-height)
-          num-out-channels (long num-kernels)
-          input (compute-layers/first-buffer input-buffers)
-          output (compute-layers/first-buffer output-buffers)
-          input-gradient (compute-layers/first-gradient input-buffers)
-          output-gradient (compute-layers/first-gradient output-buffers)
-          weights (get-in parameter-buffers [:weights :buffer])
-          bias (get-in parameter-buffers [:bias :buffer])
-          weight-gradient (get-in parameter-buffers [:weights :gradient])
-          bias-gradient (get-in parameter-buffers [:bias :gradient])
-          input-convolved (:input-convolved layer)
-          batched-data [input output input-gradient output-gradient input-convolved]
-          io-data (math/batched-data-to-per-input-data batched-data)
-          cpu-stream (drv/get-stream (.backend layer))
-          current-thread-stream (cpu-drv/main-thread-cpu-stream)]
-      (cpu-drv/with-stream-dispatch cpu-stream
-        ;;compute the weights gradient.  These aren't too expensive but we cannot easily
-        ;;parallelize this because it is an accumulation.
-        (doseq [[input output input-gradient output-gradient input-convolved] io-data]
-          (let [output-gradient (math/with-tensor output-gradient
-                                  (math/tensor num-out-channels num-out-pixels))]
-            (math/gemm current-thread-stream false true
-                       1.0 (.ones layer) output-gradient
-                       1.0 bias-gradient)
-            (math/gemm current-thread-stream false false
-                       1.0 output-gradient input-convolved
-                       1.0 weight-gradient)))
-        ;;Once weight/bias gradient accumulation is complete...
-        ;;In parallel calculate the input gradients and roll/accumulate
-        ;;back up into input vectors.  This changes input convolved
-        ;;(which was our previously unrolled input) so we have to do
-        ;;it *after* the above step.
-        (doall (pmap (fn [[input output input-gradient output-gradient input-convolved]]
-                       (let [output-gradient (math/with-tensor output-gradient
-                                               (math/tensor num-out-channels
-                                                            num-out-pixels))]
-                         ;;set input gradient at this batch location to empty
-                         (cpu-fill (device-array->view input-gradient) 0)
-                         (math/gemm current-thread-stream true false
-                                    1.0 output-gradient weights
-                                    0.0 input-convolved))
-                       (cpu-convolution->planar-output! (device-array->view input-convolved)
-                                                        (device-array->view input-gradient)
-                                                        conv-config))
-                     io-data))))))
-
-
-(defmethod cpu-layer :convolutional
-  [backend layer batch-size]
-  (conv-layer backend layer (long batch-size)))
 
 
 (defrecord MaxPooling [backend conv-config]

@@ -127,19 +127,6 @@ threadsafe while (.position ptr offset) is not."
 
 
 (extend-type Pointer
-  dtype/PCopyQueryDirect
-  (get-direct-copy-fn [dest dest-offset]
-    (fn [ptr ptr-offset elem-count]
-      (dtype/copy-to-buffer-direct! ptr ptr-offset
-                                    (as-buffer dest) dest-offset
-                                    elem-count)))
-
-  dtype/PCopyToItemDirect
-  (copy-to-array-direct! [ptr ptr-offset dest dest-offset elem-count]
-    (dtype/copy-to-array-direct! (as-buffer ptr) ptr-offset dest dest-offset elem-count))
-  (copy-to-buffer-direct! [ptr ptr-offset dest dest-offset elem-count]
-    (dtype/copy-to-buffer-direct! (as-buffer ptr) ptr-offset dest dest-offset elem-count))
-
   dtype/PAccess
   (set-value! [ptr ^long offset value] (dtype/set-value! (as-buffer ptr) offset value))
   (set-constant! [ptr offset value elem-count]

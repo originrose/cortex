@@ -27,7 +27,7 @@
 
 
 (def-double-float-test binary-op
-  (verify-tensor/binary-op (driver) *datatype*))
+  (verify-tensor/binary-op (driver) *datatype* ))
 
 
 (def-all-dtype-test unary-op
@@ -68,6 +68,10 @@
 
 (def-double-float-test softmax
   (verify-tensor/softmax (driver) *datatype*))
+
+
+(def-double-float-test convolution-operator
+  (verify-tensor/convolution-operator (driver) *datatype*))
 
 
 (def-all-dtype-test ternary-op-select

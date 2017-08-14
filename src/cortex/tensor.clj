@@ -67,11 +67,6 @@ For indirect operations element count is num-indexes * num-columns.  After that 
 ;;Stream is dynamically bound at execution time presumably by an entity outside of the context
 ;;of this file.  Due to this clients of this file should not be manipulating stream.
 (def ^:dynamic *stream*)
-;;Similar to stream, the engine will set this variable and clients should not set
-;;the variable themselves.
-(def ^:dynamic *datatype* :double)
-
-
 (defmacro with-stream
   [stream & body]
   `(with-bindings {#'*stream* ~stream}
@@ -83,6 +78,15 @@ For indirect operations element count is num-indexes * num-columns.  After that 
   (let [retval *stream*]
     (when-not-error retval "Tensor stream is nil" {})
     retval))
+
+;;Similar to stream, the engine will set this variable and clients should not set
+;;the variable themselves.
+(def ^:dynamic *datatype* :double)
+
+(defmacro with-datatype
+  [dtype & body]
+  `(with-bindings {#'*datatype* ~dtype}
+     ~@body))
 
 (defn- ensure-datatypes
   [datatype & args]
@@ -274,6 +278,31 @@ transpose that is not made concrete this condition will probably not hold."
                        (quot arg next-max)
                        (+ offset (* next-stride shape-idx))))
               offset)))))
+
+
+(defn elem-idx->addr-ary
+  "Precondition:  rev-shape, rev-max-shape, strides are same length.
+  rev-max-shape: maxes of all shapes passed in, reversed
+  rev-shape: reverse shape.
+  rev-strides: reverse strides.
+  arg: >= 0."
+  ^long [^ints rev-shape ^ints rev-strides ^ints rev-max-shape ^long arg]
+  (long (let [num-items (alength rev-shape)]
+          (loop [idx (long 0)
+                 arg (long arg)
+                 offset (long 0)]
+            (if (and (> arg 0)
+                     (< idx num-items))
+              (let [next-max (aget rev-max-shape idx)
+                    next-stride (aget rev-strides idx)
+                    next-dim (aget rev-shape idx)
+                    max-idx (rem arg next-max)
+                    shape-idx (rem arg next-dim)]
+                (recur (inc idx)
+                       (quot arg next-max)
+                       (+ offset (* next-stride shape-idx))))
+              offset)))))
+
 
 (defn- max-extend-strides
   [shape strides max-count]
@@ -1451,6 +1480,184 @@ softmax: https://en.wikipedia.org/wiki/Softmax_function"
                  (first input-shape)
                  (second input-shape)))
   output)
+
+
+(defn- ensure-non-nil
+  [map-data]
+  (when-not-error (every? #(not (nil? (second %))) map-data)
+    "Arguments were nil:"
+    map-data))
+
+
+(defn convolution-descriptor
+  "Create a descriptor.  This will probably be tracked by the resource system.  resource/release is guaranteed
+to be a valid call on the return value."
+  [datatype out-channels in-channels kern-width kern-height
+   pad-x pad-y stride-x stride-y]
+  ;;no stream required
+  (ensure-non-nil {:out-channels out-channels
+                   :in-channels in-channels
+                   :kern-width kern-width
+                   :kern-height kern-height
+                   :pad-x pad-x
+                   :pad-y pad-y
+                   :stride-x stride-x
+                   :stride-y stride-y})
+  {:datatype datatype
+   :out-channels out-channels
+   :in-channels in-channels
+   :kernel-width kern-width
+   :kernel-height kern-height
+   :pad-x pad-x
+   :pad-y pad-y
+   :stride-x stride-x
+   :stride-y stride-y
+   :descriptor (tm/convolution-descriptor (check-stream)
+                                          datatype out-channels in-channels
+                                          kern-width kern-height pad-x pad-y
+                                          stride-x stride-y)})
+
+
+(defn- get-padded-strided-dimension
+  "http://caffe.berkeleyvision.org/tutorial/layers.html.  Returns the dimensions
+of the output of a conv-net ignoring channels.  Caffe does this slightly different
+for pooling verse convolutional layers.  Furthermore keras does this differently
+than caffe for pooling layers so this exact calculation has been the source of
+a few compatibility issues."
+  [input-dim pad kernel-size stride dimension-op]
+  (let [partial-result (/ (- (+ (double input-dim)
+                                (* 2 (double pad)))
+                             (double kernel-size))
+                          (double stride))
+        partial-result (double (condp = dimension-op
+                                 :floor (Math/floor partial-result)
+                                 :ceil (Math/ceil partial-result)))]
+    (long (+ partial-result 1))))
+
+
+(defn get-convolution-output-dimensions
+  "Get the convolution output dimensions in the form of:
+{
+:width
+:height
+}"
+  [conv-descriptor input-width input-height]
+  {:output-width (get-padded-strided-dimension input-width (:pad-x conv-descriptor)
+                                               (:kernel-width conv-descriptor) (:stride-x conv-descriptor)
+                                               :floor)
+   :output-height (get-padded-strided-dimension input-height (:pad-y conv-descriptor)
+                                                (:kernel-height conv-descriptor) (:stride-y conv-descriptor)
+                                                :floor)})
+
+
+(defn choose-convolution-algorithms
+  "Choose the convolution algorithms.  This could be an expensive call.
+If use-defaults? is true then no tests are performed and the implementations are free to choose algorithms.
+The algorithm structure is in the form of:
+{:direction {:algorithm :workspace-size}}
+
+where direction may be:
+:forward :backward-bias :backward-weights :backward-data."
+  [descriptor input-width input-height batch-size
+   max-ideal-workspace-size & {:keys [use-defaults?]}]
+  (let [{:keys [output-width output-height]} (get-convolution-output-dimensions descriptor
+                                                                                input-width input-height)]
+    (tm/choose-convolution-algorithms (check-stream) descriptor
+                                      input-width input-height
+                                      output-width output-height
+                                      batch-size
+                                      max-ideal-workspace-size use-defaults?)))
+
+(defn- ensure-conv-weight-dims-match
+  [input weights conv-descriptor]
+  (let [[batch-size _] (shape (as-batch-matrix input))
+        {:keys [kernel-width kernel-height in-channels out-channels]} conv-descriptor
+        [out-size in-size] (shape (as-2d-matrix weights))]
+    (when-not-error (dense? weights)
+      "Convolution weights must be dense tensors"
+      {})
+    (when-not-error (= (long in-size)
+                       (* (long kernel-width) (long kernel-height) (long in-channels)))
+      "Weight column length does not equal kernel-width * kernel-height * in-channels"
+      {:weight-column-len in-size
+       :kernel-width kernel-width
+       :kernel-height kernel-height
+       :in-channels in-channels})
+    (when-not-error (= (long out-size)
+                       (long out-channels))
+      "Weight row count does not match out-channels"
+      {:weight-row-count out-size
+       :out-channels (long out-channels)})))
+
+
+(defn- ensure-conv-io
+  [conv-descriptor input-args output-args]
+  (let [{:keys [kernel-width kernel-height in-channels out-channels
+                pad-x pad-y stride-x stride-y]} conv-descriptor
+        [batch-size in-arg-channels in-height in-width] (shape (first input-args))
+        {:keys [output-width output-height]} (get-convolution-output-dimensions conv-descriptor in-height in-width)
+        in-channels (long in-channels)
+        out-chanenls (long out-channels)
+        output-width (long output-width)
+        output-height (long output-height)
+        expected-input-shape [batch-size in-channels in-height in-width]
+        expected-output-shape [batch-size out-channels output-width output-height]]
+    (when-not-error (every? dense? (concat input-args output-args))
+      "Convolution arguments must be dense tensors" {})
+    (doseq [input input-args]
+      (let [input-shape (shape (first input-args))]
+        (when-not-error (= expected-input-shape input-shape)
+          "Input dimensions do not match expected dimensions"
+          {:expected-shape expected-input-shape
+           :input-shape input-shape})))
+
+    (doseq [output output-args]
+      (let [output-shape (shape (first output-args))]
+        (when-not-error (= expected-output-shape output-shape)
+          "Output dimensions do not match expected dimensions"
+          {:expected-shape expected-output-shape
+           :output-shape output-shape})))))
+
+
+(defn convolution-forward!
+  "Perform convolution forward.  Input,output must be 4d tensors while weights
+must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspace-size]) ecount"
+  [output output-alpha input weights workspace conv-descriptor algorithms]
+  (ensure-datatypes (get-datatype output) input weights)
+  (ensure-same-device output input weights)
+  (ensure-conv-weight-dims-match input weights conv-descriptor)
+  (ensure-conv-io conv-descriptor [input] [output])
+  (tm/convolution-forward! (check-stream)
+                           (tensor->buffer output) (tensor->dimensions output) output-alpha
+                           (tensor->buffer input) (tensor->dimensions input)
+                           (tensor->buffer weights) (tensor->dimensions weights)
+                           (tensor->buffer workspace) (ecount workspace)
+                           conv-descriptor algorithms)
+  output)
+
+
+(defn convolution-backward-weights!
+  [weight-gradient weight-gradient-alpha output-gradient input workspace conv-descriptor algorithms]
+  (tm/convolution-backward-weights! (check-stream)
+                                    (tensor->buffer weight-gradient) (tensor->dimensions weight-gradient)
+                                    weight-gradient-alpha
+                                    (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
+                                    (tensor->buffer input) (tensor->dimensions input)
+                                    (tensor->buffer workspace) (ecount workspace)
+                                    conv-descriptor algorithms)
+  weight-gradient)
+
+
+(defn convolution-backward-data!
+  [input-gradient input-gradient-alpha output-gradient weights workspace conv-descriptor algorithms]
+  (tm/convolution-backward-data! (check-stream)
+                                 (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
+                                 input-gradient-alpha
+                                 (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
+                                 (tensor->buffer weights) (tensor->dimensions weights)
+                                 (tensor->buffer workspace) (ecount workspace)
+                                 conv-descriptor algorithms)
+  input-gradient)
 
 
 (extend-type Tensor
