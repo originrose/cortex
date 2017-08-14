@@ -12,7 +12,8 @@
             [think.resource.core :as resource]
             [cortex.nn.impl :as impl])
   (:import [cortex.compute.cpu.driver CPUStream]
-           [com.github.fommil.netlib BLAS]))
+           [com.github.fommil.netlib BLAS]
+           [think.datatype DoubleArrayView]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -24,16 +25,17 @@
   (^long idx_to_address [^long arg]))
 
 
-(defrecord ElemIdxToAddr [rev-shape rev-strides rev-max-shape]
+(defrecord ElemIdxToAddr [^ints rev-shape ^ints rev-strides ^ints rev-max-shape]
   ElemIdxToAddressFunction
   (^long idx_to_address [this ^long arg]
-   (ct/elem-idx->addr rev-shape rev-strides rev-max-shape arg)))
+   (ct/elem-idx->addr-ary rev-shape rev-strides rev-max-shape arg)))
 
 
 (defn ^:private get-elem-dims->address
   ^ElemIdxToAddressFunction [dims max-shape]
   (let [{:keys [reverse-shape reverse-strides]} (ct/dimension->reverse-data dims max-shape)]
-    (->ElemIdxToAddr reverse-shape reverse-strides (vec (reverse max-shape)))))
+    (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
+                     (int-array (vec (reverse max-shape))))))
 
 
 (defmacro ^:private assign-constant-impl
@@ -1310,7 +1312,7 @@
 
 
   (convolution-forward! [stream
-                         output output-dims
+                         output output-dims output-alpha
                          input input-dims
                          weights weight-dims
                          workspace workspace-ecount
@@ -1335,16 +1337,16 @@
           (let [batch-data (slice-batches output-tens input-tens input-convolved)]
             (->> batch-data
                  (pmap (fn [[output input input-convolved]]
-                         ;;unroll to full matrix
                          ((get-in cpu-nn-ops [(ct/get-datatype output) :planar-input->convolution!])
                           (ct/tensor->buffer input) (ct/tensor->buffer input-convolved) old-skool-desc)
                          ;;big gemm
                          ;;reshape output to be [n-channels (height * width)]
-                         (ct/gemm! (ct/as-batch-matrix output) false true 1.0 weights input-convolved 1.0)))
+                         (ct/gemm! (ct/as-batch-matrix output) false true 1.0 weights input-convolved
+                                   (double output-alpha))))
                  dorun))))))
 
   (convolution-backward-weights! [stream
-                                  weight-gradient weight-gradient-dims
+                                  weight-gradient weight-gradient-dims weight-gradient-alpha
                                   output-gradient output-gradient-dims
                                   input input-dims
                                   workspace workspace-ecount
@@ -1367,15 +1369,17 @@
              input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
              slice-data (slice-batches output-gradient-tens input-convolved)]
          (ct/with-stream (cpu-driver/main-thread-cpu-stream)
-           (doseq [[output-gradient input-convolved] slice-data]
-
-             (ct/gemm! weight-gradient-tens false false
-                       1.0 (ct/as-batch-matrix output-gradient) input-convolved
-                       1.0))))
+           (doseq [[output-gradient input-convolved idx] (map #(conj (vec %1) %2) slice-data (range))]
+             (let [weight-gradient-alpha (double (if (= 0 idx)
+                                                   weight-gradient-alpha
+                                                   1.0))]
+               (ct/gemm! weight-gradient-tens false false
+                         1.0 (ct/as-batch-matrix output-gradient) input-convolved
+                         (double weight-gradient-alpha))))))
        (catch Throwable e (println e)))))
 
   (convolution-backward-data! [stream
-                               input-gradient input-gradient-dims
+                               input-gradient input-gradient-dims input-gradient-alpha
                                output-gradient output-gradient-dims
                                weights weights-dims
                                workspace workspace-ecount
@@ -1396,19 +1400,26 @@
                 input-gradient (ct/->Tensor dev input-gradient-dims input-gradient)
                 input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
                 weights (ct/->Tensor dev weights-dims weights)
-                datatype (dtype/get-datatype weights)]
+                datatype (dtype/get-datatype weights)
+                input-gradient-alpha (double 0.0)]
+            (cond
+              (= 0.0 input-gradient-alpha)
+              (ct/assign! input-gradient 0)
+              (= 1.0 input-gradient-alpha)
+              input-gradient
+              :else
+              (ct/binary-op! input-gradient 1.0 input-gradient 1.0 input-gradient-alpha :*))
             (->> (slice-batches input-gradient output-gradient input-convolved)
                  (map (fn [[input-gradient output-gradient input-convolved]]
-                         (ct/assign! input-gradient 0)
-                         (ct/gemm! input-convolved true false
-                                   1.0 (ct/as-batch-matrix output-gradient) weights
-                                   0.0)
-                         ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
-                          (ct/tensor->buffer input-convolved)
-                          (ct/tensor->buffer input-gradient)
-                          (->old-skool-conv-desc conv-descriptor
-                                                 in-width in-height
-                                                 output-width output-height))))
+                        (ct/gemm! input-convolved true false
+                                  1.0 (ct/as-batch-matrix output-gradient) weights
+                                  0.0)
+                        ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
+                         (ct/tensor->buffer input-convolved)
+                         (ct/tensor->buffer input-gradient)
+                         (->old-skool-conv-desc conv-descriptor
+                                                in-width in-height
+                                                output-width output-height))))
                  dorun))
           (catch Throwable e (println e))))
       )

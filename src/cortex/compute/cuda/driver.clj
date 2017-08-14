@@ -519,15 +519,6 @@ set this device before.  Set device must be called before any other cuda functio
   (element-count [_] (quot size (dtype/datatype->byte-size (dtype/get-datatype ptr))))
   dtype/PDatatype
   (get-datatype [_] (dtype/get-datatype ptr))
-  dtype/PCopyQueryDirect
-  (get-direct-copy-fn [_ dest-offset]
-    (dtype/get-direct-copy-fn ptr dest-offset))
-
-  dtype/PCopyToItemDirect
-  (copy-to-array-direct! [_ ptr-offset dest dest-offset elem-count]
-    (dtype/copy-to-array-direct! ptr ptr-offset dest dest-offset elem-count))
-  (copy-to-buffer-direct! [_ ptr-offset dest dest-offset elem-count]
-    (dtype/copy-to-buffer-direct! ptr ptr-offset dest dest-offset elem-count))
 
   dtype/PAccess
   (set-value! [_ offset value] (dtype/set-value! ptr offset value))

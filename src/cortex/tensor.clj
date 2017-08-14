@@ -67,11 +67,6 @@ For indirect operations element count is num-indexes * num-columns.  After that 
 ;;Stream is dynamically bound at execution time presumably by an entity outside of the context
 ;;of this file.  Due to this clients of this file should not be manipulating stream.
 (def ^:dynamic *stream*)
-;;Similar to stream, the engine will set this variable and clients should not set
-;;the variable themselves.
-(def ^:dynamic *datatype* :double)
-
-
 (defmacro with-stream
   [stream & body]
   `(with-bindings {#'*stream* ~stream}
@@ -83,6 +78,15 @@ For indirect operations element count is num-indexes * num-columns.  After that 
   (let [retval *stream*]
     (when-not-error retval "Tensor stream is nil" {})
     retval))
+
+;;Similar to stream, the engine will set this variable and clients should not set
+;;the variable themselves.
+(def ^:dynamic *datatype* :double)
+
+(defmacro with-datatype
+  [dtype & body]
+  `(with-bindings {#'*datatype* ~dtype}
+     ~@body))
 
 (defn- ensure-datatypes
   [datatype & args]
@@ -274,6 +278,31 @@ transpose that is not made concrete this condition will probably not hold."
                        (quot arg next-max)
                        (+ offset (* next-stride shape-idx))))
               offset)))))
+
+
+(defn elem-idx->addr-ary
+  "Precondition:  rev-shape, rev-max-shape, strides are same length.
+  rev-max-shape: maxes of all shapes passed in, reversed
+  rev-shape: reverse shape.
+  rev-strides: reverse strides.
+  arg: >= 0."
+  ^long [^ints rev-shape ^ints rev-strides ^ints rev-max-shape ^long arg]
+  (long (let [num-items (alength rev-shape)]
+          (loop [idx (long 0)
+                 arg (long arg)
+                 offset (long 0)]
+            (if (and (> arg 0)
+                     (< idx num-items))
+              (let [next-max (aget rev-max-shape idx)
+                    next-stride (aget rev-strides idx)
+                    next-dim (aget rev-shape idx)
+                    max-idx (rem arg next-max)
+                    shape-idx (rem arg next-dim)]
+                (recur (inc idx)
+                       (quot arg next-max)
+                       (+ offset (* next-stride shape-idx))))
+              offset)))))
+
 
 (defn- max-extend-strides
   [shape strides max-count]
@@ -1453,12 +1482,27 @@ softmax: https://en.wikipedia.org/wiki/Softmax_function"
   output)
 
 
+(defn- ensure-non-nil
+  [map-data]
+  (when-not-error (every? #(not (nil? (second %))) map-data)
+    "Arguments were nil:"
+    map-data))
+
+
 (defn convolution-descriptor
   "Create a descriptor.  This will probably be tracked by the resource system.  resource/release is guaranteed
 to be a valid call on the return value."
   [datatype out-channels in-channels kern-width kern-height
    pad-x pad-y stride-x stride-y]
   ;;no stream required
+  (ensure-non-nil {:out-channels out-channels
+                   :in-channels in-channels
+                   :kern-width kern-width
+                   :kern-height kern-height
+                   :pad-x pad-x
+                   :pad-y pad-y
+                   :stride-x stride-x
+                   :stride-y stride-y})
   {:datatype datatype
    :out-channels out-channels
    :in-channels in-channels
@@ -1578,13 +1622,13 @@ where direction may be:
 (defn convolution-forward!
   "Perform convolution forward.  Input,output must be 4d tensors while weights
 must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspace-size]) ecount"
-  [output input weights workspace conv-descriptor algorithms]
+  [output output-alpha input weights workspace conv-descriptor algorithms]
   (ensure-datatypes (get-datatype output) input weights)
   (ensure-same-device output input weights)
   (ensure-conv-weight-dims-match input weights conv-descriptor)
   (ensure-conv-io conv-descriptor [input] [output])
   (tm/convolution-forward! (check-stream)
-                           (tensor->buffer output) (tensor->dimensions output)
+                           (tensor->buffer output) (tensor->dimensions output) output-alpha
                            (tensor->buffer input) (tensor->dimensions input)
                            (tensor->buffer weights) (tensor->dimensions weights)
                            (tensor->buffer workspace) (ecount workspace)
@@ -1593,9 +1637,10 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
 
 
 (defn convolution-backward-weights!
-  [weight-gradient output-gradient input workspace conv-descriptor algorithms]
+  [weight-gradient weight-gradient-alpha output-gradient input workspace conv-descriptor algorithms]
   (tm/convolution-backward-weights! (check-stream)
                                     (tensor->buffer weight-gradient) (tensor->dimensions weight-gradient)
+                                    weight-gradient-alpha
                                     (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
                                     (tensor->buffer input) (tensor->dimensions input)
                                     (tensor->buffer workspace) (ecount workspace)
@@ -1604,9 +1649,10 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
 
 
 (defn convolution-backward-data!
-  [input-gradient output-gradient weights workspace conv-descriptor algorithms]
+  [input-gradient input-gradient-alpha output-gradient weights workspace conv-descriptor algorithms]
   (tm/convolution-backward-data! (check-stream)
                                  (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
+                                 input-gradient-alpha
                                  (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
                                  (tensor->buffer weights) (tensor->dimensions weights)
                                  (tensor->buffer workspace) (ecount workspace)

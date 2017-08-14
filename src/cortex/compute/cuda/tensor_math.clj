@@ -850,7 +850,7 @@
                                     (long (.get backward-data-workspace-size))))})))
 
   (convolution-forward! [stream
-                         output output-dims
+                         output output-dims output-alpha
                          input input-dims
                          weights weight-dims
                          workspace workspace-ecount
@@ -878,12 +878,12 @@
                     forward-algorithm
                     (->ptr workspace)
                     (int workspace-ecount)
-                    (value->ptr 0 datatype)
+                    (value->ptr output-alpha datatype)
                     output-tensor
                     (->ptr output)))))))
 
     (convolution-backward-weights! [stream
-                                    weight-gradient weight-gradient-dims
+                                    weight-gradient weight-gradient-dims weight-gradient-alpha
                                     output-gradient output-gradient-dims
                                     input input-dims
                                     workspace workspace-ecount
@@ -910,12 +910,12 @@
                                   backward-filter-algorithm
                                   (->ptr workspace)
                                   (long workspace-ecount)
-                                  (value->ptr 1 datatype)
+                                  (value->ptr weight-gradient-alpha datatype)
                                   filter-desc
                                   (->ptr weight-gradient)))))))
 
     (convolution-backward-data! [stream
-                                 input-gradient input-gradient-dims
+                                 input-gradient input-gradient-dims input-gradient-alpha
                                  output-gradient output-gradient-dims
                                  weights weights-dims
                                  workspace workspace-ecount
@@ -943,6 +943,6 @@
              backward-data-algorithm
              (->ptr workspace)
              workspace-ecount
-             (value->ptr 0 datatype)
+             (value->ptr input-gradient-alpha datatype)
              input-tensor
              (->ptr input-gradient))))))))

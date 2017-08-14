@@ -4,7 +4,7 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
-                 [thinktopic/think.datatype "0.3.11"]
+                 [thinktopic/think.datatype "0.3.12"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
                  [com.taoensso/nippy "2.13.0"]
                  ;; Change the following dep to depend on different versions of CUDA

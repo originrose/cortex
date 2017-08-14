@@ -163,274 +163,6 @@
     (get layer :type)))
 
 
-(defn get-cudnn-convolution-output-sizes
-  "Sizes are returned in a tensor"
-  [backend layer ^long batch-size]
-  (let [layer (cpu-backend/conv-type-layer->conv-config layer)
-        ^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
-        ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
-        ^cudnn$cudnnTensorStruct input-tensor (layer-input->image-tensor layer batch-size)
-        ^cudnn$cudnnContext cudnn-context (get-cudnn backend)
-        datatype (dtype/get-datatype backend)
-        tensor-datatype (cuda-drv/dtype->cudnn datatype)
-        output-size-check (int-array 4)]
-    (cuda-drv/cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
-    (cuda-drv/cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
-    (cuda-drv/cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
-                                                  tensor-datatype
-                                                  cudnn/CUDNN_TENSOR_NCHW
-                                                  (:output-channels layer)
-                                                  (:input-channels layer)
-                                                  (:kernel-height layer)
-                                                  (:kernel-width layer)))
-    (cuda-drv/cudnn-call (cudnn/cudnnSetConvolution2dDescriptor conv-desc
-                                                       (:pad-y layer) (:pad-x layer)
-                                                       (:stride-y layer) (:stride-x layer)
-                                                       1 1 ;;stupid scale arguments...only 1
-                                                       ;;is valid
-                                                       cudnn/CUDNN_CROSS_CORRELATION))
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionNdForwardOutputDim conv-desc
-                                                             input-tensor
-                                                             filter-desc
-                                                             4
-                                                             output-size-check))
-    (cuda-drv/cudnn-call (cudnn/cudnnDestroyConvolutionDescriptor conv-desc))
-    (cuda-drv/cudnn-call (cudnn/cudnnDestroyFilterDescriptor filter-desc))
-    (apply math/tensor (vec output-size-check))))
-
-
-(defrecord ConvolutionLayer [backend
-                             workspace
-                             ^long workspace-size
-                             ^int forward-algorithm
-                             ^int backward-filter-algorithm
-                             ^int backward-data-algorithm
-                             ^cudnn$cudnnConvolutionStruct convolution-descriptor
-                             ^cudnn$cudnnFilterStruct filter-descriptor
-                             ^cudnn$cudnnTensorStruct input-tensor
-                             ^cudnn$cudnnTensorStruct output-tensor
-                             layer
-                             ^cudnn$cudnnTensorStruct bias-tensor]
-  compute-protocols/ComputeLayer
-  (forward [this parameter-buffers input-buffers output-buffers]
-    (stream-with-cudnn
-     backend
-     (let [input-ptr (first-buffer input-buffers)
-           output-ptr (first-buffer output-buffers)
-           workspace (->ptr workspace)
-           datatype (dtype/get-datatype backend)
-           weights (get-in parameter-buffers [:weights :buffer])
-           bias (get-in parameter-buffers [:bias :buffer])]
-       (cuda-drv/cudnn-call (cudnn/cudnnConvolutionForward
-                    ^cudnn$cudnnContext cudnn-context
-                    (value->ptr 1 datatype)
-                    input-tensor
-                    input-ptr
-                    filter-descriptor
-                    (->ptr weights)
-                    convolution-descriptor
-                    forward-algorithm
-                    workspace
-                    workspace-size
-                    (value->ptr 0 datatype)
-                    output-tensor
-                    output-ptr))
-       (cuda-drv/cudnn-call (cudnn/cudnnAddTensor
-                    ^cudnn$cudnnContext cudnn-context
-                    (value->ptr 1 datatype)
-                    bias-tensor
-                    (->ptr bias)
-                    (value->ptr 1 datatype)
-                    output-tensor
-                    output-ptr)))))
-
-  (backward [this parameter-buffers output-buffers input-buffers]
-    (let [input (compute-layers/first-buffer input-buffers)
-          output (compute-layers/first-buffer output-buffers)
-          input-gradient (compute-layers/first-gradient input-buffers)
-          output-gradient (compute-layers/first-gradient output-buffers)
-          weights (get-in parameter-buffers [:weights :buffer])
-          bias (get-in parameter-buffers [:bias :buffer])
-          weight-gradient (get-in parameter-buffers [:weights :gradient])
-          bias-gradient (get-in parameter-buffers [:bias :gradient])
-          workspace (->ptr workspace)
-          datatype (dtype/get-datatype backend)]
-     (stream-with-cudnn
-      backend
-      (cuda-drv/cudnn-call (cudnn/cudnnConvolutionBackwardBias
-                   ^cudnn$cudnnContext cudnn-context
-                   (value->ptr 1 datatype)
-                   output-tensor
-                   (->ptr output-gradient)
-                   (value->ptr 1 datatype)
-                   bias-tensor
-                   (->ptr bias-gradient)))
-      (cuda-drv/cudnn-call (cudnn/cudnnConvolutionBackwardFilter
-                   ^cudnn$cudnnContext cudnn-context
-                   (value->ptr 1 datatype)
-                   input-tensor
-                   (->ptr input)
-                   output-tensor
-                   (->ptr output-gradient)
-                   convolution-descriptor
-                   backward-filter-algorithm
-                   workspace
-                   workspace-size
-                   (value->ptr 1 datatype)
-                   filter-descriptor
-                   (->ptr weight-gradient)))
-      (cuda-drv/cudnn-call (cudnn/cudnnConvolutionBackwardData
-                   ^cudnn$cudnnContext cudnn-context
-                   (value->ptr 1 datatype)
-                   filter-descriptor
-                   (->ptr weights)
-                   output-tensor
-                   (->ptr output-gradient)
-                   convolution-descriptor
-                   backward-data-algorithm
-                   workspace
-                   workspace-size
-                   (value->ptr 0 datatype)
-                   input-tensor
-                   (->ptr input-gradient)))))))
-
-
-(defmethod cuda-layer :convolutional
-  [backend layer ^long batch-size]
-  (let [layer (cpu-backend/conv-type-layer->conv-config layer)
-        ^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
-        ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
-        output-width (get layer :output-width)
-        output-height (get layer :output-height)
-        datatype (dtype/get-datatype backend)
-        input-tensor (layer-input->image-tensor layer batch-size datatype)
-        output-tensor (layer-output->image-tensor layer batch-size datatype)
-        bias-tensor (cuda-drv/tensor datatype
-                            1
-                            (:output-channels layer)
-                            1
-                            1)
-        ^cudnn$cudnnContext cudnn-context (get-cudnn backend)
-        forward-algo (IntPointer. 1)
-        forward-workspace-size (SizeTPointer. 1)
-        backward-filter-algo (IntPointer. 1)
-        backward-filter-workspace-size (SizeTPointer. 1)
-        backward-data-algo (IntPointer. 1)
-        backward-data-workspace-size (SizeTPointer. 1)
-        output-size-check (int-array 4)
-        tensor-datatype (cuda-drv/dtype->cudnn datatype)]
-    (cuda-drv/cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
-    (cuda-drv/cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
-    (resource/track conv-desc)
-    (resource/track filter-desc)
-    (cuda-drv/cudnn-call (cudnn/cudnnSetFilter4dDescriptor filter-desc
-                                                  tensor-datatype
-                                                  cudnn/CUDNN_TENSOR_NCHW
-                                                  (:output-channels layer)
-                                                  (:input-channels layer)
-                                                  (:kernel-height layer)
-                                                  (:kernel-width layer)))
-    (cuda-drv/cudnn-call (cudnn/cudnnSetConvolution2dDescriptor conv-desc
-                                                       (:pad-y layer) (:pad-x layer)
-                                                       (:stride-y layer) (:stride-x layer)
-                                                       1 1 ;;stupid scale arguments...only 1
-                                                       ;;is valid
-                                                       cudnn/CUDNN_CROSS_CORRELATION))
-
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionNdForwardOutputDim conv-desc
-                                                             input-tensor
-                                                             filter-desc
-                                                             4
-                                                             output-size-check))
-    ;;If these don't match we get memory overwrite or over-read errors
-    (let [[n c h w] (vec output-size-check)]
-      (when-not (and (= h output-height)
-                     (= w output-width))
-        (throw (Exception. (format "Calculated output dimensions %s and cudnn output dimensions %s are off"
-                                   [h w] [output-height output-width])))))
-
-
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionForwardAlgorithm
-                 cudnn-context
-                 input-tensor
-                 filter-desc
-                 conv-desc
-                 output-tensor
-                 cudnn/CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT
-                 100000
-                 forward-algo))
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionForwardWorkspaceSize
-                 cudnn-context
-                 input-tensor
-                 filter-desc
-                 conv-desc
-                 output-tensor
-                 (.get forward-algo)
-                 forward-workspace-size))
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterAlgorithm
-                 cudnn-context
-                 input-tensor
-                 output-tensor
-                 conv-desc
-                 filter-desc
-                 cudnn/CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT
-                 100000
-                 backward-filter-algo))
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterWorkspaceSize
-                 cudnn-context
-                 input-tensor
-                 output-tensor
-                 conv-desc
-                 filter-desc
-                 (.get backward-filter-algo)
-                 backward-filter-workspace-size))
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataAlgorithm
-                 cudnn-context
-                 filter-desc
-                 output-tensor
-                 conv-desc
-                 input-tensor
-                 cudnn/CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT
-                 100000
-                 backward-data-algo))
-    (cuda-drv/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataWorkspaceSize
-                 cudnn-context
-                 filter-desc
-                 output-tensor
-                 conv-desc
-                 input-tensor
-                 (.get backward-data-algo)
-                 backward-data-workspace-size))
-    (comment (println (format "Convolution algorithm and workspace sizes:
-Forward: %s %d
-Backward Filter: %s %d
-Backward Data: %s %d"
-                              (get forward-algorithms (.get forward-algo))
-                              (.get forward-workspace-size)
-                              (get backward-filter-algorithms (.get backward-filter-algo))
-                              (.get backward-filter-workspace-size)
-                              (get backward-data-algorithms (.get backward-data-algo))
-                              (.get backward-data-workspace-size))))
-    (let [total-workspace-size (max (.get forward-workspace-size)
-                                    (.get backward-filter-workspace-size)
-                                    (.get backward-data-workspace-size))
-          workspace (when-not (= 0 total-workspace-size)
-                      (drv/allocate-device-buffer total-workspace-size :byte))]
-      (map->ConvolutionLayer
-       {:backend backend
-        :workspace workspace
-        :workspace-size total-workspace-size
-        :forward-algorithm (.get forward-algo)
-        :backward-filter-algorithm (.get backward-filter-algo)
-        :backward-data-algorithm (.get backward-data-algo)
-        :convolution-descriptor conv-desc
-        :filter-descriptor filter-desc
-        :input-tensor input-tensor
-        :output-tensor output-tensor
-        :layer layer
-        :bias-tensor bias-tensor}))))
-
-
 (defrecord PoolingLayer [backend
                          ^cudnn$cudnnTensorStruct input-tensor
                          ^cudnn$cudnnTensorStruct output-tensor
@@ -468,10 +200,25 @@ Backward Data: %s %d"
          input-tensor
          (first-gradient input-buffers)))))))
 
+(defn conv-type-layer->conv-config
+  "Backwards compatibility function necessary as the node format has changed over time."
+  [conv-layer]
+  (let [input-dims (first (graph/node->input-dimensions conv-layer))
+        output-dims (first (graph/node->output-dimensions conv-layer))]
+    (assoc conv-layer
+           :input-channels (get input-dims :channels)
+           :input-width (get input-dims :width)
+           :input-height (get input-dims :height)
+           :input-size (graph/dimensions->size input-dims)
+           :output-channels (get output-dims :channels)
+           :output-width (get output-dims :width)
+           :output-height (get output-dims :height)
+           :output-size (graph/dimensions->size output-dims))))
+
 
 (defmethod cuda-layer :max-pooling
   [backend layer ^long batch-size]
-  (let [layer (cpu-backend/conv-type-layer->conv-config layer)
+  (let [layer (conv-type-layer->conv-config layer)
         pooling-desc (cudnn$cudnnPoolingStruct.)
         output-width (get layer :output-width)
         output-height (get layer :output-height)

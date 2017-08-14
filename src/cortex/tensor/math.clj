@@ -181,7 +181,7 @@ resource/release *must* be a valid call on the returned value.")
 
 
   (convolution-forward! [stream
-                         output output-dims
+                         output output-dims output-alpha
                          input input-dims
                          weights weight-dims
                          workspace workspace-ecount
@@ -189,14 +189,14 @@ resource/release *must* be a valid call on the returned value.")
 
 
   (convolution-backward-weights! [stream
-                                  weight-gradient weight-gradient-dims
+                                  weight-gradient weight-gradient-dims weight-gradient-alpha
                                   output-gradient output-gradient-dims
                                   input input-dims
                                   workspace workspace-ecount
                                   conv-descriptor algorithms])
 
   (convolution-backward-data! [stream
-                               input-gradient input-gradient-dims
+                               input-gradient input-gradient-dims input-gradient-alpha
                                output-gradient output-gradient-dims
                                weights weights-dims
                                workspace workspace-ecount

@@ -27,7 +27,7 @@
 
 
 (def-double-float-test binary-op
-  (verify-tensor/binary-op (driver) *datatype*))
+  (verify-tensor/binary-op (driver) *datatype* ))
 
 
 (def-all-dtype-test unary-op
