@@ -1116,7 +1116,8 @@ and the rest of the dimensions being squashed into n-rows."
       (do
         (ensure-broadcast-rules dest x y)
         (ensure-datatypes (get-datatype x) y dest)
-        (check-partial-alias dest x y)
+        (check-partial-alias dest x)
+        (check-partial-alias dest y)
         (tm/binary-op!
          (check-stream)
          (tensor->buffer dest) (tensor->dimensions dest)

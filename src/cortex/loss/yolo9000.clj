@@ -4,7 +4,8 @@
             [cortex.util :as util]
             [clojure.core.matrix.random :as m-rand]
             [cortex.tensor :as ct]
-            [cortex.compute.cpu.tensor-math :as cpu-tm]))
+            [cortex.compute.cpu.tensor-math :as cpu-tm]
+            [clojure.math.combinatorics :as combo]))
 
 
 (def grid-x 13)
@@ -59,6 +60,17 @@
   [[x y w h]]
   [(- x (/ w 2)) (- y (/ h 2))])
 
+
+(defn coords-ct
+  "Return x-y coords of upper left corner of box"
+  [box-vec ul-vec br-vec]
+  (let [wh-vec (ct/select box-vec :all (range 2 4))
+        xy-vec (ct/select box-vec :all (range 2))]
+    (ct/unary-op! br-vec 0.5 wh-vec :noop)
+    (ct/binary-op! ul-vec 1.0 xy-vec 1.0 br-vec :-)
+    (ct/binary-op! br-vec 1.0 xy-vec 1.0 br-vec :+)))
+
+
 (defn br
   "Return x-y coords of bottom corner of box"
   [[x y w h]]
@@ -66,6 +78,42 @@
 
 (defn area [[x y]]
   (* x y))
+
+(defn ct-sigmoid!
+  [tens]
+  (ct/unary-op! tens 1.0 tens :logistic))
+
+(defn ct-emul!
+  [val tens]
+  (ct/binary-op! tens 1.0 tens 1.0 val :*))
+
+(defn ct-exp!
+  [tens]
+  (ct/unary-op! tens 1.0 tens :exp))
+
+(defn ct-sqrt!
+  [tens]
+  (ct/unary-op! tens 1.0 tens :sqrt))
+
+(defn ct-reshape
+  [tens shape]
+  (ct/in-place-reshape tens shape))
+
+(defn ct-softmax!
+  [tens]
+  (ct/softmax! tens tens))
+
+(defn ct-max!
+  [a b]
+  (ct/binary-op! a 1.0 a 1.0 b :max))
+
+(defn ct-min!
+  [a b]
+  (ct/binary-op! a 1.0 a 1.0 b :min))
+
+(defn ct-sub!
+  [a b]
+  (ct/binary-op! a 1.0 a 1.0 b :-))
 
 (defn iou
   "Calculates intersection over union of boxes b = [x y w h].
@@ -77,6 +125,65 @@
         union (+ (area (drop 2 b1)) (area (drop 2 b2)) (- intersection))
         result (if (< 0 union) (/ intersection union) 0)]
     result))
+
+(defn area-ct
+  [result wh-vec]
+  (ct/binary-op! result
+                 1.0 (ct/select wh-vec :all 0)
+                 1.0 (ct/select wh-vec :all 1)
+                 :*))
+
+
+(defn iou-ct
+  "Calculates intersection over union of boxes b = [x y w h].
+  **Be sure that x,y and w,h are using the same distance units.**"
+  [b1 b2]
+  (let [[num-box col-count] (m/shape b1)
+        b1-ul (ct/new-tensor [num-box 2])
+        b1-br (ct/new-tensor [num-box 2])
+        b2-ul (ct/new-tensor [num-box 2])
+        b2-br (ct/new-tensor [num-box 2])
+        overlap (ct/new-tensor [num-box 2])
+        intersection (ct/new-tensor [num-box])
+        area-b1 (ct/new-tensor [num-box])
+        area-b2 (ct/new-tensor [num-box])
+        union (ct/new-tensor [num-box])
+        result (ct/new-tensor [num-box])
+        _ (coords-ct b1 b1-ul b1-br)
+        _ (coords-ct b2 b2-ul b2-br)
+        UL (ct-max! b1-ul b2-ul)
+        BR (ct-min! b1-br b2-br)
+        overlap (-> (ct-sub! BR UL)
+                    (ct-max! 0))]
+    (area-ct intersection overlap)
+    (area-ct area-b1 (ct/select b1 :all (range 2 4)))
+    (area-ct area-b2 (ct/select b2 :all (range 2 4)))
+    (ct/binary-op! union 1.0 area-b1 1.0 area-b2 :+)
+    (ct/binary-op! union 1.0 union 1.0 intersection :-)
+    (ct/binary-op! result 1.0 intersection 1.0 union :/)
+    (ct/ternary-op! result 1.0 union 0.0 0.0 1.0 result :select)
+    result))
+
+
+
+(defn test-iou
+  []
+  (cpu-tm/tensor-context
+   (let [src-boxes [[10 10 20 20]
+                    [5 5 5 5]
+                    [10 10 5 5]]
+         box-pairs (mapv (fn [[x y]]
+                           [(get src-boxes x)
+                            (get src-boxes y)])
+                         (combo/combinations [0 1 2] 2))
+         b1 (ct/->tensor (map first box-pairs))
+         b2 (ct/->tensor (map second box-pairs))]
+     (let [correct (double-array (mapv (partial apply iou) box-pairs))
+           guess (ct/to-double-array (iou-ct b1 b2))]
+       (println {:correct (vec correct)
+                 :guess (vec guess)})))))
+
+
 
 (defn select-anchor
   "Given the vector iou of iou-s with the different anchors, returns a one-hot encoded vector at the max value."
@@ -131,31 +238,6 @@
     (m/join-along 3 x-y-vals w-h-vals conf-vals prob-vals)))
 
 
-(defn ct-sigmoid!
-  [tens]
-  (ct/unary-op! tens 1.0 tens :logistic))
-
-(defn ct-emul!
-  [val tens]
-  (ct/binary-op! tens 1.0 tens 1.0 val :*))
-
-(defn ct-exp!
-  [tens]
-  (ct/unary-op! tens 1.0 tens :exp))
-
-(defn ct-sqrt!
-  [tens]
-  (ct/unary-op! tens 1.0 tens :sqrt))
-
-(defn ct-reshape
-  [tens shape]
-  (ct/in-place-reshape tens shape))
-
-(defn ct-softmax!
-  [tens]
-  (ct/softmax! tens tens))
-
-
 (defn format-prediction-ct!
   [pred ct-grid-ratio ct-anchors]
   (let [pred-selector (partial ct/select pred :all :all :all)]
@@ -165,11 +247,10 @@
     (->> [2 3] pred-selector (ct-emul! ct-grid-ratio) (ct-exp!) (ct-emul! ct-anchors) (ct-sqrt!))
     ;;conf-vals
     (->> [4] pred-selector ct-sigmoid!)
-    (comment
-     ;;prob-vals
-     (-> (pred-selector (range 5 output-count))
-         (ct-reshape [(* grid-x grid-y anchor-count) classes-count])
-         ct-softmax!))
+    ;;prob-vals
+    (-> (pred-selector (range 5 output-count))
+        (ct-reshape [(* grid-x grid-y anchor-count) classes-count])
+        ct-softmax!)
     pred))
 
 
@@ -182,7 +263,8 @@
          ct-grid-ratio (ct/->tensor grid-ratio)
          ct-anchors (ct/->tensor anchors)
          ct-formatted-prediction (format-prediction-ct! (ct/->tensor label) ct-grid-ratio ct-anchors)
-         weights (->weights formatted-prediction truth)]
+         weights (->weights formatted-prediction truth)
+         ct-weights (->weights-ct! (ct/new-tensor (m/shape weights)) ct-formatted-prediction (ct/->tensor truth))]
      (let [correct-format (m/to-double-array formatted-prediction)
            ct-format (ct/to-double-array ct-formatted-prediction)]
        (clojure.pprint/pprint ["survey says..." {:equality-check  (m/equals correct-format
