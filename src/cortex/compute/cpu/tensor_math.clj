@@ -1441,16 +1441,16 @@
               :else
               (ct/binary-op! input-gradient 1.0 input-gradient 1.0 input-gradient-alpha :*))
             (->> (slice-batches input-gradient output-gradient input-convolved)
-                 (map (fn [[input-gradient output-gradient input-convolved]]
-                        (ct/gemm! input-convolved true false
-                                  1.0 (ct/as-batch-matrix output-gradient) weights
-                                  0.0)
-                        ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
-                         (ct/tensor->buffer input-convolved)
-                         (ct/tensor->buffer input-gradient)
-                         (->old-skool-conv-desc conv-descriptor
-                                                in-width in-height
-                                                output-width output-height))))
+                 (pmap (fn [[input-gradient output-gradient input-convolved]]
+                         (ct/gemm! input-convolved true false
+                                   1.0 (ct/as-batch-matrix output-gradient) weights
+                                   0.0)
+                         ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
+                          (ct/tensor->buffer input-convolved)
+                          (ct/tensor->buffer input-gradient)
+                          (->old-skool-conv-desc conv-descriptor
+                                                 in-width in-height
+                                                 output-width output-height))))
                  dorun))
           (catch Throwable e (println e)))))))
 

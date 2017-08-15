@@ -58,6 +58,42 @@ For indirect operations element count is num-indexes * num-columns.  After that 
 (set! *unchecked-math* :warn-on-boxed)
 
 
+(declare strided? dense?)
+
+(defn scalar?
+  [item] (number? item))
+
+(defn get-datatype
+  [tensor]
+  (dtype/get-datatype tensor))
+
+(defn unsafe-get-driver
+  "Return the driver for a given tensor.  This should not be necessary."
+  [tensor]
+  (compute-drv/get-driver tensor))
+
+(defn shape
+  [tensor]
+  (mp/get-shape tensor))
+
+(defn as-vector
+  [tensor]
+  (m/as-vector tensor))
+
+(defn to-vector
+  [tensor]
+  (m/to-vector tensor))
+
+(defn ecount
+  ^long [tensor]
+  (long (mp/element-count tensor)))
+
+(defn assign!
+  [dest src]
+  (mp/assign! dest src)
+  dest)
+
+
 (defmacro when-not-error
   [expr error-msg extra-data]
   `(when-not ~expr
@@ -124,6 +160,12 @@ types is guaranteed to work across devices."
   (when-not-error (apply same-device? args)
     "Tensor arguments are not all on same device"
     {}))
+
+
+(defn- reversev
+  [item-seq]
+  (vec (reverse item-seq)))
+
 
 (defn- extend-strides
   [shape strides]
@@ -385,27 +427,49 @@ transpose that is not made concrete this condition will probably not hold."
       ;;Definitely not sure *at all* about this algorithm
       (let [existing-rev-shape (reversev (get existing-dims :shape))
             existing-rev-strides (reversev (get existing-dims :strides))
+            ;;Find out where there are is padding added.  We cannot combine
+            ;;indexes across non-packed boundaries.
+            existing-rev-packed? (vec
+                                  (concat [(= 1 (long (first existing-rev-strides)))]
+                                          (mapv (fn [cur-stride prev-shape prev-stride]
+                                                  (= (long cur-stride)
+                                                     (* (long prev-shape)
+                                                        (long prev-stride))))
+                                                (drop 1 existing-rev-strides)
+                                                existing-rev-shape
+                                                existing-rev-strides)))
+
             rev-new-shape (reversev shape)
             num-old-items (count existing-rev-shape)
             num-new-shape (count shape)
-            rev-new-strides (vec (take num-new-shape existing-rev-strides))
-            num-new-shape-minus-one (long (max 0 (dec num-new-shape)))
-            remaining-existing-shape (drop num-new-shape-minus-one existing-rev-shape)
-            remaining-existing-strides (drop num-new-shape-minus-one existing-rev-strides)]
-        ;;This is only a legal move if everything that is being squashed is actually packed.
-        ;;In that case we can effectively ignore their strides.
-        (when-not-error (every? #(= (first %) (second %))
-                                (map (fn [cur-stride last-shp last-stride]
-                                       [cur-stride (* (long last-shp) (long last-stride))])
-                                     (drop 1 remaining-existing-strides)
-                                     remaining-existing-shape
-                                     remaining-existing-strides))
-          "Cannot in-place-reshape if squashed dimensions are not packed contiguous"
-          {:squashed-shape remaining-existing-shape
-           :squashed-strides remaining-existing-strides})
+            ;;Merge dimensions based on the new shape.
+            [rev-new-strides prev-idx]
+            (reduce (fn [[rev-new-strides prev-idx] cur-shape]
+                      (let [cur-stride (get existing-rev-strides prev-idx)
+                            cur-shape (long cur-shape)
+                            orig-idx (long prev-idx)
+                            [cur-prod prev-idx] (loop [prev-idx orig-idx
+                                                       cur-prod 1]
+                                                  (if (and (< prev-idx num-old-items)
+                                                           (< (long cur-prod) (long cur-shape)))
+                                                    (recur (inc prev-idx)
+                                                           (* (long cur-prod)
+                                                              (long (get existing-rev-shape prev-idx))))
+                                                    [cur-prod prev-idx]))
+                            ;;Intentionally dropping last one because we can *end* on a non-packed
+                            ;;but we cannot cross a non-packed.
+                            idx-range (range orig-idx (- (long prev-idx) 1))]
+                        (when-not-error (= cur-prod cur-shape)
+                          "Shapes do not match up evenly"
+                          {:dimension existing-dims
+                           :shape shape})
+                        [(conj rev-new-strides cur-stride) prev-idx]))
+                    [[] 0]
+                    rev-new-shape)]
         {:shape shape
          :strides (extend-strides shape (reversev rev-new-strides))})
-      (throw (ex-info "Cannot (at this point) in-place-reshape transposed dimensions" {})))))
+      (throw (ex-info "Cannot (at this point) in-place-reshape transposed dimensions"
+                      {})))))
 
 
 (defn dimensions-transpose
@@ -441,41 +505,6 @@ that rerequires the items to have the same element count."
     {:lhs-datatype (dtype/get-datatype lhs)
      :rhs-datatype (dtype/get-datatype rhs)}))
 
-
-(declare strided? dense?)
-
-(defn scalar?
-  [item] (number? item))
-
-(defn get-datatype
-  [tensor]
-  (dtype/get-datatype tensor))
-
-(defn unsafe-get-driver
-  "Return the driver for a given tensor.  This should not be necessary."
-  [tensor]
-  (compute-drv/get-driver tensor))
-
-(defn shape
-  [tensor]
-  (mp/get-shape tensor))
-
-(defn as-vector
-  [tensor]
-  (m/as-vector tensor))
-
-(defn to-vector
-  [tensor]
-  (m/to-vector tensor))
-
-(defn ecount
-  ^long [tensor]
-  (long (mp/element-count tensor)))
-
-(defn assign!
-  [dest src]
-  (mp/assign! dest src)
-  dest)
 
 ;;Tensors are a tuple of device (driver for now) dimensions and index system and buffer.
 (defrecord Tensor [device dimensions buffer]
@@ -765,11 +794,6 @@ into it in a different order."
                                            reorder-vec)))
 
 
-(defn- reversev
-  [item-seq]
-  (vec (reverse item-seq)))
-
-
 (defn select
   "Limited implementation of the core.matrix select function call.
 Same rules apply *Except* if you pass in an array of numbers for a dimension
@@ -1054,6 +1078,7 @@ and the rest of the dimensions being squashed into n-rows."
     (unary-op! dest (* (double alpha)
                        (double beta)
                        (double y))
+               x
                :noop)
     (binary-op-constant! dest alpha x beta y op false)))
 
@@ -1064,7 +1089,8 @@ and the rest of the dimensions being squashed into n-rows."
   (if (= op :*)
     (unary-op! dest (* (double alpha)
                        (double beta)
-                       (double y))
+                       (double x))
+               y
                :noop)
     (binary-op-constant! dest beta y alpha x op true)))
 
@@ -1160,7 +1186,7 @@ Datatypes must match."
         max-ecount (long (apply max 0 (map ecount tensors)))]
     (if (= 0 num-tensor-args)
       (assign! dest (inline-ternary-op alpha x beta y gamma z op))
-      (let [{:keys [tensor-pairs constants arg-order]} (order-tenery-args type-vect alpha beta gamma)]
+      (let [{:keys [tensor-pairs constants arg-order]} (order-ternary-args type-vect alpha beta gamma)]
         (apply ensure-datatypes (get-datatype dest) tensors)
         (apply ensure-same-device dest tensors)
         (doseq [tens tensors]
@@ -1244,6 +1270,12 @@ Datatypes must match."
       (format "C %s col count doesn't match B %s col count" c-shape b-shape)
       {:b-shape b-shape
        :c-shape c-shape})
+    (println {:c-dims (:dimensions C)
+              :c-col-stride (tensor->column-stride C)
+              :a-dims (:dimensions A)
+              :a-col-stride (tensor->column-stride A)
+              :b-dims (:dimensions B)
+              :b-col-stride (tensor->column-stride B)})
     (tm/gemm! (check-stream)
               (tensor->buffer C) (tensor->column-stride C)
               trans-a? trans-b? alpha
