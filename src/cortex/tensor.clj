@@ -1271,12 +1271,6 @@ Datatypes must match."
       (format "C %s col count doesn't match B %s col count" c-shape b-shape)
       {:b-shape b-shape
        :c-shape c-shape})
-    (println {:c-dims (:dimensions C)
-              :c-col-stride (tensor->column-stride C)
-              :a-dims (:dimensions A)
-              :a-col-stride (tensor->column-stride A)
-              :b-dims (:dimensions B)
-              :b-col-stride (tensor->column-stride B)})
     (tm/gemm! (check-stream)
               (tensor->buffer C) (tensor->column-stride C)
               trans-a? trans-b? alpha
