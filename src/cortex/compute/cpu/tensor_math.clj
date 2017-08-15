@@ -138,9 +138,6 @@
      (->> (generate-all-marshalling-assign-fns)
           (into {})))))
 
-(def ^:private unary-operations
-  [:floor :ceil :round :- :tanh :logistic])
-
 
 (defmacro ^:private perform-unary-op-impl
   [operation x]
@@ -151,7 +148,10 @@
     :- `(- ~x)
     :tanh `(Math/tanh (double ~x))
     :logistic `(/ 1.0
-                  (+ 1.0 (Math/exp (- ~x))))))
+                  (+ 1.0 (Math/exp (- ~x))))
+    :exp `(Math/exp (double ~x))
+    :sqrt `(Math/sqrt (double ~x))
+    :noop `(double ~x)))
 
 
 (defmacro ^:private unary-accum!-impl
@@ -196,7 +196,7 @@
 (defmacro unary-op-table-impl
   []
   (->> (for [dtype dtype/datatypes
-             op unary-operations]
+             op ct/unary-operations]
          [[dtype op] {:unary-accum! `(unary-accum!-impl ~dtype ~op)
                       :unary-op! `(unary-op!-impl ~dtype ~op)}])
        (into {})))
@@ -204,10 +204,6 @@
 
 (def ^:private unary-op-table
   (unary-op-table-impl))
-
-
-(def ^:private operations
-  [:+ :- :* :/ :max :min :bit-and])
 
 
 (defmacro ^:private perform-operation-impl
@@ -253,7 +249,7 @@
 (defmacro binary-accum-constant-table
   []
   (->> (for [dtype dtype/datatypes
-             op operations
+             op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-accum-constant!-impl ~dtype ~op ~rev-ops?)])
        (into {})))
@@ -294,7 +290,7 @@
 (defmacro binary-op-constant-table
   []
   (->> (for [dtype dtype/datatypes
-             op operations
+             op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-op-constant!-impl ~dtype ~op ~rev-ops?)])
        (into {})))
@@ -333,7 +329,7 @@
 (defmacro binary-accum-table
   []
   (->> (for [dtype dtype/datatypes
-             op operations
+             op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-accum!-impl ~dtype ~op ~rev-ops?)])
        (into {})))
@@ -378,7 +374,7 @@
 (defmacro binary-op-table-impl
   []
   (->> (for [dtype dtype/datatypes
-             op operations]
+             op ct/binary-operations]
          [[dtype op] `(binary-op!-impl ~dtype ~op)])
        (into {})))
 
@@ -875,91 +871,76 @@
                                      output# input# batch-means# batch-variances#
                                      scale# bias# epsilon#)))
 
-
-(definterface SoftmaxOffsetter
-  (^long outer_loop_count [])
-  (^long parallel_count [])
-  (^long idx_count [])
-  (^long idx_to_offset [^long outer-idx ^long var-idx ^long elem-idx]))
-
-
-(defrecord SoftmaxEltwiseOffsetter [^long batch-count ^long element-count]
-  SoftmaxOffsetter
-  (^long outer_loop_count [_] 1)
-  (^long parallel_count [_] batch-count)
-  (^long idx_count [_] element-count)
-  (^long idx_to_offset [_ ^long outer-idx ^long par-idx ^long elem-idx]
-    (+ elem-idx
-       (* par-idx element-count))))
-
-
-(defrecord SoftmaxSpatialOffsetter [^long batch-count ^long channel-count ^long element-count]
-  SoftmaxOffsetter
-  (^long outer_loop_count [_] batch-count)
-  (^long parallel_count [_] element-count)
-  (^long idx_count [_] channel-count)
-  (^long idx_to_offset [_ ^long batch-idx ^long elem-idx ^long chan-idx]
-   (+ elem-idx
-      (* chan-idx element-count )
-      (* batch-idx (* element-count channel-count)))))
+(defonce crap-atom (atom nil))
 
 
 (defmacro softmax-impl
-  [datatype offsetter output input]
-  `(let [^SoftmaxOffsetter offsetter# ~offsetter
+  [datatype output output-dims input input-dims]
+  `(let [output-dims# ~output-dims
+         input-dims# ~input-dims
+         num-elems# (long (max (ct/dimension-ecount output-dims#)
+                               (ct/dimension-ecount input-dims#)))
          output# (datatype->view-cast-fn ~datatype ~output)
          input# (datatype->view-cast-fn ~datatype ~input)
-         out-loop# (.outer_loop_count offsetter#)
-         par-loop# (.parallel_count offsetter#)
-         idx-loop# (.idx_count offsetter#)]
+         max-shape# (max-shape-from-dimensions output-dims# input-dims#)
+         output-addr# (get-elem-dims->address output-dims# max-shape#)
+         input-addr# (get-elem-dims->address input-dims# max-shape#)
+         _# (ct/when-not-error (or (= (count max-shape#) 2)
+                                   (= (count max-shape#) 3))
+              "softmax implementation only supports shapes of 2 or 3 dimensions"
+              {})
+         [outer-loop# par-loop# idx-loop#] (if (= (count max-shape#) 2)
+                                             [1 (first max-shape#) (second max-shape#)]
+                                             max-shape#)
+         outer-loop# (long outer-loop#)
+         par-loop# (long par-loop#)
+         idx-loop# (long idx-loop#)]
      (c-for
-      [outer-idx# 0 (< outer-idx# out-loop#) (inc outer-idx#)]
-      (parallel/parallel-for
-       par-idx# par-loop#
-       (let [max-val# (datatype->cast-fn ~datatype
-                                         (loop [idx# 1
-                                                max-val# (v-aget input# (.idx_to_offset offsetter#
-                                                                                        outer-idx#
-                                                                                        par-idx#
-                                                                                        0))]
-                                           (if (< idx# idx-loop#)
-                                             (recur (inc idx#) (max max-val#
-                                                                    (v-aget input# (.idx_to_offset offsetter#
-                                                                                                   outer-idx#
-                                                                                                   par-idx#
-                                                                                                   idx#))))
-                                             max-val#)))]
-         (c-for
-          [idx# 0 (< idx# idx-loop#) (inc idx#)]
-          (v-aset output# (.idx_to_offset offsetter# outer-idx# par-idx# idx#)
-                  (Math/exp (- (v-aget input# (.idx_to_offset offsetter# outer-idx# par-idx# idx#))
-                               max-val#))))
-         ;;perform normalization with array sum.
-         (let [sum-val# (datatype->cast-fn ~datatype
-                                           (sum-double-var idx# idx-loop#
-                                                           (v-aget output# (.idx_to_offset offsetter#
-                                                                                           outer-idx#
-                                                                                           par-idx#
-                                                                                           idx#))))]
-           (c-for [idx# 0 (< idx# idx-loop#) (inc idx#)]
-                  (.diveq output# (.idx_to_offset offsetter#
-                                                  outer-idx#
-                                                  par-idx#
-                                                  idx#)
-                          sum-val#))))))))
+      [outer-idx# 0 (< outer-idx# outer-loop#) (inc outer-idx#)]
+      (let [outer-loop-offset# (* outer-idx# par-loop# idx-loop#)]
+       (parallel/parallel-for
+        par-idx# par-loop#
+        (let [par-loop-offset# (+ outer-loop-offset# (* par-idx# idx-loop#))
+              max-val# (datatype->cast-fn ~datatype
+                                          (loop [idx# 1
+                                                 max-val# (v-aget input# (.idx_to_address
+                                                                          input-addr#
+                                                                          (+ par-loop-offset# 0)))]
+                                            (if (< idx# idx-loop#)
+                                              (recur (inc idx#) (max max-val#
+                                                                     (v-aget input# (.idx_to_address
+                                                                                     output-addr#
+                                                                                     (+ par-loop-offset# idx#)))))
+                                              max-val#)))]
+          (c-for
+           [idx# 0 (< idx# idx-loop#) (inc idx#)]
+           (v-aset output# (.idx_to_address output-addr# (+ par-loop-offset# idx#))
+                   (Math/exp (- (v-aget input# (.idx_to_address input-addr# (+ par-loop-offset# idx#)))
+                                max-val#))))
+          ;;perform normalization with array sum.
+          (let [sum-val# (datatype->cast-fn ~datatype
+                                            (sum-double-var idx# idx-loop#
+                                                            (v-aget output# (.idx_to_address
+                                                                             output-addr#
+                                                                             (+ par-loop-offset# idx#)))))]
+            (c-for [idx# 0 (< idx# idx-loop#) (inc idx#)]
+                   (.diveq output# (.idx_to_address output-addr# (+ par-loop-offset# idx#))
+                           sum-val#)))))))))
 
 
 (defmacro softmax-eltwise-forward-impl
   [datatype]
-  `(fn [output# input# batch-count# element-count#]
-     (softmax-impl ~datatype (->SoftmaxEltwiseOffsetter batch-count# element-count#) output# input#)))
+  `(fn [output# output-dims# input# input-dims#]
+     (softmax-impl ~datatype output# output-dims# input# input-dims#)))
 
 
 (defmacro softmax-spatial-forward-impl
   [datatype]
-  `(fn [output# input# batch-count# channel-count# element-count#]
-     (softmax-impl ~datatype (->SoftmaxSpatialOffsetter batch-count# channel-count# element-count#)
-                   output# input#)))
+  `(fn [output# output-dims# input# input-dims#]
+     (softmax-impl ~datatype
+                   ;;Transpose channels to be last dimension
+                   output# (ct/dimensions-transpose output-dims# [0 2 1])
+                   input# (ct/dimensions-transpose input-dims# [0 2 1]))))
 
 
 (defn- ->old-skool-conv-desc
@@ -1331,23 +1312,18 @@
        input-gradient output-gradient output op element-count)))
 
   (softmax-eltwise! [stream
-                     output
-                     input
-                     batch-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-eltwise!])
-       output input batch-count element-count)))
+       output output-dims input input-dims)))
 
   (softmax-spatial! [stream
-                     output
-                     input
-                     batch-count
-                     channel-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-spatial!])
-       output input batch-count channel-count element-count)))
+       output output-dims input input-dims)))
 
   (convolution-descriptor [stream
                            datatype out-channels in-channels kern-width kern-height

@@ -65,7 +65,17 @@ for the cuda backend."
                    (ct/to-double-array tens-b)))
      (ct/unary-op! tens-b 1.0 tens-b :-)
      (is (m/equals (mapv #(- (Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype)))) (range 9))
-                   (ct/to-double-array tens-b))))))
+                   (ct/to-double-array tens-b)))
+
+     (let [src-data [0 1 2 3 4]
+           tens-src (ct/->tensor src-data)
+           tens-b (ct/->tensor src-data)]
+       (ct/unary-op! tens-b 1.0 tens-src :exp)
+       (is (m/equals (mapv #(drv/dtype-cast (Math/exp (double %)) datatype) src-data)
+                     (ct/to-double-array tens-b)))
+       (ct/unary-op! tens-b 1.0 tens-src :sqrt)
+       (is (m/equals (mapv #(drv/dtype-cast (Math/sqrt (double %)) datatype) src-data)
+                     (ct/to-double-array tens-b)))))))
 
 
 (defn channel-op
@@ -539,7 +549,16 @@ for the cuda backend."
                           flatten
                           vec)
                      (ct/to-double-array output)
-                     1e-4)))))
+                     1e-4)))
+   ;;Some loss terms want to use softmax with strides that aren't contiguous
+   (let [pred-matrix (ct/->tensor (repeat 5 (range 10)))
+         sel-pred-matr (ct/select pred-matrix :all (range 2 10))
+         test-tensor (ct/->tensor (range 2 10))
+         answer (ct/softmax! test-tensor test-tensor)]
+     (ct/softmax! sel-pred-matr sel-pred-matr)
+     (is (m/equals (flatten (repeat 5 (concat [0 1]
+                                              (ct/to-double-array answer))))
+                   (ct/to-double-array pred-matrix))))))
 
 
 (defn ternary-op-select

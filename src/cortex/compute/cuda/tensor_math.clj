@@ -5,7 +5,8 @@
             [cortex.compute.driver :as drv]
             [cortex.compute.cpu.tensor-math :as cpu-tens-math]
             [cortex.compute.math-util :as cmu]
-            [think.resource.core :as resource])
+            [think.resource.core :as resource]
+            [cortex.tensor :as ct])
   (:import [cortex.compute.cuda.driver CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer SizeTPointer
             cublas cublas$cublasContext
@@ -56,7 +57,10 @@
      :round (int 2)
      :- (int 3)
      :tanh (int 4)
-     :logistic (int 5))])
+     :logistic (int 5)
+     :exp (int 6)
+     :sqrt (int 7)
+     :noop (int 8))])
 
 
 (defn- ternary-op->cuda
@@ -188,6 +192,26 @@
   [arg-order]
   (->> (cpu-tens-math/arg-order->indexes arg-order)
        (mapv #(byte %))))
+
+
+(defn- extend-2d-dimensions-to-4d
+  [{:keys [shape strides]}]
+  (ct/when-not-error (= 2 (count shape))
+    "Extension only works on 2d shapes" {})
+  (let [[batch-size elem-count] shape
+        [batch-stride elem-stride] strides]
+    {:shape [batch-size 1 1 elem-count]
+     :strides [batch-stride batch-stride batch-stride elem-stride]}))
+
+
+(defn- extend-3d-dimensions-to-4d
+  [{:keys [shape strides]}]
+  (ct/when-not-error (= 3 (count shape))
+    "Extension only works on 3d shapes" {})
+  (let [[batch-size chan-count elem-count] shape
+        [batch-stride chan-stride elem-stride] strides]
+    {:shape [batch-size chan-count 1 elem-count]
+     :strides [batch-stride chan-stride chan-stride elem-stride]}))
 
 
 (defrecord ConvDesc [^cudnn$cudnnConvolutionStruct conv-desc
@@ -697,15 +721,18 @@
                                          (value->ptr 0 datatype)
                                          tensor
                                          (->ptr input-gradient)))))))
-  
+
   (softmax-eltwise! [stream
-                     output
-                     input
-                     batch-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (resource/with-resource-context
       (let [datatype (dtype/get-datatype output)
-            tensor (cuda-base/tensor datatype batch-count 1 1 element-count)]
+            output-dims (extend-2d-dimensions-to-4d output-dims)
+            input-dims (extend-2d-dimensions-to-4d input-dims)
+            out-tensor (cuda-base/tensor-with-strides datatype (:shape output-dims) (:strides output-dims))
+            in-tensor (if-not (= output-dims input-dims)
+                        (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
+                        out-tensor)]
         (cuda-base/cudnn-with-stream
          stream
          (cuda-base/cudnn-call
@@ -713,21 +740,23 @@
                                      cudnn/CUDNN_SOFTMAX_ACCURATE
                                      cudnn/CUDNN_SOFTMAX_MODE_INSTANCE
                                      (value->ptr 1 datatype)
-                                     tensor
+                                     in-tensor
                                      (->ptr input)
                                      (value->ptr 0 datatype)
-                                     tensor
+                                     out-tensor
                                      (->ptr output)))))))
 
   (softmax-spatial! [stream
-                     output
-                     input
-                     batch-count
-                     channel-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (resource/with-resource-context
       (let [datatype (dtype/get-datatype output)
-            tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)]
+            output-dims (extend-3d-dimensions-to-4d output-dims)
+            input-dims (extend-3d-dimensions-to-4d input-dims)
+            out-tensor (cuda-base/tensor-with-strides datatype (:shape output-dims) (:strides output-dims))
+            in-tensor (if-not (= output-dims input-dims)
+                        (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
+                        out-tensor)]
         (cuda-base/cudnn-with-stream
          stream
          (cuda-base/cudnn-call
@@ -735,10 +764,10 @@
                                      cudnn/CUDNN_SOFTMAX_ACCURATE
                                      cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
                                      (value->ptr 1 datatype)
-                                     tensor
+                                     in-tensor
                                      (->ptr input)
                                      (value->ptr 0 datatype)
-                                     tensor
+                                     out-tensor
                                      (->ptr output)))))))
 
   (convolution-descriptor [stream

@@ -157,18 +157,20 @@
 
 
 (defn format-prediction-ct!
-  [pred]
+  [pred ct-grid-ratio ct-anchors]
   (let [pred-selector (partial ct/select pred :all :all :all)]
     ;;x-y-vals
     (->> [0 1] pred-selector ct-sigmoid!)
     ;;w-h-vals
-    (->> [2 3] pred-selector (ct-emul! grid-ratio) (ct-exp!) (ct-emul! anchors) (ct-sqrt!))
+    (->> [2 3] pred-selector (ct-emul! ct-grid-ratio) (ct-exp!) (ct-emul! ct-anchors) (ct-sqrt!))
     ;;conf-vals
     (->> [4] pred-selector ct-sigmoid!)
-    ;;prob-vals
-    (-> (pred-selector (range 5 output-count))
-        (ct-reshape [(* grid-x grid-y anchor-count) classes-count])
-        ct-softmax!)))
+    (comment
+     ;;prob-vals
+     (-> (pred-selector (range 5 output-count))
+         (ct-reshape [(* grid-x grid-y anchor-count) classes-count])
+         ct-softmax!))
+    pred))
 
 
 (defmethod loss/loss :yolo9000
@@ -177,7 +179,20 @@
    (let [truth (get buffer-map :labels)
          label (get buffer-map :output)
          formatted-prediction (format-prediction label)
+         ct-grid-ratio (ct/->tensor grid-ratio)
+         ct-anchors (ct/->tensor anchors)
+         ct-formatted-prediction (format-prediction-ct! (ct/->tensor label) ct-grid-ratio ct-anchors)
          weights (->weights formatted-prediction truth)]
+     (let [correct-format (m/to-double-array formatted-prediction)
+           ct-format (ct/to-double-array ct-formatted-prediction)]
+       (clojure.pprint/pprint ["survey says..." {:equality-check  (m/equals correct-format
+                                                                            ct-format
+                                                                            1e-4)
+                                                 :correct-ct-pairs (mapv vector
+                                                                         (vec (take output-count
+                                                                                    (drop output-count correct-format)))
+                                                                         (vec (take output-count
+                                                                                    (drop output-count ct-format))))}]))
      (->> (m/sub formatted-prediction truth)
           (m/square)
           (m/emul weights)

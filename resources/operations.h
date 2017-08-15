@@ -72,6 +72,9 @@ namespace tensor { namespace operations {
 	negate,
 	tanh,
 	logistic,
+	exp,
+	sqrt,
+	noop,
       };
     };
 
@@ -153,6 +156,30 @@ namespace tensor { namespace operations {
       __device__ float operator()(float data) { return 1.0 / (1.0 + expf(- data)); }
     };
 
+    template<typename dtype>
+    struct unary_exp
+    {
+      __device__ dtype operator()(dtype data) { return static_cast<dtype>( exp((double) data) ); }
+    };
+
+    template<>
+    struct unary_exp<float>
+    {
+      __device__ float operator()(float data) { return expf(data); }
+    };
+
+    template<typename dtype>
+    struct unary_sqrt
+    {
+      __device__ dtype operator()(dtype data) { return static_cast<dtype>( sqrt( (double) data) ); }
+    };
+
+    template<>
+    struct unary_sqrt<float>
+    {
+      __device__ float operator()(float data) { return sqrtf(data); }
+    };
+
     struct general_unary_operation
     {
       int op_type;
@@ -174,6 +201,12 @@ namespace tensor { namespace operations {
 	  return unary_tanh<dtype>()(lhs);
 	case unary_operation_type::logistic:
 	  return unary_logistic<dtype>()(lhs);
+	case unary_operation_type::exp:
+	  return unary_exp<dtype>()(lhs);
+	case unary_operation_type::sqrt:
+	  return unary_sqrt<dtype>()(lhs);
+	case unary_operation_type::noop:
+	  return lhs;
 	};
 	return (dtype) 0;
       }

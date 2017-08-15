@@ -125,6 +125,25 @@ types is guaranteed to work across devices."
     "Tensor arguments are not all on same device"
     {}))
 
+(defn- extend-strides
+  [shape strides]
+  (let [rev-strides (reversev strides)
+        rev-shape (reversev shape)]
+   (->> (reduce (fn [new-strides dim-idx]
+                  (let [dim-idx (long dim-idx)
+                        cur-stride (get rev-strides dim-idx)]
+                    (if (= 0 dim-idx)
+                      (conj new-strides (or cur-stride 1))
+                      (let [last-idx (dec dim-idx)
+                            last-stride (long (get new-strides last-idx))
+                            cur-dim (long (get rev-shape last-idx))
+                            min-next-stride (* last-stride cur-dim)]
+                        (conj new-strides (or cur-stride min-next-stride))))))
+                []
+                (range (count shape)))
+        reverse
+        vec)))
+
 
 (defn dimensions
   "A dimension is a map with at least a shape (vector of integers) and potentially another
@@ -133,22 +152,7 @@ and the last member of the shape is the most rapidly changing.  There can also b
 companion vector of names which name each dimension.  Names are used when doing things that are
 dimension aware such as a 2d convolution.  Shape is the same as a core-matrix shape."
   [shape & {:keys [names strides]}]
-  (let [rev-shape (vec (reverse shape))
-        rev-strides (vec (reverse strides))
-        strides (->> (reduce (fn [new-strides dim-idx]
-                               (let [dim-idx (long dim-idx)
-                                     cur-stride (get rev-strides dim-idx)]
-                                 (if (= 0 dim-idx)
-                                   (conj new-strides (or cur-stride 1))
-                                   (let [last-idx (dec dim-idx)
-                                         last-stride (long (get new-strides last-idx))
-                                         cur-dim (long (get rev-shape last-idx))
-                                         min-next-stride (* last-stride cur-dim)]
-                                     (conj new-strides (or cur-stride min-next-stride))))))
-                             []
-                             (range (count shape)))
-                     reverse
-                     vec)
+  (let [strides (extend-strides shape strides)
         sorted-shape-stride (->> (map vector shape strides)
                                  (sort-by second >))
         max-stride (apply max 0 (map second sorted-shape-stride))
@@ -345,6 +349,11 @@ transpose that is not made concrete this condition will probably not hold."
  :dimensions -  new dimensions with their shape 1-extended to be equal lengths
      and their strides max-extended to be the same length as the new shape."
   [& args]
+  (when-not-error (every? #(= (count (:shape %))
+                              (count (:strides %)))
+                          args)
+    "Some dimensions have different shape and stride counts"
+    {:args (vec args)})
   (let [shapes (map :shape args)
         strides (map :strides args)
         max-count (long (apply max 0 (map count shapes)))
@@ -360,6 +369,57 @@ transpose that is not made concrete this condition will probably not hold."
                                   (apply max 0 args))
                             shapes))
      :dimensions (mapv #(hash-map :shape %1 :strides %2) shapes strides)}))
+
+
+(defn dimensions-in-place-reshape
+  "Return new dimensions that correspond to an in-place reshape"
+  [existing-dims shape]
+  (let [new-dims (dimensions shape)]
+    (when-not-error (<= (dimension-ecount new-dims)
+                        (dimension-ecount existing-dims))
+      "Reshaped dimensions are larger than tensor"
+      {:tensor-ecount (ecount existing-dims)
+       :reshape-ecount (dimension-ecount new-dims)})
+
+    (if (dimensions-access-increasing? existing-dims)
+      ;;Definitely not sure *at all* about this algorithm
+      (let [existing-rev-shape (reversev (get existing-dims :shape))
+            existing-rev-strides (reversev (get existing-dims :strides))
+            rev-new-shape (reversev shape)
+            num-old-items (count existing-rev-shape)
+            num-new-shape (count shape)
+            rev-new-strides (vec (take num-new-shape existing-rev-strides))
+            num-new-shape-minus-one (long (max 0 (dec num-new-shape)))
+            remaining-existing-shape (drop num-new-shape-minus-one existing-rev-shape)
+            remaining-existing-strides (drop num-new-shape-minus-one existing-rev-strides)]
+        ;;This is only a legal move if everything that is being squashed is actually packed.
+        ;;In that case we can effectively ignore their strides.
+        (when-not-error (every? #(= (first %) (second %))
+                                (map (fn [cur-stride last-shp last-stride]
+                                       [cur-stride (* (long last-shp) (long last-stride))])
+                                     (drop 1 remaining-existing-strides)
+                                     remaining-existing-shape
+                                     remaining-existing-strides))
+          "Cannot in-place-reshape if squashed dimensions are not packed contiguous"
+          {:squashed-shape remaining-existing-shape
+           :squashed-strides remaining-existing-strides})
+        {:shape shape
+         :strides (extend-strides shape (reversev rev-new-strides))})
+      (throw (ex-info "Cannot (at this point) in-place-reshape transposed dimensions" {})))))
+
+
+(defn dimensions-transpose
+  [{:keys [shape strides]} reorder-vec]
+  (when-not-error (= (count (distinct reorder-vec))
+                     (count shape))
+    "Every dimension must be represented in the reorder vector"
+    {:shape shape
+     :reorder-vec reorder-vec})
+  (let [shape (mapv #(get shape %) reorder-vec)
+        strides (mapv #(get strides %) reorder-vec)]
+    {:shape shape
+     :strides strides}))
+
 
 (defn- ensure-elementwise-compatible
   "Ensure these two tensors are compatible for an elementwise operation
@@ -495,16 +555,9 @@ that rerequires the items to have the same element count."
 
 (defn in-place-reshape
   [tensor shape]
-  (when-not-error (dense? tensor)
-    "In place reshape only implemented for dense tensors"
-    {:dimensions (tensor->dimensions tensor)})
-  (let [new-dims (dimensions shape)]
-    (when-not-error (<= (dimension-ecount new-dims)
-                        (ecount tensor))
-      "Reshaped dimensions are larger than tensor"
-      {:tensor-ecount (ecount tensor)
-       :reshape-ecount (dimension-ecount new-dims)})
-    (assoc tensor :dimensions new-dims)))
+  (assoc tensor
+         :dimensions (dimensions-in-place-reshape (tensor->dimensions tensor)
+                                                  shape)))
 
 
 
@@ -596,13 +649,14 @@ that rerequires the items to have the same element count."
 (defn as-batch-matrix
   "As a 2d matrix of shape [least-rapidly-changing-dimension everything-else]"
   ^Tensor [^Tensor tensor]
-  (reinterpret-tensor tensor (dimensions (tensor->batch-shape tensor))))
+  (in-place-reshape tensor (tensor->batch-shape tensor)))
 
 
 (defn as-2d-matrix
   "As a 2d matrix of shape [everything-else most-rapidly-changin-dimension]"
   ^Tensor [^Tensor tensor]
-  (reinterpret-tensor tensor (dimensions (tensor->2d-shape tensor))))
+  (in-place-reshape tensor (tensor->2d-shape tensor)))
+
 
 (defn as-dense
   "As dense has some preconditions that are implied which are that a memcpy call would succeed
@@ -706,17 +760,9 @@ will determine the shape of the outgoing tensor."
   "Transpose the tensor returning a new tensor that shares the backing store but indexes
 into it in a different order."
   [tensor reorder-vec]
-  (when-not-error (= (count (distinct reorder-vec))
-                     (count (shape tensor)))
-    "Every dimensions must be represented in the reorder vector"
-    {:shape (shape tensor)
-     :reorder-vec reorder-vec})
-  (let [{:keys [shape strides]} (tensor->dimensions tensor)
-        shape (mapv #(get shape %) reorder-vec)
-        stride (mapv #(get strides %) reorder-vec)]
-    (assoc tensor :dimensions
-           {:shape shape
-            :strides stride})))
+  (assoc tensor
+         :dimensions (dimensions-transpose (tensor->dimensions tensor)
+                                           reorder-vec)))
 
 
 (defn- reversev
@@ -908,6 +954,11 @@ and the rest of the dimensions being squashed into n-rows."
        :max-shapes max-shape})))
 
 
+(def unary-operations
+  [:floor :ceil :round :- :tanh :logistic
+   :exp :sqrt :noop])
+
+
 (defn- perform-unary-op
   ^double [^double value op]
   (condp = op
@@ -917,7 +968,10 @@ and the rest of the dimensions being squashed into n-rows."
     :- (- value)
     :tanh (Math/tanh value)
     :logistic (/ 1.0
-                 (+ 1.0 (Math/exp (- value))))))
+                 (+ 1.0 (Math/exp (- value))))
+    :exp (Math/exp value)
+    :sqrt (Math/sqrt value)
+    :noop value))
 
 
 (defn unary-op!
@@ -995,12 +1049,24 @@ and the rest of the dimensions being squashed into n-rows."
 
 (defmethod typed-binary-op [:tensor :number]
   [dest alpha x beta y op]
-  (binary-op-constant! dest alpha x beta y op false))
+  ;;attempt a strength reduce to a unary noop if op is :*
+  (if (= op :*)
+    (unary-op! dest (* (double alpha)
+                       (double beta)
+                       (double y))
+               :noop)
+    (binary-op-constant! dest alpha x beta y op false)))
 
 
 (defmethod typed-binary-op [:number :tensor]
   [dest alpha x beta y op]
-  (binary-op-constant! dest beta y alpha x op true))
+  ;;Attempt strength reduce.
+  (if (= op :*)
+    (unary-op! dest (* (double alpha)
+                       (double beta)
+                       (double y))
+               :noop)
+    (binary-op-constant! dest beta y alpha x op true)))
 
 
 (defmethod typed-binary-op [:tensor :tensor]
@@ -1036,6 +1102,10 @@ and the rest of the dimensions being squashed into n-rows."
   dest)
 
 
+(def binary-operations
+  [:+ :- :* :/ :max :min :bit-and])
+
+
 (defn binary-op!
   "Perform the operation:
 dest = alpha * x op beta * y.
@@ -1056,7 +1126,7 @@ Datatypes must match."
                (* (double beta) (double y))))))
 
 
-(defn- order-tenery-args
+(defn- order-ternary-args
   [[[x x-dt] [y y-dt] [z z-dt] z-d] alpha beta gamma]
   (let [x-data [x x-dt :x alpha]
         y-data [y y-dt :y beta]
@@ -1491,19 +1561,15 @@ count.  This will perform per-element, per-batch spatial softmax across the chan
     {:input-shape (shape input)
      :output-shape (shape output)})
   (if (= 3 (count (shape input)))
-    (apply tm/softmax-spatial!
-           (check-stream)
-           (tensor->buffer output)
-           (tensor->buffer input)
-           (shape input))
+    (tm/softmax-spatial!
+     (check-stream)
+     (tensor->buffer output) (tensor->dimensions output)
+     (tensor->buffer input) (tensor->dimensions input))
     (let [input (as-batch-matrix input)
-          output (as-batch-matrix output)
-          input-shape (shape input)]
+          output (as-batch-matrix output)]
       (tm/softmax-eltwise! (check-stream)
-                           (tensor->buffer output)
-                           (tensor->buffer input)
-                           (first input-shape)
-                           (second input-shape))))
+                           (tensor->buffer output) (tensor->dimensions output)
+                           (tensor->buffer input) (tensor->dimensions input))))
   output)
 
 
