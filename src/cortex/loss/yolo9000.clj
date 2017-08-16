@@ -62,7 +62,7 @@
 
 
 (defn coords-ct
-  "Return x-y coords of upper left corner of box"
+  "Return x-y coords of upper left corner of box and lower right."
   [box-vec ul-vec br-vec]
   (let [wh-vec (ct/select box-vec :all (range 2 4))
         xy-vec (ct/select box-vec :all (range 2))]
@@ -171,11 +171,12 @@
   (cpu-tm/tensor-context
    (let [src-boxes [[10 10 20 20]
                     [5 5 5 5]
-                    [10 10 5 5]]
+                    [10 10 5 5]
+                    [17 17 2 2]]
          box-pairs (mapv (fn [[x y]]
                            [(get src-boxes x)
                             (get src-boxes y)])
-                         (combo/combinations [0 1 2] 2))
+                         (combo/combinations (range (count src-boxes)) 2))
          b1 (ct/->tensor (map first box-pairs))
          b2 (ct/->tensor (map second box-pairs))]
      (let [correct (double-array (mapv (partial apply iou) box-pairs))
@@ -192,6 +193,16 @@
     (if (< 0 max-iou)
       (m/eq iou max-iou)
       (m/zero-vector anchor-count))))
+
+
+(defn ct-one-hot-encode
+  "Given the vector iou of iou-s with the different anchors, returns a one-hot encoded vector at the max value.
+If there are two equal max values then you will get a two-hot encoded vector."
+  [data-matrix]
+  (let [[n-rows n-col] (m/shape data-matrix)
+        max-data (ct/new-tensor [n-rows 1])]
+    (ct/unary-reduce! max-data 1.0 data-matrix :max)
+    (ct/binary-op! data-matrix 1.0 data-matrix 1.0 max-data :eq)))
 
 
 (defn ->weights [formatted-prediction truth]
@@ -223,6 +234,41 @@
     (m/add
       (m/emul D scale-vec-ob)
       (m/emul (m/sub 1 D) scale-vec-noob))))
+
+
+(defn ->weights-ct
+  [formatted-prediction truth]
+  (let [formatted-pred-selector (partial ct/select formatted-prediction :all :all :all)
+        truth-selector (partial ct/select truth :all :all :all)
+        pred-boxes (-> (formatted-pred-selector bb)
+                       (ct-reshape [(* grid-x grid-y anchor-count) (count bb)]))
+        truth-boxes (-> (truth-selector bb)
+                        (ct-reshape [(* grid-x grid-y anchor-count) (count bb)]))
+        ious (-> (iou-ct pred-boxes truth-boxes)
+                 ;; value at (+ (* i grid-x) j) is the vector of ious for each of the five anchors at cell (i,j)
+                 (ct-reshape [(* grid-x grid-y) anchor-count]))
+
+
+        all-d (-> (ct/new-tensor (m/shape formatted-prediction)))
+
+        one-hots (-> (ct-one-hot-encode ious)
+                     ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
+                     (ct-reshape [grid-x grid-y anchor-count 1]))
+        D (ct/assign! all-d one-hots)
+        one-hots (ct/binary-op! one-hots 1.0 1 1.0 one-hots :-)
+        one-minus-d (ct/assign! (ct/new-tensor (m/shape formatted-prediction)) one-hots)
+        scale-vec-ob (-> (ct/->tensor (concat (repeat (count bb) SCALE_COOR)
+                                              (repeat (count conf) SCALE_CONF)
+                                              (repeat classes-count SCALE_PROB)))
+                         (ct/in-place-reshape [1 1 1 output-count]))
+        scale-vec-noob (-> (ct/->tensor (concat (repeat (count bb) 0)
+                                                (repeat (count conf) SCALE_NOOB)
+                                                (repeat classes-count 0)))
+                           (ct-reshape [1 1 1 output-count]))]
+    (ct/binary-op! D 1.0 D 1.0 scale-vec-ob :*)
+    (ct/binary-op! one-minus-d 1.0 one-minus-d 1.0 scale-vec-noob :*)
+    (ct/binary-op! D 1.0 D 1.0 one-minus-d :+)))
+
 
 
 (defn format-prediction
@@ -262,11 +308,12 @@
          formatted-prediction (format-prediction label)
          ct-grid-ratio (ct/->tensor grid-ratio)
          ct-anchors (ct/->tensor anchors)
+         ct-truth (ct/->tensor label)
          ct-formatted-prediction (format-prediction-ct! (ct/->tensor label) ct-grid-ratio ct-anchors)
          weights (->weights formatted-prediction truth)
-         ct-weights (->weights-ct! (ct/new-tensor (m/shape weights)) ct-formatted-prediction (ct/->tensor truth))]
-     (let [correct-format (m/to-double-array formatted-prediction)
-           ct-format (ct/to-double-array ct-formatted-prediction)]
+         weights-ct (->weights-ct ct-formatted-prediction ct-truth)]
+     (let [correct-format (m/to-double-array weights)
+           ct-format (ct/to-double-array weights-ct)]
        (clojure.pprint/pprint ["survey says..." {:equality-check  (m/equals correct-format
                                                                             ct-format
                                                                             1e-4)

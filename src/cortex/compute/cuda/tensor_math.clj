@@ -43,7 +43,8 @@
            :/ 3
            :min 4
            :max 5
-           :bit-and 6))])
+           :bit-and 6
+           :eq 7))])
   ([operation rev-ops?]
    (conj (operation->cuda operation)
          (int (if rev-ops? 1 0)))))
@@ -485,6 +486,32 @@
                          (ternary-op->cuda operation)
                          (arg-order->indexes arg-order)
                          [n-elems])
+                 vec))))
+
+  (unary-reduce! [stream
+                  output output-dims
+                  input-alpha input input-dims
+                  op]
+    (let [output-dtype (dtype/get-datatype output)
+          reduce-fn (cuda-base/get-or-create-fn stream :tensor-unary-reduce
+                                                output-dtype
+                                                #(cuda-base/load-all-datatype-function
+                                                  "tensor_unary_reduce"))
+          ->dtype #(drv/dtype-cast % output-dtype)
+          input-col-len (int (last (ct/dimensions->shape input-dims)))
+          n-elems (int (ct/dimension-ecount output-dims))]
+      (apply cuda-base/launch-linear-kernel
+             (-> (concat [stream reduce-fn n-elems 0]
+                         [(cuda-base/->ptr output)]
+                         (dimensions->cuda output-dims)
+                         [(cuda-base/->ptr input)]
+                         (dimensions->cuda input-dims)
+                         [(->dtype input-alpha)]
+                         [(condp = op
+                             :max (int 0)
+                             :min (int 1)
+                             :sum (int 2)
+                             :mean (int 3)) input-col-len n-elems])
                  vec))))
 
   (gemm! [stream

@@ -10,10 +10,10 @@
          (ct/dimensions-in-place-reshape
           (ct/dimensions [3 2 2] :strides [4 2 1]) [6 2])))
   (is (= {:shape [3 4]
-          :strides [4 1]}
-         (ct/dimensions-in-place-reshape
-          (ct/dimensions [3 2 2] :strides [4 2 1])
-          [3 4])))
+            :strides [4 1]}
+           (ct/dimensions-in-place-reshape
+            (ct/dimensions [3 2 2] :strides [4 2 1])
+            [3 4])))
   (is (= {:shape [3 4]
           :strides [5 1]}
          (ct/dimensions-in-place-reshape
@@ -22,4 +22,17 @@
   (is (= {:shape [20 8] :strides [10 1]}
          (ct/dimensions-in-place-reshape
           {:shape [4 5 8] :strides [50 10 1]}
-          [20 8]))))
+          [20 8])))
+  (is (= {:shape [20 8 1 1] :strides [10 1 1 1]}
+         (ct/dimensions-in-place-reshape
+          {:shape [4 5 8] :strides [50 10 1]}
+          [20 8 1 1])))
+  (is (= {:shape [1 1 20 8] :strides [200 200 10 1]}
+         (ct/dimensions-in-place-reshape
+          {:shape [4 5 8] :strides [50 10 1]}
+          [1 1 20 8])))
+  (is (= {:shape [169 5] :strides [5 1]}
+         (ct/dimensions-in-place-reshape
+          {:shape [845] :strides [1]}
+          [169 5])))
+  )

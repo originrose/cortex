@@ -55,10 +55,8 @@
 
 
 (def ^:private assign-constant-map
-  (memoize
-   (fn []
-     (->> (marshal/array-view-iterator assign-constant-impl)
-          (into {})))))
+  (->> (marshal/array-view-iterator assign-constant-impl)
+       (into {})))
 
 
 (defmacro ^:private datatype->view-cast-fn
@@ -133,10 +131,8 @@
 
 
 (def ^:private assign!-map
-  (memoize
-   (fn []
-     (->> (generate-all-marshalling-assign-fns)
-          (into {})))))
+  (->> (generate-all-marshalling-assign-fns)
+       (into {})))
 
 
 (defmacro ^:private perform-unary-op-impl
@@ -216,7 +212,10 @@
     ;;Math/max and friends aren't defined for all primitives leading to reflection warnings.
     :max `(if (> ~x ~y) ~x ~y)
     :min `(if (> ~x ~y) ~y ~x)
-    :bit-and `(bit-and (unchecked-int ~x) (unchecked-int ~y))))
+    :bit-and `(bit-and (unchecked-int ~x) (unchecked-int ~y))
+    :eq `(if (= ~x ~y)
+           1
+           0)))
 
 
 (defmacro ^:private perform-op-rev-ops
@@ -256,9 +255,7 @@
 
 
 (def ^:private binary-accum-constant-table
-  (memoize
-   (fn []
-     (binary-accum-constant-table))))
+  (binary-accum-constant-table))
 
 
 (defmacro ^:private binary-op-constant!-impl
@@ -297,9 +294,7 @@
 
 
 (def ^:private binary-op-constant-table
-  (memoize
-   (fn []
-     (binary-op-constant-table))))
+  (binary-op-constant-table))
 
 
 (defmacro ^:private binary-accum!-impl
@@ -336,9 +331,7 @@
 
 
 (def ^:private binary-accum-table
-  (memoize
-   (fn []
-     (binary-accum-table))))
+  (binary-accum-table))
 
 
 
@@ -380,9 +373,7 @@
 
 
 (def ^:private binary-op-table
-  (memoize
-   (fn []
-     (binary-op-table-impl))))
+  (binary-op-table-impl))
 
 (defmacro select-impl
   [x y z]
@@ -501,6 +492,71 @@
 
 (def ^:private ternary-op-table
   (ternary-op-iter))
+
+
+(defmacro do-unary-reduce-op
+  [datatype op input addr in-alpha idx-start idx-stop]
+  (condp = op
+    :min `(loop [min-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (min min-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              min-val#))
+    :max `(loop [max-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (max max-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              max-val#))
+    :sum `(loop [sum-val# (* ~in-alpha (v-aget ~input
+                                               (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (+ sum-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              sum-val#))
+    :mean `(loop [sum-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (+ sum-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              (/ sum-val#
+                 (- ~idx-stop ~idx-start))))))
+
+
+(defmacro unary-reduce-impl
+  [datatype op]
+  `(fn [output# output-dims# input-alpha# input# input-dims#]
+     (let [input-shape# (ct/dimensions->shape input-dims#)
+           output-addr# (get-elem-dims->address output-dims# (ct/dimensions->shape output-dims#))
+           input-addr# (get-elem-dims->address input-dims# (ct/dimensions->shape input-dims#))
+           input# (datatype->view-cast-fn ~datatype input#)
+           output# (datatype->view-cast-fn ~datatype output#)
+           input-alpha# (datatype->cast-fn ~datatype input-alpha#)
+           parallelism# (ct/dimension-ecount output-dims#)
+           iter-amount# (quot (ct/dimension-ecount input-dims#)
+                              parallelism#)]
+       (parallel/parallel-for
+        par-idx# parallelism#
+        (let [iter-start# (* par-idx# iter-amount#)
+              iter-stop# (+ iter-start# iter-amount#)]
+         (v-aset output# (.idx_to_address output-addr# par-idx#)
+                 (datatype->cast-fn ~datatype
+                                    (do-unary-reduce-op ~datatype ~op input# input-addr# input-alpha#
+                                                        iter-start# iter-stop#))))))))
+
+
+(defmacro unary-reduce-iter
+  []
+  (->> (for [dtype dtype/datatypes
+             reduce-op ct/unary-reduction-operations]
+         [[dtype reduce-op] {:unary-reduce! `(unary-reduce-impl ~dtype ~reduce-op)}])
+       (into {})))
+
+
+(def ^:private unary-reduce-table
+  (unary-reduce-iter))
 
 
 (defmacro ^:private blas-macro-iter
@@ -1078,7 +1134,7 @@
   tm/TensorMath
   (assign-constant! [stream buffer dimensions value n-elems]
     (cpu-driver/with-stream-dispatch stream
-      ((get (assign-constant-map) (dtype/get-datatype buffer))
+      ((get assign-constant-map (dtype/get-datatype buffer))
        buffer dimensions value n-elems)))
 
   (assign! [stream
@@ -1086,7 +1142,7 @@
             src src-dims
             n-elems]
     (cpu-driver/with-stream-dispatch stream
-      ((get (assign!-map) [(dtype/get-datatype dest) (dtype/get-datatype src)])
+      ((get assign!-map [(dtype/get-datatype dest) (dtype/get-datatype src)])
        dest dest-dims
        src src-dims
        n-elems)))
@@ -1111,7 +1167,7 @@
                            scalar
                            n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-accum-constant-table) [(dtype/get-datatype dest) operation
+      ((get binary-accum-constant-table [(dtype/get-datatype dest) operation
                                            reverse-operands?])
        dest dest-dims dest-alpha
        scalar n-elems)))
@@ -1122,7 +1178,7 @@
                         scalar
                         n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-op-constant-table) [(dtype/get-datatype dest) operation reverse-operands?])
+      ((get binary-op-constant-table [(dtype/get-datatype dest) operation reverse-operands?])
        dest dest-dims
        x x-dims x-alpha
        scalar n-elems)))
@@ -1132,7 +1188,7 @@
                   y y-dims y-alpha
                   n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-accum-table) [(dtype/get-datatype dest) operation reverse-operands?])
+      ((get binary-accum-table [(dtype/get-datatype dest) operation reverse-operands?])
        dest dest-dims dest-alpha
        y y-dims y-alpha
        n-elems)))
@@ -1143,7 +1199,7 @@
                y y-dims y-alpha
                n-elems operation]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-op-table) [(dtype/get-datatype dest) operation])
+      ((get binary-op-table [(dtype/get-datatype dest) operation])
        dest dest-dims
        x x-dims x-alpha
        y y-dims y-alpha
@@ -1196,6 +1252,14 @@
        const-2
        n-elems
        operation arg-order)))
+
+  (unary-reduce! [stream
+                  output output-dims
+                  input-alpha input input-dims
+                  op]
+    ((get-in unary-reduce-table [[(dtype/get-datatype output) op] :unary-reduce!])
+     output output-dims
+     input-alpha input input-dims))
 
   (gemm! [stream
           C c-colstride

@@ -438,34 +438,80 @@ transpose that is not made concrete this condition will probably not hold."
                                                 (drop 1 existing-rev-strides)
                                                 existing-rev-shape
                                                 existing-rev-strides)))
-
-            rev-new-shape (reversev shape)
-            num-old-items (count existing-rev-shape)
-            num-new-shape (count shape)
-            ;;Merge dimensions based on the new shape.
-            [rev-new-strides prev-idx]
-            (reduce (fn [[rev-new-strides prev-idx] cur-shape]
-                      (let [cur-stride (get existing-rev-strides prev-idx)
-                            cur-shape (long cur-shape)
-                            orig-idx (long prev-idx)
-                            [cur-prod prev-idx] (loop [prev-idx orig-idx
-                                                       cur-prod 1]
-                                                  (if (and (< prev-idx num-old-items)
-                                                           (< (long cur-prod) (long cur-shape)))
-                                                    (recur (inc prev-idx)
-                                                           (* (long cur-prod)
-                                                              (long (get existing-rev-shape prev-idx))))
-                                                    [cur-prod prev-idx]))
-                            ;;Intentionally dropping last one because we can *end* on a non-packed
-                            ;;but we cannot cross a non-packed.
-                            idx-range (range orig-idx (- (long prev-idx) 1))]
-                        (when-not-error (= cur-prod cur-shape)
-                          "Shapes do not match up evenly"
-                          {:dimension existing-dims
-                           :shape shape})
-                        [(conj rev-new-strides cur-stride) prev-idx]))
-                    [[] 0]
-                    rev-new-shape)]
+            existing-info (mapv vector
+                                existing-rev-shape
+                                existing-rev-strides
+                                existing-rev-packed?)
+            new-shape-count (count shape)
+            old-shape-count (count existing-info)
+            max-old-idx (- old-shape-count 1)
+            reverse-shape (reversev shape)
+            rev-new-strides (loop [new-idx 0
+                                   old-idx 0
+                                   new-shape reverse-shape
+                                   existing-info existing-info
+                                   rev-new-strides []]
+                              (if (< new-idx new-shape-count)
+                                (let [[old-dim old-stride old-packed?] (get existing-info
+                                                                            (min old-idx
+                                                                                 max-old-idx))
+                                      new-dim (long (get new-shape new-idx))
+                                      old-dim (long old-dim)
+                                      old-stride (long old-stride)]
+                                  (when-not-error (or (< old-idx old-shape-count)
+                                                       (= 1 new-dim))
+                                   "Ran out of old shape dimensions"
+                                   {:old-idx old-idx
+                                    :existing-info existing-info
+                                    :rev-new-strides rev-new-strides
+                                    :new-dim new-dim})
+                                  #_(println {:new-idx new-idx
+                                            :old-idx old-idx
+                                            :new-dim new-dim
+                                            :old-dim old-dim
+                                            :old-stride old-stride})
+                                  (cond
+                                    (= 1 new-dim)
+                                    (do
+                                      #_(println (last rev-new-strides)
+                                                 (get reverse-shape (dec new-idx)))
+                                     (recur (inc new-idx)
+                                            old-idx
+                                            new-shape
+                                            existing-info
+                                            (conj rev-new-strides
+                                                  (* (long (or (last rev-new-strides) 1))
+                                                     (long (or (get reverse-shape (dec new-idx))
+                                                               1))))))
+                                    (= old-dim new-dim)
+                                    (do
+                                      (recur (inc new-idx) (inc old-idx) new-shape existing-info
+                                             (conj rev-new-strides old-stride)))
+                                    (< old-dim new-dim)
+                                    (do (when-not-error (= 0 (rem new-dim old-dim))
+                                          "Old dimension not commensurate with new dimensions"
+                                          {:old-dim old-dim
+                                           :new-dim new-dim})
+                                        (recur new-idx (inc old-idx)
+                                               (assoc new-shape
+                                                      new-idx
+                                                      (quot (long new-dim) (long old-dim)))
+                                               ;;Carry original stride forward
+                                               (assoc-in existing-info [(inc old-idx) 1] old-stride)
+                                               rev-new-strides))
+                                    (> old-dim new-dim)
+                                    (do
+                                      (when-not-error (= 0 (rem old-dim new-dim))
+                                        "New dimension not commensurate with old dimension"
+                                        {:old-dim old-dim
+                                         :new-dim new-dim})
+                                      (recur (inc new-idx) old-idx
+                                             new-shape
+                                             (assoc existing-info old-idx [(quot old-dim new-dim)
+                                                                           (* old-stride new-dim)
+                                                                           old-packed?])
+                                             (conj rev-new-strides old-stride)))))
+                                rev-new-strides))]
         {:shape shape
          :strides (extend-strides shape (reversev rev-new-strides))})
       (throw (ex-info "Cannot (at this point) in-place-reshape transposed dimensions"
@@ -1130,7 +1176,7 @@ and the rest of the dimensions being squashed into n-rows."
 
 
 (def binary-operations
-  [:+ :- :* :/ :max :min :bit-and])
+  [:+ :- :* :/ :max :min :bit-and :eq])
 
 
 (defn binary-op!
@@ -1172,7 +1218,7 @@ Datatypes must match."
 (defn ternary-op!
   "Perform the elementwise operation
   dest = op( alpha * x, beta * y, gamma * z )
-  dest tensor and must not alias any other arguments.  There is on accumulator version
+  dest tensor and must not alias any other arguments.  There is no accumulator version
   of these operations at this time in order to keep kernel permutations low (3 backend permutations).
 
   x, y, z can be constants or tensors.
@@ -1219,12 +1265,43 @@ Datatypes must match."
     dest))
 
 
+(def unary-reduction-operations
+  [:max :min :sum :mean])
+
+
+(defn unary-reduce!
+  "Vector operations operate across the last dimension and produce 1 result.
+output = op((alpha*input))
+Output must be a [xyz 1] tensor while input is an [xyz n] tensor;
+the reduction will occur across the n axis with the results placed in output.
+The leading dimensions of both vectors must match."
+  [output alpha input op]
+  (let [output-shape (m/shape output)
+        input-shape (m/shape input)]
+    (when-not-error (= (drop-last output-shape)
+                       (drop-last input-shape))
+      "Output leading dimensions must match input leading dimensions"
+      {:output-shape output-shape
+       :input-shape input-shape})
+    (when-not-error (= 1 (last output-shape))
+      "Last dimension of output must be 1"
+      {:output-shape output-shape})
+    (ensure-same-device output input)
+    (ensure-datatypes (dtype/get-datatype output) input)
+    (tm/unary-reduce! (check-stream)
+                      (tensor->buffer output) (tensor->dimensions output)
+                      alpha (tensor->buffer input) (tensor->dimensions input)
+                      op)
+    output))
+
+
 (defn- trans-2d-shape
   [trans-a? a]
   (let [[rows cols] (tensor->2d-shape a)]
     (if trans-a?
       [cols rows]
       [rows cols])))
+
 
 (defn- ensure-cudnn-datatype
   [dtype op]

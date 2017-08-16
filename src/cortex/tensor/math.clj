@@ -91,6 +91,12 @@ Argument order is specified by arg-order.")
     "Apply ternary elementwise operation to args + 2 constants.
 Argument order is specified by arg-order")
 
+  (unary-reduce! [stream
+                  output output-dims
+                  input-alpha input input-dims
+                  op]
+    "Reduction on 1 operand.")
+
   (gemm! [stream
           c c-colstride
           trans-a? trans-b? alpha

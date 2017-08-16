@@ -187,7 +187,15 @@ for the cuda backend."
          (ct/binary-op! test-vec 1.0 test-vec 1.0 big-m :+)
          (is (m/equals sums
                        (ct/to-double-array test-vec)
-                       1e-4)))))))
+                       1e-4)))))
+   (let [tens-a (ct/->tensor (repeat 4 (partition 3 (range 9))))
+         result (ct/new-tensor (m/shape tens-a))]
+     (ct/binary-op! result 1.0 tens-a 1.0 5 :eq)
+     (is (m/equals (mapv #(if (= (long %) 5)
+                            1
+                            0)
+                         (ct/to-double-array tens-a))
+                   (ct/to-double-array result))))))
 
 
 (defn gemm
@@ -583,6 +591,26 @@ for the cuda backend."
                    (ct/to-double-array dest)))
      (ct/ternary-op! dest 1 x-arg 1.0 -1 3.0 2.0 :select)
      (is (m/equals [-1 -1 -1 -1 -1 6 6 6 6 6]
+                   (ct/to-double-array dest))))))
+
+
+(defn unary-reduce
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [dest (ct/new-tensor [10 1])
+         src-data [0 3 5 2 1 9 5 7 7 2]
+         src (ct/->tensor (repeat 10 src-data))]
+     (ct/unary-reduce! dest 2.0 src :max)
+     (is (m/equals (repeat 10 18)
+                   (ct/to-double-array dest)))
+     (ct/unary-reduce! dest 1.0 src :sum)
+     (is (m/equals (repeat 10 (apply + src-data))
+                   (ct/to-double-array dest)))
+     (ct/unary-reduce! dest 1.0 src :mean)
+     (is (m/equals (repeat 10 (drv/dtype-cast (/ (apply + src-data)
+                                                 (count src-data))
+                                              datatype))
                    (ct/to-double-array dest))))))
 
 

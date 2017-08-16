@@ -79,6 +79,10 @@
   (verify-tensor/ternary-op-select (create-driver) *datatype*))
 
 
+(def-all-dtype-test unary-reduce
+  (verify-tensor/unary-reduce (create-driver) *datatype*))
+
+
 (def-double-float-test convolution-operator
   (verify-tensor/convolution-operator (create-driver) *datatype*))
 

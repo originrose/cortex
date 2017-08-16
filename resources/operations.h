@@ -19,7 +19,7 @@ namespace tensor { namespace operations {
       return (dtype) ((int) lhs & (int) rhs);
     }
 
-    struct operation_type
+    struct binary_operation_type
     {
       enum _enum
       {
@@ -30,6 +30,7 @@ namespace tensor { namespace operations {
 	min,
 	max,
 	bit_and,
+	eq,
       };
     };
 
@@ -43,20 +44,22 @@ namespace tensor { namespace operations {
       template<typename dtype>
       __device__ dtype operator()( dtype lhs, dtype rhs ) const {
 	switch( op_type ) {
-	case operation_type::add:
+	case binary_operation_type::add:
 	  return  lhs + rhs;
-	case operation_type::subtract:
+	case binary_operation_type::subtract:
 	  return reverse_operands ? rhs - lhs : lhs - rhs;
-	case operation_type::multiply:
+	case binary_operation_type::multiply:
 	  return lhs * rhs;
-	case operation_type::divide:
+	case binary_operation_type::divide:
 	  return reverse_operands ? rhs / lhs : lhs / rhs;
-	case operation_type::max:
+	case binary_operation_type::max:
 	  return op_max(lhs, rhs);
-	case operation_type::min:
+	case binary_operation_type::min:
 	  return op_min(lhs, rhs);
-	case operation_type::bit_and:
+	case binary_operation_type::bit_and:
 	  return op_bit_and(lhs,rhs);
+	case binary_operation_type::eq:
+	  return (dtype) lhs == rhs ? 1 : 0;
 	};
 	return (dtype) 0;
       }
@@ -245,6 +248,7 @@ namespace tensor { namespace operations {
 	return (dtype) 0;
       }
     };
+
   }}
 
 
