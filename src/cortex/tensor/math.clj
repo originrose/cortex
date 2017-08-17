@@ -162,9 +162,9 @@ running means, variances using a running average
                                        batch-count channel-count element-count]
     "Gradient calculation.  All gradients exception output gradient are out vars.")
   (activation-gradient! [stream
-                         input-gradient
-                         output-gradient
-                         output
+                         input-gradient input-grad-dim
+                         output-gradient output-grad-dim
+                         output output-dim
                          op
                          element-count])
 

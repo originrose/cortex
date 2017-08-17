@@ -725,28 +725,44 @@
            (->ptr batch-variances)))))))
 
   (activation-gradient! [stream
-                         input-gradient
-                         output-gradient
-                         output
+                         input-gradient input-grad-dims
+                         output-gradient output-grad-dims
+                         output output-dims
                          op
                          element-count]
     (resource/with-resource-context
       (let [datatype (dtype/get-datatype input-gradient)
-            tensor (cuda-base/tensor datatype 1 1 1 element-count)]
+            in-grad-tens (cuda-base/tensor-with-strides datatype
+                                                        (:shape input-grad-dims)
+                                                        (:strides input-grad-dims))
+            out-grad-tens (if (= output-grad-dims input-grad-dims)
+                            in-grad-tens
+                            (cuda-base/tensor-with-strides datatype
+                                                           (:shape output-grad-dims)
+                                                           (:strides output-grad-dims)))
+            output-tens (cond
+                          (= output-dims output-grad-dims)
+                          out-grad-tens
+                          (= output-dims input-grad-dims)
+                          in-grad-tens
+                          :else
+                          (cuda-base/tensor-with-strides datatype
+                                                         (:shape output-dims)
+                                                         (:strides output-dims)))]
         (cuda-base/cudnn-with-stream
          stream
          (cuda-base/cudnn-call
           (cudnn/cudnnActivationBackward cudnn-context
                                          (act-type->cudnn op)
                                          (value->ptr 1 datatype)
-                                         tensor
+                                         output-tens
                                          (->ptr output)
-                                         tensor
+                                         out-grad-tens
                                          (->ptr output-gradient)
-                                         tensor
+                                         output-tens
                                          (->ptr output)
                                          (value->ptr 0 datatype)
-                                         tensor
+                                         in-grad-tens
                                          (->ptr input-gradient)))))))
 
   (softmax-eltwise! [stream

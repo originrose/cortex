@@ -56,6 +56,19 @@
   (let [exp-v (m/exp v)]
     (m/div exp-v (m/esum exp-v))))
 
+(defn softmax-gradient
+  "Softmax gradient is a matrix whose ij-entry is v_jdelta_ij - v_jv_i.
+  Written globally that is Diagonal(v) minus v-tensor-v."
+  [v]
+  (m/sub (m/diagonal-matrix v) (m/outer-product v v)))
+
+(comment
+  [1 2 3]
+  [[0 -2 -3]
+   [-2 2 -6]
+   [-3 -6 6]])
+
+
 (defn ul
   "Return x-y coords of upper left corner of box"
   [[x y w h]]
@@ -295,8 +308,10 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 
 (defn format-prediction-ct!
-  [pred ct-grid-ratio ct-anchors]
-  (let [pred-selector (partial ct/select pred :all :all :all)]
+  [pred]
+  (let [ct-grid-ratio (ct/->tensor grid-ratio)
+        ct-anchors (ct/->tensor anchors)
+        pred-selector (partial ct/select pred :all :all :all)]
     ;;x-y-vals
     (->> [0 1] pred-selector ct-sigmoid!)
     ;;w-h-vals
@@ -310,16 +325,123 @@ If there are two equal max values then you will get a two-hot encoded vector."
     pred))
 
 
+(defn ->gradient
+  "Calculates the gradient from a formatted prediction and a weighted error
+  (weighted error is of the form 'weights*(formatted-pred - truth)'"
+  [formatted-prediction weighted-error]
+  (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
+        we-selector   (partial m/select weighted-error :all :all :all)
+        x-y-grad      (->> [0 1] formatted-pred-selector (m/emap sigmoid-gradient))
+        w-h-grad      (->> [2 3] formatted-pred-selector (m/emul 0.5 grid-ratio))
+        conf-grad     (->> [4]   formatted-pred-selector (m/emap sigmoid-gradient))
+        prob-grad     (-> (formatted-pred-selector (range 5 output-count))
+                          (m/reshape [(* grid-x grid-y anchor-count) classes-count])
+                          ((fn [v] (map softmax-gradient v))))
+        prob-vals     (-> (we-selector (range 5 output-count))
+                          (m/reshape [(* grid-x grid-y anchor-count) classes-count]))]
+    (m/emul 2
+            (m/join-along 3
+                          (m/emul (we-selector [0 1]) x-y-grad)
+                          (m/emul (we-selector [2 3]) w-h-grad)
+                          (m/emul (we-selector [4]) conf-grad)
+                          (-> (map m/inner-product prob-grad prob-vals)
+                              (m/reshape [grid-x grid-y anchor-count classes-count]))))))
+
+
+(defn ct-sigmoid-gradient!
+  [input-gradient output loss-gradient]
+  (ct/activation-gradient! input-gradient loss-gradient output :logistic))
+
+
+(defn ct-wh-grad!
+  [input-gradient output loss-gradient]
+  (let [grid-ratio (ct/->tensor grid-ratio)]
+    ;;x = (a*x * b*y)
+    (ct/binary-op! input-gradient 1.0 output 0.5 grid-ratio :*)
+    (ct/binary-op! input-gradient 1.0 input-gradient 1.0 loss-gradient :*)))
+
+
+(defn ct-softmax-grad!
+  [input-gradient output loss-gradient]
+  (let [output (ct/as-2d-matrix output)
+        input-gradient (ct/as-2d-matrix input-gradient)
+        loss-gradient (ct/as-2d-matrix loss-gradient)
+        [n-rows n-cols] (m/shape output)
+        output-emul-loss (ct/new-tensor (m/shape output))
+        output-dot-loss (ct/new-tensor [n-rows 1])]
+    ;;(v emul loss) - output emul (output dot loss)
+    (ct/binary-op! output-emul-loss 1.0 output 1.0 loss-gradient :*)
+    (ct/unary-reduce! output-dot-loss 1.0 output-emul-loss :sum)
+    (ct/binary-op! input-gradient 1.0 output 1.0 output-dot-loss :*)
+    (ct/binary-op! input-gradient 1.0 output-emul-loss 1.0 input-gradient :-)))
+
+
+(defn ->gradient-ct!
+  "Calculates the gradient from a formatted prediction and a weighted error
+  (weighted error is of the form 'weights*(formatted-pred - truth)'"
+  [formatted-prediction loss-gradient]
+  (let [input-gradient (ct/new-tensor (m/shape formatted-prediction))
+        formatted-pred-selector (partial ct/select formatted-prediction :all :all :all)
+        lg-selector   (partial ct/select loss-gradient :all :all :all)
+        ig-selector   (partial ct/select input-gradient :all :all :all)]
+    ;;x-y-grad
+    (ct-sigmoid-gradient! (ig-selector [0 1])
+                          (formatted-pred-selector [0 1])
+                          (lg-selector [0 1]))
+    ;;w-h-grad
+    (ct-wh-grad! (ig-selector [2 3])
+                 (formatted-pred-selector [2 3])
+                 (lg-selector [2 3]))
+    ;;conf-grad
+    (ct-sigmoid-gradient! (ig-selector [4])
+                          (formatted-pred-selector [4])
+                          (lg-selector [4]))
+    ;;prob-grad
+    (ct-softmax-grad! (ig-selector (range 5 output-count))
+                      (formatted-pred-selector (range 5 output-count))
+                      (lg-selector (range 5 output-count)))
+    (ct-emul! 2.0 input-gradient)))
+
+
+(defn custom-loss-gradient
+  "Note that prediction has a different format than truth."
+  [pred truth]
+  (let [formatted-prediction (format-prediction pred)
+        weights              (->weights formatted-prediction truth)
+        weighted-error       (->> (m/sub formatted-prediction truth) (m/emul weights))
+        gradient             (->gradient formatted-prediction weighted-error)]
+    {:pred formatted-prediction
+     :truth truth
+     :weights weights
+     :loss-gradient weighted-error
+     :gradient gradient}))
+
+
+(defn ct-custom-loss-gradient
+  [pred truth]
+  (let [truth           (ct/->tensor (m/array truth))
+        pred            (ct/->tensor (m/array pred))
+        pred            (format-prediction-ct! pred)
+        weights         (->weights-ct pred truth)
+        loss-gradient   (-> (ct/new-tensor (m/shape pred))
+                            (ct/binary-op! 1.0 pred 1.0 truth :-)
+                            ;;Produce v-hat with 2 multiplication
+                            (#(ct/binary-op! % 1.0 % 1.0 weights :*)))]
+    {:pred (m/assign! (ct/new-tensor (m/shape pred)) pred)
+     :truth truth
+     :weights weights
+     :loss-gradient loss-gradient
+     :gradient (->gradient-ct! pred loss-gradient)}))
+
+
 (defmethod loss/loss :yolo9000
   [loss-term buffer-map]
   (cpu-tm/tensor-context
    (let [truth (get buffer-map :labels)
          prediction (get buffer-map :output)
          formatted-prediction (format-prediction prediction)
-         ct-grid-ratio (ct/->tensor grid-ratio)
-         ct-anchors (ct/->tensor anchors)
          ct-truth (ct/->tensor (m/array truth))
-         ct-formatted-prediction (format-prediction-ct! (ct/->tensor prediction) ct-grid-ratio ct-anchors)
+         ct-formatted-prediction (format-prediction-ct! (ct/->tensor prediction))
          weights (->weights formatted-prediction truth)
          weights-ct (->weights-ct ct-formatted-prediction ct-truth)
          corem-loss (->> (m/sub formatted-prediction truth)
@@ -335,15 +457,36 @@ If there are two equal max values then you will get a two-hot encoded vector."
       :ct-loss ct-loss})))
 
 
+
 (defn- read-label
   []
   (let [data (util/read-nippy-file "yololoss.nippy")]
     (m/reshape (get data :data) (get data :shape))))
 
 
+(defn- compare-large-vectors
+  [corem-vec ct-vec]
+  (let [correct (m/to-double-array corem-vec)
+        guess (ct/to-double-array ct-vec)]
+    (clojure.pprint/pprint
+     [:equals (m/equals correct guess 1e-4)
+      :results
+      (->> (map vector
+                (range)
+                correct guess)
+           (remove (fn [[idx correct guess]]
+                     (= (double correct)
+                        (double guess))))
+           (take output-count))])))
+
+
 (defn- test-loss
   []
-  (let [pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
-        truth (read-label)]
-    (loss/loss {:type :yolo9000} {:labels truth
-                                  :output pred})))
+  (cpu-tm/tensor-context
+   (let [pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
+         truth (read-label)
+         loss (loss/loss {:type :yolo9000} {:labels truth
+                                            :output pred})
+         corem-grad (custom-loss-gradient pred truth)
+         ct-grad (ct-custom-loss-gradient pred truth)]
+     (compare-large-vectors (:gradient corem-grad) (:gradient ct-grad)))))

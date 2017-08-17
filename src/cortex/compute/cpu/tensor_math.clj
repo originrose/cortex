@@ -1072,10 +1072,18 @@
 
 (defmacro act-backward-impl
   [datatype]
-  `(fn [input-gradient# output-gradient# output# op# n-elems#]
+  `(fn [input-gradient# input-grad-dims#
+        output-gradient# output-grad-dims#
+        output# output-dims# op# n-elems#]
      (let [dest# (datatype->view-cast-fn ~datatype output#)
+           max-shape# (max-shape-from-dimensions input-grad-dims#
+                                                 output-grad-dims#
+                                                 output-dims#)
+           dest-idx# (get-elem-dims->address output-dims# max-shape#)
            src-grad# (datatype->view-cast-fn ~datatype input-gradient#)
+           src-grad-idx# (get-elem-dims->address input-grad-dims# max-shape#)
            dest-grad# (datatype->view-cast-fn ~datatype output-gradient#)
+           dest-grad-idx# (get-elem-dims->address output-grad-dims# max-shape#)
            n-elems# (long n-elems#)
            val-1# (datatype->cast-fn ~datatype 1)
            val-0# (datatype->cast-fn ~datatype 0)]
@@ -1084,29 +1092,29 @@
          ;; input gradient = output * (1 - output) * output-gradient
          (parallel/parallel-for
           idx# n-elems#
-          (let [out-val# (v-aget dest# idx#)]
-            (v-aset src-grad# idx#
+          (let [out-val# (v-aget dest# (.idx_to_address dest-idx# idx#))]
+            (v-aset src-grad# (.idx_to_address src-grad-idx# idx#)
                     (* out-val#
                        (- val-1# out-val#)
-                       (v-aget dest-grad# idx#)))))
+                       (v-aget dest-grad# (.idx_to_address dest-grad-idx# idx#))))))
          :relu
          (parallel/parallel-for
           idx# n-elems#
           (let [mult# (datatype->cast-fn ~datatype
-                                         (if (> (v-aget dest# idx#)
+                                         (if (> (v-aget dest# (.idx_to_address dest-idx# idx#))
                                                 val-0#)
                                            1
                                            0))]
-            (v-aset src-grad# idx#
-                    (* mult# (v-aget dest-grad# idx#)))))
+            (v-aset src-grad# (.idx_to_address src-grad-idx# idx#)
+                    (* mult# (v-aget dest-grad# (.idx_to_address dest-grad-idx# idx#))))))
          :tanh
          (parallel/parallel-for
           idx# n-elems#
-          (let [out-val# (v-aget dest# idx#)]
-            (v-aset src-grad# idx#
+          (let [out-val# (v-aget dest# (.idx_to_address dest-idx# idx#))]
+            (v-aset src-grad# (.idx_to_address src-grad-idx# idx#)
                     (* (- val-1#
                           (* out-val# out-val#))
-                       (v-aget dest-grad# idx#)))))))))
+                       (v-aget dest-grad# (.idx_to_address dest-grad-idx# idx#))))))))))
 
 
 (def activation-backward-table
@@ -1367,14 +1375,17 @@
        batch-count channel-count element-count)))
 
   (activation-gradient! [stream
-                         input-gradient
-                         output-gradient
-                         output
+                         input-gradient input-grad-dims
+                         output-gradient output-grad-dims
+                         output output-dims
                          op
                          element-count]
     (cpu-driver/with-stream-dispatch stream
       ((get activation-backward-table (dtype/get-datatype input-gradient))
-       input-gradient output-gradient output op element-count)))
+       input-gradient input-grad-dims
+       output-gradient output-grad-dims
+       output output-dims
+       op element-count)))
 
   (softmax-eltwise! [stream
                      output output-dims

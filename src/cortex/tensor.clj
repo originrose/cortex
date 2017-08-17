@@ -1617,10 +1617,6 @@ See batch-normalize-update-and-apply!"
   tanh: (1 - out * out) * out-grad
   relu: (out > 0) ? out-grad : 0"
   ^Tensor [input-gradient output-gradient output op]
-  (when-not-error (not (compute-drv/alias? (tensor->buffer input-gradient)
-                                           (tensor->buffer output)))
-    "Input and input-gradient must not alias"
-    {})
   (ensure-datatypes (get-datatype input-gradient) output output-gradient)
   (ensure-same-device input-gradient output output-gradient)
   (ensure-cudnn-datatype (get-datatype input-gradient) "activation-gradient!")
@@ -1636,9 +1632,9 @@ See batch-normalize-update-and-apply!"
        :in-grad-ecount (ecount input-gradient)
        :out-grad-ecount (ecount output-gradient)})
     (tm/activation-gradient! (check-stream)
-                             (tensor->buffer input-gradient)
-                             (tensor->buffer output-gradient)
-                             (tensor->buffer output)
+                             (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
+                             (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
+                             (tensor->buffer output) (tensor->dimensions output)
                              op
                              out-ecount))
   input-gradient)
