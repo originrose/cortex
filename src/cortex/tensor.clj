@@ -1152,7 +1152,6 @@ and the rest of the dimensions being squashed into n-rows."
                                       [beta alpha x true])]
         (ensure-broadcast-rules dest y)
         (ensure-datatypes (get-datatype dest) y)
-        (check-partial-alias dest y)
         (tm/binary-accum!
          (check-stream)
          (tensor->buffer dest) (tensor->dimensions dest) alpha

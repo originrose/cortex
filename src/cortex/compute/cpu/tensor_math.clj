@@ -1257,9 +1257,10 @@
                   output output-dims
                   input-alpha input input-dims
                   op]
-    ((get-in unary-reduce-table [[(dtype/get-datatype output) op] :unary-reduce!])
-     output output-dims
-     input-alpha input input-dims))
+    (cpu-driver/with-stream-dispatch stream
+     ((get-in unary-reduce-table [[(dtype/get-datatype output) op] :unary-reduce!])
+      output output-dims
+      input-alpha input input-dims)))
 
   (gemm! [stream
           C c-colstride

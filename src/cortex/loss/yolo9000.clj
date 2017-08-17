@@ -5,7 +5,8 @@
             [clojure.core.matrix.random :as m-rand]
             [cortex.tensor :as ct]
             [cortex.compute.cpu.tensor-math :as cpu-tm]
-            [clojure.math.combinatorics :as combo]))
+            [clojure.math.combinatorics :as combo]
+            [cortex.compute.driver :as drv]))
 
 
 (def grid-x 13)
@@ -201,8 +202,15 @@ If there are two equal max values then you will get a two-hot encoded vector."
   [data-matrix]
   (let [[n-rows n-col] (m/shape data-matrix)
         max-data (ct/new-tensor [n-rows 1])]
+
     (ct/unary-reduce! max-data 1.0 data-matrix :max)
-    (ct/binary-op! data-matrix 1.0 data-matrix 1.0 max-data :eq)))
+    (ct/binary-op! data-matrix 1.0 data-matrix 1.0 max-data :eq)
+
+    ;;Zero-data has ones everywhere max *wasn't* zero
+    (ct/binary-op! max-data 1.0 max-data 0.0 0.0 :eq)
+    (ct/binary-op! max-data 1.0 1.0 1.0 max-data :-)
+    ;;Zero out elements that had maxes of zero.
+    (ct/binary-op! data-matrix 1.0 data-matrix 1.0 max-data :*)))
 
 
 (defn ->weights [formatted-prediction truth]
@@ -215,8 +223,9 @@ If there are two equal max values then you will get a two-hot encoded vector."
         ious (-> (map iou pred-boxes truth-boxes)
                  ;; value at (+ (* i grid-x) j) is the vector of ious for each of the five anchors at cell (i,j)
                  (m/reshape [(* grid-x grid-y) anchor-count]))
-        ;; value at (+ (* i grid-x) j) is [0 0 1 0 0] if third anchor achieves iou max at cell (i,j)
-        D (-> (map select-anchor ious)
+
+        one-hots (map select-anchor ious)
+        D (-> one-hots
               ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
               (m/reshape [grid-x grid-y anchor-count])
               ;; tensor on 1's to get shape [grid-x grid-y anchor-count output-count]
@@ -230,10 +239,11 @@ If there are two equal max values then you will get a two-hot encoded vector."
                               (m/zero-vector (count bb))
                               (m/assign (m/zero-vector (count conf)) SCALE_NOOB)
                               (m/zero-vector classes-count))
-                            (m/broadcast-like formatted-prediction))]
-    (m/add
-      (m/emul D scale-vec-ob)
-      (m/emul (m/sub 1 D) scale-vec-noob))))
+                            (m/broadcast-like formatted-prediction))
+        D     (m/add
+               (m/emul D scale-vec-ob)
+               (m/emul (m/sub 1 D) scale-vec-noob))]
+    D))
 
 
 (defn ->weights-ct
@@ -250,10 +260,10 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 
         all-d (-> (ct/new-tensor (m/shape formatted-prediction)))
-
         one-hots (-> (ct-one-hot-encode ious)
                      ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
                      (ct-reshape [grid-x grid-y anchor-count 1]))
+
         D (ct/assign! all-d one-hots)
         one-hots (ct/binary-op! one-hots 1.0 1 1.0 one-hots :-)
         one-minus-d (ct/assign! (ct/new-tensor (m/shape formatted-prediction)) one-hots)
@@ -304,28 +314,25 @@ If there are two equal max values then you will get a two-hot encoded vector."
   [loss-term buffer-map]
   (cpu-tm/tensor-context
    (let [truth (get buffer-map :labels)
-         label (get buffer-map :output)
-         formatted-prediction (format-prediction label)
+         prediction (get buffer-map :output)
+         formatted-prediction (format-prediction prediction)
          ct-grid-ratio (ct/->tensor grid-ratio)
          ct-anchors (ct/->tensor anchors)
-         ct-truth (ct/->tensor label)
-         ct-formatted-prediction (format-prediction-ct! (ct/->tensor label) ct-grid-ratio ct-anchors)
+         ct-truth (ct/->tensor (m/array truth))
+         ct-formatted-prediction (format-prediction-ct! (ct/->tensor prediction) ct-grid-ratio ct-anchors)
          weights (->weights formatted-prediction truth)
-         weights-ct (->weights-ct ct-formatted-prediction ct-truth)]
-     (let [correct-format (m/to-double-array weights)
-           ct-format (ct/to-double-array weights-ct)]
-       (clojure.pprint/pprint ["survey says..." {:equality-check  (m/equals correct-format
-                                                                            ct-format
-                                                                            1e-4)
-                                                 :correct-ct-pairs (mapv vector
-                                                                         (vec (take output-count
-                                                                                    (drop output-count correct-format)))
-                                                                         (vec (take output-count
-                                                                                    (drop output-count ct-format))))}]))
-     (->> (m/sub formatted-prediction truth)
-          (m/square)
-          (m/emul weights)
-          (m/esum)))))
+         weights-ct (->weights-ct ct-formatted-prediction ct-truth)
+         corem-loss (->> (m/sub formatted-prediction truth)
+                         (m/square)
+                         (m/emul weights)
+                         (m/esum))
+         ct-loss (-> (ct/binary-op! ct-formatted-prediction 1.0 ct-formatted-prediction 1.0 ct-truth :-)
+                     (ct/binary-op! 1.0 ct-formatted-prediction 1.0 ct-formatted-prediction :*)
+                     (ct/binary-op! 1.0 ct-formatted-prediction 1.0 weights-ct :*)
+                     ct/to-double-array
+                     m/esum)]
+     {:corem-loss corem-loss
+      :ct-loss ct-loss})))
 
 
 (defn- read-label
