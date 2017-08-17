@@ -5,6 +5,7 @@
             [clojure.core.matrix.random :as m-rand]
             [cortex.tensor :as ct]
             [cortex.compute.cpu.tensor-math :as cpu-tm]
+            [cortex.compute.cuda.tensor-math :as gpu-tm]
             [clojure.math.combinatorics :as combo]
             [cortex.compute.driver :as drv]))
 
@@ -18,10 +19,6 @@
               "person" "horse" "bicycle" "aeroplane" "car" "cat" "tvmonitor" "pottedplant"])
 (def classes-count (count classes))
 (def output-count (+ 5 classes-count))
-(def width 416)
-(def height 416)
-(defn class-name->label [class] (mapv #(if (= class %) 1.0 0.0) classes))
-(defn label->class-name [label] (nth classes (util/max-index label)))
 (def SCALE_NOOB 0.5)
 (def SCALE_CONF 5)
 (def SCALE_COOR 5)
@@ -30,6 +27,7 @@
 (def w-h [2 3])
 (def bb [0 1 2 3])
 (def conf [4])
+(def class-dims (range 5 output-count))
 
 
 ;; prediction has shape [grid-x grid-y anchor-count output-count]
@@ -182,7 +180,7 @@
 
 (defn test-iou
   []
-  (cpu-tm/tensor-context
+  (gpu-tm/tensor-context
    (let [src-boxes [[10 10 20 20]
                     [5 5 5 5]
                     [10 10 5 5]
@@ -218,12 +216,23 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
     (ct/unary-reduce! max-data 1.0 data-matrix :max)
     (ct/binary-op! data-matrix 1.0 data-matrix 1.0 max-data :eq)
-
-    ;;Zero-data has ones everywhere max *wasn't* zero
     (ct/binary-op! max-data 1.0 max-data 0.0 0.0 :eq)
     (ct/binary-op! max-data 1.0 1.0 1.0 max-data :-)
-    ;;Zero out elements that had maxes of zero.
     (ct/binary-op! data-matrix 1.0 data-matrix 1.0 max-data :*)))
+
+
+(defn test-one-hot-encode
+  []
+  (gpu-tm/tensor-context
+   (->> (ct/->tensor [[0 0 0 0]
+                      [0 0 0 0]
+                      [0 0 2 0]
+                      [1 4 2 2]])
+        ct-one-hot-encode
+        ct/to-double-array
+        vec)))
+
+
 
 
 (defn ->weights [formatted-prediction truth]
@@ -256,7 +265,9 @@ If there are two equal max values then you will get a two-hot encoded vector."
         D     (m/add
                (m/emul D scale-vec-ob)
                (m/emul (m/sub 1 D) scale-vec-noob))]
-    D))
+    {:ious ious
+     :one-hots one-hots
+     :weights D}))
 
 
 (defn ->weights-ct
@@ -273,13 +284,13 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 
         all-d (-> (ct/new-tensor (m/shape formatted-prediction)))
-        one-hots (-> (ct-one-hot-encode ious)
+        one-hots (-> (ct-one-hot-encode (m/assign! (ct/new-tensor (m/shape ious)) ious))
                      ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
                      (ct-reshape [grid-x grid-y anchor-count 1]))
 
         D (ct/assign! all-d one-hots)
-        one-hots (ct/binary-op! one-hots 1.0 1 1.0 one-hots :-)
-        one-minus-d (ct/assign! (ct/new-tensor (m/shape formatted-prediction)) one-hots)
+        one-minus-one-hots (ct/binary-op! (ct/new-tensor (m/shape one-hots)) 1.0 1 1.0 one-hots :-)
+        one-minus-d (ct/assign! (ct/new-tensor (m/shape formatted-prediction)) one-minus-one-hots)
         scale-vec-ob (-> (ct/->tensor (concat (repeat (count bb) SCALE_COOR)
                                               (repeat (count conf) SCALE_CONF)
                                               (repeat classes-count SCALE_PROB)))
@@ -290,17 +301,20 @@ If there are two equal max values then you will get a two-hot encoded vector."
                            (ct-reshape [1 1 1 output-count]))]
     (ct/binary-op! D 1.0 D 1.0 scale-vec-ob :*)
     (ct/binary-op! one-minus-d 1.0 one-minus-d 1.0 scale-vec-noob :*)
-    (ct/binary-op! D 1.0 D 1.0 one-minus-d :+)))
+    (ct/binary-op! D 1.0 D 1.0 one-minus-d :+)
+    {:ious ious
+     :one-hots one-hots
+     :weights D}))
 
 
 
 (defn format-prediction
   [pred]
   (let [pred-selector (partial m/select pred :all :all :all)
-        x-y-vals      (->> [0 1] pred-selector (m/emap sigmoid))
-        w-h-vals      (->> [2 3] pred-selector (m/emul grid-ratio) (m/exp) (m/emul anchors) (m/sqrt))
-        conf-vals     (->> [4] pred-selector (m/emap sigmoid))
-        prob-vals     (-> (pred-selector (range 5 output-count))
+        x-y-vals      (->> x-y pred-selector (m/emap sigmoid))
+        w-h-vals      (->> w-h pred-selector (m/emul grid-ratio) (m/exp) (m/emul anchors) (m/sqrt))
+        conf-vals     (->> conf pred-selector (m/emap sigmoid))
+        prob-vals     (-> (pred-selector class-dims)
                           (m/reshape [(* grid-x grid-y anchor-count) classes-count])
                           ((fn [v] (map softmax v)))
                           (m/reshape [grid-x grid-y anchor-count classes-count]))]
@@ -313,13 +327,13 @@ If there are two equal max values then you will get a two-hot encoded vector."
         ct-anchors (ct/->tensor anchors)
         pred-selector (partial ct/select pred :all :all :all)]
     ;;x-y-vals
-    (->> [0 1] pred-selector ct-sigmoid!)
+    (->> x-y pred-selector ct-sigmoid!)
     ;;w-h-vals
-    (->> [2 3] pred-selector (ct-emul! ct-grid-ratio) (ct-exp!) (ct-emul! ct-anchors) (ct-sqrt!))
+    (->> w-h pred-selector (ct-emul! ct-grid-ratio) (ct-exp!) (ct-emul! ct-anchors) (ct-sqrt!))
     ;;conf-vals
-    (->> [4] pred-selector ct-sigmoid!)
+    (->> conf pred-selector ct-sigmoid!)
     ;;prob-vals
-    (-> (pred-selector (range 5 output-count))
+    (-> (pred-selector class-dims)
         (ct-reshape [(* grid-x grid-y anchor-count) classes-count])
         ct-softmax!)
     pred))
@@ -331,19 +345,19 @@ If there are two equal max values then you will get a two-hot encoded vector."
   [formatted-prediction weighted-error]
   (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
         we-selector   (partial m/select weighted-error :all :all :all)
-        x-y-grad      (->> [0 1] formatted-pred-selector (m/emap sigmoid-gradient))
-        w-h-grad      (->> [2 3] formatted-pred-selector (m/emul 0.5 grid-ratio))
-        conf-grad     (->> [4]   formatted-pred-selector (m/emap sigmoid-gradient))
-        prob-grad     (-> (formatted-pred-selector (range 5 output-count))
+        x-y-grad      (->> x-y formatted-pred-selector (m/emap sigmoid-gradient))
+        w-h-grad      (->> w-h formatted-pred-selector (m/emul 0.5 grid-ratio))
+        conf-grad     (->> conf   formatted-pred-selector (m/emap sigmoid-gradient))
+        prob-grad     (-> (formatted-pred-selector class-dims)
                           (m/reshape [(* grid-x grid-y anchor-count) classes-count])
                           ((fn [v] (map softmax-gradient v))))
-        prob-vals     (-> (we-selector (range 5 output-count))
+        prob-vals     (-> (we-selector class-dims)
                           (m/reshape [(* grid-x grid-y anchor-count) classes-count]))]
     (m/emul 2
             (m/join-along 3
-                          (m/emul (we-selector [0 1]) x-y-grad)
-                          (m/emul (we-selector [2 3]) w-h-grad)
-                          (m/emul (we-selector [4]) conf-grad)
+                          (m/emul (we-selector x-y) x-y-grad)
+                          (m/emul (we-selector w-h) w-h-grad)
+                          (m/emul (we-selector conf) conf-grad)
                           (-> (map m/inner-product prob-grad prob-vals)
                               (m/reshape [grid-x grid-y anchor-count classes-count]))))))
 
@@ -385,21 +399,21 @@ If there are two equal max values then you will get a two-hot encoded vector."
         lg-selector   (partial ct/select loss-gradient :all :all :all)
         ig-selector   (partial ct/select input-gradient :all :all :all)]
     ;;x-y-grad
-    (ct-sigmoid-gradient! (ig-selector [0 1])
-                          (formatted-pred-selector [0 1])
-                          (lg-selector [0 1]))
+    (ct-sigmoid-gradient! (ig-selector x-y)
+                          (formatted-pred-selector x-y)
+                          (lg-selector x-y))
     ;;w-h-grad
-    (ct-wh-grad! (ig-selector [2 3])
-                 (formatted-pred-selector [2 3])
-                 (lg-selector [2 3]))
+    (ct-wh-grad! (ig-selector w-h)
+                 (formatted-pred-selector w-h)
+                 (lg-selector w-h))
     ;;conf-grad
-    (ct-sigmoid-gradient! (ig-selector [4])
-                          (formatted-pred-selector [4])
-                          (lg-selector [4]))
+    (ct-sigmoid-gradient! (ig-selector conf)
+                          (formatted-pred-selector conf)
+                          (lg-selector conf))
     ;;prob-grad
-    (ct-softmax-grad! (ig-selector (range 5 output-count))
-                      (formatted-pred-selector (range 5 output-count))
-                      (lg-selector (range 5 output-count)))
+    (ct-softmax-grad! (ig-selector class-dims)
+                      (formatted-pred-selector class-dims)
+                      (lg-selector class-dims))
     (ct-emul! 2.0 input-gradient)))
 
 
@@ -407,12 +421,14 @@ If there are two equal max values then you will get a two-hot encoded vector."
   "Note that prediction has a different format than truth."
   [pred truth]
   (let [formatted-prediction (format-prediction pred)
-        weights              (->weights formatted-prediction truth)
+        {:keys [weights ious one-hots]} (->weights formatted-prediction truth)
         weighted-error       (->> (m/sub formatted-prediction truth) (m/emul weights))
         gradient             (->gradient formatted-prediction weighted-error)]
     {:pred formatted-prediction
      :truth truth
      :weights weights
+     :ious ious
+     :one-hots one-hots
      :loss-gradient weighted-error
      :gradient gradient}))
 
@@ -422,13 +438,15 @@ If there are two equal max values then you will get a two-hot encoded vector."
   (let [truth           (ct/->tensor (m/array truth))
         pred            (ct/->tensor (m/array pred))
         pred            (format-prediction-ct! pred)
-        weights         (->weights-ct pred truth)
+        {:keys [weights ious one-hots]} (->weights-ct pred truth)
         loss-gradient   (-> (ct/new-tensor (m/shape pred))
                             (ct/binary-op! 1.0 pred 1.0 truth :-)
                             ;;Produce v-hat with 2 multiplication
                             (#(ct/binary-op! % 1.0 % 1.0 weights :*)))]
     {:pred (m/assign! (ct/new-tensor (m/shape pred)) pred)
      :truth truth
+     :ious ious
+     :one-hots one-hots
      :weights weights
      :loss-gradient loss-gradient
      :gradient (->gradient-ct! pred loss-gradient)}))
@@ -442,8 +460,8 @@ If there are two equal max values then you will get a two-hot encoded vector."
          formatted-prediction (format-prediction prediction)
          ct-truth (ct/->tensor (m/array truth))
          ct-formatted-prediction (format-prediction-ct! (ct/->tensor prediction))
-         weights (->weights formatted-prediction truth)
-         weights-ct (->weights-ct ct-formatted-prediction ct-truth)
+         weights (:weights (->weights formatted-prediction truth))
+         weights-ct (:weights (->weights-ct ct-formatted-prediction ct-truth))
          corem-loss (->> (m/sub formatted-prediction truth)
                          (m/square)
                          (m/emul weights)
@@ -486,7 +504,16 @@ If there are two equal max values then you will get a two-hot encoded vector."
    (let [pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
          truth (read-label)
          loss (loss/loss {:type :yolo9000} {:labels truth
-                                            :output pred})
+                                            :output pred})]
+     loss)))
+
+
+(defn- test-gradient
+  []
+  (gpu-tm/tensor-context
+   (let [pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
+         truth (read-label)
          corem-grad (custom-loss-gradient pred truth)
          ct-grad (ct-custom-loss-gradient pred truth)]
-     (compare-large-vectors (:gradient corem-grad) (:gradient ct-grad)))))
+     (compare-large-vectors (:gradient corem-grad)
+                            (:gradient ct-grad)))))

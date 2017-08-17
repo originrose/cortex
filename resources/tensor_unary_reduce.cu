@@ -25,29 +25,30 @@ void unary_reduce(dtype* output, const general_index_system& output_sys,
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    dtype result = input_alpha * input[input_sys(elem_idx * input_col_len, input_sys.rev_shape)];
+    int idx_offset = elem_idx * input_col_len;
+    dtype result = input_alpha * input[input_sys(idx_offset, input_sys.rev_shape)];
     switch (reduce_op) {
     case unary_reduction_operations::max:
       for ( int idx = 1; idx < input_col_len; ++idx ) {
-	int offset = idx + n_elems * input_col_len;
+	int offset = idx + idx_offset;
 	result = max(result, input_alpha * input[input_sys( offset, input_sys.rev_shape)]);
       }
       break;
     case unary_reduction_operations::min:
       for ( int idx = 1; idx < input_col_len; ++idx ) {
-	int offset = idx + n_elems * input_col_len;
+	int offset = idx + idx_offset;
 	result = min(result, input_alpha * input[input_sys( offset, input_sys.rev_shape)]);
       }
       break;
     case unary_reduction_operations::sum:
       for ( int idx = 1; idx < input_col_len; ++idx ) {
-	int offset = idx + n_elems * input_col_len;
+	int offset = idx + idx_offset;
 	result += input_alpha * input[input_sys( offset, input_sys.rev_shape)];
       }
       break;
     case unary_reduction_operations::mean:
       for ( int idx = 1; idx < input_col_len; ++idx ) {
-	int offset = idx + n_elems * input_col_len;
+	int offset = idx + idx_offset;
 	result += input_alpha * input[input_sys( offset, input_sys.rev_shape)];
       }
       result /= input_col_len;

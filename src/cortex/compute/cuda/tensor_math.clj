@@ -1041,3 +1041,13 @@
            (value->ptr input-gradient-alpha datatype)
            input-tensor
            (->ptr input-gradient))))))))
+
+
+(defmacro tensor-context
+  [& body]
+  `(resource/with-resource-context
+     (first (drv/with-compute-device
+              (drv/default-device (cuda-base/driver))
+              (with-bindings {#'ct/*stream* (drv/create-stream)
+                              #'ct/*datatype* :double}
+                ~@body)))))
