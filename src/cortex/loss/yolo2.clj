@@ -362,7 +362,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
   [pred]
   (let [ct-grid-ratio (ct/->tensor grid-ratio)
         ct-anchors (ct/->tensor anchors)
-        pred-selector (partial ct/select pred :all :all :all)]
+        pred-selector (partial ct/select pred :all :all :all :all)]
     ;;x-y-vals
     (->> x-y pred-selector ct-sigmoid!)
     ;;w-h-vals

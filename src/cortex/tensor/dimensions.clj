@@ -275,9 +275,12 @@ to get correct as it needs to take into account changing strides and dense vs no
       "Reshaped dimensions are larger than tensor"
       {:tensor-ecount (ecount existing-dims)
        :reshape-ecount (ecount new-dims)})
-
-    (if (access-increasing? existing-dims)
-      ;;Definitely not sure *at all* about this algorithm
+    (cond
+      (and (access-increasing? existing-dims)
+           (dense? existing-dims))
+      {:shape shape
+       :strides (extend-strides shape [])}
+      (access-increasing? existing-dims)
       (let [existing-rev-shape (reversev (get existing-dims :shape))
             existing-rev-strides (reversev (get existing-dims :strides))
             ;;Find out where there are is padding added.  We cannot combine
@@ -312,30 +315,30 @@ to get correct as it needs to take into account changing strides and dense vs no
                                       old-dim (long old-dim)
                                       old-stride (long old-stride)]
                                   (when-not-error (or (< old-idx old-shape-count)
-                                                       (= 1 new-dim))
-                                   "Ran out of old shape dimensions"
-                                   {:old-idx old-idx
-                                    :existing-info existing-info
-                                    :rev-new-strides rev-new-strides
-                                    :new-dim new-dim})
+                                                      (= 1 new-dim))
+                                    "Ran out of old shape dimensions"
+                                    {:old-idx old-idx
+                                     :existing-info existing-info
+                                     :rev-new-strides rev-new-strides
+                                     :new-dim new-dim})
                                   #_(println {:new-idx new-idx
-                                            :old-idx old-idx
-                                            :new-dim new-dim
-                                            :old-dim old-dim
-                                            :old-stride old-stride})
+                                              :old-idx old-idx
+                                              :new-dim new-dim
+                                              :old-dim old-dim
+                                              :old-stride old-stride})
                                   (cond
                                     (= 1 new-dim)
                                     (do
                                       #_(println (last rev-new-strides)
                                                  (get reverse-shape (dec new-idx)))
-                                     (recur (inc new-idx)
-                                            old-idx
-                                            new-shape
-                                            existing-info
-                                            (conj rev-new-strides
-                                                  (* (long (or (last rev-new-strides) 1))
-                                                     (long (or (get reverse-shape (dec new-idx))
-                                                               1))))))
+                                      (recur (inc new-idx)
+                                             old-idx
+                                             new-shape
+                                             existing-info
+                                             (conj rev-new-strides
+                                                   (* (long (or (last rev-new-strides) 1))
+                                                      (long (or (get reverse-shape (dec new-idx))
+                                                                1))))))
                                     (= old-dim new-dim)
                                     (do
                                       (recur (inc new-idx) (inc old-idx) new-shape existing-info
@@ -367,6 +370,7 @@ to get correct as it needs to take into account changing strides and dense vs no
                                 rev-new-strides))]
         {:shape shape
          :strides (extend-strides shape (reversev rev-new-strides))})
+      :else
       (throw (ex-info "Cannot (at this point) in-place-reshape transposed dimensions"
                       {})))))
 

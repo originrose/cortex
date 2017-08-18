@@ -35,4 +35,9 @@
          (ct-dims/in-place-reshape
           {:shape [845] :strides [1]}
           [169 5])))
-  )
+  ;;This test is just f-ed up.  But the thing is that if the dimensions are dense, then in-place reshape
+  ;;that preserves ecount is possible; it is just an arbitrary reinterpretation of the data.
+  (is (= {:shape [10 4 9] :strides [36 9 1]}
+         (ct-dims/in-place-reshape
+          {:shape [10 1 18 2] :strides [36 36 2 1]}
+          [10 4 9]))))
