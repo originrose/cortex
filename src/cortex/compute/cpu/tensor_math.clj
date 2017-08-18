@@ -11,6 +11,7 @@
             [cortex.compute.driver :as drv]
             [think.resource.core :as resource]
             [cortex.tensor :as ct]
+            [cortex.tensor.dimensions :as ct-dims]
             [cortex.nn.impl :as impl])
   (:import [cortex.compute.cpu.driver CPUStream]
            [com.github.fommil.netlib BLAS]
@@ -30,12 +31,12 @@
 (defrecord ElemIdxToAddr [^ints rev-shape ^ints rev-strides ^ints rev-max-shape]
   ElemIdxToAddressFunction
   (^long idx_to_address [this ^long arg]
-   (ct/elem-idx->addr-ary rev-shape rev-strides rev-max-shape arg)))
+   (ct-dims/elem-idx->addr-ary rev-shape rev-strides rev-max-shape arg)))
 
 
 (defn ^:private get-elem-dims->address
   ^ElemIdxToAddressFunction [dims max-shape]
-  (let [{:keys [reverse-shape reverse-strides]} (ct/dimension->reverse-data dims max-shape)]
+  (let [{:keys [reverse-shape reverse-strides]} (ct-dims/->reverse-data dims max-shape)]
     (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
                      (int-array (vec (reverse max-shape))))))
 
@@ -100,7 +101,7 @@
 
 (defn max-shape-from-dimensions
   [& args]
-  (-> (apply ct/dimension-seq->max-shape args)
+  (-> (apply ct-dims/dimension-seq->max-shape args)
       :max-shape))
 
 
@@ -528,14 +529,14 @@
 (defmacro unary-reduce-impl
   [datatype op]
   `(fn [output# output-dims# input-alpha# input# input-dims#]
-     (let [input-shape# (ct/dimensions->shape input-dims#)
-           output-addr# (get-elem-dims->address output-dims# (ct/dimensions->shape output-dims#))
-           input-addr# (get-elem-dims->address input-dims# (ct/dimensions->shape input-dims#))
+     (let [input-shape# (ct-dims/shape input-dims#)
+           output-addr# (get-elem-dims->address output-dims# (ct-dims/shape output-dims#))
+           input-addr# (get-elem-dims->address input-dims# (ct-dims/shape input-dims#))
            input# (datatype->view-cast-fn ~datatype input#)
            output# (datatype->view-cast-fn ~datatype output#)
            input-alpha# (datatype->cast-fn ~datatype input-alpha#)
-           parallelism# (ct/dimension-ecount output-dims#)
-           iter-amount# (quot (ct/dimension-ecount input-dims#)
+           parallelism# (ct-dims/ecount output-dims#)
+           iter-amount# (quot (ct-dims/ecount input-dims#)
                               parallelism#)]
        (parallel/parallel-for
         par-idx# parallelism#
@@ -934,15 +935,15 @@
   [datatype output output-dims input input-dims]
   `(let [output-dims# ~output-dims
          input-dims# ~input-dims
-         num-elems# (long (max (ct/dimension-ecount output-dims#)
-                               (ct/dimension-ecount input-dims#)))
+         num-elems# (long (max (ct-dims/ecount output-dims#)
+                               (ct-dims/ecount input-dims#)))
          output# (datatype->view-cast-fn ~datatype ~output)
          input# (datatype->view-cast-fn ~datatype ~input)
          max-shape# (max-shape-from-dimensions output-dims# input-dims#)
          output-addr# (get-elem-dims->address output-dims# max-shape#)
          input-addr# (get-elem-dims->address input-dims# max-shape#)
-         _# (ct/when-not-error (or (= (count max-shape#) 2)
-                                   (= (count max-shape#) 3))
+         _# (ct-dims/when-not-error (or (= (count max-shape#) 2)
+                                        (= (count max-shape#) 3))
               "softmax implementation only supports shapes of 2 or 3 dimensions"
               {})
          [outer-loop# par-loop# idx-loop#] (if (= (count max-shape#) 2)
@@ -995,8 +996,8 @@
   `(fn [output# output-dims# input# input-dims#]
      (softmax-impl ~datatype
                    ;;Transpose channels to be last dimension
-                   output# (ct/dimensions-transpose output-dims# [0 2 1])
-                   input# (ct/dimensions-transpose input-dims# [0 2 1]))))
+                   output# (ct-dims/transpose output-dims# [0 2 1])
+                   input# (ct-dims/transpose input-dims# [0 2 1]))))
 
 
 (defn- ->old-skool-conv-desc
@@ -1438,7 +1439,7 @@
                                                 output-width output-height)
           output-tens (ct/->Tensor dev output-dims output)
           input-tens (ct/->Tensor dev input-dims input)
-          input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)]
+          input-convolved (ct/->Tensor dev (ct-dims/dimensions [batch-size n-rows n-cols]) workspace)]
       (cpu-driver/with-stream-dispatch stream
         (ct/with-stream (cpu-driver/main-thread-cpu-stream)
           (let [batch-data (slice-batches output-tens input-tens input-convolved)]
@@ -1473,7 +1474,7 @@
                                                    in-width in-height
                                                    output-width output-height)
              output-gradient-tens (ct/->Tensor dev output-gradient-dims output-gradient)
-             input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+             input-convolved (ct/->Tensor dev (ct-dims/dimensions [batch-size n-rows n-cols]) workspace)
              slice-data (slice-batches output-gradient-tens input-convolved)]
          (ct/with-stream (cpu-driver/main-thread-cpu-stream)
            (doseq [[output-gradient input-convolved idx] (map #(conj (vec %1) %2) slice-data (range))]
@@ -1505,7 +1506,7 @@
                 batch-size (long (first (get output-gradient-dims :shape)))
                 output-gradient (ct/->Tensor dev output-gradient-dims output-gradient)
                 input-gradient (ct/->Tensor dev input-gradient-dims input-gradient)
-                input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+                input-convolved (ct/->Tensor dev (ct-dims/dimensions [batch-size n-rows n-cols]) workspace)
                 weights (ct/->Tensor dev weights-dims weights)
                 datatype (dtype/get-datatype weights)
                 input-gradient-alpha (double 0.0)]
@@ -1534,7 +1535,7 @@
 (defn as-tensor
   [java-array]
   (ct/construct-tensor (drv/get-device ct/*stream*)
-                       (ct/dimensions [(ct/ecount java-array)])
+                       (ct-dims/dimensions [(ct/ecount java-array)])
                        (dtype/->view java-array)))
 
 (defn as-java-array

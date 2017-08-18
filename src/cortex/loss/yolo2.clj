@@ -1,4 +1,4 @@
-(ns cortex.loss.yolo9000
+(ns cortex.loss.yolo2
   (:require [clojure.core.matrix :as m]
             [cortex.loss.core :as loss]
             [cortex.util :as util]
@@ -44,6 +44,9 @@
 ;; (m/select D x y i) is 1 when an object has its center in cell (x, y), and anchor box i achieves the greatest
 ;; iou between the truth bounding box and the predicted bounding-boxes.
 
+
+;;Core-m implementation for reference
+
 (defn sigmoid [x] (/ 1 (+ 1 (Math/exp (- x)))))
 
 (defn un-sigmoid [x] (-> (/ 1 x) (- 1) (Math/log) (-)))
@@ -60,12 +63,6 @@
   [v]
   (m/sub (m/diagonal-matrix v) (m/outer-product v v)))
 
-(comment
-  [1 2 3]
-  [[0 -2 -3]
-   [-2 2 -6]
-   [-3 -6 6]])
-
 
 (defn ul
   "Return x-y coords of upper left corner of box"
@@ -73,7 +70,125 @@
   [(- x (/ w 2)) (- y (/ h 2))])
 
 
-(defn coords-ct
+(defn br
+  "Return x-y coords of bottom corner of box"
+  [[x y w h]]
+  [(+ x (/ w 2)) (+ y (/ h 2))])
+
+
+(defn area [[x y]]
+  (* x y))
+
+
+(defn iou
+  "Calculates intersection over union of boxes b = [x y w h].
+  **Be sure that x,y and w,h are using the same distance units.**"
+  [b1 b2]
+  (let [UL (m/emap max (ul b1) (ul b2))
+        BR (m/emap min (br b1) (br b2))
+        intersection (area (map max (m/sub BR UL) [0 0]))
+        union (+ (area (drop 2 b1)) (area (drop 2 b2)) (- intersection))
+        result (if (< 0 union) (/ intersection union) 0)]
+    result))
+
+
+(defn select-anchor
+  "Given the vector iou of iou-s with the different anchors, returns a one-hot encoded vector at the max value."
+  [iou]
+  (let [max-iou (m/emax iou)]
+    (if (< 0 max-iou)
+      (m/eq iou max-iou)
+      (m/zero-vector anchor-count))))
+
+
+(defn ->weights [formatted-prediction truth]
+  (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
+        truth-selector (partial m/select truth :all :all :all)
+        pred-boxes (-> (formatted-pred-selector bb)
+                       (m/reshape [(* grid-x grid-y anchor-count) (count bb)]))
+        truth-boxes (-> (truth-selector bb)
+                        (m/reshape [(* grid-x grid-y anchor-count) (count bb)]))
+        ious (-> (map iou pred-boxes truth-boxes)
+                 ;; value at (+ (* i grid-x) j) is the vector of ious for each of the five anchors at cell (i,j)
+                 (m/reshape [(* grid-x grid-y) anchor-count]))
+
+        one-hots (map select-anchor ious)
+        D (-> one-hots
+              ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
+              (m/reshape [grid-x grid-y anchor-count])
+              ;; tensor on 1's to get shape [grid-x grid-y anchor-count output-count]
+              (m/outer-product (m/assign (m/new-vector output-count) 1.0)))
+        scale-vec-ob (->> (m/join
+                            (m/assign (m/zero-vector (count bb)) SCALE_COOR)
+                            (m/assign (m/zero-vector (count conf)) SCALE_CONF)
+                            (m/assign (m/zero-vector classes-count) SCALE_PROB))
+                          (m/broadcast-like formatted-prediction))
+        scale-vec-noob (->> (m/join
+                              (m/zero-vector (count bb))
+                              (m/assign (m/zero-vector (count conf)) SCALE_NOOB)
+                              (m/zero-vector classes-count))
+                            (m/broadcast-like formatted-prediction))
+        D     (m/add
+               (m/emul D scale-vec-ob)
+               (m/emul (m/sub 1 D) scale-vec-noob))]
+    {:ious ious
+     :one-hots one-hots
+     :weights D}))
+
+
+(defn format-prediction
+  [pred]
+  (let [pred-selector (partial m/select pred :all :all :all)
+        x-y-vals      (->> x-y pred-selector (m/emap sigmoid))
+        w-h-vals      (->> w-h pred-selector (m/emul grid-ratio) (m/exp) (m/emul anchors) (m/sqrt))
+        conf-vals     (->> conf pred-selector (m/emap sigmoid))
+        prob-vals     (-> (pred-selector class-dims)
+                          (m/reshape [(* grid-x grid-y anchor-count) classes-count])
+                          ((fn [v] (map softmax v)))
+                          (m/reshape [grid-x grid-y anchor-count classes-count]))]
+    (m/join-along 3 x-y-vals w-h-vals conf-vals prob-vals)))
+
+
+(defn ->gradient
+  "Calculates the gradient from a formatted prediction and a weighted error
+  (weighted error is of the form 'weights*(formatted-pred - truth)'"
+  [formatted-prediction weighted-error]
+  (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
+        we-selector   (partial m/select weighted-error :all :all :all)
+        x-y-grad      (->> x-y formatted-pred-selector (m/emap sigmoid-gradient))
+        w-h-grad      (->> w-h formatted-pred-selector (m/emul 0.5 grid-ratio))
+        conf-grad     (->> conf   formatted-pred-selector (m/emap sigmoid-gradient))
+        prob-grad     (-> (formatted-pred-selector class-dims)
+                          (m/reshape [(* grid-x grid-y anchor-count) classes-count])
+                          ((fn [v] (map softmax-gradient v))))
+        prob-vals     (-> (we-selector class-dims)
+                          (m/reshape [(* grid-x grid-y anchor-count) classes-count]))]
+    (m/emul 2
+            (m/join-along 3
+                          (m/emul (we-selector x-y) x-y-grad)
+                          (m/emul (we-selector w-h) w-h-grad)
+                          (m/emul (we-selector conf) conf-grad)
+                          (-> (map m/inner-product prob-grad prob-vals)
+                              (m/reshape [grid-x grid-y anchor-count classes-count]))))))
+
+
+(defn custom-loss-gradient
+  "Note that prediction has a different format than truth."
+  [pred truth]
+  (let [formatted-prediction (format-prediction pred)
+        {:keys [weights ious one-hots]} (->weights formatted-prediction truth)
+        weighted-error       (->> (m/sub formatted-prediction truth) (m/emul weights))
+        gradient             (->gradient formatted-prediction weighted-error)]
+    {:pred formatted-prediction
+     :truth truth
+     :weights weights
+     :ious ious
+     :one-hots one-hots
+     :loss-gradient weighted-error
+     :gradient gradient}))
+
+
+(defn ct-coords!
   "Return x-y coords of upper left corner of box and lower right."
   [box-vec ul-vec br-vec]
   (let [wh-vec (ct/select box-vec :all (range 2 4))
@@ -82,14 +197,6 @@
     (ct/binary-op! ul-vec 1.0 xy-vec 1.0 br-vec :-)
     (ct/binary-op! br-vec 1.0 xy-vec 1.0 br-vec :+)))
 
-
-(defn br
-  "Return x-y coords of bottom corner of box"
-  [[x y w h]]
-  [(+ x (/ w 2)) (+ y (/ h 2))])
-
-(defn area [[x y]]
-  (* x y))
 
 (defn ct-sigmoid!
   [tens]
@@ -126,17 +233,6 @@
 (defn ct-sub!
   [a b]
   (ct/binary-op! a 1.0 a 1.0 b :-))
-
-(defn iou
-  "Calculates intersection over union of boxes b = [x y w h].
-  **Be sure that x,y and w,h are using the same distance units.**"
-  [b1 b2]
-  (let [UL (m/emap max (ul b1) (ul b2))
-        BR (m/emap min (br b1) (br b2))
-        intersection (area (map max (m/sub BR UL) [0 0]))
-        union (+ (area (drop 2 b1)) (area (drop 2 b2)) (- intersection))
-        result (if (< 0 union) (/ intersection union) 0)]
-    result))
 
 (defn area-ct
   [result wh-vec]
@@ -198,15 +294,6 @@
 
 
 
-(defn select-anchor
-  "Given the vector iou of iou-s with the different anchors, returns a one-hot encoded vector at the max value."
-  [iou]
-  (let [max-iou (m/emax iou)]
-    (if (< 0 max-iou)
-      (m/eq iou max-iou)
-      (m/zero-vector anchor-count))))
-
-
 (defn ct-one-hot-encode
   "Given the vector iou of iou-s with the different anchors, returns a one-hot encoded vector at the max value.
 If there are two equal max values then you will get a two-hot encoded vector."
@@ -232,42 +319,6 @@ If there are two equal max values then you will get a two-hot encoded vector."
         ct/to-double-array
         vec)))
 
-
-
-
-(defn ->weights [formatted-prediction truth]
-  (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
-        truth-selector (partial m/select truth :all :all :all)
-        pred-boxes (-> (formatted-pred-selector bb)
-                       (m/reshape [(* grid-x grid-y anchor-count) (count bb)]))
-        truth-boxes (-> (truth-selector bb)
-                        (m/reshape [(* grid-x grid-y anchor-count) (count bb)]))
-        ious (-> (map iou pred-boxes truth-boxes)
-                 ;; value at (+ (* i grid-x) j) is the vector of ious for each of the five anchors at cell (i,j)
-                 (m/reshape [(* grid-x grid-y) anchor-count]))
-
-        one-hots (map select-anchor ious)
-        D (-> one-hots
-              ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
-              (m/reshape [grid-x grid-y anchor-count])
-              ;; tensor on 1's to get shape [grid-x grid-y anchor-count output-count]
-              (m/outer-product (m/assign (m/new-vector output-count) 1.0)))
-        scale-vec-ob (->> (m/join
-                            (m/assign (m/zero-vector (count bb)) SCALE_COOR)
-                            (m/assign (m/zero-vector (count conf)) SCALE_CONF)
-                            (m/assign (m/zero-vector classes-count) SCALE_PROB))
-                          (m/broadcast-like formatted-prediction))
-        scale-vec-noob (->> (m/join
-                              (m/zero-vector (count bb))
-                              (m/assign (m/zero-vector (count conf)) SCALE_NOOB)
-                              (m/zero-vector classes-count))
-                            (m/broadcast-like formatted-prediction))
-        D     (m/add
-               (m/emul D scale-vec-ob)
-               (m/emul (m/sub 1 D) scale-vec-noob))]
-    {:ious ious
-     :one-hots one-hots
-     :weights D}))
 
 
 (defn ->weights-ct
@@ -307,20 +358,6 @@ If there are two equal max values then you will get a two-hot encoded vector."
      :weights D}))
 
 
-
-(defn format-prediction
-  [pred]
-  (let [pred-selector (partial m/select pred :all :all :all)
-        x-y-vals      (->> x-y pred-selector (m/emap sigmoid))
-        w-h-vals      (->> w-h pred-selector (m/emul grid-ratio) (m/exp) (m/emul anchors) (m/sqrt))
-        conf-vals     (->> conf pred-selector (m/emap sigmoid))
-        prob-vals     (-> (pred-selector class-dims)
-                          (m/reshape [(* grid-x grid-y anchor-count) classes-count])
-                          ((fn [v] (map softmax v)))
-                          (m/reshape [grid-x grid-y anchor-count classes-count]))]
-    (m/join-along 3 x-y-vals w-h-vals conf-vals prob-vals)))
-
-
 (defn format-prediction-ct!
   [pred]
   (let [ct-grid-ratio (ct/->tensor grid-ratio)
@@ -339,29 +376,6 @@ If there are two equal max values then you will get a two-hot encoded vector."
     pred))
 
 
-(defn ->gradient
-  "Calculates the gradient from a formatted prediction and a weighted error
-  (weighted error is of the form 'weights*(formatted-pred - truth)'"
-  [formatted-prediction weighted-error]
-  (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
-        we-selector   (partial m/select weighted-error :all :all :all)
-        x-y-grad      (->> x-y formatted-pred-selector (m/emap sigmoid-gradient))
-        w-h-grad      (->> w-h formatted-pred-selector (m/emul 0.5 grid-ratio))
-        conf-grad     (->> conf   formatted-pred-selector (m/emap sigmoid-gradient))
-        prob-grad     (-> (formatted-pred-selector class-dims)
-                          (m/reshape [(* grid-x grid-y anchor-count) classes-count])
-                          ((fn [v] (map softmax-gradient v))))
-        prob-vals     (-> (we-selector class-dims)
-                          (m/reshape [(* grid-x grid-y anchor-count) classes-count]))]
-    (m/emul 2
-            (m/join-along 3
-                          (m/emul (we-selector x-y) x-y-grad)
-                          (m/emul (we-selector w-h) w-h-grad)
-                          (m/emul (we-selector conf) conf-grad)
-                          (-> (map m/inner-product prob-grad prob-vals)
-                              (m/reshape [grid-x grid-y anchor-count classes-count]))))))
-
-
 (defn ct-sigmoid-gradient!
   [input-gradient output loss-gradient]
   (ct/activation-gradient! input-gradient loss-gradient output :logistic))
@@ -370,7 +384,6 @@ If there are two equal max values then you will get a two-hot encoded vector."
 (defn ct-wh-grad!
   [input-gradient output loss-gradient]
   (let [grid-ratio (ct/->tensor grid-ratio)]
-    ;;x = (a*x * b*y)
     (ct/binary-op! input-gradient 1.0 output 0.5 grid-ratio :*)
     (ct/binary-op! input-gradient 1.0 input-gradient 1.0 loss-gradient :*)))
 
@@ -417,22 +430,6 @@ If there are two equal max values then you will get a two-hot encoded vector."
     (ct-emul! 2.0 input-gradient)))
 
 
-(defn custom-loss-gradient
-  "Note that prediction has a different format than truth."
-  [pred truth]
-  (let [formatted-prediction (format-prediction pred)
-        {:keys [weights ious one-hots]} (->weights formatted-prediction truth)
-        weighted-error       (->> (m/sub formatted-prediction truth) (m/emul weights))
-        gradient             (->gradient formatted-prediction weighted-error)]
-    {:pred formatted-prediction
-     :truth truth
-     :weights weights
-     :ious ious
-     :one-hots one-hots
-     :loss-gradient weighted-error
-     :gradient gradient}))
-
-
 (defn ct-custom-loss-gradient
   [pred truth]
   (let [truth           (ct/->tensor (m/array truth))
@@ -469,7 +466,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
          ct-loss (-> (ct/binary-op! ct-formatted-prediction 1.0 ct-formatted-prediction 1.0 ct-truth :-)
                      (ct/binary-op! 1.0 ct-formatted-prediction 1.0 ct-formatted-prediction :*)
                      (ct/binary-op! 1.0 ct-formatted-prediction 1.0 weights-ct :*)
-                     ct/to-double-array
+                     cpu-tm/as-java-arras
                      m/esum)]
      {:corem-loss corem-loss
       :ct-loss ct-loss})))

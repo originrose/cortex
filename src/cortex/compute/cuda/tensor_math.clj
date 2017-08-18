@@ -6,7 +6,8 @@
             [cortex.compute.cpu.tensor-math :as cpu-tens-math]
             [cortex.compute.math-util :as cmu]
             [think.resource.core :as resource]
-            [cortex.tensor :as ct])
+            [cortex.tensor :as ct]
+            [cortex.tensor.dimensions :as ct-dims])
   (:import [cortex.compute.cuda.driver CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer SizeTPointer
             cublas cublas$cublasContext
@@ -197,7 +198,7 @@
 
 (defn- extend-2d-dimensions-to-4d
   [{:keys [shape strides]}]
-  (ct/when-not-error (= 2 (count shape))
+  (ct-dims/when-not-error (= 2 (count shape))
     "Extension only works on 2d shapes" {})
   (let [[batch-size elem-count] shape
         [batch-stride elem-stride] strides]
@@ -207,7 +208,7 @@
 
 (defn- extend-3d-dimensions-to-4d
   [{:keys [shape strides]}]
-  (ct/when-not-error (= 3 (count shape))
+  (ct-dims/when-not-error (= 3 (count shape))
     "Extension only works on 3d shapes" {})
   (let [[batch-size chan-count elem-count] shape
         [batch-stride chan-stride elem-stride] strides]
@@ -498,8 +499,8 @@
                                                 #(cuda-base/load-all-datatype-function
                                                   "tensor_unary_reduce"))
           ->dtype #(drv/dtype-cast % output-dtype)
-          input-col-len (int (last (ct/dimensions->shape input-dims)))
-          n-elems (int (ct/dimension-ecount output-dims))]
+          input-col-len (int (last (ct-dims/shape input-dims)))
+          n-elems (int (ct-dims/ecount output-dims))]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream reduce-fn n-elems 0]
                          [(cuda-base/->ptr output)]

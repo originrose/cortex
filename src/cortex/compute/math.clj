@@ -9,7 +9,8 @@
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
             [think.resource.core :as resource]
-            [cortex.tensor :as ct]))
+            [cortex.tensor :as ct]
+            [cortex.tensor.dimensions :as ct-dims]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -496,5 +497,5 @@ and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 ou
                      [1]
                      tens-shape)]
     (ct/construct-tensor (drv/current-device)
-                         (ct/dimensions tens-shape)
+                         (ct-dims/dimensions tens-shape)
                          (device-buffer ary))))

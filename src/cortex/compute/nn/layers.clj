@@ -20,6 +20,7 @@ implementation as possible."
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
+
 (defn first-buffer
   [buffer-vec]
   (get-in buffer-vec [0 :buffer]))
@@ -53,9 +54,7 @@ implementation as possible."
   (let [retval (math/array->cortex-tensor (math/as-2d-batch-matrix buffer))
         retval-shape (tensor/shape retval)]
     (if (< (count retval-shape) 2)
-      (assoc retval :dimensions (tensor/dimensions [1 (first retval-shape)]
-                                                   :stides (get-in retval
-                                                                   [:dimensions :strides])))
+      (tensor/in-place-reshape retval [1 (first retval-shape)])
       retval)))
 
 
@@ -65,12 +64,12 @@ or a faithful tensor of the math/array data.  This does no copy; just constructs
 a datastructure that shares the backing store."
   [buffer batch-count input-dimension spatial?]
   (let [retval (if spatial?
-                 (tensor/reinterpret-tensor
-                  (math/array->cortex-tensor buffer)
-                  (tensor/dimensions [batch-count
-                                      (get input-dimension :channels)
-                                      (* (long (get input-dimension :height))
-                                         (long (get input-dimension :width)))]))
+                 (-> (math/array->cortex-tensor buffer)
+                     (tensor/in-place-reshape
+                      [batch-count
+                       (get input-dimension :channels)
+                       (* (long (get input-dimension :height))
+                          (long (get input-dimension :width)))]))
                  (->simple-batch-tensor buffer))]
     retval))
 
@@ -143,8 +142,8 @@ a datastructure that shares the backing store."
         spatial? (and (= 1 channels)
                       (not= 1 (get (graph/node->input-dimension layer) :channels)))]
     (if (> channels 1)
-      (tensor/reinterpret-tensor (math/array->cortex-tensor math-ary)
-                                 (tensor/dimensions [(quot ary-ecount channels) channels]))
+      (tensor/in-place-reshape (math/array->cortex-tensor math-ary)
+                               [(quot ary-ecount channels) channels])
       (->batch-tensor math-ary (math/batch-size math-ary)
                       (graph/node->input-dimension layer) spatial?))))
 
@@ -291,11 +290,11 @@ and then forward many times for every parameter of the network."
 
 (defn- ->conv-tensor
   [dimensions batch-size io-buf]
-  (assoc (math/array->cortex-tensor io-buf)
-         :dimensions (tensor/dimensions
-                      [batch-size (get dimensions :channels)
-                       (get dimensions :height)
-                       (get dimensions :width)])))
+  (-> (math/array->cortex-tensor io-buf)
+      (tensor/in-place-reshape
+       [batch-size (get dimensions :channels)
+        (get dimensions :height)
+        (get dimensions :width)])))
 
 
 (defrecord ConvolutionLayer [backend layer conv-desc algorithms workspace]
@@ -307,8 +306,8 @@ and then forward many times for every parameter of the network."
             input (->conv-tensor (graph/node->input-dimension layer) batch-size (first-buffer input-buffers))
             weights (math/array->cortex-tensor (get-in parameter-buffers [:weights :buffer]))
             ;;Setup bias so it broadcasts correctly over the output
-            bias (assoc (math/array->cortex-tensor (get-in parameter-buffers [:bias :buffer]))
-                        :dimensions (tensor/dimensions [(get conv-desc :out-channels) 1 1]))]
+            bias (-> (math/array->cortex-tensor (get-in parameter-buffers [:bias :buffer]))
+                     (tensor/in-place-reshape [(get conv-desc :out-channels) 1 1]))]
         (m/assign! output bias)
         (tensor/convolution-forward! output 1.0 input weights workspace conv-desc algorithms))))
 
@@ -325,8 +324,8 @@ and then forward many times for every parameter of the network."
 
             weight-gradient (math/array->cortex-tensor (get-in parameter-buffers [:weights :gradient]))
             [_ out-chan out-height out-width] (m/shape output-gradient)
-            bias-gradient (assoc (math/array->cortex-tensor (get-in parameter-buffers [:bias :gradient]))
-                                 :dimensions (tensor/dimensions [out-chan 1 1]))]
+            bias-gradient (-> (math/array->cortex-tensor (get-in parameter-buffers [:bias :gradient]))
+                              (tensor/in-place-reshape [out-chan 1 1]))]
 
         (tensor/binary-op! bias-gradient 1.0 output-gradient 1.0 bias-gradient :+)
         (tensor/convolution-backward-weights! weight-gradient 0.0 output-gradient input
@@ -369,7 +368,7 @@ and then forward many times for every parameter of the network."
                                             spatial?)
             ->tensor #(cond-> (math/array->cortex-tensor %)
                         spatial?
-                        (assoc :dimensions (tensor/dimensions [n-channels 1])))
+                        (tensor/in-place-reshape [n-channels 1]))
 
             input (->batch-tensor (first-buffer input-buffers))
             output (->batch-tensor (first-buffer output-buffers))
@@ -392,7 +391,7 @@ and then forward many times for every parameter of the network."
                                             spatial?)
             ->tensor #(cond-> (math/array->cortex-tensor %)
                         spatial?
-                        (assoc :dimensions (tensor/dimensions [n-channels 1])))
+                        (tensor/in-place-reshape [n-channels 1]))
            input-gradient (->batch-tensor (first-gradient input-buffers))
            input (->batch-tensor (first-buffer input-buffers))
            output-gradient (->batch-tensor (first-gradient output-buffers))

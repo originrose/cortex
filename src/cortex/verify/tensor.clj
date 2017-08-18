@@ -82,8 +82,7 @@ for the cuda backend."
   [driver datatype]
   (tensor-context driver datatype
    (let [tens-a (ct/->tensor (partition 3 (partition 3 (range 18))))
-         tens-chan (assoc (ct/->tensor (range 3))
-                          :dimensions (ct/dimensions [3 1]))
+         tens-chan (ct/in-place-reshape (ct/->tensor (range 3)) [3 1])
          tens-result (ct/new-tensor [2 3 3])]
 
      (ct/binary-op! tens-result 1.0 tens-a 1.0 tens-chan :*)
@@ -181,8 +180,8 @@ for the cuda backend."
                                      (partition img-dim)
                                      (partition img-dim)
                                      (partition n-channels)))
-             test-vec (assoc (ct/new-tensor [n-channels])
-                             :dimensions (ct/dimensions [n-channels 1 1]))]
+             test-vec (-> (ct/new-tensor [n-channels])
+                          (ct/in-place-reshape [n-channels 1 1]))]
          ;;broadcasting summation
          (ct/binary-op! test-vec 1.0 test-vec 1.0 big-m :+)
          (is (m/equals sums
@@ -649,14 +648,14 @@ for the cuda backend."
          img-tensor (ct/->tensor
                      (->> (repeat (* img-dim img-dim) rgba)
                           (partition img-dim)))
-         mask-tensor (assoc (ct/->tensor [0xFF
-                                          (bit-shift-left 0xFF 8)
-                                          (bit-shift-left 0xFF 16)])
-                            :dimensions (ct/dimensions [3 1 1]))
-         div-tensor (assoc (ct/->tensor [1
-                                         (bit-shift-left 1 8)
-                                         (bit-shift-left 1 16)])
-                           :dimensions (ct/dimensions [3 1 1]))
+         mask-tensor (-> (ct/->tensor [0xFF
+                                       (bit-shift-left 0xFF 8)
+                                       (bit-shift-left 0xFF 16)])
+                         (ct/in-place-reshape [3 1 1]))
+         div-tensor (-> (ct/->tensor [1
+                                      (bit-shift-left 1 8)
+                                      (bit-shift-left 1 16)])
+                        (ct/in-place-reshape [3 1 1]))
          result (ct/new-tensor [3 img-dim img-dim])]
      (ct/binary-op! result 1.0 img-tensor 1.0 mask-tensor :bit-and)
      (ct/binary-op! result 1.0 result 1.0 div-tensor :/)
@@ -772,12 +771,11 @@ for the cuda backend."
          output-width (long output-width)
          output-height (long output-height)
          output (ct/new-tensor [batch-size num-out-channels output-height output-width])
-         output-gradient (assoc (ct/->tensor (repeat (* batch-size
-                                                        output-width output-height
-                                                        num-out-channels) 1))
-                                :dimensions
-                                (ct/dimensions [batch-size num-out-channels
-                                                output-height output-width]))
+         output-gradient (-> (ct/->tensor (repeat (* batch-size
+                                                     output-width output-height
+                                                     num-out-channels) 1))
+                             (ct/in-place-reshape [batch-size num-out-channels
+                                                   output-height output-width]))
          algorithms (ct/choose-convolution-algorithms conv-desc input-dim input-dim batch-size 1000)
          workspace (ct/new-tensor [(long (get algorithms :workspace-size))])
          weights (ct/->tensor (take num-out-channels
