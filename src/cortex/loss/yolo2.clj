@@ -257,8 +257,8 @@
         area-b2 (ct/new-tensor [num-box])
         union (ct/new-tensor [num-box])
         result (ct/new-tensor [num-box])
-        _ (coords-ct b1 b1-ul b1-br)
-        _ (coords-ct b2 b2-ul b2-br)
+        _ (ct-coords! b1 b1-ul b1-br)
+        _ (ct-coords! b2 b2-ul b2-br)
         UL (ct-max! b1-ul b2-ul)
         BR (ct-min! b1-br b2-br)
         overlap (-> (ct-sub! BR UL)
@@ -466,7 +466,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
          ct-loss (-> (ct/binary-op! ct-formatted-prediction 1.0 ct-formatted-prediction 1.0 ct-truth :-)
                      (ct/binary-op! 1.0 ct-formatted-prediction 1.0 ct-formatted-prediction :*)
                      (ct/binary-op! 1.0 ct-formatted-prediction 1.0 weights-ct :*)
-                     cpu-tm/as-java-arras
+                     cpu-tm/as-java-array
                      m/esum)]
      {:corem-loss corem-loss
       :ct-loss ct-loss})))
@@ -508,9 +508,10 @@ If there are two equal max values then you will get a two-hot encoded vector."
 (defn- test-gradient
   []
   (gpu-tm/tensor-context
-   (let [pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
-         truth (read-label)
-         corem-grad (custom-loss-gradient pred truth)
+   (let [batch-size 10
+         pred (repeat batch-size (m-rand/sample-uniform [grid-x grid-y anchor-count output-count]))
+         truth (repeat batch-size (read-label))
+         corem-grad (custom-loss-gradient (first pred) (first truth))
          ct-grad (ct-custom-loss-gradient pred truth)]
      (compare-large-vectors (:gradient corem-grad)
-                            (:gradient ct-grad)))))
+                            (:gradient (ct/select ct-grad 0 :all :all :all :all))))))
