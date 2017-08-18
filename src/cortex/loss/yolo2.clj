@@ -500,8 +500,8 @@ If there are two equal max values then you will get a two-hot encoded vector."
   (cpu-tm/tensor-context
    (let [pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
          truth (read-label)
-         loss (loss/loss {:type :yolo9000} {:labels truth
-                                            :output pred})]
+         loss (loss/loss {:type :yolo2} {:labels truth
+                                         :output pred})]
      loss)))
 
 
