@@ -338,16 +338,9 @@ to get correct as it needs to take into account changing strides and dense vs no
                                      :existing-info existing-info
                                      :rev-new-strides rev-new-strides
                                      :new-dim new-dim})
-                                  #_(println {:new-idx new-idx
-                                              :old-idx old-idx
-                                              :new-dim new-dim
-                                              :old-dim old-dim
-                                              :old-stride old-stride})
                                   (cond
                                     (= 1 new-dim)
                                     (do
-                                      #_(println (last rev-new-strides)
-                                                 (get reverse-shape (dec new-idx)))
                                       (recur (inc new-idx)
                                              old-idx
                                              new-shape
@@ -362,7 +355,7 @@ to get correct as it needs to take into account changing strides and dense vs no
                                              (conj rev-new-strides old-stride)))
                                     (< old-dim new-dim)
                                     ;;Due to minimization, this is always an error
-                                    (throw (ex-info "Cannot combine dimensions across non-packed boundaries"
+                                    (throw (ex-info "Cannot combine dimensions across padded boundaries"
                                                     {:old-dim old-dim
                                                      :new-dim new-dim}))
                                     (> old-dim new-dim)

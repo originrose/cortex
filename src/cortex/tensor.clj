@@ -420,6 +420,7 @@ as one expects.  This means actually 2 conditions are checked:
   [tensor]
   (m/as-vector (to-core-matrix tensor)))
 
+
 (defn ->tensor
   "Create a tensor from the data.  The shape of the data combined with the batch size
 will determine the shape of the outgoing tensor."
