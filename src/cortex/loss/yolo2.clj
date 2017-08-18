@@ -200,8 +200,7 @@
 
 (defn ct-sigmoid!
   [tens]
-  (let [tens (ct/as-2d-matrix tens)]
-    (ct/unary-op! tens 1.0 tens :logistic)))
+  (ct/unary-op! tens 1.0 tens :logistic))
 
 (defn ct-emul!
   [val tens]
@@ -221,8 +220,7 @@
 
 (defn ct-softmax!
   [tens]
-  (let [tens (ct/as-2d-matrix tens)]
-    (ct/softmax! tens tens)))
+  (ct/softmax! tens tens))
 
 (defn ct-max!
   [a b]
@@ -322,33 +320,44 @@ If there are two equal max values then you will get a two-hot encoded vector."
         vec)))
 
 
+(defn apply-selector
+  [item shp]
+  (let [shp-count (count (m/shape item))]
+    (-> (apply ct/select item (concat (repeat (- shp-count 1) :all)
+                                      [shp]))
+        ct/as-2d-matrix)))
+
+
 (defn make-selector
   [item]
   (fn [shp]
-    (ct/select item :all :all :all shp)))
+    (apply-selector item shp)))
 
 
 (defn ->weights-ct
   [formatted-prediction truth]
   (let [formatted-pred-selector (make-selector formatted-prediction)
+        pred-shape (m/shape formatted-prediction)
         truth-selector (make-selector truth)
-        pred-boxes (-> (formatted-pred-selector bb)
-                       (ct-reshape [(* grid-x grid-y anchor-count) (count bb)]))
-        truth-boxes (-> (truth-selector bb)
-                        (ct-reshape [(* grid-x grid-y anchor-count) (count bb)]))
+        pred-boxes (formatted-pred-selector bb)
+        truth-boxes (truth-selector bb)
+        num-ious (first (m/shape pred-boxes))
         ious (-> (iou-ct pred-boxes truth-boxes)
                  ;; value at (+ (* i grid-x) j) is the vector of ious for each of the five anchors at cell (i,j)
-                 (ct-reshape [(* grid-x grid-y) anchor-count]))
+                 (ct-reshape [(quot (long num-ious) (long anchor-count)) anchor-count]))
 
 
-        all-d (-> (ct/new-tensor (m/shape formatted-prediction)))
+        all-d (-> (ct/new-tensor (m/shape formatted-prediction))
+                  ct/as-2d-matrix)
         one-hots (-> (ct-one-hot-encode (m/assign! (ct/new-tensor (m/shape ious)) ious))
-                     ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
-                     (ct-reshape [grid-x grid-y anchor-count 1]))
+                     ;;Flatten out so broadcasting will apply correctly
+                     (ct/in-place-reshape [num-ious 1]))
 
         D (ct/assign! all-d one-hots)
         one-minus-one-hots (ct/binary-op! (ct/new-tensor (m/shape one-hots)) 1.0 1 1.0 one-hots :-)
-        one-minus-d (ct/assign! (ct/new-tensor (m/shape formatted-prediction)) one-minus-one-hots)
+        one-minus-d (ct/assign! (-> (ct/new-tensor (m/shape formatted-prediction))
+                                    ct/as-2d-matrix)
+                                one-minus-one-hots)
         scale-vec-ob (-> (ct/->tensor (concat (repeat (count bb) SCALE_COOR)
                                               (repeat (count conf) SCALE_CONF)
                                               (repeat classes-count SCALE_PROB))))
@@ -360,7 +369,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
     (ct/binary-op! D 1.0 D 1.0 one-minus-d :+)
     {:ious ious
      :one-hots one-hots
-     :weights D}))
+     :weights (ct/in-place-reshape D (m/shape formatted-prediction))}))
 
 
 (defn format-prediction-ct!
