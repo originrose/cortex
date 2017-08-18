@@ -272,23 +272,23 @@ b. Combine densely-packed dimensions (not as simple)."
   [dimensions]
   (let [stripped (->> (mapv vector (:shape dimensions) (:strides dimensions))
                       (remove (fn [[shp str]]
-                                (= 1 (long shp)))))
-        reverse-stripped (reverse stripped)
-        reverse-stripped (reduce (fn [reverse-stripped [[cur-shp cur-stride]
-                                                        [last-shp last-stride]]]
-                                   (if (= (long cur-stride)
-                                          (* (long last-shp) (long last-stride)))
-                                     (let [[str-shp str-str] (last reverse-stripped)]
-                                       (vec (concat (drop-last reverse-stripped)
-                                                    [[(* (long str-shp) (long cur-shp)) str-str]])))
-                                     (conj reverse-stripped [cur-shp cur-stride])))
-                                 [(first reverse-stripped)]
-                                 (map vector (rest reverse-stripped) reverse-stripped))
-        stripped (reversev reverse-stripped)]
+                                (= 1 (long shp)))))]
     (if (= 0 (count stripped))
       {:shape [1] :strides [1]}
-      {:shape (mapv first stripped)
-       :strides (mapv second stripped)})))
+      (let [reverse-stripped (reverse stripped)
+            reverse-stripped (reduce (fn [reverse-stripped [[cur-shp cur-stride]
+                                                            [last-shp last-stride]]]
+                                       (if (= (long cur-stride)
+                                              (* (long last-shp) (long last-stride)))
+                                         (let [[str-shp str-str] (last reverse-stripped)]
+                                           (vec (concat (drop-last reverse-stripped)
+                                                        [[(* (long str-shp) (long cur-shp)) str-str]])))
+                                         (conj reverse-stripped [cur-shp cur-stride])))
+                                     [(first reverse-stripped)]
+                                     (map vector (rest reverse-stripped) reverse-stripped))
+            stripped (reversev reverse-stripped)]
+       {:shape (mapv first stripped)
+        :strides (mapv second stripped)}))))
 
 
 (defn in-place-reshape

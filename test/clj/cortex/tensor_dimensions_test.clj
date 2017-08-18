@@ -41,8 +41,11 @@
          (ct-dims/in-place-reshape
           {:shape [10 1 18 2] :strides [36 36 2 1]}
           [10 4 9])))
-
   (is (= {:shape [845 1] :strides [25 1]}
          (ct-dims/in-place-reshape
           {:shape [13 13 5 1], :strides [1625 125 25 1]}
-          [845 1]))))
+          [845 1])))
+  (is (= {:shape [1 1] :strides [1 1]}
+         (ct-dims/in-place-reshape
+          {:shape [1], :strides [1]}
+          [1 1]))))
