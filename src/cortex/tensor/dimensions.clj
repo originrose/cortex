@@ -265,6 +265,32 @@ to be reversed for the most efficient implementation."
      :dimensions (mapv #(hash-map :shape %1 :strides %2) shapes strides)}))
 
 
+(defn minimize
+  "Make the dimensions of smaller rank by doing some minimization -
+a. If the dimension is 1, strip it and associated stride.
+b. Combine densely-packed dimensions (not as simple)."
+  [dimensions]
+  (let [stripped (->> (mapv vector (:shape dimensions) (:strides dimensions))
+                      (remove (fn [[shp str]]
+                                (= 1 (long shp)))))
+        reverse-stripped (reverse stripped)
+        reverse-stripped (reduce (fn [reverse-stripped [[cur-shp cur-stride]
+                                                        [last-shp last-stride]]]
+                                   (if (= (long cur-stride)
+                                          (* (long last-shp) (long last-stride)))
+                                     (let [[str-shp str-str] (last reverse-stripped)]
+                                       (vec (concat (drop-last reverse-stripped)
+                                                    [[(* (long str-shp) (long cur-shp)) str-str]])))
+                                     (conj reverse-stripped [cur-shp cur-stride])))
+                                 [(first reverse-stripped)]
+                                 (map vector (rest reverse-stripped) reverse-stripped))
+        stripped (reversev reverse-stripped)]
+    (if (= 0 (count stripped))
+      {:shape [1] :strides [1]}
+      {:shape (mapv first stripped)
+       :strides (mapv second stripped)})))
+
+
 (defn in-place-reshape
   "Return new dimensions that correspond to an in-place reshape.  This is a very difficult algorithm
 to get correct as it needs to take into account changing strides and dense vs non-dense dimensions."
@@ -281,23 +307,14 @@ to get correct as it needs to take into account changing strides and dense vs no
       {:shape shape
        :strides (extend-strides shape [])}
       (access-increasing? existing-dims)
-      (let [existing-rev-shape (reversev (get existing-dims :shape))
+      (let [existing-dims (minimize existing-dims)
+            existing-rev-shape (reversev (get existing-dims :shape))
             existing-rev-strides (reversev (get existing-dims :strides))
             ;;Find out where there are is padding added.  We cannot combine
             ;;indexes across non-packed boundaries.
-            existing-rev-packed? (vec
-                                  (concat [(= 1 (long (first existing-rev-strides)))]
-                                          (mapv (fn [cur-stride prev-shape prev-stride]
-                                                  (= (long cur-stride)
-                                                     (* (long prev-shape)
-                                                        (long prev-stride))))
-                                                (drop 1 existing-rev-strides)
-                                                existing-rev-shape
-                                                existing-rev-strides)))
             existing-info (mapv vector
                                 existing-rev-shape
-                                existing-rev-strides
-                                existing-rev-packed?)
+                                existing-rev-strides)
             new-shape-count (count shape)
             old-shape-count (count existing-info)
             max-old-idx (- old-shape-count 1)
@@ -344,17 +361,10 @@ to get correct as it needs to take into account changing strides and dense vs no
                                       (recur (inc new-idx) (inc old-idx) new-shape existing-info
                                              (conj rev-new-strides old-stride)))
                                     (< old-dim new-dim)
-                                    (do (when-not-error (= 0 (rem new-dim old-dim))
-                                          "Old dimension not commensurate with new dimensions"
-                                          {:old-dim old-dim
-                                           :new-dim new-dim})
-                                        (recur new-idx (inc old-idx)
-                                               (assoc new-shape
-                                                      new-idx
-                                                      (quot (long new-dim) (long old-dim)))
-                                               ;;Carry original stride forward
-                                               (assoc-in existing-info [(inc old-idx) 1] old-stride)
-                                               rev-new-strides))
+                                    ;;Due to minimization, this is always an error
+                                    (throw (ex-info "Cannot combine dimensions across non-packed boundaries"
+                                                    {:old-dim old-dim
+                                                     :new-dim new-dim}))
                                     (> old-dim new-dim)
                                     (do
                                       (when-not-error (= 0 (rem old-dim new-dim))
@@ -364,8 +374,7 @@ to get correct as it needs to take into account changing strides and dense vs no
                                       (recur (inc new-idx) old-idx
                                              new-shape
                                              (assoc existing-info old-idx [(quot old-dim new-dim)
-                                                                           (* old-stride new-dim)
-                                                                           old-packed?])
+                                                                           (* old-stride new-dim)])
                                              (conj rev-new-strides old-stride)))))
                                 rev-new-strides))]
         {:shape shape

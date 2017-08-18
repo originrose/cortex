@@ -200,7 +200,8 @@
 
 (defn ct-sigmoid!
   [tens]
-  (ct/unary-op! tens 1.0 tens :logistic))
+  (let [tens (ct/as-2d-matrix tens)]
+    (ct/unary-op! tens 1.0 tens :logistic)))
 
 (defn ct-emul!
   [val tens]
@@ -220,7 +221,8 @@
 
 (defn ct-softmax!
   [tens]
-  (ct/softmax! tens tens))
+  (let [tens (ct/as-2d-matrix tens)]
+    (ct/softmax! tens tens)))
 
 (defn ct-max!
   [a b]
@@ -320,11 +322,16 @@ If there are two equal max values then you will get a two-hot encoded vector."
         vec)))
 
 
+(defn make-selector
+  [item]
+  (fn [shp]
+    (ct/select item :all :all :all shp)))
+
 
 (defn ->weights-ct
   [formatted-prediction truth]
-  (let [formatted-pred-selector (partial ct/select formatted-prediction :all :all :all)
-        truth-selector (partial ct/select truth :all :all :all)
+  (let [formatted-pred-selector (make-selector formatted-prediction)
+        truth-selector (make-selector truth)
         pred-boxes (-> (formatted-pred-selector bb)
                        (ct-reshape [(* grid-x grid-y anchor-count) (count bb)]))
         truth-boxes (-> (truth-selector bb)
@@ -344,12 +351,10 @@ If there are two equal max values then you will get a two-hot encoded vector."
         one-minus-d (ct/assign! (ct/new-tensor (m/shape formatted-prediction)) one-minus-one-hots)
         scale-vec-ob (-> (ct/->tensor (concat (repeat (count bb) SCALE_COOR)
                                               (repeat (count conf) SCALE_CONF)
-                                              (repeat classes-count SCALE_PROB)))
-                         (ct/in-place-reshape [1 1 1 output-count]))
+                                              (repeat classes-count SCALE_PROB))))
         scale-vec-noob (-> (ct/->tensor (concat (repeat (count bb) 0)
                                                 (repeat (count conf) SCALE_NOOB)
-                                                (repeat classes-count 0)))
-                           (ct-reshape [1 1 1 output-count]))]
+                                                (repeat classes-count 0))))]
     (ct/binary-op! D 1.0 D 1.0 scale-vec-ob :*)
     (ct/binary-op! one-minus-d 1.0 one-minus-d 1.0 scale-vec-noob :*)
     (ct/binary-op! D 1.0 D 1.0 one-minus-d :+)
@@ -362,7 +367,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
   [pred]
   (let [ct-grid-ratio (ct/->tensor grid-ratio)
         ct-anchors (ct/->tensor anchors)
-        pred-selector (partial ct/select pred :all :all :all :all)]
+        pred-selector (make-selector pred)]
     ;;x-y-vals
     (->> x-y pred-selector ct-sigmoid!)
     ;;w-h-vals
@@ -370,9 +375,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
     ;;conf-vals
     (->> conf pred-selector ct-sigmoid!)
     ;;prob-vals
-    (-> (pred-selector class-dims)
-        (ct-reshape [(* grid-x grid-y anchor-count) classes-count])
-        ct-softmax!)
+    (->> (pred-selector class-dims) ct-softmax!)
     pred))
 
 
@@ -408,9 +411,9 @@ If there are two equal max values then you will get a two-hot encoded vector."
   (weighted error is of the form 'weights*(formatted-pred - truth)'"
   [formatted-prediction loss-gradient]
   (let [input-gradient (ct/new-tensor (m/shape formatted-prediction))
-        formatted-pred-selector (partial ct/select formatted-prediction :all :all :all)
-        lg-selector   (partial ct/select loss-gradient :all :all :all)
-        ig-selector   (partial ct/select input-gradient :all :all :all)]
+        formatted-pred-selector (make-selector formatted-prediction)
+        lg-selector   (make-selector loss-gradient)
+        ig-selector   (make-selector input-gradient)]
     ;;x-y-grad
     (ct-sigmoid-gradient! (ig-selector x-y)
                           (formatted-pred-selector x-y)
@@ -509,9 +512,9 @@ If there are two equal max values then you will get a two-hot encoded vector."
   []
   (gpu-tm/tensor-context
    (let [batch-size 10
-         pred (repeat batch-size (m-rand/sample-uniform [grid-x grid-y anchor-count output-count]))
-         truth (repeat batch-size (read-label))
-         corem-grad (custom-loss-gradient (first pred) (first truth))
+         pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
+         truth (read-label)
+         corem-grad (custom-loss-gradient pred truth)
          ct-grad (ct-custom-loss-gradient pred truth)]
      (compare-large-vectors (:gradient corem-grad)
-                            (:gradient (ct/select ct-grad 0 :all :all :all :all))))))
+                            (:gradient ct-grad)))))
