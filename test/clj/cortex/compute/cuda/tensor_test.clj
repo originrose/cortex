@@ -28,7 +28,7 @@
 
 
 (def-cas-dtype-test unary-op
-  (verify-tensor/unary-op (create-driver) :int))
+  (verify-tensor/unary-op (create-driver) *datatype*))
 
 
 (def-cas-dtype-test binary-constant-op
@@ -77,6 +77,10 @@
 
 (def-all-dtype-test ternary-op-select
   (verify-tensor/ternary-op-select (create-driver) *datatype*))
+
+
+(def-all-dtype-test unary-reduce
+  (verify-tensor/unary-reduce (create-driver) *datatype*))
 
 
 (def-double-float-test convolution-operator

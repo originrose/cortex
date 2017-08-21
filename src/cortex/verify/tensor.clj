@@ -65,15 +65,24 @@ for the cuda backend."
                    (ct/to-double-array tens-b)))
      (ct/unary-op! tens-b 1.0 tens-b :-)
      (is (m/equals (mapv #(- (Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype)))) (range 9))
-                   (ct/to-double-array tens-b))))))
+                   (ct/to-double-array tens-b)))
+
+     (let [src-data [0 1 2 3 4]
+           tens-src (ct/->tensor src-data)
+           tens-b (ct/->tensor src-data)]
+       (ct/unary-op! tens-b 1.0 tens-src :exp)
+       (is (m/equals (mapv #(drv/dtype-cast (Math/exp (double %)) datatype) src-data)
+                     (ct/to-double-array tens-b)))
+       (ct/unary-op! tens-b 1.0 tens-src :sqrt)
+       (is (m/equals (mapv #(drv/dtype-cast (Math/sqrt (double %)) datatype) src-data)
+                     (ct/to-double-array tens-b)))))))
 
 
 (defn channel-op
   [driver datatype]
   (tensor-context driver datatype
    (let [tens-a (ct/->tensor (partition 3 (partition 3 (range 18))))
-         tens-chan (assoc (ct/->tensor (range 3))
-                          :dimensions (ct/dimensions [3 1]))
+         tens-chan (ct/in-place-reshape (ct/->tensor (range 3)) [3 1])
          tens-result (ct/new-tensor [2 3 3])]
 
      (ct/binary-op! tens-result 1.0 tens-a 1.0 tens-chan :*)
@@ -171,13 +180,21 @@ for the cuda backend."
                                      (partition img-dim)
                                      (partition img-dim)
                                      (partition n-channels)))
-             test-vec (assoc (ct/new-tensor [n-channels])
-                             :dimensions (ct/dimensions [n-channels 1 1]))]
+             test-vec (-> (ct/new-tensor [n-channels])
+                          (ct/in-place-reshape [n-channels 1 1]))]
          ;;broadcasting summation
          (ct/binary-op! test-vec 1.0 test-vec 1.0 big-m :+)
          (is (m/equals sums
                        (ct/to-double-array test-vec)
-                       1e-4)))))))
+                       1e-4)))))
+   (let [tens-a (ct/->tensor (repeat 4 (partition 3 (range 9))))
+         result (ct/new-tensor (m/shape tens-a))]
+     (ct/binary-op! result 1.0 tens-a 1.0 5 :eq)
+     (is (m/equals (mapv #(if (= (long %) 5)
+                            1
+                            0)
+                         (ct/to-double-array tens-a))
+                   (ct/to-double-array result))))))
 
 
 (defn gemm
@@ -539,7 +556,16 @@ for the cuda backend."
                           flatten
                           vec)
                      (ct/to-double-array output)
-                     1e-4)))))
+                     1e-4)))
+   ;;Some loss terms want to use softmax with strides that aren't contiguous
+   (let [pred-matrix (ct/->tensor (repeat 5 (range 10)))
+         sel-pred-matr (ct/select pred-matrix :all (range 2 10))
+         test-tensor (ct/->tensor (range 2 10))
+         answer (ct/softmax! test-tensor test-tensor)]
+     (ct/softmax! sel-pred-matr sel-pred-matr)
+     (is (m/equals (flatten (repeat 5 (concat [0 1]
+                                              (ct/to-double-array answer))))
+                   (ct/to-double-array pred-matrix))))))
 
 
 (defn ternary-op-select
@@ -564,6 +590,26 @@ for the cuda backend."
                    (ct/to-double-array dest)))
      (ct/ternary-op! dest 1 x-arg 1.0 -1 3.0 2.0 :select)
      (is (m/equals [-1 -1 -1 -1 -1 6 6 6 6 6]
+                   (ct/to-double-array dest))))))
+
+
+(defn unary-reduce
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [dest (ct/new-tensor [10 1])
+         src-data [0 3 5 2 1 9 5 7 7 2]
+         src (ct/->tensor (repeat 10 src-data))]
+     (ct/unary-reduce! dest 2.0 src :max)
+     (is (m/equals (repeat 10 18)
+                   (ct/to-double-array dest)))
+     (ct/unary-reduce! dest 1.0 src :sum)
+     (is (m/equals (repeat 10 (apply + src-data))
+                   (ct/to-double-array dest)))
+     (ct/unary-reduce! dest 1.0 src :mean)
+     (is (m/equals (repeat 10 (drv/dtype-cast (/ (apply + src-data)
+                                                 (count src-data))
+                                              datatype))
                    (ct/to-double-array dest))))))
 
 
@@ -602,14 +648,14 @@ for the cuda backend."
          img-tensor (ct/->tensor
                      (->> (repeat (* img-dim img-dim) rgba)
                           (partition img-dim)))
-         mask-tensor (assoc (ct/->tensor [0xFF
-                                          (bit-shift-left 0xFF 8)
-                                          (bit-shift-left 0xFF 16)])
-                            :dimensions (ct/dimensions [3 1 1]))
-         div-tensor (assoc (ct/->tensor [1
-                                         (bit-shift-left 1 8)
-                                         (bit-shift-left 1 16)])
-                           :dimensions (ct/dimensions [3 1 1]))
+         mask-tensor (-> (ct/->tensor [0xFF
+                                       (bit-shift-left 0xFF 8)
+                                       (bit-shift-left 0xFF 16)])
+                         (ct/in-place-reshape [3 1 1]))
+         div-tensor (-> (ct/->tensor [1
+                                      (bit-shift-left 1 8)
+                                      (bit-shift-left 1 16)])
+                        (ct/in-place-reshape [3 1 1]))
          result (ct/new-tensor [3 img-dim img-dim])]
      (ct/binary-op! result 1.0 img-tensor 1.0 mask-tensor :bit-and)
      (ct/binary-op! result 1.0 result 1.0 div-tensor :/)
@@ -725,12 +771,11 @@ for the cuda backend."
          output-width (long output-width)
          output-height (long output-height)
          output (ct/new-tensor [batch-size num-out-channels output-height output-width])
-         output-gradient (assoc (ct/->tensor (repeat (* batch-size
-                                                        output-width output-height
-                                                        num-out-channels) 1))
-                                :dimensions
-                                (ct/dimensions [batch-size num-out-channels
-                                                output-height output-width]))
+         output-gradient (-> (ct/->tensor (repeat (* batch-size
+                                                     output-width output-height
+                                                     num-out-channels) 1))
+                             (ct/in-place-reshape [batch-size num-out-channels
+                                                   output-height output-width]))
          algorithms (ct/choose-convolution-algorithms conv-desc input-dim input-dim batch-size 1000)
          workspace (ct/new-tensor [(long (get algorithms :workspace-size))])
          weights (ct/->tensor (take num-out-channels

@@ -38,3 +38,6 @@
 
 (deftest censor-gradient
   (gradient/censor-gradient (create-context)))
+
+(deftest yolo-gradient
+  (gradient/yolo-gradient (create-context)))

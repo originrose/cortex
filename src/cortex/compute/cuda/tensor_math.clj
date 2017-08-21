@@ -5,7 +5,9 @@
             [cortex.compute.driver :as drv]
             [cortex.compute.cpu.tensor-math :as cpu-tens-math]
             [cortex.compute.math-util :as cmu]
-            [think.resource.core :as resource])
+            [think.resource.core :as resource]
+            [cortex.tensor :as ct]
+            [cortex.tensor.dimensions :as ct-dims])
   (:import [cortex.compute.cuda.driver CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer SizeTPointer
             cublas cublas$cublasContext
@@ -42,7 +44,8 @@
            :/ 3
            :min 4
            :max 5
-           :bit-and 6))])
+           :bit-and 6
+           :eq 7))])
   ([operation rev-ops?]
    (conj (operation->cuda operation)
          (int (if rev-ops? 1 0)))))
@@ -56,7 +59,10 @@
      :round (int 2)
      :- (int 3)
      :tanh (int 4)
-     :logistic (int 5))])
+     :logistic (int 5)
+     :exp (int 6)
+     :sqrt (int 7)
+     :noop (int 8))])
 
 
 (defn- ternary-op->cuda
@@ -188,6 +194,26 @@
   [arg-order]
   (->> (cpu-tens-math/arg-order->indexes arg-order)
        (mapv #(byte %))))
+
+
+(defn- extend-2d-dimensions-to-4d
+  [{:keys [shape strides]}]
+  (ct-dims/when-not-error (= 2 (count shape))
+    "Extension only works on 2d shapes" {})
+  (let [[batch-size elem-count] shape
+        [batch-stride elem-stride] strides]
+    {:shape [batch-size 1 1 elem-count]
+     :strides [batch-stride batch-stride batch-stride elem-stride]}))
+
+
+(defn- extend-3d-dimensions-to-4d
+  [{:keys [shape strides]}]
+  (ct-dims/when-not-error (= 3 (count shape))
+    "Extension only works on 3d shapes" {})
+  (let [[batch-size chan-count elem-count] shape
+        [batch-stride chan-stride elem-stride] strides]
+    {:shape [batch-size chan-count 1 elem-count]
+     :strides [batch-stride chan-stride chan-stride elem-stride]}))
 
 
 (defrecord ConvDesc [^cudnn$cudnnConvolutionStruct conv-desc
@@ -463,6 +489,32 @@
                          [n-elems])
                  vec))))
 
+  (unary-reduce! [stream
+                  output output-dims
+                  input-alpha input input-dims
+                  op]
+    (let [output-dtype (dtype/get-datatype output)
+          reduce-fn (cuda-base/get-or-create-fn stream :tensor-unary-reduce
+                                                output-dtype
+                                                #(cuda-base/load-all-datatype-function
+                                                  "tensor_unary_reduce"))
+          ->dtype #(drv/dtype-cast % output-dtype)
+          input-col-len (int (last (ct-dims/shape input-dims)))
+          n-elems (int (ct-dims/ecount output-dims))]
+      (apply cuda-base/launch-linear-kernel
+             (-> (concat [stream reduce-fn n-elems 0]
+                         [(cuda-base/->ptr output)]
+                         (dimensions->cuda output-dims)
+                         [(cuda-base/->ptr input)]
+                         (dimensions->cuda input-dims)
+                         [(->dtype input-alpha)]
+                         [(condp = op
+                             :max (int 0)
+                             :min (int 1)
+                             :sum (int 2)
+                             :mean (int 3)) input-col-len n-elems])
+                 vec))))
+
   (gemm! [stream
           C c-colstride
           trans-a? trans-b? alpha
@@ -674,38 +726,57 @@
            (->ptr batch-variances)))))))
 
   (activation-gradient! [stream
-                         input-gradient
-                         output-gradient
-                         output
+                         input-gradient input-grad-dims
+                         output-gradient output-grad-dims
+                         output output-dims
                          op
                          element-count]
     (resource/with-resource-context
       (let [datatype (dtype/get-datatype input-gradient)
-            tensor (cuda-base/tensor datatype 1 1 1 element-count)]
+            in-grad-tens (cuda-base/tensor-with-strides datatype
+                                                        (:shape input-grad-dims)
+                                                        (:strides input-grad-dims))
+            out-grad-tens (if (= output-grad-dims input-grad-dims)
+                            in-grad-tens
+                            (cuda-base/tensor-with-strides datatype
+                                                           (:shape output-grad-dims)
+                                                           (:strides output-grad-dims)))
+            output-tens (cond
+                          (= output-dims output-grad-dims)
+                          out-grad-tens
+                          (= output-dims input-grad-dims)
+                          in-grad-tens
+                          :else
+                          (cuda-base/tensor-with-strides datatype
+                                                         (:shape output-dims)
+                                                         (:strides output-dims)))]
         (cuda-base/cudnn-with-stream
          stream
          (cuda-base/cudnn-call
           (cudnn/cudnnActivationBackward cudnn-context
                                          (act-type->cudnn op)
                                          (value->ptr 1 datatype)
-                                         tensor
+                                         output-tens
                                          (->ptr output)
-                                         tensor
+                                         out-grad-tens
                                          (->ptr output-gradient)
-                                         tensor
+                                         output-tens
                                          (->ptr output)
                                          (value->ptr 0 datatype)
-                                         tensor
+                                         in-grad-tens
                                          (->ptr input-gradient)))))))
-  
+
   (softmax-eltwise! [stream
-                     output
-                     input
-                     batch-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (resource/with-resource-context
       (let [datatype (dtype/get-datatype output)
-            tensor (cuda-base/tensor datatype batch-count 1 1 element-count)]
+            output-dims (extend-2d-dimensions-to-4d output-dims)
+            input-dims (extend-2d-dimensions-to-4d input-dims)
+            out-tensor (cuda-base/tensor-with-strides datatype (:shape output-dims) (:strides output-dims))
+            in-tensor (if-not (= output-dims input-dims)
+                        (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
+                        out-tensor)]
         (cuda-base/cudnn-with-stream
          stream
          (cuda-base/cudnn-call
@@ -713,21 +784,23 @@
                                      cudnn/CUDNN_SOFTMAX_ACCURATE
                                      cudnn/CUDNN_SOFTMAX_MODE_INSTANCE
                                      (value->ptr 1 datatype)
-                                     tensor
+                                     in-tensor
                                      (->ptr input)
                                      (value->ptr 0 datatype)
-                                     tensor
+                                     out-tensor
                                      (->ptr output)))))))
 
   (softmax-spatial! [stream
-                     output
-                     input
-                     batch-count
-                     channel-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (resource/with-resource-context
       (let [datatype (dtype/get-datatype output)
-            tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)]
+            output-dims (extend-3d-dimensions-to-4d output-dims)
+            input-dims (extend-3d-dimensions-to-4d input-dims)
+            out-tensor (cuda-base/tensor-with-strides datatype (:shape output-dims) (:strides output-dims))
+            in-tensor (if-not (= output-dims input-dims)
+                        (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
+                        out-tensor)]
         (cuda-base/cudnn-with-stream
          stream
          (cuda-base/cudnn-call
@@ -735,10 +808,10 @@
                                      cudnn/CUDNN_SOFTMAX_ACCURATE
                                      cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
                                      (value->ptr 1 datatype)
-                                     tensor
+                                     in-tensor
                                      (->ptr input)
                                      (value->ptr 0 datatype)
-                                     tensor
+                                     out-tensor
                                      (->ptr output)))))))
 
   (convolution-descriptor [stream
@@ -969,3 +1042,13 @@
            (value->ptr input-gradient-alpha datatype)
            input-tensor
            (->ptr input-gradient))))))))
+
+
+(defmacro tensor-context
+  [& body]
+  `(resource/with-resource-context
+     (first (drv/with-compute-device
+              (drv/default-device (cuda-base/driver))
+              (with-bindings {#'ct/*stream* (drv/create-stream)
+                              #'ct/*datatype* :float}
+                ~@body)))))

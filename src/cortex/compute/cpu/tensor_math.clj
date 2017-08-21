@@ -11,6 +11,7 @@
             [cortex.compute.driver :as drv]
             [think.resource.core :as resource]
             [cortex.tensor :as ct]
+            [cortex.tensor.dimensions :as ct-dims]
             [cortex.nn.impl :as impl])
   (:import [cortex.compute.cpu.driver CPUStream]
            [com.github.fommil.netlib BLAS]
@@ -30,12 +31,12 @@
 (defrecord ElemIdxToAddr [^ints rev-shape ^ints rev-strides ^ints rev-max-shape]
   ElemIdxToAddressFunction
   (^long idx_to_address [this ^long arg]
-   (ct/elem-idx->addr-ary rev-shape rev-strides rev-max-shape arg)))
+   (ct-dims/elem-idx->addr-ary rev-shape rev-strides rev-max-shape arg)))
 
 
 (defn ^:private get-elem-dims->address
   ^ElemIdxToAddressFunction [dims max-shape]
-  (let [{:keys [reverse-shape reverse-strides]} (ct/dimension->reverse-data dims max-shape)]
+  (let [{:keys [reverse-shape reverse-strides]} (ct-dims/->reverse-data dims max-shape)]
     (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
                      (int-array (vec (reverse max-shape))))))
 
@@ -55,10 +56,8 @@
 
 
 (def ^:private assign-constant-map
-  (memoize
-   (fn []
-     (->> (marshal/array-view-iterator assign-constant-impl)
-          (into {})))))
+  (->> (marshal/array-view-iterator assign-constant-impl)
+       (into {})))
 
 
 (defmacro ^:private datatype->view-cast-fn
@@ -102,7 +101,7 @@
 
 (defn max-shape-from-dimensions
   [& args]
-  (-> (apply ct/dimension-seq->max-shape args)
+  (-> (apply ct-dims/dimension-seq->max-shape args)
       :max-shape))
 
 
@@ -133,13 +132,8 @@
 
 
 (def ^:private assign!-map
-  (memoize
-   (fn []
-     (->> (generate-all-marshalling-assign-fns)
-          (into {})))))
-
-(def ^:private unary-operations
-  [:floor :ceil :round :- :tanh :logistic])
+  (->> (generate-all-marshalling-assign-fns)
+       (into {})))
 
 
 (defmacro ^:private perform-unary-op-impl
@@ -151,7 +145,10 @@
     :- `(- ~x)
     :tanh `(Math/tanh (double ~x))
     :logistic `(/ 1.0
-                  (+ 1.0 (Math/exp (- ~x))))))
+                  (+ 1.0 (Math/exp (- ~x))))
+    :exp `(Math/exp (double ~x))
+    :sqrt `(Math/sqrt (double ~x))
+    :noop `(double ~x)))
 
 
 (defmacro ^:private unary-accum!-impl
@@ -196,7 +193,7 @@
 (defmacro unary-op-table-impl
   []
   (->> (for [dtype dtype/datatypes
-             op unary-operations]
+             op ct/unary-operations]
          [[dtype op] {:unary-accum! `(unary-accum!-impl ~dtype ~op)
                       :unary-op! `(unary-op!-impl ~dtype ~op)}])
        (into {})))
@@ -204,10 +201,6 @@
 
 (def ^:private unary-op-table
   (unary-op-table-impl))
-
-
-(def ^:private operations
-  [:+ :- :* :/ :max :min :bit-and])
 
 
 (defmacro ^:private perform-operation-impl
@@ -220,7 +213,10 @@
     ;;Math/max and friends aren't defined for all primitives leading to reflection warnings.
     :max `(if (> ~x ~y) ~x ~y)
     :min `(if (> ~x ~y) ~y ~x)
-    :bit-and `(bit-and (unchecked-int ~x) (unchecked-int ~y))))
+    :bit-and `(bit-and (unchecked-int ~x) (unchecked-int ~y))
+    :eq `(if (= ~x ~y)
+           1
+           0)))
 
 
 (defmacro ^:private perform-op-rev-ops
@@ -253,16 +249,14 @@
 (defmacro binary-accum-constant-table
   []
   (->> (for [dtype dtype/datatypes
-             op operations
+             op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-accum-constant!-impl ~dtype ~op ~rev-ops?)])
        (into {})))
 
 
 (def ^:private binary-accum-constant-table
-  (memoize
-   (fn []
-     (binary-accum-constant-table))))
+  (binary-accum-constant-table))
 
 
 (defmacro ^:private binary-op-constant!-impl
@@ -294,16 +288,14 @@
 (defmacro binary-op-constant-table
   []
   (->> (for [dtype dtype/datatypes
-             op operations
+             op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-op-constant!-impl ~dtype ~op ~rev-ops?)])
        (into {})))
 
 
 (def ^:private binary-op-constant-table
-  (memoize
-   (fn []
-     (binary-op-constant-table))))
+  (binary-op-constant-table))
 
 
 (defmacro ^:private binary-accum!-impl
@@ -333,16 +325,14 @@
 (defmacro binary-accum-table
   []
   (->> (for [dtype dtype/datatypes
-             op operations
+             op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-accum!-impl ~dtype ~op ~rev-ops?)])
        (into {})))
 
 
 (def ^:private binary-accum-table
-  (memoize
-   (fn []
-     (binary-accum-table))))
+  (binary-accum-table))
 
 
 
@@ -378,15 +368,13 @@
 (defmacro binary-op-table-impl
   []
   (->> (for [dtype dtype/datatypes
-             op operations]
+             op ct/binary-operations]
          [[dtype op] `(binary-op!-impl ~dtype ~op)])
        (into {})))
 
 
 (def ^:private binary-op-table
-  (memoize
-   (fn []
-     (binary-op-table-impl))))
+  (binary-op-table-impl))
 
 (defmacro select-impl
   [x y z]
@@ -505,6 +493,71 @@
 
 (def ^:private ternary-op-table
   (ternary-op-iter))
+
+
+(defmacro do-unary-reduce-op
+  [datatype op input addr in-alpha idx-start idx-stop]
+  (condp = op
+    :min `(loop [min-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (min min-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              min-val#))
+    :max `(loop [max-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (max max-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              max-val#))
+    :sum `(loop [sum-val# (* ~in-alpha (v-aget ~input
+                                               (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (+ sum-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              sum-val#))
+    :mean `(loop [sum-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start)))
+                 idx# (+ ~idx-start 1)]
+            (if (< idx# ~idx-stop)
+              (recur (+ sum-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
+                     (inc idx#))
+              (/ sum-val#
+                 (- ~idx-stop ~idx-start))))))
+
+
+(defmacro unary-reduce-impl
+  [datatype op]
+  `(fn [output# output-dims# input-alpha# input# input-dims#]
+     (let [input-shape# (ct-dims/shape input-dims#)
+           output-addr# (get-elem-dims->address output-dims# (ct-dims/shape output-dims#))
+           input-addr# (get-elem-dims->address input-dims# (ct-dims/shape input-dims#))
+           input# (datatype->view-cast-fn ~datatype input#)
+           output# (datatype->view-cast-fn ~datatype output#)
+           input-alpha# (datatype->cast-fn ~datatype input-alpha#)
+           parallelism# (ct-dims/ecount output-dims#)
+           iter-amount# (quot (ct-dims/ecount input-dims#)
+                              parallelism#)]
+       (parallel/parallel-for
+        par-idx# parallelism#
+        (let [iter-start# (* par-idx# iter-amount#)
+              iter-stop# (+ iter-start# iter-amount#)]
+         (v-aset output# (.idx_to_address output-addr# par-idx#)
+                 (datatype->cast-fn ~datatype
+                                    (do-unary-reduce-op ~datatype ~op input# input-addr# input-alpha#
+                                                        iter-start# iter-stop#))))))))
+
+
+(defmacro unary-reduce-iter
+  []
+  (->> (for [dtype dtype/datatypes
+             reduce-op ct/unary-reduction-operations]
+         [[dtype reduce-op] {:unary-reduce! `(unary-reduce-impl ~dtype ~reduce-op)}])
+       (into {})))
+
+
+(def ^:private unary-reduce-table
+  (unary-reduce-iter))
 
 
 (defmacro ^:private blas-macro-iter
@@ -875,91 +928,76 @@
                                      output# input# batch-means# batch-variances#
                                      scale# bias# epsilon#)))
 
-
-(definterface SoftmaxOffsetter
-  (^long outer_loop_count [])
-  (^long parallel_count [])
-  (^long idx_count [])
-  (^long idx_to_offset [^long outer-idx ^long var-idx ^long elem-idx]))
-
-
-(defrecord SoftmaxEltwiseOffsetter [^long batch-count ^long element-count]
-  SoftmaxOffsetter
-  (^long outer_loop_count [_] 1)
-  (^long parallel_count [_] batch-count)
-  (^long idx_count [_] element-count)
-  (^long idx_to_offset [_ ^long outer-idx ^long par-idx ^long elem-idx]
-    (+ elem-idx
-       (* par-idx element-count))))
-
-
-(defrecord SoftmaxSpatialOffsetter [^long batch-count ^long channel-count ^long element-count]
-  SoftmaxOffsetter
-  (^long outer_loop_count [_] batch-count)
-  (^long parallel_count [_] element-count)
-  (^long idx_count [_] channel-count)
-  (^long idx_to_offset [_ ^long batch-idx ^long elem-idx ^long chan-idx]
-   (+ elem-idx
-      (* chan-idx element-count )
-      (* batch-idx (* element-count channel-count)))))
+(defonce crap-atom (atom nil))
 
 
 (defmacro softmax-impl
-  [datatype offsetter output input]
-  `(let [^SoftmaxOffsetter offsetter# ~offsetter
+  [datatype output output-dims input input-dims]
+  `(let [output-dims# ~output-dims
+         input-dims# ~input-dims
+         num-elems# (long (max (ct-dims/ecount output-dims#)
+                               (ct-dims/ecount input-dims#)))
          output# (datatype->view-cast-fn ~datatype ~output)
          input# (datatype->view-cast-fn ~datatype ~input)
-         out-loop# (.outer_loop_count offsetter#)
-         par-loop# (.parallel_count offsetter#)
-         idx-loop# (.idx_count offsetter#)]
+         max-shape# (max-shape-from-dimensions output-dims# input-dims#)
+         output-addr# (get-elem-dims->address output-dims# max-shape#)
+         input-addr# (get-elem-dims->address input-dims# max-shape#)
+         _# (ct-dims/when-not-error (or (= (count max-shape#) 2)
+                                        (= (count max-shape#) 3))
+              "softmax implementation only supports shapes of 2 or 3 dimensions"
+              {})
+         [outer-loop# par-loop# idx-loop#] (if (= (count max-shape#) 2)
+                                             [1 (first max-shape#) (second max-shape#)]
+                                             max-shape#)
+         outer-loop# (long outer-loop#)
+         par-loop# (long par-loop#)
+         idx-loop# (long idx-loop#)]
      (c-for
-      [outer-idx# 0 (< outer-idx# out-loop#) (inc outer-idx#)]
-      (parallel/parallel-for
-       par-idx# par-loop#
-       (let [max-val# (datatype->cast-fn ~datatype
-                                         (loop [idx# 1
-                                                max-val# (v-aget input# (.idx_to_offset offsetter#
-                                                                                        outer-idx#
-                                                                                        par-idx#
-                                                                                        0))]
-                                           (if (< idx# idx-loop#)
-                                             (recur (inc idx#) (max max-val#
-                                                                    (v-aget input# (.idx_to_offset offsetter#
-                                                                                                   outer-idx#
-                                                                                                   par-idx#
-                                                                                                   idx#))))
-                                             max-val#)))]
-         (c-for
-          [idx# 0 (< idx# idx-loop#) (inc idx#)]
-          (v-aset output# (.idx_to_offset offsetter# outer-idx# par-idx# idx#)
-                  (Math/exp (- (v-aget input# (.idx_to_offset offsetter# outer-idx# par-idx# idx#))
-                               max-val#))))
-         ;;perform normalization with array sum.
-         (let [sum-val# (datatype->cast-fn ~datatype
-                                           (sum-double-var idx# idx-loop#
-                                                           (v-aget output# (.idx_to_offset offsetter#
-                                                                                           outer-idx#
-                                                                                           par-idx#
-                                                                                           idx#))))]
-           (c-for [idx# 0 (< idx# idx-loop#) (inc idx#)]
-                  (.diveq output# (.idx_to_offset offsetter#
-                                                  outer-idx#
-                                                  par-idx#
-                                                  idx#)
-                          sum-val#))))))))
+      [outer-idx# 0 (< outer-idx# outer-loop#) (inc outer-idx#)]
+      (let [outer-loop-offset# (* outer-idx# par-loop# idx-loop#)]
+       (parallel/parallel-for
+        par-idx# par-loop#
+        (let [par-loop-offset# (+ outer-loop-offset# (* par-idx# idx-loop#))
+              max-val# (datatype->cast-fn ~datatype
+                                          (loop [idx# 1
+                                                 max-val# (v-aget input# (.idx_to_address
+                                                                          input-addr#
+                                                                          (+ par-loop-offset# 0)))]
+                                            (if (< idx# idx-loop#)
+                                              (recur (inc idx#) (max max-val#
+                                                                     (v-aget input# (.idx_to_address
+                                                                                     output-addr#
+                                                                                     (+ par-loop-offset# idx#)))))
+                                              max-val#)))]
+          (c-for
+           [idx# 0 (< idx# idx-loop#) (inc idx#)]
+           (v-aset output# (.idx_to_address output-addr# (+ par-loop-offset# idx#))
+                   (Math/exp (- (v-aget input# (.idx_to_address input-addr# (+ par-loop-offset# idx#)))
+                                max-val#))))
+          ;;perform normalization with array sum.
+          (let [sum-val# (datatype->cast-fn ~datatype
+                                            (sum-double-var idx# idx-loop#
+                                                            (v-aget output# (.idx_to_address
+                                                                             output-addr#
+                                                                             (+ par-loop-offset# idx#)))))]
+            (c-for [idx# 0 (< idx# idx-loop#) (inc idx#)]
+                   (.diveq output# (.idx_to_address output-addr# (+ par-loop-offset# idx#))
+                           sum-val#)))))))))
 
 
 (defmacro softmax-eltwise-forward-impl
   [datatype]
-  `(fn [output# input# batch-count# element-count#]
-     (softmax-impl ~datatype (->SoftmaxEltwiseOffsetter batch-count# element-count#) output# input#)))
+  `(fn [output# output-dims# input# input-dims#]
+     (softmax-impl ~datatype output# output-dims# input# input-dims#)))
 
 
 (defmacro softmax-spatial-forward-impl
   [datatype]
-  `(fn [output# input# batch-count# channel-count# element-count#]
-     (softmax-impl ~datatype (->SoftmaxSpatialOffsetter batch-count# channel-count# element-count#)
-                   output# input#)))
+  `(fn [output# output-dims# input# input-dims#]
+     (softmax-impl ~datatype
+                   ;;Transpose channels to be last dimension
+                   output# (ct-dims/transpose output-dims# [0 2 1])
+                   input# (ct-dims/transpose input-dims# [0 2 1]))))
 
 
 (defn- ->old-skool-conv-desc
@@ -1035,10 +1073,18 @@
 
 (defmacro act-backward-impl
   [datatype]
-  `(fn [input-gradient# output-gradient# output# op# n-elems#]
+  `(fn [input-gradient# input-grad-dims#
+        output-gradient# output-grad-dims#
+        output# output-dims# op# n-elems#]
      (let [dest# (datatype->view-cast-fn ~datatype output#)
+           max-shape# (max-shape-from-dimensions input-grad-dims#
+                                                 output-grad-dims#
+                                                 output-dims#)
+           dest-idx# (get-elem-dims->address output-dims# max-shape#)
            src-grad# (datatype->view-cast-fn ~datatype input-gradient#)
+           src-grad-idx# (get-elem-dims->address input-grad-dims# max-shape#)
            dest-grad# (datatype->view-cast-fn ~datatype output-gradient#)
+           dest-grad-idx# (get-elem-dims->address output-grad-dims# max-shape#)
            n-elems# (long n-elems#)
            val-1# (datatype->cast-fn ~datatype 1)
            val-0# (datatype->cast-fn ~datatype 0)]
@@ -1047,29 +1093,29 @@
          ;; input gradient = output * (1 - output) * output-gradient
          (parallel/parallel-for
           idx# n-elems#
-          (let [out-val# (v-aget dest# idx#)]
-            (v-aset src-grad# idx#
+          (let [out-val# (v-aget dest# (.idx_to_address dest-idx# idx#))]
+            (v-aset src-grad# (.idx_to_address src-grad-idx# idx#)
                     (* out-val#
                        (- val-1# out-val#)
-                       (v-aget dest-grad# idx#)))))
+                       (v-aget dest-grad# (.idx_to_address dest-grad-idx# idx#))))))
          :relu
          (parallel/parallel-for
           idx# n-elems#
           (let [mult# (datatype->cast-fn ~datatype
-                                         (if (> (v-aget dest# idx#)
+                                         (if (> (v-aget dest# (.idx_to_address dest-idx# idx#))
                                                 val-0#)
                                            1
                                            0))]
-            (v-aset src-grad# idx#
-                    (* mult# (v-aget dest-grad# idx#)))))
+            (v-aset src-grad# (.idx_to_address src-grad-idx# idx#)
+                    (* mult# (v-aget dest-grad# (.idx_to_address dest-grad-idx# idx#))))))
          :tanh
          (parallel/parallel-for
           idx# n-elems#
-          (let [out-val# (v-aget dest# idx#)]
-            (v-aset src-grad# idx#
+          (let [out-val# (v-aget dest# (.idx_to_address dest-idx# idx#))]
+            (v-aset src-grad# (.idx_to_address src-grad-idx# idx#)
                     (* (- val-1#
                           (* out-val# out-val#))
-                       (v-aget dest-grad# idx#)))))))))
+                       (v-aget dest-grad# (.idx_to_address dest-grad-idx# idx#))))))))))
 
 
 (def activation-backward-table
@@ -1097,7 +1143,7 @@
   tm/TensorMath
   (assign-constant! [stream buffer dimensions value n-elems]
     (cpu-driver/with-stream-dispatch stream
-      ((get (assign-constant-map) (dtype/get-datatype buffer))
+      ((get assign-constant-map (dtype/get-datatype buffer))
        buffer dimensions value n-elems)))
 
   (assign! [stream
@@ -1105,7 +1151,7 @@
             src src-dims
             n-elems]
     (cpu-driver/with-stream-dispatch stream
-      ((get (assign!-map) [(dtype/get-datatype dest) (dtype/get-datatype src)])
+      ((get assign!-map [(dtype/get-datatype dest) (dtype/get-datatype src)])
        dest dest-dims
        src src-dims
        n-elems)))
@@ -1130,7 +1176,7 @@
                            scalar
                            n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-accum-constant-table) [(dtype/get-datatype dest) operation
+      ((get binary-accum-constant-table [(dtype/get-datatype dest) operation
                                            reverse-operands?])
        dest dest-dims dest-alpha
        scalar n-elems)))
@@ -1141,7 +1187,7 @@
                         scalar
                         n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-op-constant-table) [(dtype/get-datatype dest) operation reverse-operands?])
+      ((get binary-op-constant-table [(dtype/get-datatype dest) operation reverse-operands?])
        dest dest-dims
        x x-dims x-alpha
        scalar n-elems)))
@@ -1151,7 +1197,7 @@
                   y y-dims y-alpha
                   n-elems operation reverse-operands?]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-accum-table) [(dtype/get-datatype dest) operation reverse-operands?])
+      ((get binary-accum-table [(dtype/get-datatype dest) operation reverse-operands?])
        dest dest-dims dest-alpha
        y y-dims y-alpha
        n-elems)))
@@ -1162,7 +1208,7 @@
                y y-dims y-alpha
                n-elems operation]
     (cpu-driver/with-stream-dispatch stream
-      ((get (binary-op-table) [(dtype/get-datatype dest) operation])
+      ((get binary-op-table [(dtype/get-datatype dest) operation])
        dest dest-dims
        x x-dims x-alpha
        y y-dims y-alpha
@@ -1215,6 +1261,15 @@
        const-2
        n-elems
        operation arg-order)))
+
+  (unary-reduce! [stream
+                  output output-dims
+                  input-alpha input input-dims
+                  op]
+    (cpu-driver/with-stream-dispatch stream
+     ((get-in unary-reduce-table [[(dtype/get-datatype output) op] :unary-reduce!])
+      output output-dims
+      input-alpha input input-dims)))
 
   (gemm! [stream
           C c-colstride
@@ -1321,33 +1376,31 @@
        batch-count channel-count element-count)))
 
   (activation-gradient! [stream
-                         input-gradient
-                         output-gradient
-                         output
+                         input-gradient input-grad-dims
+                         output-gradient output-grad-dims
+                         output output-dims
                          op
                          element-count]
     (cpu-driver/with-stream-dispatch stream
       ((get activation-backward-table (dtype/get-datatype input-gradient))
-       input-gradient output-gradient output op element-count)))
+       input-gradient input-grad-dims
+       output-gradient output-grad-dims
+       output output-dims
+       op element-count)))
 
   (softmax-eltwise! [stream
-                     output
-                     input
-                     batch-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-eltwise!])
-       output input batch-count element-count)))
+       output output-dims input input-dims)))
 
   (softmax-spatial! [stream
-                     output
-                     input
-                     batch-count
-                     channel-count
-                     element-count]
+                     output output-dims
+                     input input-dims]
     (cpu-driver/with-stream-dispatch stream
       ((get-in cpu-nn-ops [(dtype/get-datatype output) :softmax-spatial!])
-       output input batch-count channel-count element-count)))
+       output output-dims input input-dims)))
 
   (convolution-descriptor [stream
                            datatype out-channels in-channels kern-width kern-height
@@ -1386,7 +1439,7 @@
                                                 output-width output-height)
           output-tens (ct/->Tensor dev output-dims output)
           input-tens (ct/->Tensor dev input-dims input)
-          input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)]
+          input-convolved (ct/->Tensor dev (ct-dims/dimensions [batch-size n-rows n-cols]) workspace)]
       (cpu-driver/with-stream-dispatch stream
         (ct/with-stream (cpu-driver/main-thread-cpu-stream)
           (let [batch-data (slice-batches output-tens input-tens input-convolved)]
@@ -1421,7 +1474,7 @@
                                                    in-width in-height
                                                    output-width output-height)
              output-gradient-tens (ct/->Tensor dev output-gradient-dims output-gradient)
-             input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+             input-convolved (ct/->Tensor dev (ct-dims/dimensions [batch-size n-rows n-cols]) workspace)
              slice-data (slice-batches output-gradient-tens input-convolved)]
          (ct/with-stream (cpu-driver/main-thread-cpu-stream)
            (doseq [[output-gradient input-convolved idx] (map #(conj (vec %1) %2) slice-data (range))]
@@ -1453,7 +1506,7 @@
                 batch-size (long (first (get output-gradient-dims :shape)))
                 output-gradient (ct/->Tensor dev output-gradient-dims output-gradient)
                 input-gradient (ct/->Tensor dev input-gradient-dims input-gradient)
-                input-convolved (ct/->Tensor dev (ct/dimensions [batch-size n-rows n-cols]) workspace)
+                input-convolved (ct/->Tensor dev (ct-dims/dimensions [batch-size n-rows n-cols]) workspace)
                 weights (ct/->Tensor dev weights-dims weights)
                 datatype (dtype/get-datatype weights)
                 input-gradient-alpha (double 0.0)]
@@ -1465,16 +1518,16 @@
               :else
               (ct/binary-op! input-gradient 1.0 input-gradient 1.0 input-gradient-alpha :*))
             (->> (slice-batches input-gradient output-gradient input-convolved)
-                 (map (fn [[input-gradient output-gradient input-convolved]]
-                        (ct/gemm! input-convolved true false
-                                  1.0 (ct/as-batch-matrix output-gradient) weights
-                                  0.0)
-                        ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
-                         (ct/tensor->buffer input-convolved)
-                         (ct/tensor->buffer input-gradient)
-                         (->old-skool-conv-desc conv-descriptor
-                                                in-width in-height
-                                                output-width output-height))))
+                 (pmap (fn [[input-gradient output-gradient input-convolved]]
+                         (ct/gemm! input-convolved true false
+                                   1.0 (ct/as-batch-matrix output-gradient) weights
+                                   0.0)
+                         ((get-in cpu-nn-ops [datatype :convolution->planar-output!])
+                          (ct/tensor->buffer input-convolved)
+                          (ct/tensor->buffer input-gradient)
+                          (->old-skool-conv-desc conv-descriptor
+                                                 in-width in-height
+                                                 output-width output-height))))
                  dorun))
           (catch Throwable e (println e)))))))
 
@@ -1482,7 +1535,7 @@
 (defn as-tensor
   [java-array]
   (ct/construct-tensor (drv/get-device ct/*stream*)
-                       (ct/dimensions [(ct/ecount java-array)])
+                       (ct-dims/dimensions [(ct/ecount java-array)])
                        (dtype/->view java-array)))
 
 (defn as-java-array

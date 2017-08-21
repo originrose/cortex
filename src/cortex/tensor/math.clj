@@ -91,6 +91,12 @@ Argument order is specified by arg-order.")
     "Apply ternary elementwise operation to args + 2 constants.
 Argument order is specified by arg-order")
 
+  (unary-reduce! [stream
+                  output output-dims
+                  input-alpha input input-dims
+                  op]
+    "Reduction on 1 operand.")
+
   (gemm! [stream
           c c-colstride
           trans-a? trans-b? alpha
@@ -156,24 +162,19 @@ running means, variances using a running average
                                        batch-count channel-count element-count]
     "Gradient calculation.  All gradients exception output gradient are out vars.")
   (activation-gradient! [stream
-                         input-gradient
-                         output-gradient
-                         output
+                         input-gradient input-grad-dim
+                         output-gradient output-grad-dim
+                         output output-dim
                          op
                          element-count])
 
   (softmax-eltwise! [stream
-                     output
-                     input
-                     batch-count
-                     element-count])
+                     output output-dims
+                     input input-dims])
 
   (softmax-spatial! [stream
-                     output
-                     input
-                     batch-count
-                     channel-count
-                     element-count])
+                     output output-dims
+                     input input-dims])
 
   (convolution-descriptor [stream
                            datatype out-channels in-channels kern-width kern-height

@@ -26,7 +26,7 @@
   (verify-tensor/binary-constant-op (driver) *datatype*))
 
 
-(def-double-float-test binary-op
+(def-all-dtype-test binary-op
   (verify-tensor/binary-op (driver) *datatype* ))
 
 
@@ -76,6 +76,10 @@
 
 (def-all-dtype-test ternary-op-select
   (verify-tensor/ternary-op-select (driver) *datatype*))
+
+
+(def-all-dtype-test ternary-reduce
+  (verify-tensor/unary-reduce (driver) *datatype*))
 
 
 (def-all-dtype-test transpose

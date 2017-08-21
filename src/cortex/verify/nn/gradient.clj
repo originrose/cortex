@@ -11,7 +11,8 @@
             [cortex.verify.nn.data :as verify-data]
             [cortex.loss.core :as loss]
             [cortex.gaussian :as gaussian]
-            [cortex.util :as cortex-util]))
+            [cortex.util :as cortex-util]
+            [cortex.loss.yolo2 :as yolo2]))
 
 
 (defn close-enough?
@@ -262,3 +263,29 @@
                        batch-size
                        :test)
         check-gradients)))
+
+
+(defn yolo-gradient
+  [context]
+  (let [batch-size 2
+        grid-x 3
+        grid-y 3
+        n-classes 4
+        truth (-> (yolo2/realize-label {:filename "2012_004196.png", :width 500, :height 375,
+                                        :segmented? false, :objects [{:class "person", :bounding-box [143 7 387 375]}]}
+                                       {:grid-x 3 :grid-y 3 :anchor-count 5 :class-count 4
+                                        :class-name->label (constantly [0 0 1 0])})
+                  :label)
+        input-size (* grid-x grid-y yolo2/anchor-count (+ 5 n-classes))
+        input (partition input-size (vec (repeatedly (* input-size batch-size) rand)))
+        output (repeat batch-size (m/to-double-array truth))]
+    (-> (get-gradients context
+                       [(layers/input input-size 1 1 :id :data)
+                        (layers/relu :id :test
+                                     :yolo2 {:grid-x 3
+                                             :grid-y 3
+                                             :labels {:type :stream
+                                                      :stream :test}})]
+                       (data->dataset input output batch-size)
+                       1e-4 batch-size :test)
+        (check-gradients))))
