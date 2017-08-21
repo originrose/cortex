@@ -18,7 +18,9 @@
     "Create a new tensor.  If allocated, initialize to 0")
 
   (new-uninitialized-tensor-impl [this name shape args]
-    "Create a new tensor.  If allocated, do nothing"))
+    "Create a new tensor.  If allocated, do nothing")
+
+  (allocation-count-impl [this]))
 
 
 (defn- args->map
@@ -77,19 +79,23 @@
 
   (new-tensor-impl
     [this name shape args]
-    (if-let [retval (get @allocated-data name)]
+    (if-let [retval (get-in @allocated-data [name :tensor])]
       (do
         (m/assign! retval 0)
         retval)
       (let [retval (apply ct/new-tensor shape args)]
-        (swap! allocated-data assoc name retval)
+        (swap! allocated-data assoc name {:tensor retval})
         retval)))
 
   (new-uninitialized-tensor-impl
     [this name shape args]
     (if-let [retval (get @allocated-data name)]
-      retval
-      (new-tensor-impl this name shape args))))
+      (:tensor retval)
+      (new-tensor-impl this name shape args)))
+
+  (allocation-count-impl
+    [this]
+    (m/esum (mapv (comp m/ecount :tensor second) @allocated-data))))
 
 
 (defn atom-allocator [] (->BaseTensorAllocator (atom {})))
@@ -107,7 +113,10 @@
     (apply ct/new-tensor shape args))
 
   (new-uninitialized-tensor-impl [this name shape args]
-    (apply ct/new-tensor shape args)))
+    (apply ct/new-tensor shape args))
+
+  (allocation-count-impl [this]
+    0))
 
 
 (defn passthrough-allocator [] (->PassthroughAllocator))
@@ -118,7 +127,7 @@
 
 (defmacro with-allocator
   [allocator & body]
-  `(with-bindings [#'*allocator* ~allocator]
+  `(with-bindings {#'*allocator* ~allocator}
      ~@body))
 
 
@@ -152,3 +161,8 @@
 (defn new-uninitialized-tensor
   [name shape & args]
   (new-uninitialized-tensor-impl (check-allocator) name shape args))
+
+
+(defn allocation-count
+  ^long []
+  (allocation-count-impl (check-allocator)))

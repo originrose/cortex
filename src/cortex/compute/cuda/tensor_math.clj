@@ -1050,5 +1050,5 @@
      (first (drv/with-compute-device
               (drv/default-device (cuda-base/driver))
               (with-bindings {#'ct/*stream* (drv/create-stream)
-                              #'ct/*datatype* :double}
+                              #'ct/*datatype* :float}
                 ~@body)))))

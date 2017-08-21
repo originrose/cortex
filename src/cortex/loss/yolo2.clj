@@ -8,27 +8,62 @@
             [cortex.compute.cuda.tensor-math :as gpu-tm]
             [clojure.math.combinatorics :as combo]
             [cortex.compute.driver :as drv]
-            [cortex.tensor.allocator :as alloc]))
+            [cortex.tensor.allocator :as alloc]
+            [mikera.vectorz.matrix-api]
+            [cortex.loss.util :as loss-util]
+            [cortex.compute.nn.backend :as nn-backend]
+            [cortex.compute.math :as math]
+            [think.datatype.core :as dtype]
+            [cortex.graph :as graph]))
 
 
-(def grid-x 13)
-(def grid-y 13)
-(def grid-ratio [(/ grid-x) (/ grid-y)])
-(def anchor-count 5)
-(def anchors (m/reshape [1.08, 1.19, 3.42, 4.41, 6.63, 11.38, 9.42, 5.11, 16.62, 10.52] [5 2]))
-(def classes ["boat" "sofa" "dog" "bird" "sheep" "cow" "bottle" "diningtable" "train" "bus" "chair" "motorbike"
-              "person" "horse" "bicycle" "aeroplane" "car" "cat" "tvmonitor" "pottedplant"])
-(def classes-count (count classes))
-(def output-count (+ 5 classes-count))
-(def SCALE_NOOB 0.5)
-(def SCALE_CONF 5)
-(def SCALE_COOR 5)
-(def SCALE_PROB 1)
+(def ^:dynamic *grid-x* 13)
+(def ^:dynamic *grid-y* 13)
+(def ^:dynamic *scale-noob* 0.5)
+(def ^:dynamic *scale-conf* 5)
+(def ^:dynamic *scale-coord* 5)
+(def ^:dynamic *scale-prob* 1)
+
+
+(defmacro with-variables
+  [grid-x grid-y scale-noob scale-conf scale-coord scale-prob & body]
+  `(with-bindings {#'*grid-x* (long ~grid-x)
+                   #'*grid-y* (long ~grid-y)
+                   #'*scale-noob* (double ~scale-noob)
+                   #'*scale-conf* (double ~scale-conf)
+                   #'*scale-prob* (double ~scale-prob)}
+     ~@body))
+
+
+(defn grid-ratio
+  []
+  [(/ (long *grid-x*)) (/ (long *grid-y*))])
+
+(defonce anchor-count 5)
+(defonce anchors (m/reshape [1.08, 1.19, 3.42, 4.41, 6.63, 11.38, 9.42, 5.11, 16.62, 10.52] [5 2]))
+
+
+(defn output-count
+  [prediction]
+  (long (last (m/shape prediction))))
+
+
+(defn classes-count
+  [prediction]
+  (- (output-count prediction) 5))
+
+
+(defn class-dims
+  [prediction]
+  (range 5 (output-count prediction)))
+
+
 (def x-y [0 1])
 (def w-h [2 3])
 (def bb [0 1 2 3])
 (def conf [4])
-(def class-dims (range 5 output-count))
+
+
 
 
 ;; prediction has shape [grid-x grid-y anchor-count output-count]
@@ -108,29 +143,31 @@
 
 (defn ->weights [formatted-prediction truth]
   (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
+        output-count (output-count formatted-prediction)
+        classes-count (classes-count formatted-prediction)
         truth-selector (partial m/select truth :all :all :all)
         pred-boxes (-> (formatted-pred-selector bb)
-                       (m/reshape [(* grid-x grid-y anchor-count) (count bb)]))
+                       (m/reshape [(* *grid-x* *grid-y* anchor-count) (count bb)]))
         truth-boxes (-> (truth-selector bb)
-                        (m/reshape [(* grid-x grid-y anchor-count) (count bb)]))
+                        (m/reshape [(* *grid-x* *grid-y* anchor-count) (count bb)]))
         ious (-> (map iou pred-boxes truth-boxes)
                  ;; value at (+ (* i grid-x) j) is the vector of ious for each of the five anchors at cell (i,j)
-                 (m/reshape [(* grid-x grid-y) anchor-count]))
+                 (m/reshape [(* *grid-x* *grid-y*) anchor-count]))
 
         one-hots (map select-anchor ious)
         D (-> one-hots
               ;; value at [i j anchor-idx] is 1 if anchor-idx achieves max for cell (i,j), otherwise 0.
-              (m/reshape [grid-x grid-y anchor-count])
+              (m/reshape [*grid-x* *grid-y* anchor-count])
               ;; tensor on 1's to get shape [grid-x grid-y anchor-count output-count]
               (m/outer-product (m/assign (m/new-vector output-count) 1.0)))
         scale-vec-ob (->> (m/join
-                            (m/assign (m/zero-vector (count bb)) SCALE_COOR)
-                            (m/assign (m/zero-vector (count conf)) SCALE_CONF)
-                            (m/assign (m/zero-vector classes-count) SCALE_PROB))
+                            (m/assign (m/zero-vector (count bb)) *scale-coord*)
+                            (m/assign (m/zero-vector (count conf)) *scale-conf*)
+                            (m/assign (m/zero-vector classes-count) *scale-prob*))
                           (m/broadcast-like formatted-prediction))
         scale-vec-noob (->> (m/join
                               (m/zero-vector (count bb))
-                              (m/assign (m/zero-vector (count conf)) SCALE_NOOB)
+                              (m/assign (m/zero-vector (count conf)) *scale-noob*)
                               (m/zero-vector classes-count))
                             (m/broadcast-like formatted-prediction))
         D     (m/add
@@ -145,12 +182,12 @@
   [pred]
   (let [pred-selector (partial m/select pred :all :all :all)
         x-y-vals      (->> x-y pred-selector (m/emap sigmoid))
-        w-h-vals      (->> w-h pred-selector (m/emul grid-ratio) (m/exp) (m/emul anchors) (m/sqrt))
+        w-h-vals      (->> w-h pred-selector (m/emul (grid-ratio)) (m/exp) (m/emul anchors) (m/sqrt))
         conf-vals     (->> conf pred-selector (m/emap sigmoid))
-        prob-vals     (-> (pred-selector class-dims)
-                          (m/reshape [(* grid-x grid-y anchor-count) classes-count])
+        prob-vals     (-> (pred-selector (class-dims pred))
+                          (m/reshape [(* *grid-x* *grid-y* anchor-count) (classes-count pred)])
                           ((fn [v] (map softmax v)))
-                          (m/reshape [grid-x grid-y anchor-count classes-count]))]
+                          (m/reshape [*grid-x* *grid-y* anchor-count (classes-count pred)]))]
     (m/join-along 3 x-y-vals w-h-vals conf-vals prob-vals)))
 
 
@@ -158,23 +195,25 @@
   "Calculates the gradient from a formatted prediction and a weighted error
   (weighted error is of the form 'weights*(formatted-pred - truth)'"
   [formatted-prediction weighted-error]
-  (let [formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
+  (let [class-dims (class-dims formatted-prediction)
+        classes-count (classes-count formatted-prediction)
+        formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
         we-selector   (partial m/select weighted-error :all :all :all)
         x-y-grad      (->> x-y formatted-pred-selector (m/emap sigmoid-gradient))
-        w-h-grad      (->> w-h formatted-pred-selector (m/emul 0.5 grid-ratio))
+        w-h-grad      (->> w-h formatted-pred-selector (m/emul 0.5 (grid-ratio)))
         conf-grad     (->> conf   formatted-pred-selector (m/emap sigmoid-gradient))
         prob-grad     (-> (formatted-pred-selector class-dims)
-                          (m/reshape [(* grid-x grid-y anchor-count) classes-count])
+                          (m/reshape [(* *grid-x* *grid-y* anchor-count) classes-count])
                           ((fn [v] (map softmax-gradient v))))
         prob-vals     (-> (we-selector class-dims)
-                          (m/reshape [(* grid-x grid-y anchor-count) classes-count]))]
+                          (m/reshape [(* *grid-x* *grid-y* anchor-count) classes-count]))]
     (m/emul 2
             (m/join-along 3
                           (m/emul (we-selector x-y) x-y-grad)
                           (m/emul (we-selector w-h) w-h-grad)
                           (m/emul (we-selector conf) conf-grad)
                           (-> (map m/inner-product prob-grad prob-vals)
-                              (m/reshape [grid-x grid-y anchor-count classes-count]))))))
+                              (m/reshape [*grid-x* *grid-y* anchor-count classes-count]))))))
 
 
 (defn custom-loss-gradient
@@ -361,19 +400,18 @@ If there are two equal max values then you will get a two-hot encoded vector."
                      (ct/in-place-reshape [num-ious 1]))
 
         D (ct/assign! all-d one-hots)
-        one-minus-one-hots (ct/binary-op! (alloc/new-uninitialized-tensor :one-minus-one-hots (m/shape one-hots))
-                                          1.0 1 1.0 one-hots :-)
+        one-minus-one-hots (ct/binary-op! one-hots 1.0 1 1.0 one-hots :-)
         one-minus-d (ct/assign! (-> (alloc/new-uninitialized-tensor :one-minus-d (m/shape formatted-prediction))
                                     ct/as-2d-matrix)
                                 one-minus-one-hots)
         scale-vec-ob (-> (alloc/->const-tensor :scale-vec-ob
-                                               (concat (repeat (count bb) SCALE_COOR)
-                                                       (repeat (count conf) SCALE_CONF)
-                                                       (repeat classes-count SCALE_PROB))))
+                                               (concat (repeat (count bb) *scale-coord*)
+                                                       (repeat (count conf) *scale-conf*)
+                                                       (repeat (classes-count formatted-prediction) *scale-prob*))))
         scale-vec-noob (-> (alloc/->const-tensor :scale-vec-noob
                                                  (concat (repeat (count bb) 0)
-                                                         (repeat (count conf) SCALE_NOOB)
-                                                         (repeat classes-count 0))))]
+                                                         (repeat (count conf) *scale-noob*)
+                                                         (repeat (classes-count formatted-prediction) 0))))]
     (ct/binary-op! D 1.0 D 1.0 scale-vec-ob :*)
     (ct/binary-op! one-minus-d 1.0 one-minus-d 1.0 scale-vec-noob :*)
     (ct/binary-op! D 1.0 D 1.0 one-minus-d :+)
@@ -384,7 +422,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 (defn format-prediction-ct!
   [pred]
-  (let [ct-grid-ratio (alloc/->const-tensor :ct-grid-ratio grid-ratio)
+  (let [ct-grid-ratio (alloc/->const-tensor :ct-grid-ratio (grid-ratio))
         ct-anchors (alloc/->const-tensor :ct-anchors anchors)
         pred-selector (make-selector pred)]
     ;;x-y-vals
@@ -394,7 +432,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
     ;;conf-vals
     (->> conf pred-selector ct-sigmoid!)
     ;;prob-vals
-    (->> (pred-selector class-dims) ct-softmax!)
+    (->> (pred-selector (class-dims pred)) ct-softmax!)
     pred))
 
 
@@ -405,8 +443,8 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 (defn ct-wh-grad!
   [input-gradient output loss-gradient]
-  (let [ct-grid-ratio (alloc/->const-tensor :ct-grid-ratio grid-ratio)]
-    (ct/binary-op! input-gradient 1.0 output 0.5 grid-ratio :*)
+  (let [ct-grid-ratio (alloc/->const-tensor :ct-grid-ratio (grid-ratio))]
+    (ct/binary-op! input-gradient 1.0 output 0.5 ct-grid-ratio :*)
     (ct/binary-op! input-gradient 1.0 input-gradient 1.0 loss-gradient :*)))
 
 
@@ -431,7 +469,8 @@ If there are two equal max values then you will get a two-hot encoded vector."
   [input-gradient formatted-prediction loss-gradient]
   (let [formatted-pred-selector (make-selector formatted-prediction)
         lg-selector   (make-selector loss-gradient)
-        ig-selector   (make-selector input-gradient)]
+        ig-selector   (make-selector input-gradient)
+        c-dims (class-dims formatted-prediction)]
     ;;x-y-grad
     (ct-sigmoid-gradient! (ig-selector x-y)
                           (formatted-pred-selector x-y)
@@ -445,9 +484,9 @@ If there are two equal max values then you will get a two-hot encoded vector."
                           (formatted-pred-selector conf)
                           (lg-selector conf))
     ;;prob-grad
-    (ct-softmax-grad! (ig-selector class-dims)
-                      (formatted-pred-selector class-dims)
-                      (lg-selector class-dims))
+    (ct-softmax-grad! (ig-selector c-dims)
+                      (formatted-pred-selector c-dims)
+                      (lg-selector c-dims))
     (ct-emul! 2.0 input-gradient)))
 
 
@@ -459,8 +498,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
                             (ct/binary-op! 1.0 pred 1.0 truth :-)
                             ;;Produce v-hat with 2 multiplication
                             (#(ct/binary-op! % 1.0 % 1.0 weights :*)))]
-    {:pred (m/assign! (alloc/new-uninitialized-tensor :pred (m/shape pred)) pred)
-     :truth truth
+    {:truth truth
      :ious ious
      :one-hots one-hots
      :weights weights
@@ -472,32 +510,61 @@ If there are two equal max values then you will get a two-hot encoded vector."
   [prediction truth]
   (let [formatted-prediction (format-prediction prediction)
         weights (:weights (->weights formatted-prediction truth))]
-    (->> (m/sub formatted-prediction truth)
-                         (m/square)
-                         (m/emul weights)
-                         (m/esum))))
+    {:pred formatted-prediction
+     :weights weights
+     :value
+     (->> (m/sub formatted-prediction truth)
+          (m/square)
+          (m/emul weights)
+          (m/esum))}))
+
+(defn ct-clone
+  [item]
+  (ct/assign! (ct/new-tensor (m/shape item)) item))
+
+(defn ct-sub!
+  [lhs rhs]
+  (ct/binary-op! lhs 1.0 lhs 1.0 rhs :-))
+
+(defn ct-sqr!
+  [lhs]
+  (ct/binary-op! lhs 1.0 lhs 1.0 lhs :*))
 
 
 (defn- ct-custom-loss
   [prediction truth]
-  (cpu-tm/tensor-context
-   (alloc/with-allocator (alloc/passthrough-allocator)
-     (let [prediction (ct/->tensor [prediction])
-           ct-truth (ct/->tensor [truth])
-           ct-formatted-prediction (format-prediction-ct! prediction)
-           ct-weights (:weights (->weights-ct ct-formatted-prediction ct-truth))]
-       (-> (ct/binary-op! ct-formatted-prediction 1.0 ct-formatted-prediction 1.0 ct-truth :-)
-           (ct/binary-op! 1.0 ct-formatted-prediction 1.0 ct-formatted-prediction :*)
-           (ct/binary-op! 1.0 ct-formatted-prediction 1.0 ct-weights :*)
-           cpu-tm/as-java-array
-           m/esum)))))
+  (alloc/with-allocator (alloc/passthrough-allocator)
+    (let [output-count (/ (ct/ecount prediction)
+                          (* (long *grid-x*)
+                             (long *grid-y*)
+                             (long anchor-count)))
+          data-shape [1 *grid-x* *grid-y* anchor-count output-count]
+          prediction (-> (ct/->tensor [prediction])
+                         (ct/in-place-reshape data-shape))
+          ct-truth (-> (ct/->tensor [truth])
+                       (ct/in-place-reshape data-shape))
+          ct-formatted-prediction (format-prediction-ct! prediction)
+          ct-weights (:weights (->weights-ct ct-formatted-prediction ct-truth))]
+      {:pred ct-formatted-prediction
+       :weights ct-weights
+       :value
+       (-> (ct-sub! ct-formatted-prediction ct-truth)
+           (ct-sqr!)
+           (ct-emul! ct-weights)
+           (ct/to-double-array)
+           m/esum)})))
+
 
 
 (defmethod loss/loss :yolo2
   [loss-term buffer-map]
   ((let [truth (get buffer-map :labels)
-         prediction (get buffer-map :output)]
-     (ct-custom-loss prediction truth))))
+         prediction (get buffer-map :output)
+         {:keys [grid-x grid-y
+                 scale-noob scale-conf scale-coord scale-prob]} loss-term]
+     (with-variables grid-x grid-y scale-noob scale-conf scale-coord scale-prob
+       (cpu-tm/tensor-context
+        (ct-custom-loss prediction truth))))))
 
 
 
@@ -518,15 +585,17 @@ If there are two equal max values then you will get a two-hot encoded vector."
            (remove (fn [[idx correct guess]]
                      (= (double correct)
                         (double guess))))
-           (take output-count))])))
+           (take 20))])))
 
 
 (defn- test-loss
   []
-  (let [pred (m-rand/sample-uniform [grid-x grid-y anchor-count output-count])
-        truth (read-label)]
-    {:corem-loss (custom-loss pred truth)
-     :ct-loss (custom-loss pred truth)}))
+  (cpu-tm/tensor-context
+   (let [truth (m/array (read-label))
+         pred (m-rand/sample-uniform [*grid-x* *grid-y* anchor-count (output-count truth)])
+         corem-data (custom-loss pred truth)
+         ct-data (ct-custom-loss pred truth)]
+     (println (:value corem-data) (:value ct-data)))))
 
 
 (defn- repeatv
@@ -540,9 +609,70 @@ If there are two equal max values then you will get a two-hot encoded vector."
   (gpu-tm/tensor-context
    (alloc/with-allocator (alloc/atom-allocator)
      (let [batch-size 10
-           pred (repeatv 10 (m-rand/sample-uniform [grid-x grid-y anchor-count output-count]))
            truth (repeatv 10 (read-label))
+           pred (repeatv 10 (m-rand/sample-uniform [*grid-x* *grid-y* anchor-count (output-count truth)]))
            corem-grad (custom-loss-gradient (first pred) (first truth))
-           ct-grad (ct-custom-loss-gradient (ct/->tensor pred) (ct/->tensor truth))]
+           input-gradient (ct/new-tensor (m/shape pred))
+           truth-tens    (ct/->tensor (m/array truth))
+           ct-grad (ct-custom-loss-gradient! input-gradient
+                                             (ct/->tensor pred)
+                                             truth-tens)
+           _ (m/assign! input-gradient 0)
+           ct-grad (ct-custom-loss-gradient! input-gradient
+                                             (ct/->tensor pred)
+                                             truth-tens)]
        (compare-large-vectors (:gradient corem-grad)
                               (ct/select (:gradient ct-grad) 1 :all :all :all :all))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Compute implementation
+(defrecord Yolo2Loss [loss-term backend allocator]
+  loss-util/PComputeLoss
+  (compute-loss-gradient [this buffer-map]
+    (let [v (get-in buffer-map [:output :buffer])
+          gradient (get-in buffer-map [:output :gradient])
+          target (get-in buffer-map [:labels :buffer])
+          stream (nn-backend/get-stream)
+          [batch-size output-size] (math/batch-shape v)
+          {:keys [grid-x grid-y
+                  scale-noob scale-conf scale-coord scale-prob]} loss-term]
+      (with-variables grid-x grid-y scale-noob scale-conf scale-coord scale-prob
+       (ct/with-stream stream
+         (ct/with-datatype (dtype/get-datatype v)
+           (alloc/with-allocator allocator
+             (let [output-count (/ (m/ecount v)
+                                   (* (long batch-size)
+                                      *grid-x*
+                                      *grid-y*
+                                      anchor-count))
+                   data-shape [batch-size *grid-x* *grid-y* anchor-count output-count]
+                   ->tensor #(-> (math/array->cortex-tensor %)
+                                 (ct/in-place-reshape data-shape))
+                   pred (->tensor v)
+                   input-gradient (->tensor gradient)
+                   truth (->tensor target)]
+               (ct-custom-loss-gradient! input-gradient pred truth)))))))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Graph implementation
+(defmethod graph/get-node-metadata :yolo2
+  [loss-term]
+  {:arguments {:output {:gradients? true}
+               :labels {}}
+   :passes [:loss]})
+
+
+(defn yolo2-loss
+  [{:keys [grid-x grid-y scale-noob scale-conf scale-coord scale-prob]
+    :or {grid-x 13 grid-y 13 scale-noob 0.5 scale-conf 5 scale-coord 5 scale-prob 1}
+    :as arg-map}]
+  (merge {:type :yolo2
+          :grid-x grid-x
+          :grid-y grid-y
+          :scale-noob scale-noob
+          :scale-conf scale-conf
+          :scale-coord scale-coord
+          :scale-prob scale-prob}
+         arg-map))
