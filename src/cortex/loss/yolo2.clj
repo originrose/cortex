@@ -336,24 +336,24 @@
 
 
 
-(defn test-iou
-  []
-  (gpu-tm/tensor-context
-   (alloc/with-allocator (alloc/passthrough-allocator)
-     (let [src-boxes [[10 10 20 20]
-                      [5 5 5 5]
-                      [10 10 5 5]
-                      [17 17 2 2]]
-           box-pairs (mapv (fn [[x y]]
-                             [(get src-boxes x)
-                              (get src-boxes y)])
-                           (combo/combinations (range (count src-boxes)) 2))
-           b1 (ct/->tensor (map first box-pairs))
-           b2 (ct/->tensor (map second box-pairs))]
-       (let [correct (double-array (mapv (partial apply iou) box-pairs))
-             guess (ct/to-double-array (iou-ct b1 b2))]
-         (println {:correct (vec correct)
-                   :guess (vec guess)}))))))
+;; (defn test-iou
+;;   []
+;;   (gpu-tm/tensor-context
+;;    (alloc/with-allocator (alloc/passthrough-allocator)
+;;      (let [src-boxes [[10 10 20 20]
+;;                       [5 5 5 5]
+;;                       [10 10 5 5]
+;;                       [17 17 2 2]]
+;;            box-pairs (mapv (fn [[x y]]
+;;                              [(get src-boxes x)
+;;                               (get src-boxes y)])
+;;                            (combo/combinations (range (count src-boxes)) 2))
+;;            b1 (ct/->tensor (map first box-pairs))
+;;            b2 (ct/->tensor (map second box-pairs))]
+;;        (let [correct (double-array (mapv (partial apply iou) box-pairs))
+;;              guess (ct/to-double-array (iou-ct b1 b2))]
+;;          (println {:correct (vec correct)
+;;                    :guess (vec guess)}))))))
 
 
 
@@ -371,17 +371,17 @@ If there are two equal max values then you will get a two-hot encoded vector."
     (ct/binary-op! data-matrix 1.0 data-matrix 1.0 max-data :*)))
 
 
-(defn test-one-hot-encode
-  []
-  (gpu-tm/tensor-context
-   (alloc/with-allocator (alloc/passthrough-allocator)
-    (->> (ct/->tensor [[0 0 0 0]
-                       [0 0 0 0]
-                       [0 0 2 0]
-                       [1 4 2 2]])
-         ct-one-hot-encode
-         ct/to-double-array
-         vec))))
+;; (defn test-one-hot-encode
+;;   []
+;;   (gpu-tm/tensor-context
+;;    (alloc/with-allocator (alloc/passthrough-allocator)
+;;     (->> (ct/->tensor [[0 0 0 0]
+;;                        [0 0 0 0]
+;;                        [0 0 2 0]
+;;                        [1 4 2 2]])
+;;          ct-one-hot-encode
+;;          ct/to-double-array
+;;          vec))))
 
 
 (defn apply-selector
