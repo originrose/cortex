@@ -64,6 +64,25 @@
 (def conf [4])
 
 
+(defn realize-label
+  "Adds the label keyword to a datum.
+  A 'truth' value to be passed into the loss function is of the form '(:label (realize-label datum))'
+  A label is of the form (x y w h conf p0 ... p20), where x, y, w, h, conf are in the range 0-1, and p's form the class probability vector"
+  [d {:keys [grid-x grid-y anchor-count class-count class-name->label]}]
+  (let [output-count (+ class-count 5)
+        label (m/mutable (m/zero-array [grid-x grid-y anchor-count output-count]))]
+    (doseq [ob (:objects d)]
+      (let [[w h bb] [(:width d) (:height d) (:bounding-box ob)]
+            scale   [(/ grid-x w) (/ grid-y h) (/ grid-x w) (/ grid-y h)]
+            [xm ym xM yM] (m/mul scale bb)
+            [x-ave y-ave] [(/ (+ xm xM) 2) (/ (+ ym yM) 2)]
+            [cell-x cell-y] [(int x-ave) (int y-ave)]
+            [x y w h]  [(- x-ave cell-x) (- y-ave cell-y) (/ (- xM xm) grid-x) (/ (- yM ym) grid-y)]
+            output (m/array (concat [x y w h] [1] (class-name->label (:class ob))))]
+        (m/set-selection! label cell-x cell-y :all :all output)))
+    (assoc d :label label)))
+
+
 
 
 ;; prediction has shape [grid-x grid-y anchor-count output-count]
@@ -555,16 +574,15 @@ If there are two equal max values then you will get a two-hot encoded vector."
            m/esum)})))
 
 
-
 (defmethod loss/loss :yolo2
   [loss-term buffer-map]
-  ((let [truth (get buffer-map :labels)
-         prediction (get buffer-map :output)
-         {:keys [grid-x grid-y
-                 scale-noob scale-conf scale-coord scale-prob]} loss-term]
-     (with-variables grid-x grid-y scale-noob scale-conf scale-coord scale-prob
-       (cpu-tm/tensor-context
-        (ct-custom-loss prediction truth))))))
+  (let [truth (get buffer-map :labels)
+        prediction (get buffer-map :output)
+        {:keys [grid-x grid-y
+                scale-noob scale-conf scale-coord scale-prob]} loss-term]
+    (with-variables grid-x grid-y scale-noob scale-conf scale-coord scale-prob
+      (cpu-tm/tensor-context
+       (:value (ct-custom-loss prediction truth))))))
 
 
 
@@ -655,6 +673,11 @@ If there are two equal max values then you will get a two-hot encoded vector."
                (ct-custom-loss-gradient! input-gradient pred truth)))))))))
 
 
+(defmethod loss-util/create-compute-loss-term :yolo2
+  [backend network loss-term batch-size]
+  (->Yolo2Loss loss-term backend (alloc/atom-allocator)))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Graph implementation
 (defmethod graph/get-node-metadata :yolo2
@@ -662,7 +685,6 @@ If there are two equal max values then you will get a two-hot encoded vector."
   {:arguments {:output {:gradients? true}
                :labels {}}
    :passes [:loss]})
-
 
 (defn yolo2-loss
   [{:keys [grid-x grid-y scale-noob scale-conf scale-coord scale-prob]
@@ -676,3 +698,13 @@ If there are two equal max values then you will get a two-hot encoded vector."
           :scale-coord scale-coord
           :scale-prob scale-prob}
          arg-map))
+
+
+(defmethod loss/generate-loss-term :yolo2
+  [item-key]
+  (assoc (yolo2-loss {}) :lambda (loss/get-loss-lambda {:type :yolo2})))
+
+
+(defmethod graph/generate-stream-definitions :yolo2
+  [graph loss-term]
+  (loss-util/generate-loss-term-stream-definitions graph loss-term))
