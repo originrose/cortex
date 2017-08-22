@@ -928,8 +928,8 @@
     (resource/with-resource-context
       (let [{:keys [datatype out-channels in-channels kernel-width kernel-height
                     pad-x pad-y stride-x stride-y descriptor]} conv-descriptor
-            input-tensor (cuda-base/tensor datatype batch-size in-channels input-width input-height)
-            output-tensor (cuda-base/tensor datatype batch-size out-channels output-width output-height)
+            input-tensor (cuda-base/tensor datatype batch-size in-channels input-height input-width)
+            output-tensor (cuda-base/tensor datatype batch-size out-channels output-height output-width)
             ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
             ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
             forward-algo (IntPointer. 1)
@@ -1039,8 +1039,8 @@
        (let [[batch-size in-channels in-height in-width] (get input-dims :shape)
              [batch-size out-channels out-height out-width] (get output-dims :shape)
              {:keys [datatype descriptor]} conv-descriptor
-             input-tensor (cuda-base/tensor datatype batch-size in-channels in-width in-height)
-             output-tensor (cuda-base/tensor datatype batch-size out-channels out-width out-height)
+             input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
+             output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
              ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
              ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
              forward-algorithm (long (get-in algorithms [:forward :algorithm]))]
@@ -1072,8 +1072,8 @@
        (let [{:keys [datatype descriptor]} conv-descriptor
              [batch-size in-channels in-height in-width] (get input-dims :shape)
              [batch-size out-channels out-height out-width] (get output-gradient-dims :shape)
-             input-tensor (cuda-base/tensor datatype batch-size in-channels in-width in-height)
-             output-tensor (cuda-base/tensor datatype batch-size out-channels out-width out-height)
+             input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
+             output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
              ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
              ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
              backward-filter-algorithm (get-in algorithms [:backward-filter :algorithm])]
@@ -1104,8 +1104,8 @@
        (let [{:keys [datatype descriptor]} conv-descriptor
              [batch-size in-channels in-height in-width] (get input-gradient-dims :shape)
              [batch-size out-channels out-height out-width] (get output-gradient-dims :shape)
-             input-tensor (cuda-base/tensor datatype batch-size in-channels in-width in-height)
-             output-tensor (cuda-base/tensor datatype batch-size out-channels out-width out-height)
+             input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
+             output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
              ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
              ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
              backward-data-algorithm (get-in algorithms [:backward-data :algorithm])]
