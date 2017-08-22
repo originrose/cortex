@@ -271,12 +271,14 @@
         grid-x 3
         grid-y 3
         n-classes 4
+        anchors (partition 2 [9.42 5.11 16.62 10.52])
+        anchor-count (first (m/shape anchors))
         truth (-> (yolo2/realize-label {:filename "2012_004196.png", :width 500, :height 375,
                                         :segmented? false, :objects [{:class "person", :bounding-box [143 7 387 375]}]}
-                                       {:grid-x 3 :grid-y 3 :anchor-count 5 :class-count 4
+                                       {:grid-x 3 :grid-y 3 :anchor-count anchor-count :class-count 4
                                         :class-name->label (constantly [0 0 1 0])})
                   :label)
-        input-size (* grid-x grid-y yolo2/anchor-count (+ 5 n-classes))
+        input-size (* grid-x grid-y anchor-count (+ 5 n-classes))
         input (partition input-size (vec (repeatedly (* input-size batch-size) rand)))
         output (repeat batch-size (m/to-double-array truth))]
     (-> (get-gradients context
@@ -284,6 +286,7 @@
                         (layers/relu :id :test
                                      :yolo2 {:grid-x 3
                                              :grid-y 3
+                                             :anchors anchors
                                              :labels {:type :stream
                                                       :stream :test}})]
                        (data->dataset input output batch-size)
