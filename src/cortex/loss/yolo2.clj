@@ -14,7 +14,8 @@
             [cortex.compute.math :as math]
             [think.datatype.core :as dtype]
             [cortex.graph :as graph]
-            [cortex.compute.cuda.tensor-math :as gpu-tm]))
+;;            [cortex.compute.cuda.tensor-math :as gpu-tm]
+            ))
 
 
 (def ^:dynamic *grid-x* 13)
@@ -625,25 +626,25 @@ If there are two equal max values then you will get a two-hot encoded vector."
       vec))
 
 
-(defn- test-gradient
-  []
-  (gpu-tm/tensor-context
-   (alloc/with-allocator (alloc/atom-allocator)
-     (let [batch-size 10
-           truth (repeatv 10 (read-label))
-           pred (repeatv 10 (m-rand/sample-uniform [*grid-x* *grid-y* (anchor-count) (output-count truth)]))
-           corem-grad (custom-loss-gradient (first pred) (first truth))
-           input-gradient (ct/new-tensor (m/shape pred))
-           truth-tens    (ct/->tensor (m/array truth))
-           ct-grad (ct-custom-loss-gradient! input-gradient
-                                             (ct/->tensor pred)
-                                             truth-tens)
-           _ (m/assign! input-gradient 0)
-           ct-grad (ct-custom-loss-gradient! input-gradient
-                                             (ct/->tensor pred)
-                                             truth-tens)]
-       (compare-large-vectors (:gradient corem-grad)
-                              (ct/select (:gradient ct-grad) 1 :all :all :all :all))))))
+;; (defn- test-gradient
+;;   []
+;;   (gpu-tm/tensor-context
+;;    (alloc/with-allocator (alloc/atom-allocator)
+;;      (let [batch-size 10
+;;            truth (repeatv 10 (read-label))
+;;            pred (repeatv 10 (m-rand/sample-uniform [*grid-x* *grid-y* (anchor-count) (output-count truth)]))
+;;            corem-grad (custom-loss-gradient (first pred) (first truth))
+;;            input-gradient (ct/new-tensor (m/shape pred))
+;;            truth-tens    (ct/->tensor (m/array truth))
+;;            ct-grad (ct-custom-loss-gradient! input-gradient
+;;                                              (ct/->tensor pred)
+;;                                              truth-tens)
+;;            _ (m/assign! input-gradient 0)
+;;            ct-grad (ct-custom-loss-gradient! input-gradient
+;;                                              (ct/->tensor pred)
+;;                                              truth-tens)]
+;;        (compare-large-vectors (:gradient corem-grad)
+;;                               (ct/select (:gradient ct-grad) 1 :all :all :all :all))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
