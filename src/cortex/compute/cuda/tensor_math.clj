@@ -216,6 +216,38 @@
      :strides [batch-stride chan-stride chan-stride elem-stride]}))
 
 
+(defn- dimensions-shape-1-or-equal?
+  [max-shape {:keys [shape]}]
+  (every? (fn [[max-item item]]
+            (or (= 1 (long item))
+                (= (long max-item) (long item))))
+          (map vector max-shape shape)))
+
+
+(defn- dims-cudnn-compatible?
+  [& args]
+  (let [{:keys [max-shape new-dims]} (apply ct-dims/dimension-seq->max-shape args)]
+    (and (every? ct-dims/access-increasing? new-dims)
+         (every? (partial dimensions-shape-1-or-equal? max-shape) new-dims))))
+
+
+(defn- datatype-cudnn-compatible?
+  [dtype]
+  (or (= dtype :float)
+      (= dtype :double)))
+
+
+(defn- channel-accumulation?
+  [dest-dims y-dims]
+  (let [dest-max (long (apply max (:shape dest-dims)))
+        {:keys [max-shape]} (ct-dims/dimension-seq->max-shape dest-dims y-dims)]
+    (and (>= (count (:shape dest-dims)) 3)
+         (= (long dest-max)
+            (long (nth (reverse (:shape dest-dims)) 2)))
+        (= dest-max (ct-dims/ecount dest-dims))
+        (= max-shape (:shape y-dims)))))
+
+
 (defrecord ConvDesc [^cudnn$cudnnConvolutionStruct conv-desc
                      ^cudnn$cudnnFilterStruct filter-desc]
   resource/PResource
@@ -263,8 +295,7 @@
                                               dest-dtype
                                               #(cuda-base/load-cas-datatype-function
                                                 "tensor_unary_accum"))]
-      (if (and (or (= dest-dtype :float)
-                   (= dest-dtype :double))
+      (if (and (datatype-cudnn-compatible? dest-dtype)
                (or (= op :logistic)
                    (= op :tanh)))
         (cudnn-activation! stream dest dest-dims alpha dest dest-dims op)
@@ -286,8 +317,7 @@
                                               dest-dtype
                                               #(cuda-base/load-all-datatype-function
                                                 "tensor_unary_op"))]
-      (if (and (or (= dest-dtype :float)
-                   (= dest-dtype :double))
+      (if (and (datatype-cudnn-compatible? dest-dtype)
                (or (= op :logistic)
                    (= op :tanh))
                ;;Make sure no broadcasting
@@ -316,8 +346,7 @@
           ->dtype #(drv/dtype-cast % dest-dtype)]
       (if (and (= :max operation)
                (= 0.0 scalar)
-               (or (= dest-dtype :double)
-                   (= dest-dtype :float)))
+               (datatype-cudnn-compatible? dest-dtype))
         (cudnn-activation! stream dest dest-dims dest-alpha dest dest-dims :relu)
         (apply cuda-base/launch-linear-kernel
                (-> (concat [stream binop-fn n-elems 0]
@@ -359,24 +388,77 @@
   (binary-accum! [stream
                   dest dest-dims dest-alpha
                   y y-dims y-alpha
-                  n-elems operation reverse-operands?]
-    (let [dest-dtype (dtype/get-datatype dest)
-          binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-accum
-                                               dest-dtype
-                                               #(cuda-base/load-cas-datatype-function
-                                                 "tensor_binary_accum"))
-          ->dtype #(drv/dtype-cast % dest-dtype)]
-      (apply cuda-base/launch-linear-kernel
-             (-> (concat [stream binop-fn n-elems 0]
-                         [(cuda-base/->ptr dest)]
-                         (dimensions->cuda dest-dims)
-                         [(->dtype dest-alpha)]
-                         [(cuda-base/->ptr y)]
-                         (dimensions->cuda y-dims)
-                         [(->dtype y-alpha)]
-                         (operation->cuda operation reverse-operands?)
-                         [n-elems])
-                 vec))))
+                  n-elems operation
+                  reverse-operands?
+                  operation-requires-cas?]
+    (if operation-requires-cas?
+      (if (and (= operation :+)
+               (dims-cudnn-compatible? dest-dims y-dims)
+               (datatype-cudnn-compatible? (dtype/get-datatype dest))
+               (channel-accumulation? dest-dims y-dims))
+        ;;try to hit cudnn fast path
+        (resource/with-resource-context
+          (cuda-base/cudnn-with-stream
+           stream
+           (let [dest-dtype (dtype/get-datatype dest)
+                 dest-tensor (cuda-base/tensor-with-strides dest-dtype (:shape dest-dims) (:strides dest-dims))
+                 y-tensor (cuda-base/tensor-with-strides dest-dtype (:shape y-dims) (:strides y-dims))]
+             (cuda-base/cudnn-call
+              (cudnn/cudnnConvolutionBackwardBias
+               cudnn-context
+               (cuda-base/value->ptr y-alpha dest-dtype)
+               y-tensor
+               (->ptr y)
+               (cuda-base/value->ptr dest-alpha dest-dtype)
+               dest-tensor
+               (->ptr dest))))))
+        ;;fallback to generic slow path
+        (let [dest-dtype (dtype/get-datatype dest)
+              binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-accum
+                                                   dest-dtype
+                                                   #(cuda-base/load-cas-datatype-function
+                                                     "tensor_binary_accum"))
+              ->dtype #(drv/dtype-cast % dest-dtype)]
+          (apply cuda-base/launch-linear-kernel
+                 (-> (concat [stream binop-fn n-elems 0]
+                             [(cuda-base/->ptr dest)]
+                             (dimensions->cuda dest-dims)
+                             [(->dtype dest-alpha)]
+                             [(cuda-base/->ptr y)]
+                             (dimensions->cuda y-dims)
+                             [(->dtype y-alpha)]
+                             (operation->cuda operation reverse-operands?)
+                             [n-elems])
+                     vec))))
+     (if (and (= operation :+)
+              (dims-cudnn-compatible? dest-dims y-dims)
+              (datatype-cudnn-compatible? (dtype/get-datatype dest)))
+       (resource/with-resource-context
+         (cuda-base/cudnn-with-stream
+          stream
+          (let [dest-dtype (dtype/get-datatype dest)
+                dest-tensor (cuda-base/tensor-with-strides dest-dtype (:shape dest-dims) (:strides dest-dims))
+                y-tensor (cuda-base/tensor-with-strides dest-dtype (:shape y-dims) (:strides y-dims))]
+            (cuda-base/cudnn-call
+             (cudnn/cudnnAddTensor cudnn-context
+                                   (cuda-base/value->ptr y-alpha dest-dtype)
+                                   y-tensor
+                                   (->ptr y)
+                                   (cuda-base/value->ptr dest-alpha dest-dtype)
+                                   dest-tensor
+                                   (->ptr dest))))))
+       (do
+        (if reverse-operands?
+          (tm/binary-op! stream
+                         dest dest-dims
+                         y y-dims y-alpha
+                         dest dest-dims dest-alpha
+                         n-elems operation)
+          (tm/binary-op! stream
+                         dest dest-dims
+                         dest dest-dims dest-alpha
+                         y y-dims y-alpha
+                         n-elems operation))))))
 
   (binary-op! [stream
                dest dest-dims
