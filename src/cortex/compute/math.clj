@@ -215,12 +215,19 @@ argument for creating an array storing a batch of data."
   ([stream datatype data batch-size]
    (let [batch-size (long batch-size)
          data-shape (m/shape data)
-         data-ary (make-java-array datatype data)
-         ;;synchronous call.
-         data-ptr (drv/host-array->device-buffer stream data-ary :datatype datatype)
-         n-elems (m/ecount data-ary)
+         n-elems (long (apply * data-shape))
+         device (drv/get-device stream)
+         host-buffer (drv/allocate-host-buffer
+                      (drv/get-driver device)
+                      n-elems datatype)
+         dev-buffer (drv/allocate-device-buffer n-elems datatype
+                                                        :device device)
          tensor (core-mat-shape->tensor data-shape batch-size)]
-     (->DeviceArray data-ptr tensor)))
+     (dtype/copy-raw->item! data host-buffer 0)
+     (drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
+     (drv/sync-stream stream)
+     (resource/release host-buffer)
+     (->DeviceArray dev-buffer tensor)))
   ([stream datatype data] (array stream datatype data 1)))
 
 
