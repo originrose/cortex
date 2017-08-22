@@ -50,9 +50,15 @@ dest[idx] = alpha * x[idx] op scalar")
   (binary-accum! [stream
                   dest dest-dims dest-alpha
                   y y-dims y-alpha
-                  n-elems operation reverse-operands?]
+                  n-elems operation
+                  reverse-operands?
+                  dest-requires-cas?]
     "Binary operation where dest is involved in the computation.
-dest[idx] = alpha * dest[idx] op y[idx]")
+dest[idx] = alpha * dest[idx] op y[idx]
+reverse-operands?  Whether to reverse the operands.
+dest-requires-cas? If the tensor library detects that dest is only written to once ever
+then no CAS operation is required.  Else a CAS operation is potentially required as the destination
+may be written to multiple times during the operation.")
 
   (binary-op! [stream
                dest dest-dims

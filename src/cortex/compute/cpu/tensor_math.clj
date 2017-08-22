@@ -1195,12 +1195,28 @@
   (binary-accum! [stream
                   dest dest-dims dest-alpha
                   y y-dims y-alpha
-                  n-elems operation reverse-operands?]
-    (cpu-driver/with-stream-dispatch stream
-      ((get binary-accum-table [(dtype/get-datatype dest) operation reverse-operands?])
-       dest dest-dims dest-alpha
-       y y-dims y-alpha
-       n-elems)))
+                  n-elems operation
+                  reverse-operands?
+                  dest-requires-cas?]
+    (if dest-requires-cas?
+      (cpu-driver/with-stream-dispatch stream
+        ((get binary-accum-table [(dtype/get-datatype dest) operation reverse-operands?])
+         dest dest-dims dest-alpha
+         y y-dims y-alpha
+         n-elems))
+      ;;If the operation does not require a CAS op then we can use the full parallelism of the
+      ;;binary op.  Unfortunately if it does then we have to do a lot of things in single-threaded mode.
+      (if reverse-operands?
+        (tm/binary-op! stream
+                       dest dest-dims
+                       y y-dims y-alpha
+                       dest dest-dims dest-alpha
+                       n-elems operation)
+        (tm/binary-op! stream
+                       dest dest-dims
+                       dest dest-dims dest-alpha
+                       y y-dims y-alpha
+                       n-elems operation))))
 
   (binary-op! [stream
                dest dest-dims

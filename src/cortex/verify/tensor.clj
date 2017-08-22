@@ -194,7 +194,22 @@ for the cuda backend."
                             1
                             0)
                          (ct/to-double-array tens-a))
-                   (ct/to-double-array result))))))
+                   (ct/to-double-array result))))
+   (let [tens-a (ct/new-tensor [4 3 3])
+         bias (-> (ct/->tensor [1 2 3 4])
+                  (ct/in-place-reshape [4 1 1]))]
+     (ct/binary-op! tens-a 1.0 tens-a 1.0 bias :+)
+     (is (m/equals (flatten
+                    (map #(repeat 9 %) [1 2 3 4]))
+                   (ct/to-double-array tens-a))))
+   ;;bias-gradient calculation
+   (let [tens-a (ct/->tensor  (mapv #(->> (repeat 9 %)
+                                          (partition 3)) [1 2 3 4]))
+         bias (-> (ct/new-tensor [4])
+                  (ct/in-place-reshape [4 1 1]))]
+     (ct/binary-op! bias 1.0 tens-a 1.0 bias :+)
+     (is (m/equals [9 18 27 36]
+                   (ct/to-double-array bias))))))
 
 
 (defn gemm

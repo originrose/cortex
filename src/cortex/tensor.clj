@@ -671,53 +671,60 @@ and the rest of the dimensions being squashed into n-rows."
   (ensure-datatypes (dtype/get-datatype dest) x)
   (let [y (* (double beta) (double y))
         device (tensor->device dest)]
-    (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
-      (tm/binary-accum-constant!
-       (check-stream)
-       (tensor->buffer dest) (tensor->dimensions dest) alpha
-       y
-       (ecount dest) op reverse-operands?)
-      (do
-        (check-partial-alias dest x)
-        (tm/binary-op-constant!
+    ;;attempt a strength reduce for a common operation.
+    (if (= op :*)
+      (unary-op! dest (* (double alpha)
+                         (double y))
+                 x
+                 :noop)
+      (if (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
+        (tm/binary-accum-constant!
          (check-stream)
-         (tensor->buffer dest) (tensor->dimensions dest)
-         (tensor->buffer x) (tensor->dimensions x) alpha
+         (tensor->buffer dest) (tensor->dimensions dest) alpha
          y
-         (max (ecount x)
-              (ecount dest)) op reverse-operands?))))
+         (ecount dest) op reverse-operands?)
+        (do
+          (check-partial-alias dest x)
+          (tm/binary-op-constant!
+           (check-stream)
+           (tensor->buffer dest) (tensor->dimensions dest)
+           (tensor->buffer x) (tensor->dimensions x) alpha
+           y
+           (max (ecount x)
+                (ecount dest)) op reverse-operands?)))))
   dest)
 
 
 (defmethod typed-binary-op [:tensor :number]
   [dest alpha x beta y op]
-  ;;attempt a strength reduce to a unary noop if op is :*
-  (if (= op :*)
-    (unary-op! dest (* (double alpha)
-                       (double beta)
-                       (double y))
-               x
-               :noop)
-    (binary-op-constant! dest alpha x beta y op false)))
+  (binary-op-constant! dest alpha x beta y op false))
 
 
 (defmethod typed-binary-op [:number :tensor]
   [dest alpha x beta y op]
-  ;;Attempt strength reduce.
-  (if (= op :*)
-    (unary-op! dest (* (double alpha)
-                       (double beta)
-                       (double x))
-               y
-               :noop)
-    (binary-op-constant! dest beta y alpha x op true)))
+  (binary-op-constant! dest beta y alpha x op true))
 
 
 (defmethod typed-binary-op [:tensor :tensor]
   [dest alpha x beta y op]
-  (let [device (tensor->device dest)]
-    (if (or (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
-            (compute-drv/alias? (tensor->buffer dest) (tensor->buffer y)))
+  (let [device (tensor->device dest)
+        {:keys [max-shape dimensions]} (dims/dimension-seq->max-shape
+                                          (tensor->dimensions dest)
+                                          (tensor->dimensions x)
+                                          (tensor->dimensions y))
+        [dest-dims x-dims y-dims] dimensions
+        arg-alias? (or (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
+                       (compute-drv/alias? (tensor->buffer dest) (tensor->buffer y)))
+        dest-is-max-shape? (= (:shape dest-dims) max-shape)]
+
+    (when-not dest-is-max-shape?
+      (when-not arg-alias?
+        (throw (ex-info "If destination is a broadcast target then it must be one of the operands"
+                        {:destination-dimensions dest-dims
+                         :x-dims x-dims
+                         :y-dims y-dims
+                         :max-shape max-shape}))))
+    (if arg-alias?
       (let [x-alias? (compute-drv/alias? (tensor->buffer dest) (tensor->buffer x))
             [alpha beta y rev-ops?] (if x-alias?
                                       [alpha beta y false]
@@ -729,17 +736,17 @@ and the rest of the dimensions being squashed into n-rows."
          (tensor->buffer dest) (tensor->dimensions dest) alpha
          (tensor->buffer y) (tensor->dimensions y) beta
          (max (ecount dest)
-              (ecount y)) op rev-ops?))
+              (ecount y)) op
+         rev-ops?
+         (not dest-is-max-shape?)))
       (do
         (ensure-broadcast-rules dest x y)
         (ensure-datatypes (get-datatype x) y dest)
-        (check-partial-alias dest x)
-        (check-partial-alias dest y)
         (tm/binary-op!
          (check-stream)
-         (tensor->buffer dest) (tensor->dimensions dest)
-         (tensor->buffer x) (tensor->dimensions x) alpha
-         (tensor->buffer y) (tensor->dimensions y) beta
+         (tensor->buffer dest) dest-dims
+         (tensor->buffer x) x-dims alpha
+         (tensor->buffer y) y-dims beta
          (max (ecount dest)
               (ecount x)
               (ecount y)) op))))
