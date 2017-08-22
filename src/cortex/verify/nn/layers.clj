@@ -424,7 +424,7 @@
 (defn basic-conv-layer
   [context]
 
-  #_(let [batch-size 10
+  (let [batch-size 10
         channel-count 4
         input (repeat batch-size (range 1 10))
         output-gradient (flatten
