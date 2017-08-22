@@ -308,8 +308,8 @@ and then forward many times for every parameter of the network."
             ;;Setup bias so it broadcasts correctly over the output
             bias (-> (math/array->cortex-tensor (get-in parameter-buffers [:bias :buffer]))
                      (tensor/in-place-reshape [(get conv-desc :out-channels) 1 1]))]
-        (m/assign! output bias)
-        (tensor/convolution-forward! output 1.0 input weights workspace conv-desc algorithms))))
+        (tensor/convolution-forward! output 0.0 input weights workspace conv-desc algorithms)
+        (tensor/binary-op! output 1.0 output 1.0 bias :+))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
     (tensor/with-stream (nn-backend/get-stream)
