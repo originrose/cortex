@@ -9,6 +9,7 @@
             [cortex.compute.cpu.backend :as cpu-backend]
             [cortex.optimize :as opt]
             [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.resource.core :as resource]
             [cortex.compute.cuda.driver :refer [->ptr value->ptr] :as cuda-drv]
             [cortex.compute.cuda.tensor-math])
@@ -47,7 +48,7 @@
   (get-driver
     [backend]
     (drv/get-driver (drv/get-device backend)))
-  dtype/PDatatype
+  dtype-base/PDatatype
   (get-datatype
     [backend]
     (get backend :datatype)))

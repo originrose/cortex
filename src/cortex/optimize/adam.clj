@@ -8,7 +8,7 @@
    [cortex.compute.cpu.driver :as cpu-drv]
    ;[cortex.compute.cuda.driver :as cuda-drv]
    [cortex.util :as util]
-   [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
+   [think.datatype.core :refer [v-aget v-aset] :as dtype]
    [think.datatype.marshal :as marshal]
    [think.parallel.core :as parallel]
    [cortex.graph :as graph]

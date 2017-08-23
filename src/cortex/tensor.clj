@@ -45,6 +45,7 @@ For indirect operations element count is num-indexes * num-columns.  After that 
   larger."
   (:require [cortex.compute.driver :as compute-drv]
             [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [clojure.core.matrix.protocols :as mp]
             [mikera.vectorz.matrix-api]
             [cortex.graph :as graph]
@@ -181,7 +182,7 @@ that rerequires the items to have the same element count."
 
 ;;Tensors are a tuple of device (driver for now) dimensions and index system and buffer.
 (defrecord Tensor [device dimensions buffer]
-  dtype/PDatatype
+  dtype-base/PDatatype
   (get-datatype [tensor] (dtype/get-datatype (:buffer tensor)))
   compute-drv/PDeviceProvider
   (get-device [tensor] device)
