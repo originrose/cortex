@@ -3,6 +3,7 @@
             [cortex.compute.driver :as drv]
             [cortex.compute.math :as math]
             [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [clojure.core.matrix :as m]))
 
 
@@ -18,7 +19,7 @@
           input-data (dtype/make-array-of-type datatype (range 10))
           output-data (dtype/make-array-of-type datatype 10)]
       (dtype/copy! input-data 0 buf-a 0 10)
-      (dtype/set-value! buf-a 0 100.0)
+      (dtype-base/set-value! buf-a 0 100.0)
       (dtype/copy! buf-a 0 output-data 0 10)
       (drv/copy-host->device stream buf-a 0 buf-b 0 10)
       (drv/memset stream buf-b 5 20.0 5)

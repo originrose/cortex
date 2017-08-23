@@ -1,7 +1,7 @@
 (ns cortex.compute.javacpp-datatype
   (:require [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.datatype.marshal :as marshal]
-            [think.datatype.time-test :as time-test]
             [clojure.core.matrix.protocols :as mp])
   (:import [org.bytedeco.javacpp
             BytePointer IntPointer LongPointer DoublePointer
@@ -23,7 +23,7 @@
 (System/setProperty "org.bytedeco.javacpp.nopointergc" "true")
 
 
-(extend-protocol dtype/PDatatype
+(extend-protocol dtype-base/PDatatype
   BytePointer
   (get-datatype [ptr] :byte)
   ShortPointer
@@ -85,8 +85,8 @@ threadsafe while (.position ptr offset) is not."
     ;;code for dealing with position is incorrect.
     (.set ^Field address-field retval (+ addr
                                          (* (+ pos offset)
-                                            (dtype/datatype->byte-size
-                                             (dtype/get-datatype ptr)))))
+                                            (dtype-base/datatype->byte-size
+                                             (dtype-base/get-datatype ptr)))))
     retval))
 
 
@@ -127,11 +127,11 @@ threadsafe while (.position ptr offset) is not."
 
 
 (extend-type Pointer
-  dtype/PAccess
-  (set-value! [ptr ^long offset value] (dtype/set-value! (as-buffer ptr) offset value))
+  dtype-base/PAccess
+  (set-value! [ptr ^long offset value] (dtype-base/set-value! (as-buffer ptr) offset value))
   (set-constant! [ptr offset value elem-count]
-    (dtype/set-constant! (as-buffer ptr) offset value elem-count))
-  (get-value [ptr ^long offset] (dtype/get-value (as-buffer ptr) offset))
+    (dtype-base/set-constant! (as-buffer ptr) offset value elem-count))
+  (get-value [ptr ^long offset] (dtype-base/get-value (as-buffer ptr) offset))
 
   mp/PElementCount
   (element-count [ptr] (.capacity ptr)))
@@ -159,15 +159,6 @@ threadsafe while (.position ptr offset) is not."
   marshal/PTypeToCopyToFn
   (get-copy-to-fn [dest dest-offset]
     (marshal/get-copy-to-fn (as-buffer dest) dest-offset))
-  dtype/PCopyQueryIndirect
-  (get-indirect-copy-fn [dest dest-offset]
+  dtype-base/PCopyQuery
+  (get-copy-fn [dest dest-offset]
     (marshal/get-copy-to-fn dest dest-offset)))
-
-
-(defn float->double-ary-time-test
-  []
-  (let [n-elems 100000
-        src (make-pointer-of-type :float (range n-elems))
-        dest (double-array n-elems)]
-    (time-test/time-test
-     #(dtype/copy! src 0 dest 0 n-elems))))

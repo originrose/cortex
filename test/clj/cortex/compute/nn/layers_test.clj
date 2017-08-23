@@ -73,8 +73,8 @@
 (def-double-float-test batch-normalization
   (verify-layers/batch-normalization (create-context)))
 
-(def-double-float-test local-response-normalization-forward
-  (verify-layers/lrn-forward (create-context)))
+;; (def-double-float-test local-response-normalization-forward
+;;   (verify-layers/lrn-forward (create-context)))
 
 (def-double-float-test prelu
   (verify-layers/prelu (create-context)))

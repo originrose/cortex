@@ -1,9 +1,13 @@
 (ns cortex.compute.cpu.tensor-math
   (:require [think.datatype.core :refer [v-aget v-aset] :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.datatype.marshal :as marshal]
             [cortex.tensor.math :as tm]
             [clojure.math.combinatorics :as combo]
-            [cortex.compute.cpu.driver :as cpu-driver]
+            [cortex.compute.cpu.driver
+             :refer [datatype->view-cast-fn
+                     datatype->cast-fn]
+             :as cpu-driver]
             [cortex.compute.driver :as compute-drv]
             [think.parallel.core :as parallel]
             [clojure.core.matrix.macros :refer [c-for]]
@@ -59,27 +63,6 @@
   (->> (marshal/array-view-iterator assign-constant-impl)
        (into {})))
 
-
-(defmacro ^:private datatype->view-cast-fn
-  [dtype buf]
-  (condp = dtype
-    :byte `(marshal/as-byte-array-view ~buf)
-    :short `(marshal/as-short-array-view ~buf)
-    :int `(marshal/as-int-array-view ~buf)
-    :long `(marshal/as-long-array-view ~buf)
-    :float `(marshal/as-float-array-view ~buf)
-    :double `(marshal/as-double-array-view ~buf)))
-
-(defmacro ^:private datatype->cast-fn
-  [dtype val]
-  (condp = dtype
-    :byte `(byte ~val)
-    :short `(short ~val)
-    :int `(int ~val)
-    :long `(long ~val)
-    :float `(float ~val)
-    :double `(double ~val)))
-
 (defmacro ^:private datatype->cast-fn-symbol
   [dtype]
   (condp = dtype
@@ -93,7 +76,7 @@
 
 (defn- generate-datatype-combinations
   []
-  (let [all-dtypes dtype/datatypes]
+  (let [all-dtypes dtype-base/datatypes]
     (for [lhs all-dtypes
           rhs all-dtypes]
       [lhs rhs])))
@@ -192,7 +175,7 @@
 
 (defmacro unary-op-table-impl
   []
-  (->> (for [dtype dtype/datatypes
+  (->> (for [dtype dtype-base/datatypes
              op ct/unary-operations]
          [[dtype op] {:unary-accum! `(unary-accum!-impl ~dtype ~op)
                       :unary-op! `(unary-op!-impl ~dtype ~op)}])
@@ -248,7 +231,7 @@
 
 (defmacro binary-accum-constant-table
   []
-  (->> (for [dtype dtype/datatypes
+  (->> (for [dtype dtype-base/datatypes
              op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-accum-constant!-impl ~dtype ~op ~rev-ops?)])
@@ -287,7 +270,7 @@
 
 (defmacro binary-op-constant-table
   []
-  (->> (for [dtype dtype/datatypes
+  (->> (for [dtype dtype-base/datatypes
              op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-op-constant!-impl ~dtype ~op ~rev-ops?)])
@@ -324,7 +307,7 @@
 
 (defmacro binary-accum-table
   []
-  (->> (for [dtype dtype/datatypes
+  (->> (for [dtype dtype-base/datatypes
              op ct/binary-operations
              rev-ops? [true false]]
          [[dtype op rev-ops?] `(binary-accum!-impl ~dtype ~op ~rev-ops?)])
@@ -367,7 +350,7 @@
 
 (defmacro binary-op-table-impl
   []
-  (->> (for [dtype dtype/datatypes
+  (->> (for [dtype dtype-base/datatypes
              op ct/binary-operations]
          [[dtype op] `(binary-op!-impl ~dtype ~op)])
        (into {})))
@@ -484,7 +467,7 @@
 
 (defmacro ternary-op-iter
   []
-  (->> (for [dtype dtype/datatypes]
+  (->> (for [dtype dtype-base/datatypes]
          [dtype {:ternary-op! `(ternary-op-impl ~dtype)
                  :ternary-op-constant! `(ternary-op-constant-impl ~dtype)
                  :ternary-op-constant-constant! `(ternary-op-constant-constant-impl ~dtype)}])
@@ -550,7 +533,7 @@
 
 (defmacro unary-reduce-iter
   []
-  (->> (for [dtype dtype/datatypes
+  (->> (for [dtype dtype-base/datatypes
              reduce-op ct/unary-reduction-operations]
          [[dtype reduce-op] {:unary-reduce! `(unary-reduce-impl ~dtype ~reduce-op)}])
        (into {})))

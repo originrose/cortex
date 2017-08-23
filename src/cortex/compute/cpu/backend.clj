@@ -4,6 +4,7 @@
     [clojure.core.matrix.protocols :as mp]
     [clojure.core.matrix.macros :refer [c-for]]
     [think.datatype.core :refer [v-aget v-aset v-alength] :as dtype]
+    [think.datatype.base :as dtype-base]
     [cortex.graph :as graph]
     [cortex.nn.layers :as layers]
     [cortex.nn.impl :as impl]
@@ -30,7 +31,7 @@
 
 
 (defrecord CPUBackend [type device stream datatype resource-context]
-  dtype/PDatatype
+  dtype-base/PDatatype
   (get-datatype [backend] (.datatype backend))
   drv/PDriverProvider
   (get-driver [backend] (drv/get-driver (.device backend)))
@@ -441,19 +442,18 @@ Calculates: (sum(x[i]^2)*alpha + K)"
                      squared-sum-view# (ArrayView/toView (double-array n-channels#))]
                  (c-for
                   [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
-                  (let [pix-offset# (+ start-offset# pix-idx#)
-                        ;;Setup input to stride over image channels at this pixel.
-                        input# (.toStridedView input# pix-offset# channel-stride#)
-                        output# (.toStridedView output# pix-offset# channel-stride#)]
+                  (let [pix-offset# (+ start-offset# pix-idx#)]
                     (calc-squared-sums! input# n-channels# remove-index# add-index#
                                         squared-sum-view# alpha# k# ~cast-fn)
                     (c-for
                      [chan-idx# 0 (< chan-idx# n-channels#) (inc chan-idx#)]
                      (let [divisor# (safe-positive-pow
-                                     (.get squared-sum-view# chan-idx#)
+                                     (v-aget squared-sum-view# (+ pix-offset# (* chan-idx# channel-stride#)))
                                      beta#)]
-                       (.set output# chan-idx# (~cast-fn (/ (.get input# chan-idx#)
-                                                            divisor#))))))))
+                       (.set output# (+ pix-offset# (* chan-idx# channel-stride#))
+                             (~cast-fn (/ (.get input# (+ pix-offset#
+                                                          (* chan-idx# channel-stride#)))
+                                          divisor#))))))))
                (catch Throwable e# (clojure.pprint/pprint e#))))]
         ;;(pixel-fn# 0 num-pixels#)
         (parallel/launch-parallel-for num-pixels# lrn-forward-fn#)))))
@@ -501,13 +501,7 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                      squared-sum-view# (ArrayView/toView (double-array n-channels#))]
                  (c-for
                   [pix-idx# start# (< pix-idx# end#) (inc pix-idx#)]
-                  (let [pix-offset# (+ start-offset# pix-idx#)
-                        ;;Setup input to stride over image channels at this pixel.
-                        input# (.toStridedView input# pix-offset# channel-stride#)
-                        output-gradient# (.toStridedView output-gradient#
-                                                         pix-offset# channel-stride#)
-                        input-gradient# (.toStridedView input-gradient#
-                                                         pix-offset# channel-stride#)]
+                  (let [pix-offset# (+ start-offset# pix-idx#)]
                     (calc-squared-sums! input# n-channels# remove-index# add-index#
                                        squared-sum-view# alpha# k# ~cast-fn)
                     (c-for
@@ -518,19 +512,19 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                               output-accum# (double 0.0)]
                          (if (< range-idx# past-range-end#)
                            (let [squared-to-beta# (safe-positive-pow
-                                                   (.get squared-sum-view#
-                                                         range-idx#)
+                                                   (v-aget squared-sum-view#
+                                                           range-idx#)
                                                    beta#)
                                  squared-to-beta-minus-one#
                                  (safe-positive-pow
-                                  (.get squared-sum-view#
-                                        range-idx#)
+                                  (v-aget squared-sum-view#
+                                          range-idx#)
                                   (- beta# 1.0))
 
 
                                  shared-quantity# (/ (* -2.0 squared-to-beta-minus-one#
-                                                        (.get input# chan-idx#)
-                                                        (.get input# range-idx#)
+                                                        (v-aget input# (+ pix-offset# (* chan-idx# channel-stride#)))
+                                                        (v-aget input# (+ pix-offset# (* range-idx# channel-stride#)))
                                                         alpha# beta#)
                                                      (* squared-to-beta#
                                                         squared-to-beta#))
@@ -542,8 +536,9 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                                     (double
                                      (+ output-accum#
                                         (* (+ shared-quantity# addend#)
-                                           (.get output-gradient# range-idx#))))))
-                           (.set input-gradient# chan-idx# output-accum#))))))))
+                                           (v-aget output-gradient# (+ pix-offset# (* range-idx# channel-stride#))))))))
+                           (v-aset input-gradient# (+ pix-offset# (* chan-idx# channel-stride#))
+                                   output-accum#))))))))
                (catch Throwable e# (clojure.pprint/pprint e#))))]
         (parallel/launch-parallel-for num-pixels# lrn-backward-fn#)))))
 
@@ -742,9 +737,10 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
                           n k alpha beta)))))
 
 
-(defmethod cpu-layer :local-response-normalization
-  [backend layer batch-size]
-  (->LocalResponseNormalization backend layer batch-size))
+;;CN - disabling this until we have time to re-write using tensors; it is too tough to maintain in it's current format.
+;; (defmethod cpu-layer :local-response-normalization
+;;   [backend layer batch-size]
+;;   (->LocalResponseNormalization backend layer batch-size))
 
 
 (extend-type CPUBackend

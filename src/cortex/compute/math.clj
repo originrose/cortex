@@ -8,6 +8,7 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.resource.core :as resource]
             [cortex.tensor :as ct]
             [cortex.tensor.dimensions :as ct-dims]))
@@ -169,17 +170,6 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   (batch-size [item] (.batch-size item)))
 
 
-(defn make-java-array
-  "Given a datatype and a specific amount of data then produce an array.  If there is no fast path
-then an array of a given type is produced."
-  [datatype data]
-  (let [data (or (mp/as-double-array data)
-                 data)]
-    (if (dtype/is-primitive-array? data)
-      data
-      (dtype/make-array-of-type datatype (vec (m/eseq data))))))
-
-
 (defprotocol PGetDeviceBuffer
   (device-buffer [item]
     "Given a generic object product the device buffer backing data store for the object."))
@@ -193,7 +183,7 @@ then an array of a given type is produced."
 (defrecord DeviceArray [device-buffer ^Tensor tensor])
 
 (extend-type DeviceArray
-  dtype/PDatatype
+  dtype-base/PDatatype
   (get-datatype [ary] (dtype/get-datatype (.device-buffer ary)))
   mp/PElementCount
   (element-count [ary] (mp/element-count (.tensor ary)))
@@ -204,7 +194,7 @@ then an array of a given type is produced."
   (batch-size [ary] (batch-size (.tensor ary)))
   PGetDeviceBuffer
   (device-buffer [ary] (.device-buffer ary))
-  dtype/PView
+  dtype-base/PView
   (->view-impl [ary offset length]
     (dtype/->view (.device-buffer ary) offset length)))
 
