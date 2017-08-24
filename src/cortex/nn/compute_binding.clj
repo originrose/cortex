@@ -684,14 +684,12 @@ traversal with the inputs and outputs mapped to specific buffers."
 (defn do-traverse
   [network pass-direction]
   (let [mapped-pass (mapped-traversal network pass-direction)]
-    (reduce
-      (fn [network pass-function]
-        (->> mapped-pass
-             (map (partial perform-pass pass-direction network pass-function))
-             dorun)
-        network)
-      network
-      (get-in PASS-METADATA [pass-direction :pass-functions]))))
+    (doseq [{:keys [pass] :as item} mapped-pass]
+      ;;The traversal system can override the specific pass direction on a given item.
+      (let [pass-direction (or pass pass-direction)]
+        (doseq [pass-function (get-in PASS-METADATA [pass-direction :pass-functions])]
+          (perform-pass pass-direction network pass-function item))))
+    network))
 
 
 

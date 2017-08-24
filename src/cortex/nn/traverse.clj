@@ -270,12 +270,22 @@ the client's perspective is located in the buffers section."
   "
   [network & {:keys [keep-non-trainable?]}]
   (let [[forward-traversal buffers] (network->forward-traversal-and-buffers
-                                     network :training)]
+                                     network :training)
+        backward-traversal (-> (if keep-non-trainable?
+                                 forward-traversal
+                                 (remove-non-trainable network forward-traversal))
+                               reverse-forward-traversal)
+        backward-id-set (set (map :id backward-traversal))
+        forward-traversal (map (fn [{:keys [id] :as entry}]
+                                 (cond-> entry
+                                   (and (not (contains? backward-id-set id))
+                                        (get-in network [:compute-graph :nodes id :non-trainable?]))
+                                   (assoc :pass :inference)))
+                               forward-traversal)]
+    ;;Layers not involved in the backward traversal should have their passes set to inference.
+
     {:forward forward-traversal
-     :backward (-> (if keep-non-trainable?
-                     forward-traversal
-                     (remove-non-trainable network forward-traversal))
-                   reverse-forward-traversal)
+     :backward backward-traversal
      :buffers (stream-arguments->buffers network buffers :training)
      :type :training}))
 
