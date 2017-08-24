@@ -206,7 +206,7 @@
   [pred]
   (let [pred-selector (partial m/select pred :all :all :all)
         x-y-vals      (->> x-y pred-selector (m/emap sigmoid))
-        w-h-vals      (->> w-h pred-selector (m/emul (grid-ratio)) (m/exp) (m/emul *anchors*) (m/sqrt))
+        w-h-vals      (->> w-h pred-selector (m/exp) (m/emul (grid-ratio)) (m/emul *anchors*) (m/sqrt))
         conf-vals     (->> conf pred-selector (m/emap sigmoid))
         prob-vals     (-> (pred-selector (class-dims pred))
                           (m/reshape [(* *grid-x* *grid-y* (anchor-count)) (classes-count pred)])
@@ -224,7 +224,7 @@
         formatted-pred-selector (partial m/select formatted-prediction :all :all :all)
         we-selector   (partial m/select weighted-error :all :all :all)
         x-y-grad      (->> x-y formatted-pred-selector (m/emap sigmoid-gradient))
-        w-h-grad      (->> w-h formatted-pred-selector (m/emul 0.5 (grid-ratio)))
+        w-h-grad      (->> w-h formatted-pred-selector (m/emul 0.5))
         conf-grad     (->> conf   formatted-pred-selector (m/emap sigmoid-gradient))
         prob-grad     (-> (formatted-pred-selector class-dims)
                           (m/reshape [(* *grid-x* *grid-y* (anchor-count)) classes-count])
@@ -452,7 +452,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
     ;;x-y-vals
     (->> x-y pred-selector ct-sigmoid!)
     ;;w-h-vals
-    (->> w-h pred-selector (ct-emul! ct-grid-ratio) (ct-exp!) (ct-emul! ct-anchors) (ct-sqrt!))
+    (->> w-h pred-selector (ct-exp!) (ct-emul! ct-grid-ratio) (ct-emul! ct-anchors) (ct-sqrt!))
     ;;conf-vals
     (->> conf pred-selector ct-sigmoid!)
     ;;prob-vals
@@ -467,9 +467,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 (defn ct-wh-grad!
   [input-gradient output loss-gradient]
-  (let [ct-grid-ratio (alloc/->const-tensor :ct-grid-ratio (grid-ratio))]
-    (ct/binary-op! input-gradient 1.0 output 0.5 ct-grid-ratio :*)
-    (ct/binary-op! input-gradient 1.0 input-gradient 1.0 loss-gradient :*)))
+  (ct/binary-op! input-gradient 1.0 output 0.5 loss-gradient :*))
 
 
 (defn- ct-softmax-grad!
