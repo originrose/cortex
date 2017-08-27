@@ -54,11 +54,10 @@
 
 (defn- add-node-to-graph
   [[graph last-id] desc]
-  (let [predecessor-id-seq (if-let [parents (get desc :parents)]
-                             parents
-                             (if last-id
-                               [last-id]
-                               []))
+  (let [predecessor-id-seq (cond
+                             (contains? desc :parents) (:parents desc)
+                             last-id [last-id]
+                             :default [])
         desc (embed-param-args desc)
         [graph id] (graph/add-node graph desc
                                    predecessor-id-seq)

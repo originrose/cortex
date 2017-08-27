@@ -4,11 +4,9 @@
             [think.datatype.core :as dtype]
             [cortex.optimize :refer [create-optimizer] :as opt]
             [cortex.optimize.adam :as adam]
-
             [cortex.compute.verify.utils :refer [def-double-float-test] :as utils]
             [cortex.verify.utils :as cortex-utils]
             [clojure.core.matrix :as m]))
-
 
 (def adam-answers
   [[0.999000000005, 1.9990000000025, 2.9990000000016668, 3.99900000000125]
@@ -30,7 +28,6 @@
    [0.9830150304982433, 1.9830074756785594, 2.9830049750356973, 3.9830037280016044]
    [0.9820177164052082, 1.9820088100921336, 2.982005862758586, 3.9820043930880837]
    [0.9810206928263993, 1.9810102885187928, 2.981006846215933, 3.9810051298728633]])
-
 
 (defn test-adam
   [backend]
