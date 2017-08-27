@@ -50,9 +50,15 @@ dest[idx] = alpha * x[idx] op scalar")
   (binary-accum! [stream
                   dest dest-dims dest-alpha
                   y y-dims y-alpha
-                  n-elems operation reverse-operands?]
+                  n-elems operation
+                  reverse-operands?
+                  dest-requires-cas?]
     "Binary operation where dest is involved in the computation.
-dest[idx] = alpha * dest[idx] op y[idx]")
+dest[idx] = alpha * dest[idx] op y[idx]
+reverse-operands?  Whether to reverse the operands.
+dest-requires-cas? If the tensor library detects that dest is only written to once ever
+then no CAS operation is required.  Else a CAS operation is potentially required as the destination
+may be written to multiple times during the operation.")
 
   (binary-op! [stream
                dest dest-dims
@@ -90,6 +96,12 @@ Argument order is specified by arg-order.")
                                   operation arg-order]
     "Apply ternary elementwise operation to args + 2 constants.
 Argument order is specified by arg-order")
+
+  (unary-reduce! [stream
+                  output output-dims
+                  input-alpha input input-dims
+                  op]
+    "Reduction on 1 operand.")
 
   (gemm! [stream
           c c-colstride
@@ -156,13 +168,52 @@ running means, variances using a running average
                                        batch-count channel-count element-count]
     "Gradient calculation.  All gradients exception output gradient are out vars.")
   (activation-gradient! [stream
-                         input-gradient
-                         output-gradient
-                         output
+                         input-gradient input-grad-dim
+                         output-gradient output-grad-dim
+                         output output-dim
                          op
                          element-count])
-  (softmax! [stream
-             output
-             input
-             batch-count
-             element-count]))
+
+  (softmax-eltwise! [stream
+                     output output-dims
+                     input input-dims])
+
+  (softmax-spatial! [stream
+                     output output-dims
+                     input input-dims])
+
+  (convolution-descriptor [stream
+                           datatype out-channels in-channels kern-width kern-height
+                           pad-x pad-y stride-x stride-y]
+    "Return an implementation-specific descriptor to be used with the resulting convolution calls.
+resource/release *must* be a valid call on the returned value.")
+
+  (choose-convolution-algorithms [stream conv-descriptor
+                                  input-width input-height
+                                  output-width output-height
+                                  batch-size
+                                  max-ideal-workspace-size use-defaults?])
+
+
+  (convolution-forward! [stream
+                         output output-dims output-alpha
+                         input input-dims
+                         weights weight-dims
+                         workspace workspace-ecount
+                         conv-descriptor algorithms])
+
+
+  (convolution-backward-weights! [stream
+                                  weight-gradient weight-gradient-dims weight-gradient-alpha
+                                  output-gradient output-gradient-dims
+                                  input input-dims
+                                  workspace workspace-ecount
+                                  conv-descriptor algorithms])
+
+
+  (convolution-backward-data! [stream
+                               input-gradient input-gradient-dims input-gradient-alpha
+                               output-gradient output-gradient-dims
+                               weights weights-dims
+                               workspace workspace-ecount
+                               conv-descriptor algorithms]))

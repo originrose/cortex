@@ -1,6 +1,7 @@
 (ns cortex.compute.cuda.driver
   (:require [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.datatype.marshal :as marshal]
             [clojure.java.io :as io]
             [think.resource.core :as resource]
@@ -358,7 +359,7 @@ set this device before.  Set device must be called before any other cuda functio
    "_d"])
 
 (def datatype->suffixes-map
-  (into {} (map vec (partition 2 (interleave dtype/datatypes suffixes)))))
+  (into {} (map vec (partition 2 (interleave dtype-base/datatypes suffixes)))))
 
 (defn fn-name-datatype->fn-name
   [fn-name datatype]
@@ -383,9 +384,9 @@ set this device before.  Set device must be called before any other cuda functio
 
 (defn load-all-datatype-function
   ([module-name fn-name]
-   (load-multiple-datatype-function module-name fn-name dtype/datatypes))
+   (load-multiple-datatype-function module-name fn-name dtype-base/datatypes))
   ([fn-name]
-   (load-multiple-datatype-function fn-name dtype/datatypes)))
+   (load-multiple-datatype-function fn-name dtype-base/datatypes)))
 
 (defn load-float-double-function
   ([module-name fn-name]
@@ -400,8 +401,8 @@ set this device before.  Set device must be called before any other cuda functio
     (let [module (with-open [io-stream (io/input-stream
                                         (io/resource (format "%s.fatbin" fn-name)))]
                    (load-module io-stream))]
-      (->> (for [lhs-dtype dtype/datatypes
-                 rhs-dtype dtype/datatypes]
+      (->> (for [lhs-dtype dtype-base/datatypes
+                 rhs-dtype dtype-base/datatypes]
              (let [fn-name (format "%s%s%s"
                                    fn-name
                                    (get datatype->suffixes-map lhs-dtype)
@@ -477,9 +478,9 @@ set this device before.  Set device must be called before any other cuda functio
   (let [lhs-start (.address ^Pointer (->ptr lhs))
         rhs-start (.address ^Pointer (->ptr rhs))
         lhs-byte-count (* (long (m/ecount lhs))
-                          (dtype/datatype->byte-size (dtype/get-datatype lhs)))
+                          (dtype-base/datatype->byte-size (dtype/get-datatype lhs)))
         rhs-byte-count (* (long (m/ecount rhs))
-                          (dtype/datatype->byte-size (dtype/get-datatype rhs)))]
+                          (dtype-base/datatype->byte-size (dtype/get-datatype rhs)))]
     (or (in-range? lhs-start rhs-start rhs-byte-count)
         (in-range? rhs-start lhs-start lhs-byte-count))))
 
@@ -492,14 +493,14 @@ set this device before.  Set device must be called before any other cuda functio
     (cuda-library-debug-print "Free: " (.address ptr))
     (cuda-call (cuda/cudaFree ptr)))
   mp/PElementCount
-  (element-count [item] (quot size (dtype/datatype->byte-size
+  (element-count [item] (quot size (dtype-base/datatype->byte-size
                                     (dtype/get-datatype ptr))))
-  dtype/PDatatype
+  dtype-base/PDatatype
   (get-datatype [item] (dtype/get-datatype ptr))
   drv/PBuffer
   (sub-buffer-impl [this offset length]
     (->DevicePointer
-     (* (dtype/datatype->byte-size (dtype/get-datatype ptr))
+     (* (dtype-base/datatype->byte-size (dtype/get-datatype ptr))
         (long length))
      (drv/sub-buffer-impl ptr offset length)))
   (alias? [lhs-dev-buffer rhs-dev-buffer]
@@ -516,35 +517,26 @@ set this device before.  Set device must be called before any other cuda functio
     (cuda-library-debug-print "FreeHost: " (.address ptr))
     (check-cuda-error (cuda/cudaFreeHost ptr)))
   mp/PElementCount
-  (element-count [_] (quot size (dtype/datatype->byte-size (dtype/get-datatype ptr))))
-  dtype/PDatatype
+  (element-count [_] (quot size (dtype-base/datatype->byte-size (dtype/get-datatype ptr))))
+  dtype-base/PDatatype
   (get-datatype [_] (dtype/get-datatype ptr))
-  dtype/PCopyQueryDirect
-  (get-direct-copy-fn [_ dest-offset]
-    (dtype/get-direct-copy-fn ptr dest-offset))
 
-  dtype/PCopyToItemDirect
-  (copy-to-array-direct! [_ ptr-offset dest dest-offset elem-count]
-    (dtype/copy-to-array-direct! ptr ptr-offset dest dest-offset elem-count))
-  (copy-to-buffer-direct! [_ ptr-offset dest dest-offset elem-count]
-    (dtype/copy-to-buffer-direct! ptr ptr-offset dest dest-offset elem-count))
-
-  dtype/PAccess
-  (set-value! [_ offset value] (dtype/set-value! ptr offset value))
+  dtype-base/PAccess
+  (set-value! [_ offset value] (dtype-base/set-value! ptr offset value))
   (set-constant! [_ offset value elem-count]
-    (dtype/set-constant! ptr offset value elem-count))
-  (get-value [_ offset] (dtype/get-value ptr offset))
+    (dtype-base/set-constant! ptr offset value elem-count))
+  (get-value [_ offset] (dtype-base/get-value ptr offset))
   marshal/PTypeToCopyToFn
   (get-copy-to-fn [_ dest-offset]
     (marshal/get-copy-to-fn ptr dest-offset))
-  dtype/PCopyQueryIndirect
-  (get-indirect-copy-fn [_ dest-offset]
+  dtype-base/PCopyQuery
+  (get-copy-fn [_ dest-offset]
     (marshal/get-copy-to-fn ptr dest-offset))
 
   drv/PBuffer
   (sub-buffer-impl [this offset length]
     (->PageLockedPointer
-     (* (dtype/datatype->byte-size (dtype/get-datatype ptr))
+     (* (dtype-base/datatype->byte-size (dtype/get-datatype ptr))
         (long length))
      (drv/sub-buffer-impl ptr offset length))))
 
@@ -572,7 +564,7 @@ set this device before.  Set device must be called before any other cuda functio
 
 (defn- alloc-page-locked-memory
   [driver ^long elem-count elem-type]
-  (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
+  (let [size (* (dtype-base/datatype->byte-size elem-type) elem-count)
         retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
     (check-cuda-error (cuda/cudaMallocHost retval size))
     (cuda-library-debug-print "MallocHost: " (.address retval))
@@ -900,7 +892,7 @@ relies only on blockDim.x block.x and thread.x"
   (allocate-device-buffer-impl [impl ^long elem-count elem-type]
     (drv/unsafe-with-compute-device
      impl
-     (let [size (* (dtype/datatype->byte-size elem-type) elem-count)
+     (let [size (* (dtype-base/datatype->byte-size elem-type) elem-count)
            retval (jcpp-dtype/make-empty-pointer-of-type elem-type)]
        (cuda-call (cuda/cudaMalloc retval size))
        (cuda-library-debug-print "Malloc: " (.address retval))
@@ -939,7 +931,7 @@ relies only on blockDim.x block.x and thread.x"
     (cuda-call
      (cuda/cudaMemcpyAsync (->ptr dest-buffer dest-offset)
                            (->ptr src-buffer src-offset)
-                           (* elem-count (dtype/datatype->byte-size
+                           (* elem-count (dtype-base/datatype->byte-size
                                           (dtype/get-datatype dest-buffer)))
                            ^long copy-type (.stream stream)))))
 
@@ -1210,7 +1202,7 @@ relies only on blockDim.x block.x and thread.x"
      (let [buf-dtype (dtype/get-datatype device-buffer)
            cuda-stream (.stream stream)]
        (if (= 0.0 (double elem-val))
-         (let [buf-dtype-size (dtype/datatype->byte-size buf-dtype)
+         (let [buf-dtype-size (dtype-base/datatype->byte-size buf-dtype)
                bytes (* (long elem-count) buf-dtype-size)
                offset (* (long device-offset) buf-dtype-size)]
            (cuda/cudaMemsetAsync (->ptr device-buffer offset) (int 0) (long bytes) cuda-stream))
@@ -1491,7 +1483,7 @@ relies only on blockDim.x block.x and thread.x"
 
 
 (extend-type cudnn$cudnnTensorStruct
-  dtype/PDatatype
+  dtype-base/PDatatype
   (get-datatype [tensor]
     (let [tensor-data (get-tensor tensor)
           tensor-dtype (:data-type tensor-data)]

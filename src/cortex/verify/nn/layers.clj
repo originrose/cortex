@@ -356,6 +356,32 @@
            (m/eseq input-gradient)))))
 
 
+(defn softmax-image
+  [context]
+  (let [img-dim 5
+        batch-size 1
+        n-channels 4
+        input-range (range 1 (+ n-channels 1))
+        input (->> input-range
+                   (mapv #(repeat (* img-dim img-dim) %)))
+        output-gradient input
+        {:keys [output input-gradient]}
+        (forward-backward-test [(layers/input img-dim img-dim n-channels)
+                                (layers/softmax)]
+                               context batch-size input output-gradient)
+        output-range [0.03205860328008499 0.08714431874203257
+                      0.23688281808991013 0.6439142598879724]]
+    (is (m/equals (->> output-range
+                       (mapv #(repeat (* img-dim img-dim) %))
+                       flatten
+                       vec)
+                  output
+                  1e-4))
+    (is (m/equals (vec (flatten input))
+                  input-gradient
+                  1e-6))))
+
+
 (defn softmax-batch-channels
   [context]
   (let [batch-size 10
@@ -387,8 +413,8 @@
 
 
 (defn conv-layer
-  [input-dim num-channels k-dim pad stride n-kernels]
-  [(layers/input input-dim input-dim num-channels)
+  [input-width input-height num-channels k-dim pad stride n-kernels]
+  [(layers/input input-width input-height num-channels)
    (layers/convolutional k-dim pad stride n-kernels
                          :weights {:buffer (map #(repeat (* k-dim k-dim num-channels) %)
                                                 (range 1 (+ n-kernels 1)))}
@@ -397,13 +423,14 @@
 
 (defn basic-conv-layer
   [context]
+
   (let [batch-size 10
         channel-count 4
         input (repeat batch-size (range 1 10))
         output-gradient (flatten
-                         (repeat (* 4 batch-size) [1 1 1 1]))
+                         (repeat (* channel-count batch-size) [1 1 1 1]))
         {:keys [output input-gradient parameters]}
-        (forward-backward-test (conv-layer 3 1 2 0 1 channel-count)
+        (forward-backward-test (conv-layer 3 3 1 2 0 1 channel-count)
                                context
                                batch-size
                                input
@@ -416,6 +443,27 @@
     (is (= (map double (repeat 4 (* 4 batch-size)))
            (m/eseq (get-in parameters [:bias :buffer :gradient]))))
     (is (= (flatten (repeat batch-size (map #(double (* 10 %)) [1 2 1 2 4 2 1 2 1])))
+           (m/eseq input-gradient))))
+  (let [batch-size 10
+        channel-count 4
+        input (repeat batch-size (range 1 13))
+        output-gradient (flatten
+                         (repeat batch-size (repeat 24 1)))
+        {:keys [output input-gradient parameters]}
+        (forward-backward-test (conv-layer 3 4 1 2 0 1 channel-count)
+                               context
+                               batch-size
+                               input
+                               output-gradient)]
+    (is (= (flatten (repeat batch-size [13.0 17.0 25.0 29.0 37.0 41.0 25.0 33.0 49.0 57.0 73.0 81.0 37.0
+                                        49.0 73.0 85.0 109.0 121.0 49.0 65.0 97.0 113.0 145.0 161.0] ))
+           (m/eseq output)))
+    (is (= (map double (flatten (repeat 4 [270.0 330.0 450.0 510.0])))
+           (m/eseq (get-in parameters [:weights :buffer :gradient]))))
+    (is (= (map double (repeat 4 (* 6 batch-size)))
+           (m/eseq (get-in parameters [:bias :buffer :gradient]))))
+    (is (= (flatten (repeat batch-size (map double [10.0 20.0 10.0 20.0 40.0 20.0 20.0 40.0 20.0
+                                                    10.0 20.0 10.0])))
            (m/eseq input-gradient)))))
 
 

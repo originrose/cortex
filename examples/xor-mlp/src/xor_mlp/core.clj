@@ -24,6 +24,6 @@
                                :epoch-count 3000
                                :simple-loss-print? true)]
     (println "\nXOR results before training:")
-    (clojure.pprint/pprint (execute/run nn xor))
+    (clojure.pprint/pprint (execute/run nn xor-dataset))
     (println "\nXOR results after training:")
-    (clojure.pprint/pprint (execute/run trained xor))))
+    (clojure.pprint/pprint (execute/run trained xor-dataset))))

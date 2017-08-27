@@ -433,3 +433,60 @@
              {:stream :single-split} {:dimension {:channels 1, :height 1, :width 20}},
              {:stream :double-split} {:dimension {:channels 1, :height 1, :width 10}}}
             (get train-traversal :buffers))))))
+
+
+(def resizable-net
+  [(layers/input 28 28 1 :id :data)
+   (layers/convolutional 5 2 1 20)
+   (layers/max-pooling 2 0 2)
+   (layers/dropout 0.9)
+   (layers/convolutional 3 1 1 50)
+   (layers/max-pooling 2 0 2)
+   (layers/convolutional 3 1 1 100)
+   (layers/relu)
+   (layers/convolutional 7 0 7 400)
+   (layers/dropout 0.7)
+   (layers/relu)
+   (layers/convolutional 1 0 1 10  :id :chop-here)
+   (layers/softmax :id :label)])
+
+(defn mnist-yolo-network []
+  (let [network (network/resize-input (network/linear-network resizable-net) 118 118 1)
+        chopped-net (network/dissoc-layers-from-network network :chop-here)
+        nodes (get-in chopped-net [:compute-graph :nodes])
+        new-node-params (mapv (fn [params] (assoc params :non-trainable? true)) (vals nodes))
+        frozen-nodes (zipmap (keys nodes) new-node-params)
+        frozen-net (assoc-in chopped-net [:compute-graph :nodes] frozen-nodes)
+        layers-to-add (map first [(layers/linear 480
+                                                 :id :label
+                                                 :yolo2 {:grid-x 2
+                                                         :grid-y 2
+                                                         :anchors [[1 1] [2 2]]
+                                                         :labels {:type :stream
+                                                                  :stream :label}})])
+        modified-net (network/assoc-layers-to-network frozen-net layers-to-add)]
+    modified-net))
+
+
+(deftest freeze-network
+  (let [test-net (mnist-yolo-network)
+        traversal (traverse/training-traversal test-net)]
+    (is (= [nil nil]
+           (minimal-diff
+            [{:id :convolutional-1, :incoming [{:stream :data}], :outgoing [{:id :convolutional-1}],
+              :pass :inference}
+             {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]
+              :pass :inference}
+             {:id :dropout-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :dropout-1}], :pass :inference}
+             {:id :convolutional-2, :incoming [{:id :dropout-1}], :outgoing [{:id :convolutional-2}],
+              :pass :inference}
+             {:id :max-pooling-2, :incoming [{:id :convolutional-2}], :outgoing [{:id :max-pooling-2}],
+              :pass :inference}
+             {:id :convolutional-3, :incoming [{:id :max-pooling-2}], :outgoing [{:id :convolutional-3}],
+              :pass :inference}
+             {:id :relu-1, :incoming [{:id :convolutional-3}], :outgoing [{:id :relu-1}], :pass :inference}
+             {:id :convolutional-4, :incoming [{:id :relu-1}], :outgoing [{:id :convolutional-4}], :pass :inference}
+             {:id :dropout-2, :incoming [{:id :convolutional-4}], :outgoing [{:id :dropout-2}], :pass :inference}
+             {:id :relu-2, :incoming [{:id :dropout-2}], :outgoing [{:id :relu-2}], :pass :inference}
+             {:id :label, :incoming [{:id :relu-2}], :outgoing [{:id :label}]}]
+            (get traversal :forward))))))

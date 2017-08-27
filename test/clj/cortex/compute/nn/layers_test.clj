@@ -43,6 +43,9 @@
 (def-double-float-test softmax
   (verify-layers/softmax (create-context)))
 
+(def-double-float-test softmax-image
+  (verify-layers/softmax-image (create-context)))
+
 (def-double-float-test softmax-batch
   (verify-layers/softmax-batch (create-context)))
 
@@ -70,8 +73,8 @@
 (def-double-float-test batch-normalization
   (verify-layers/batch-normalization (create-context)))
 
-(def-double-float-test local-response-normalization-forward
-  (verify-layers/lrn-forward (create-context)))
+;; (def-double-float-test local-response-normalization-forward
+;;   (verify-layers/lrn-forward (create-context)))
 
 (def-double-float-test prelu
   (verify-layers/prelu (create-context)))

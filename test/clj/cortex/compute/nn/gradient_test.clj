@@ -18,8 +18,8 @@
 (deftest batch-normalization
   (gradient/batch-normalization-gradient (create-context)))
 
-(deftest local-response-normalization-gradient
-  (gradient/lrn-gradient (create-context)))
+;; (deftest local-response-normalization-gradient
+;;   (gradient/lrn-gradient (create-context)))
 
 (deftest prelu-gradient
   (gradient/prelu-gradient (create-context)))
@@ -38,3 +38,6 @@
 
 (deftest censor-gradient
   (gradient/censor-gradient (create-context)))
+
+(deftest yolo-gradient
+  (gradient/yolo-gradient (create-context)))

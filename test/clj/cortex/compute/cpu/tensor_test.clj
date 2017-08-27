@@ -4,6 +4,7 @@
              :refer [def-double-float-test
                      def-all-dtype-test
                      *datatype*
+                     def-int-long-test
                      test-wrapper]]
             [clojure.test :refer :all]
             [cortex.compute.cpu.driver :refer [driver]]
@@ -25,8 +26,8 @@
   (verify-tensor/binary-constant-op (driver) *datatype*))
 
 
-(def-double-float-test binary-op
-  (verify-tensor/binary-op (driver) *datatype*))
+(def-all-dtype-test binary-op
+  (verify-tensor/binary-op (driver) *datatype* ))
 
 
 (def-all-dtype-test unary-op
@@ -69,5 +70,29 @@
   (verify-tensor/softmax (driver) *datatype*))
 
 
+(def-double-float-test convolution-operator
+  (verify-tensor/convolution-operator (driver) *datatype*))
+
+
 (def-all-dtype-test ternary-op-select
   (verify-tensor/ternary-op-select (driver) *datatype*))
+
+
+(def-all-dtype-test ternary-reduce
+  (verify-tensor/unary-reduce (driver) *datatype*))
+
+
+(def-all-dtype-test transpose
+  (verify-tensor/transpose (driver) *datatype*))
+
+
+(def-int-long-test mask
+  (verify-tensor/mask (driver) *datatype*))
+
+
+(def-all-dtype-test select
+  (verify-tensor/select (driver) *datatype*))
+
+
+(def-all-dtype-test select-transpose-interaction
+  (verify-tensor/select-transpose-interaction (driver) *datatype*))

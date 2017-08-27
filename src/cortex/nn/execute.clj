@@ -15,6 +15,7 @@ Furthermore infer should be both wrapped in a resource context and completely re
             [clojure.core.matrix.macros :refer [c-for]]
             [think.resource.core :as resource]
             [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.parallel.core :as parallel]
             [cortex.graph :as graph]
             [cortex.loss.core :as loss]
@@ -280,7 +281,7 @@ from the size of their result and the traversal information updated to take this
                           compute-binding/columns->maps)
           ;;Run the network forward and generate the loss.
           forward-fn (fn [param-value host-buffer device-buffer elem-count idx]
-                       (dtype/set-value! host-buffer idx param-value)
+                       (dtype-base/set-value! host-buffer idx param-value)
                        (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
                        ;;Raw-forward is used here to avoid calling prepare-forward again.  But this
                        ;;is not an inference pass; it is an actual forward pass.
@@ -300,7 +301,7 @@ from the size of their result and the traversal information updated to take this
             (drv/copy-device->host stream device-buffer 0 host-buffer 0 elem-count)
             (drv/sync-stream stream)
             (doseq [idx (range elem-count)]
-              (let [param-value (double (dtype/get-value host-buffer idx))
+              (let [param-value (double (dtype-base/get-value host-buffer idx))
                     positive (forward-fn (+ param-value epsilon) host-buffer device-buffer elem-count idx)
                     negative (forward-fn (- param-value epsilon) host-buffer device-buffer elem-count idx)
                     ;;The loss is normally divided by the batch size to get an average loss
@@ -309,10 +310,10 @@ from the size of their result and the traversal information updated to take this
                                       (double negative))
                                    batch-size)
                                 (* 2 epsilon))]
-                (dtype/set-value! host-buffer idx param-value)
+                (dtype-base/set-value! host-buffer idx param-value)
                 ;;Reset device buffer to original value.
                 (drv/copy-host->device stream host-buffer 0 device-buffer 0 elem-count)
-                (dtype/set-value! numeric-gradient idx gradient))))))
+                (dtype-base/set-value! numeric-gradient idx gradient))))))
       (-> (compute-binding/save-to-network context network {:save-gradients? true})
           :network))))
 
