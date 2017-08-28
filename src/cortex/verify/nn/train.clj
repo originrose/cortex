@@ -97,8 +97,7 @@
       (let [dataset CORN-DATASET
             labels (map :label dataset)
             big-dataset (apply concat (repeat 100 dataset))
-            ;optimizer (adam/adam)
-            optimizer (sgd/sgd)
+            optimizer (adam/adam)
             network (corn-network)
             network (loop [network network
                            optimizer optimizer
@@ -121,8 +120,8 @@
   [a b]
   (softmax/evaluate-softmax a b))
 
-(defn train-mnist
-  [& [context]]
+(defn train-mnist-impl
+  [& [context optimizer]]
   (let [context (or context (execute/compute-context))]
     (execute/with-compute-context context
      ;;for the creation of the main cuda and cudnn contexts if necessary.  This also does all the
@@ -137,6 +136,7 @@
             dataset (take 200 @mnist-training-dataset*)
             test-dataset (take 100 @mnist-test-dataset*)
             test-labels (map :label test-dataset)
+            _ (println optimizer)
             network (network/linear-network MNIST-NETWORK)
             _ (println (format "Training MNIST network for %s epochs..." n-epochs))
             _ (network/print-layer-summary network (traverse/training-traversal network))
@@ -168,7 +168,7 @@
                         (println (format "Score for epoch %s: %s" (inc epoch) score))
                         (println (loss/loss-fn->table-str loss-fn))
                         [network optimizer]))
-                    [network (sgd/sgd)]
+                    [network (or optimizer (sgd/sgd))]
                     (range n-epochs))
             results (->> (execute/run network test-dataset
                                       :batch-size running-batch-size :context context)
@@ -176,6 +176,15 @@
         ;;Ensure the optimizer was updated
         ;(is (= (clojure.set/intersection #{:m :v} (set (keys optimizer))) #{:m :v}))
         (is (> (percent= results test-labels) 0.6))))))
+
+(defn train-mnist-sgd
+  [context]
+  (train-mnist-impl context (sgd/sgd)))
+
+
+(defn train-mnist-adam
+  [context]
+  (train-mnist-impl context (adam/adam)))
 
 (defn dataset-batch-size-mismatch
   [& [context]]

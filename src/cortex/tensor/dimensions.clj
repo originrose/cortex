@@ -120,16 +120,17 @@ dimension aware such as a 2d convolution.  Shape is the same as a core-matrix sh
 
 (defn dense?
   [{:keys [shape strides]}]
-  ;;If we have a 1 dimensional shape then it's stride doesn't count
-  (let [[shape strides] (->> (map vector shape strides)
-                             (remove #(= 1 (first %)))
-                             (sort-by second >)
-                             ((fn [shp-strd]
-                                [(mapv first shp-strd)
-                                 (mapv second shp-strd)])))
-        max-stride (first strides)
-        shape-num (apply * 1 (drop 1 shape))]
-    (= max-stride shape-num)))
+  (if (= 1 (count shape))
+    (= 1 (long (first strides)))
+    (let [[shape strides] (->> (map vector shape strides)
+                               (remove #(= 1 (first %)))
+                               (sort-by second >)
+                               ((fn [shp-strd]
+                                  [(mapv first shp-strd)
+                                   (mapv second shp-strd)])))
+          max-stride (first strides)
+          shape-num (apply * 1 (drop 1 shape))]
+      (= max-stride shape-num))))
 
 
 (defn access-increasing?
@@ -406,7 +407,6 @@ https://cloojure.github.io/doc/core.matrix/clojure.core.matrix.html#var-select"
       "arg count must match shape count"
       {:shape data-shp
        :args (vec args)})
-
     (let [{:keys [shape strides]} dimensions
           rev-shape (reversev shape)
           rev-strides (reversev strides)

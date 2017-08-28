@@ -492,9 +492,9 @@ https://cloojure.github.io/doc/core.matrix/clojure.core.matrix.html#var-select"
   (when-not-error (>= (long offset) 0)
     "Offset must be >= 0"
     {:offset offset})
-  (select (as-vector tensor) (range offset (or length
-                                               (- (ecount tensor)
-                                                  (long offset))))))
+  (select (as-vector tensor) (range offset (or (+ (long offset)
+                                                  (long length))
+                                               (ecount tensor)))))
 
 
 (defn submatrix
