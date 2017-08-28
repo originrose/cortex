@@ -14,7 +14,7 @@
 
 
 (defn tensor-sgd
-  [allocator learning-rate momentum momentum-vals gradient-temp
+  [allocator learning-rate momentum momentum-vals
    gradient-alpha offset gradient parameters]
   (ct/with-stream (compute-backend/get-stream)
     (ct/with-datatype (dtype/get-datatype gradient)
@@ -37,18 +37,17 @@
              ;;create adjusted dx
              dx (ct/binary-op! gradient-temp 1.0 dxm (+ 1 momentum) momentum-vals :-)
              ;;Sum into parameters
-             new-parameters (ct/binary-op! parameters 1.0 parameters 1.0 dx :+)]
-         )))))
+             new-parameters (ct/binary-op! parameters 1.0 parameters 1.0 dx :+)])))))
 
 
 (defrecord SGD [backend optimizer alloc]
   PGradientOptimizer
   (batch-update [this optimizer-parameters]
     this)
-  (compute-parameters! [this {:keys [momentum-vals gradient-temp] :as params}
+  (compute-parameters! [this {:keys [momentum-vals] :as params}
                         gradient-alpha offset gradient parameters]
     (let [{:keys [learning-rate momentum]} optimizer]
-      (tensor-sgd alloc learning-rate momentum momentum-vals gradient-temp
+      (tensor-sgd alloc learning-rate momentum momentum-vals
                   gradient-alpha offset gradient parameters))))
 
 
