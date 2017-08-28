@@ -11,7 +11,9 @@
    [think.datatype.marshal :as marshal]
    [think.parallel.core :as parallel]
    [cortex.graph :as graph]
-   [cortex.compute.nn.backend :as compute-backend])
+   [cortex.compute.nn.backend :as compute-backend]
+   [cortex.tensor :as ct]
+   [cortex.tensor.allocator :as ct-alloc])
   (:import
    [think.datatype ArrayView IntArrayView]))
 
@@ -89,6 +91,7 @@
                           learning-rate# momentum#
                           gradient-alpha# gradient# parameters# momentum-vals#))})
 
+
 (defn- sgd-optimise-step!
   [backend fn-map dev-dispatch-fn
    param-offset
@@ -107,6 +110,7 @@
                      (->buffer backend momentum-vals param-offset)
                      item-count)))
 
+
 (defn- sgd-step-fn
   [backend fn-map dev-dispatch-fn]
   (fn [offset
@@ -116,20 +120,46 @@
                         learning-rate momentum
                         gradient-alpha gradient parameters momentum-vals)))
 
-(defrecord SGD [backend optimizer step-fn]
+
+
+(defn tensor-sgd
+  [momentum-vals gradient-temp gradient-alpha offset gradient parameters]
+  (ct/with-stream (backend/get-stream)
+    (let [{:keys [learning-rate momentum]} optimizer
+          gradient-mul (* (double learning-rate)
+                          (double gradient-alpha))
+          momentum (double momentum)
+          gradient (ct/as-vector (math/array->cortex-tensor gradient))
+          parameters (ct/as-vector (math/array->cortex-tensor parameters))
+          momentum-vals (-> (ct/as-vector (math/array->cortex-tensor momentum-vals))
+                            (ct/subvector offset :length (ct/ecount gradient)))
+          gradient-temp (-> (ct/as-vector (math/array->cortex-tensor gradient-temp))
+                            (ct/subector offset :length (ct/ecount gradient)))
+          ;;Use gradient-temp for dxm
+          dxm (ct/unary-op! gradient-temp momentum momentum-vals :noop)
+          ;;update momentum with gradient
+          new-momentum (ct/binary-op! momentum-vals 1.0 dxm gradient-mul gradient :+)
+          ;;create adjusted dx
+          dx (ct/binary-op! gradient-temp 1.0 dxm (+ 1 momentum) momentum-vals :-)
+          ;;Sum into parameters
+          new-parameters (ct/binary-op! parameters 1.0 parameters 1.0 dx :+)])))
+
+
+
+(defrecord SGD [backend optimizer step-fn alloc]
   PGradientOptimizer
   (batch-update [this optimizer-parameters]
     this)
-  (compute-parameters! [this {:keys [momentum-vals]}
+  (compute-parameters! [this {:keys [momentum-vals gradient-temp]}
                         gradient-alpha offset gradient parameters]
     (let [{:keys [learning-rate momentum]} optimizer]
-      (step-fn offset
-               learning-rate momentum
-               gradient-alpha gradient parameters momentum-vals))))
+                 (step-fn offset
+                          learning-rate momentum
+                          gradient-alpha gradient parameters momentum-vals))))
 
 (defn- setup-optimizer
   [backend optimizer step-fn]
-  (->SGD backend optimizer step-fn))
+  (->SGD backend optimizer step-fn (ct-alloc/atom-allocator)))
 
 (defmethod create-optimizer [:cpu :sgd]
   [backend optimizer]
@@ -150,6 +180,8 @@
   {:arguments
    {:momentum-vals {:initialization {:type :constant :value 0}
                     :type :parameter}}
+   :gradient-temp {:initialization {:type :constant :value 0}
+                   :type :parameter}
    :passes #{:training}})
 
 (defn sgd
