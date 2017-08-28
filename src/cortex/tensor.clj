@@ -764,7 +764,11 @@ dest = alpha * x op beta * y.
 x or y may be a scalar, dest must not be.
 Datatypes must match."
   ^Tensor [dest alpha x beta y op]
-  (typed-binary-op dest alpha x beta y op)
+  (if (= op :-)
+    ;;Change minus to plus with negative alpha to minimize situations
+    ;;where backends may have a fast path (they only need one for +)
+    (typed-binary-op dest alpha x (- (double beta)) y :+)
+    (typed-binary-op dest alpha x beta y op))
   dest)
 
 
