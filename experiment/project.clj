@@ -2,7 +2,7 @@
   :description "A higher-level library for performing experiments with cortex."
   :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
                  [thinktopic/cortex "0.9.12-SNAPSHOT"]
-                 [thinktopic/think.image "0.4.12"]
+                 [thinktopic/think.image "0.4.13"]
                  [org.shark8me/tfevent-sink "0.1.3"]
                  ;;Default way of displaying anything is a web page.
                  ;;Because if you want to train on aws (which you should)
