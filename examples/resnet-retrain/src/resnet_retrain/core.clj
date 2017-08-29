@@ -114,11 +114,6 @@
 
 
 
-;; (create-train-test-folders "orig-data/" "data/train" "data/test" .3)
-
-;; (load-network "resnet50.nippy :fc1000 layers-to-add)
-
-
 (defn get-training-size
   [network batch-size]
   (let [traversal (traverse/training-traversal network)

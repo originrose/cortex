@@ -12,3 +12,4 @@ pom.xml.asc
 orig-data/
 data/
 *.nippy
+models
