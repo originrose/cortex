@@ -3,7 +3,8 @@
             [cortex.tensor.dimensions :as dims]
             [cortex.compute.driver :as compute-drv]
             [clojure.core.matrix :as m]
-            [think.datatype.core :as dtype]))
+            [think.datatype.core :as dtype]
+            [think.resource.core :as resource]))
 
 
 (defprotocol PAllocator
@@ -12,13 +13,17 @@
     "Allocate a tensor.  IF allocated, copy existing data into existing tensor.")
 
   (->const-tensor-impl [this name data args]
-    "Allocate a tensor.  If allocated, do nothing and return tensor")
+    "Allocate a tensor.  If allocated, do nothing and return tensor.")
 
   (new-tensor-impl [this name shape args]
     "Create a new tensor.  If allocated, initialize to 0")
 
   (new-uninitialized-tensor-impl [this name shape args]
     "Create a new tensor.  If allocated, do nothing")
+
+  (new-resizeable-uninitialized-impl [this name shape args]
+    "Create a new tensor, possibly making the existing one large.  Return an uninitialized
+tensor of exactly the requested shape.")
 
   (allocation-count-impl [this]))
 
@@ -36,6 +41,15 @@
     (when-not retval
       (swap! map-atom #(assoc % key (value-fn))))
     (get @map-atom key)))
+
+
+(defn- ensure-shape!
+  [tensor new-shape]
+  (when-not (= new-shape (ct/shape tensor))
+    (throw (ex-info "Shape mismatch between allocated tensor and requested tensor"
+                    {:existing-shape (ct/shape tensor)
+                     :incoming-shape new-shape})))
+  tensor)
 
 
 (defrecord BaseTensorAllocator [allocated-data]
@@ -62,7 +76,7 @@
               {:host-buffer host-buffer
                :dev-buffer dev-buffer
                :tensor tensor})))]
-
+      (ensure-shape! tensor data-shape)
       (dtype/copy-raw->item! data host-buffer 0)
       (compute-drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
       tensor))
@@ -74,15 +88,14 @@
           stream (ct/check-stream)
           device (compute-drv/get-device stream)]
       (if-let [retval (get @allocated-data name)]
-        (get retval :tensor)
+        (ensure-shape! (get retval :tensor) (m/shape data))
         (->tensor-impl this name data args))))
 
   (new-tensor-impl
     [this name shape args]
     (if-let [retval (get-in @allocated-data [name :tensor])]
-      (do
-        (m/assign! retval 0)
-        retval)
+      (-> (ensure-shape! retval shape)
+          (ct/assign! 0))
       (let [retval (apply ct/new-tensor shape args)]
         (swap! allocated-data assoc name {:tensor retval})
         retval)))
@@ -90,8 +103,25 @@
   (new-uninitialized-tensor-impl
     [this name shape args]
     (if-let [retval (get @allocated-data name)]
-      (:tensor retval)
+      (ensure-shape! (:tensor retval) shape)
       (new-tensor-impl this name shape args)))
+
+  (new-resizeable-uninitialized-impl [this name shape args]
+    (let [shape-ecount (long (apply * 1 shape))
+          retval (get-in @allocated-data [name :tensor])]
+      (if retval
+        (let [existing-buffer (ct/tensor->buffer retval)
+              retval-buffer-ecount (long (m/ecount existing-buffer))
+              new-buffer (if (< retval-buffer-ecount shape-ecount)
+                             (do
+                               (compute-drv/sync-stream ct/*stream*)
+                               (resource/release existing-buffer)
+                               (compute-drv/allocate-device-buffer shape-ecount
+                                                                   (dtype/get-datatype existing-buffer)))
+                             existing-buffer)]
+          (swap! allocated-data assoc-in [name :tensor :buffer] new-buffer)
+          (ct/->Tensor (:device retval) (dims/dimensions shape) new-buffer))
+        (new-uninitialized-tensor-impl this name shape args))))
 
   (allocation-count-impl
     [this]
@@ -113,6 +143,9 @@
     (apply ct/new-tensor shape args))
 
   (new-uninitialized-tensor-impl [this name shape args]
+    (apply ct/new-tensor shape args))
+
+  (new-resizeable-uninitialized-impl [this name shape args]
     (apply ct/new-tensor shape args))
 
   (allocation-count-impl [this]
@@ -161,6 +194,11 @@
 (defn new-uninitialized-tensor
   [name shape & args]
   (new-uninitialized-tensor-impl (check-allocator) name shape args))
+
+
+(defn new-resizeable-uninitialized-tensor
+  [name shape & args]
+  (new-resizeable-uninitialized-impl (check-allocator) name shape args))
 
 
 (defn allocation-count
