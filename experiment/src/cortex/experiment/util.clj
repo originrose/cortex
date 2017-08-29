@@ -89,19 +89,23 @@
 
 (defn- image->observation-data
   "Create an observation from input."
-  [image datatype colorspace image-aug-fn]
+  [image datatype colorspace normalize image-aug-fn]
   (patch/image->patch (if image-aug-fn
                         (image-aug-fn image)
                         image)
                       :datatype datatype
-                      :colorspace colorspace))
+                      :colorspace colorspace
+                      :normalize normalize))
 
 
 (defn- file->observation
   "Given a file, returns an observation map (an element of a dataset)."
-  [{:keys [class-name->index]} image-aug-fn datatype colorspace ^File file]
+  [{:keys [class-name->index]} image-aug-fn post-process-fn datatype colorspace normalize ^File file]
   (try
-    {:data (image->observation-data (i/load-image file) datatype colorspace image-aug-fn)
+    {:data (as-> (image->observation-data (i/load-image file) datatype colorspace normalize image-aug-fn) obs
+             (if post-process-fn
+               (post-process-fn obs)
+               obs))
      :labels (util/idx->one-hot (class-name->index (.. file getParentFile getName))
                                 (count (keys class-name->index)))}
     (catch Throwable _
@@ -110,9 +114,10 @@
 
 (defn create-dataset-from-folder
   "Turns a folder of folders of png images into a dataset (a sequence of maps)."
-  [folder-name class-mapping & {:keys [image-aug-fn datatype colorspace]
+  [folder-name class-mapping & {:keys [image-aug-fn post-process-fn datatype colorspace normalize]
                                 :or {datatype :float
-                                     colorspace :gray}}]
+                                     colorspace :gray
+                                     normalize :true}}]
   (println "Building dataset from folder:" folder-name)
   (->> folder-name
        (io/as-file)
@@ -121,6 +126,8 @@
        (map (partial file->observation
                      class-mapping
                      image-aug-fn
+                     post-process-fn
                      datatype
-                     colorspace))
+                     colorspace
+                     normalize))
        (remove nil?)))

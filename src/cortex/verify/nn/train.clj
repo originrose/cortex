@@ -136,9 +136,9 @@
             dataset (take 200 @mnist-training-dataset*)
             test-dataset (take 100 @mnist-test-dataset*)
             test-labels (map :label test-dataset)
-            _ (println optimizer)
             network (network/linear-network MNIST-NETWORK)
-            _ (println (format "Training MNIST network for %s epochs..." n-epochs))
+            optimizer (or optimizer (sgd/sgd))
+            _ (println (format "Training MNIST(%s) network for %s epochs..." (:type optimizer) n-epochs))
             _ (network/print-layer-summary network (traverse/training-traversal network))
             [network optimizer]
             (reduce (fn [[network optimizer] epoch]
@@ -168,7 +168,7 @@
                         (println (format "Score for epoch %s: %s" (inc epoch) score))
                         (println (loss/loss-fn->table-str loss-fn))
                         [network optimizer]))
-                    [network (or optimizer (sgd/sgd))]
+                    [network optimizer]
                     (range n-epochs))
             results (->> (execute/run network test-dataset
                                       :batch-size running-batch-size :context context)

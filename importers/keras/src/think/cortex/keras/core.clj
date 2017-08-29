@@ -206,17 +206,12 @@
                                  (= (keyword class_name) :InputLayer)
                                  model-vector
 
-                                 ;;on "Add" layers, assoc previous layer (so skip can figure out its shortcut parent)
-                                 (= (keyword class_name) :Add)
-                                 (let [prev (get-in (last model-vector) [:config :name])]
-                                   (conj model-vector (assoc current :previous_layer (keyword prev))))
-
                                  :else
                                  (conj model-vector current)))
                              [] model)
         ;;TODO models with a single channel input and figure out planar vs. interleaved
         cortex-layers (vec
-                        (flatten (concat (layers/input width height n-channels)
+                        (flatten (concat (layers/input width height n-channels :id :data)
                                          (mapv (fn [mod-item]
                                                  (try
                                                    (model-item->desc mod-item)
@@ -236,7 +231,8 @@
                                         (loop [ancestor-list [] cur parent-layer]
                                           ;; stop looking for ancestors when: reached another join layer, or reached input (end)
                                           (if (or (= (:type cur) :join)
-                                                  (= (:type cur) :input))
+                                                  (= (:type cur) :input)
+                                                  (= cur nil))
                                             ancestor-list
                                             (recur (conj ancestor-list cur)
                                                    (get-layer-by-id cortex-desc (get (:parents cur) 0)))))) parent-layers)
@@ -494,23 +490,22 @@
                                [:beta:0 :gamma:0 :moving_mean:0 :moving_variance:0] (keys weight-map)))))
             (let [params (mapv #(hdf5/->clj %) [bias-ds scale-ds mean-ds variance-ds])
                   double-params (mapv #(ensure-doubles (:data %)) params) ;; vector of 4 param vectors: [[<offset params>] [<gamma params>] ...]
-                  ;; temp hack
                   channel-height (get-in node [:input-dimensions 0 :height])
                   channel-width (get-in node [:input-dimensions 0 :width])
-                  expanded-params (mapv (fn [param-vec]
-                                          (->> param-vec
-                                               (mapcat #(repeat (* channel-height channel-width) %))))
-                                        double-params)
                   [bias-arg scale-arg means-arg variances-arg] (mapv #(graph/get-node-argument node %)
-                                                                     [:bias :scale :means :variances])]
+                                                                     [:bias :scale :means :variances])
+
+                  network (if (or (> channel-height 1) (> channel-width 1))
+                            (assoc-in network [:compute-graph :nodes
+                                               (:id node) :mode] :spatial)
+                            network)]
 
               (reduce (fn [network param-kv]
                         (assoc-in network [:compute-graph :buffers
                                            (get (key param-kv) :buffer-id)
                                            :buffer]
-                                  (get expanded-params (val param-kv))))
-                      network (zipmap [bias-arg scale-arg means-arg variances-arg] [0 1 2 3]))
-              ))))
+                                  (get double-params (val param-kv))))
+                      network (zipmap [bias-arg scale-arg means-arg variances-arg] [0 1 2 3]))))))
       network)))
 
 
@@ -640,7 +635,7 @@
   "This function fulfills one basic contract of the importer: for a given Keras
   architecture description in a JSON file with supported layer types, we map it
   to a cortex description of the same architecture.
-
+  z
   This also defines a separate, valid import path. I.e., if we don't want to
   import weights but we want to create a Cortex model with an equivalent arch.
   to some well-known Keras model, we can use its architecture json as a single
