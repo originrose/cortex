@@ -6,6 +6,7 @@
             [cortex.loss.core :as loss]
             [cortex.loss.softmax :as softmax]
             [cortex.optimize :as opt]
+            [cortex.optimize.sgd :as sgd]
             [cortex.optimize.adam :as adam]
             [cortex.optimize.adadelta :as adadelta]
             [cortex.nn.layers :as layers]
@@ -19,7 +20,6 @@
                      mnist-training-dataset*
                      mnist-test-dataset*]
              :as data]))
-
 
 (def MNIST-NETWORK
   [(layers/input 28 28 1 :id :data)
@@ -54,7 +54,6 @@
             (recur minimum min-index (inc i))))
         min-index))))
 
-
 (defn max-index
   "Returns the index of the maximum value in a vector."
   [v]
@@ -69,7 +68,6 @@
             (recur maximum max-index (inc i))))
         max-index))))
 
-
 (defn- print-layer-weights
   [network]
   (clojure.pprint/pprint (->> (get-in network [:compute-graph :buffers])
@@ -79,20 +77,18 @@
                               (into {})))
   network)
 
-
 (defn corn-network
   []
   (->> [(layers/input 2 1 1 :id :data)
         (layers/linear 1 :id :label)]
        (network/linear-network)))
 
-
 (defn regression-error
   [as bs]
   (reduce +
-    (map (fn [[a] [b]]
-           (* (- a b) (- a b)))
-        as bs)))
+          (map (fn [[a] [b]]
+                 (* (- a b) (- a b)))
+               as bs)))
 
 (defn test-corn
   [& [context]]
@@ -101,7 +97,7 @@
       (let [dataset CORN-DATASET
             labels (map :label dataset)
             big-dataset (apply concat (repeat 100 dataset))
-            optimizer (adam/adam :alpha 0.01)
+            optimizer (adam/adam)
             network (corn-network)
             network (loop [network network
                            optimizer optimizer
@@ -120,14 +116,12 @@
             err (regression-error results labels)]
         (is (> err 0.2))))))
 
-
 (defn percent=
   [a b]
   (softmax/evaluate-softmax a b))
 
-
-(defn train-mnist
-  [& [context]]
+(defn train-mnist-impl
+  [& [context optimizer]]
   (let [context (or context (execute/compute-context))]
     (execute/with-compute-context context
      ;;for the creation of the main cuda and cudnn contexts if necessary.  This also does all the
@@ -142,6 +136,7 @@
             dataset (take 200 @mnist-training-dataset*)
             test-dataset (take 100 @mnist-test-dataset*)
             test-labels (map :label test-dataset)
+            _ (println optimizer)
             network (network/linear-network MNIST-NETWORK)
             _ (println (format "Training MNIST network for %s epochs..." n-epochs))
             _ (network/print-layer-summary network (traverse/training-traversal network))
@@ -153,17 +148,17 @@
                                            :batch-size training-batch-size
                                            :optimizer optimizer)
                             results (execute/run network test-dataset
-                                      :context context
-                                      :batch-size running-batch-size
-                                      :loss-outputs? true)
+                                                 :context context
+                                                 :batch-size running-batch-size
+                                                 :loss-outputs? true)
                             ;;Run multiple inferences in parallel to make sure this works across devices and to shake
                             ;;out possible indeterminism in the system.
                             loss-fns (->> (range 9)
                                           (pmap (fn [_]
                                                   (->> (execute/run network test-dataset
-                                                         :context context
-                                                         :batch-size running-batch-size
-                                                         :loss-outputs? true)
+                                                                    :context context
+                                                                    :batch-size running-batch-size
+                                                                    :loss-outputs? true)
                                                        ((fn [results]
                                                           (execute/execute-loss-fn network results test-dataset))))))
                                           distinct)
@@ -173,16 +168,23 @@
                         (println (format "Score for epoch %s: %s" (inc epoch) score))
                         (println (loss/loss-fn->table-str loss-fn))
                         [network optimizer]))
-                    [network nil]
+                    [network (or optimizer (sgd/sgd))]
                     (range n-epochs))
             results (->> (execute/run network test-dataset
-                           :batch-size running-batch-size :context context)
+                                      :batch-size running-batch-size :context context)
                          (map :label))]
         ;;Ensure the optimizer was updated
-        (is (= (clojure.set/intersection #{:m :v} (set (keys optimizer)))
-               #{:m :v}))
+        ;(is (= (clojure.set/intersection #{:m :v} (set (keys optimizer))) #{:m :v}))
         (is (> (percent= results test-labels) 0.6))))))
 
+(defn train-mnist-sgd
+  [context]
+  (train-mnist-impl context (sgd/sgd)))
+
+
+(defn train-mnist-adam
+  [context]
+  (train-mnist-impl context (adam/adam)))
 
 (defn dataset-batch-size-mismatch
   [& [context]]
@@ -198,14 +200,13 @@
                                               :context context
                                               :batch-size batch-size)
             results (execute/run network dataset
-                      :context context
-                      :batch-size batch-size
-                      :loss-outputs? true)
+                                 :context context
+                                 :batch-size batch-size
+                                 :loss-outputs? true)
             loss-fn (execute/execute-loss-fn network results dataset)
             result-count (count results)]
         (is (not (zero? (rem dataset-count batch-size))))
         (is (zero? (rem result-count batch-size)))))))
-
 
 (defn multithread-infer
   [& [context]]
@@ -224,8 +225,8 @@
                         (pmap (fn [{:keys [dataset stream]}]
                                 (nn-backend/with-stream stream
                                   (->> (execute/run network dataset
-                                         :context context
-                                         :batch-size batch-size)
+                                                    :context context
+                                                    :batch-size batch-size)
                                        ((fn [inferences]
                                           (-> (percent= (map :label inferences) test-labels)
                                               (* 100))))))))

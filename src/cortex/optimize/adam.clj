@@ -62,8 +62,6 @@
    (->buffer backend buffer 0)))
 
 
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Begin adam implementation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -113,7 +111,6 @@
       (cpu-adam-step-impl! ~scalar-cast-fn ~buffer-cast-fn
                            alpha# beta1# beta2# epsilon# pow-beta1-t# pow-beta2-t#
                            gradient-alpha# gradient# parameters# m# v#))})
-
 
 
 (defn- adam-optimise-step!
@@ -176,7 +173,8 @@
 (defmethod create-optimizer [:cuda :adam]
   [backend optimizer]
   ;; Load the compiled GPU kernel for floats and doubles
-  (let [cuda-fns ((resolve 'cortex.compute.cuda.driver/load-float-double-function) "adam.fatbin" "adam_step")]
+  (let [cuda-fns ((resolve 'cortex.compute.cuda.driver/load-float-double-function)
+                  "adam.fatbin" "adam_step")]
     (setup-optimizer backend optimizer
                      (adam-step-fn backend cuda-fns dispatch-to-gpu))))
 
@@ -189,6 +187,7 @@
     :v {:initialization {:type :constant :value 0}
         :type :parameter}}
    :passes #{:training}})
+
 
 (defn adam
   [& args]
