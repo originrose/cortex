@@ -167,6 +167,22 @@ parents are specified concretely."
     (throw (ex-info "Network does not appear to contain a graph; keys should contain :compute-graph"
                     {:network-keys (keys network)}))))
 
+
+(defn resize-input
+  [network width height channels & {:keys [input-id]}]
+  (let [graph (network->graph network)
+        input-id (or input-id
+                     (first (graph/roots (network->graph network))))
+        node (graph/get-node graph input-id)
+        input-arg (graph/get-node-argument node :input)]
+    (assoc network :compute-graph
+           (-> (assoc-in graph [:streams (get input-arg :stream)]
+                         {:channels channels :width width :height height})
+               (graph/build-graph)
+               (graph/generate-leaf-streams)
+               (graph/generate-parameters)))))
+
+
 (defn is-non-loss-node?
   [node]
   (not (loss/is-loss-node? node)))

@@ -8,13 +8,15 @@ using namespace tensor::index_system;
 template<typename dest_type,
 	 typename src_type>
 __device__
-void assign(dest_type* dest, const general_index_system&  dest_idx_system,
-	    const src_type* src, const general_index_system& src_idx_system,
+void assign(dest_type* dest, const general_index_system&  dest_sys,
+	    const src_type* src, const general_index_system& src_sys,
 	    int n_elems)
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    dest[dest_idx_system(elem_idx)] = static_cast<dest_type>( src[src_idx_system(elem_idx)] );
+    int max_shape[5];
+    general_index_system::get_max_shape(dest_sys, src_sys, max_shape );
+    dest[dest_sys(elem_idx, max_shape)] = static_cast<dest_type>( src[src_sys(elem_idx, max_shape)] );
   }
 };
 

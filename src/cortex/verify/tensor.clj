@@ -1,9 +1,9 @@
 (ns cortex.verify.tensor
   (:require [cortex.tensor :as ct]
-            [cortex.tensor.index-system :as ci]
             [cortex.compute.driver :as drv]
             [clojure.test :refer :all]
-            [clojure.core.matrix :as m]))
+            [clojure.core.matrix :as m]
+            [cortex.util :as util]))
 
 
 (defmacro tensor-context
@@ -26,7 +26,6 @@
      (ct/assign! tensor 1)
      (is (m/equals (repeat 9 1)
                    (ct/to-double-array tensor)))
-
      (let [rows (ct/rows tensor)
            columns (ct/columns tensor)]
        (doseq [row rows]
@@ -60,24 +59,30 @@ for the cuda backend."
   [driver datatype]
   (tensor-context driver datatype
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
-         tens-b (ct/->tensor (repeat 9 1))]
+         tens-b (ct/->tensor (partition 3 (repeat 9 1)))]
      (ct/unary-op! tens-b 2.5 tens-a :ceil)
      (is (m/equals (mapv #(Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype))) (range 9))
                    (ct/to-double-array tens-b)))
      (ct/unary-op! tens-b 1.0 tens-b :-)
      (is (m/equals (mapv #(- (Math/ceil (* ^double % (drv/dtype-cast 2.5 datatype)))) (range 9))
-                   (ct/to-double-array tens-b))))))
+                   (ct/to-double-array tens-b)))
+
+     (let [src-data [0 1 2 3 4]
+           tens-src (ct/->tensor src-data)
+           tens-b (ct/->tensor src-data)]
+       (ct/unary-op! tens-b 1.0 tens-src :exp)
+       (is (m/equals (mapv #(drv/dtype-cast (Math/exp (double %)) datatype) src-data)
+                     (ct/to-double-array tens-b)))
+       (ct/unary-op! tens-b 1.0 tens-src :sqrt)
+       (is (m/equals (mapv #(drv/dtype-cast (Math/sqrt (double %)) datatype) src-data)
+                     (ct/to-double-array tens-b)))))))
 
 
 (defn channel-op
   [driver datatype]
   (tensor-context driver datatype
    (let [tens-a (ct/->tensor (partition 3 (partition 3 (range 18))))
-         tens-chan (assoc (ct/->tensor (range 3))
-                          :dimensions (ct/dimensions [3 3])
-                          :index-system
-                          (ci/index-system (ci/monotonically-increasing-strategy (* 3 3))
-                                           :idx-denominator 3))
+         tens-chan (ct/in-place-reshape (ct/->tensor (range 3)) [3 1])
          tens-result (ct/new-tensor [2 3 3])]
 
      (ct/binary-op! tens-result 1.0 tens-a 1.0 tens-chan :*)
@@ -87,13 +92,12 @@ for the cuda backend."
                    (ct/to-double-array tens-result))))))
 
 
-
 (defn binary-constant-op
   [driver datatype]
   (tensor-context
    driver datatype
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
-         tens-b (ct/->tensor (repeat 9 1))]
+         tens-b (ct/->tensor (partition 3 (repeat 9 1)))]
 
      (when-not (= datatype :byte)
        (ct/binary-op! tens-b 2.0 tens-a 3.0 4.0 :*)
@@ -125,8 +129,8 @@ for the cuda backend."
   (tensor-context
    driver datatype
    (let [tens-a (ct/->tensor (partition 3 (range 9)))
-         tens-b (ct/->tensor (repeat 9 2))
-         tens-c (ct/->tensor (repeat 9 10))]
+         tens-b (ct/->tensor (partition 3 (repeat 9 2)))
+         tens-c (ct/->tensor (partition 3 (repeat 9 10)))]
      (ct/binary-op! tens-c 2.0 tens-a 2.0 tens-b :*)
      (is (m/equals (mapv #(* 2 2 2 %) (flatten (partition 3 (range 9))))
                    (ct/to-double-array tens-c)))
@@ -160,7 +164,52 @@ for the cuda backend."
                                        (nth c-data elem-idx)
                                        (map #(* 2.0 %) (sub-fn elem-idx))))
                              [0 1 2])
-                       (ct/to-double-array tens-c-small))))))))
+                       (ct/to-double-array tens-c-small)))))
+     (when (contains? #{:float :double} datatype)
+       (let [n-batches 3
+             n-channels 5
+             img-dim 4
+             big-pools (repeatedly (*  n-channels n-batches)
+                                   (fn []
+                                     (vec (repeatedly (* img-dim img-dim) rand))))
+             sums (->> (mapv #(apply + %) big-pools)
+                       (partition n-channels)
+                       (apply m/add))
+
+             big-m (ct/->tensor (->> (flatten big-pools)
+                                     (partition img-dim)
+                                     (partition img-dim)
+                                     (partition n-channels)))
+             test-vec (-> (ct/new-tensor [n-channels])
+                          (ct/in-place-reshape [n-channels 1 1]))]
+         ;;broadcasting summation
+         (ct/binary-op! test-vec 1.0 test-vec 1.0 big-m :+)
+         (is (m/equals sums
+                       (ct/to-double-array test-vec)
+                       1e-4)))))
+   (let [tens-a (ct/->tensor (repeat 4 (partition 3 (range 9))))
+         result (ct/new-tensor (m/shape tens-a))]
+     (ct/binary-op! result 1.0 tens-a 1.0 5 :eq)
+     (is (m/equals (mapv #(if (= (long %) 5)
+                            1
+                            0)
+                         (ct/to-double-array tens-a))
+                   (ct/to-double-array result))))
+   (let [tens-a (ct/new-tensor [4 3 3])
+         bias (-> (ct/->tensor [1 2 3 4])
+                  (ct/in-place-reshape [4 1 1]))]
+     (ct/binary-op! tens-a 1.0 tens-a 1.0 bias :+)
+     (is (m/equals (flatten
+                    (map #(repeat 9 %) [1 2 3 4]))
+                   (ct/to-double-array tens-a))))
+   ;;bias-gradient calculation
+   (let [tens-a (ct/->tensor  (mapv #(->> (repeat 9 %)
+                                          (partition 3)) [1 2 3 4]))
+         bias (-> (ct/new-tensor [4])
+                  (ct/in-place-reshape [4 1 1]))]
+     (ct/binary-op! bias 1.0 tens-a 1.0 bias :+)
+     (is (m/equals [9 18 27 36]
+                   (ct/to-double-array bias))))))
 
 
 (defn gemm
@@ -510,7 +559,28 @@ for the cuda backend."
                       0.03205860328008499, 0.08714431874203256, 0.2368828180899101,
                       0.6439142598879722]
                      (ct/to-double-array output)
-                     1e-4)))))
+                     1e-4)))
+   (let [img-dim 4
+         input (ct/->tensor [(->> [1 2 3 4]
+                                   (mapv #(repeat (* img-dim img-dim) %)))])
+         output (ct/new-tensor [1 4 (* img-dim img-dim)])]
+     (ct/softmax! output input)
+     (is (m/equals   (->> [0.03205860328008499 0.08714431874203257
+                           0.23688281808991013 0.6439142598879724]
+                          (mapv #(repeat (* img-dim img-dim) %))
+                          flatten
+                          vec)
+                     (ct/to-double-array output)
+                     1e-4)))
+   ;;Some loss terms want to use softmax with strides that aren't contiguous
+   (let [pred-matrix (ct/->tensor (repeat 5 (range 10)))
+         sel-pred-matr (ct/select pred-matrix :all (range 2 10))
+         test-tensor (ct/->tensor (range 2 10))
+         answer (ct/softmax! test-tensor test-tensor)]
+     (ct/softmax! sel-pred-matr sel-pred-matr)
+     (is (m/equals (flatten (repeat 5 (concat [0 1]
+                                              (ct/to-double-array answer))))
+                   (ct/to-double-array pred-matrix))))))
 
 
 (defn ternary-op-select
@@ -536,3 +606,248 @@ for the cuda backend."
      (ct/ternary-op! dest 1 x-arg 1.0 -1 3.0 2.0 :select)
      (is (m/equals [-1 -1 -1 -1 -1 6 6 6 6 6]
                    (ct/to-double-array dest))))))
+
+
+(defn unary-reduce
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [dest (ct/new-tensor [10 1])
+         src-data [0 3 5 2 1 9 5 7 7 2]
+         src (ct/->tensor (repeat 10 src-data))]
+     (ct/unary-reduce! dest 2.0 src :max)
+     (is (m/equals (repeat 10 18)
+                   (ct/to-double-array dest)))
+     (ct/unary-reduce! dest 1.0 src :sum)
+     (is (m/equals (repeat 10 (apply + src-data))
+                   (ct/to-double-array dest)))
+     (ct/unary-reduce! dest 1.0 src :mean)
+     (is (m/equals (repeat 10 (drv/dtype-cast (/ (apply + src-data)
+                                                 (count src-data))
+                                              datatype))
+                   (ct/to-double-array dest))))))
+
+
+(defn transpose
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [img-dim 4
+         img-tensor (ct/->tensor
+                     (->> (repeat (* img-dim img-dim) [1 2 3])
+                          (partition img-dim)))
+         planar-tensor (ct/transpose img-tensor [2 0 1])
+         rgb-tensor (ct/transpose planar-tensor [1 2 0])]
+     (is (m/equals (flatten (concat (repeat (* img-dim img-dim) 1)
+                                    (repeat (* img-dim img-dim) 2)
+                                    (repeat (* img-dim img-dim) 3)))
+                   (ct/to-double-array planar-tensor)))
+
+     (is (m/equals (flatten (repeat (* img-dim img-dim) [1 2 3]))
+                   (ct/to-double-array rgb-tensor))))))
+
+
+(defn mask
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [r-pix (int 1)
+         g-pix (int 2)
+         b-pix (int 3)
+         ;;Load a single image to r,g,b planes
+         rgba (+ r-pix
+                 (bit-shift-left g-pix 8)
+                 (bit-shift-left b-pix 16)
+                 (bit-shift-left (int 255) 24))
+         img-dim 4
+         img-tensor (ct/->tensor
+                     (->> (repeat (* img-dim img-dim) rgba)
+                          (partition img-dim)))
+         mask-tensor (-> (ct/->tensor [0xFF
+                                       (bit-shift-left 0xFF 8)
+                                       (bit-shift-left 0xFF 16)])
+                         (ct/in-place-reshape [3 1 1]))
+         div-tensor (-> (ct/->tensor [1
+                                      (bit-shift-left 1 8)
+                                      (bit-shift-left 1 16)])
+                        (ct/in-place-reshape [3 1 1]))
+         result (ct/new-tensor [3 img-dim img-dim])]
+     (ct/binary-op! result 1.0 img-tensor 1.0 mask-tensor :bit-and)
+     (ct/binary-op! result 1.0 result 1.0 div-tensor :/)
+     (is (m/equals (flatten (concat (repeat (* img-dim img-dim) 1)
+                                    (repeat (* img-dim img-dim) 2)
+                                    (repeat (* img-dim img-dim) 3)))
+                   (ct/to-double-array result))))))
+
+
+(defn select
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [mat-tens (ct/->tensor (repeat 2 (partition 3 (range 9))))]
+     (let [sel-tens (ct/select mat-tens :all :all [1 2])]
+       (is (m/equals (flatten (repeat 2 [1 2 4 5 7 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3 2]
+                     (m/shape sel-tens))))
+     (let [sel-tens (ct/select mat-tens :all :all [2])]
+       (is (m/equals (flatten (repeat 2 [2 5 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3 1]
+                     (m/shape sel-tens))))
+     (let [sel-tens (ct/select mat-tens :all :all 2)]
+       (is (m/equals (flatten (repeat 2 [2 5 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3]
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
+
+     (let [sel-tens (ct/select mat-tens :all [1 2] :all)]
+       (is (m/equals (flatten (repeat 2 [3 4 5 6 7 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 2 3]
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
+     (let [sel-tens (ct/select mat-tens :all [2] :all)]
+       (is (m/equals (flatten (repeat 2 [6 7 8]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 1 3]
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
+
+     (let [sel-tens (ct/select mat-tens :all 0 :all)]
+       (is (m/equals (flatten (repeat 2 [0 1 2]))
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [2 3]
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens))))
+
+     (let [sel-tens (ct/select mat-tens [1] [1] :all)]
+       (is (m/equals [3 4 5]
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [1 1 3]
+                     (m/shape sel-tens)))
+       (is (ct/dense? sel-tens)))
+
+     (let [sel-tens (ct/select mat-tens 1 1 :all)]
+       (is (m/equals [3 4 5]
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [3]
+                     (m/shape sel-tens)))
+       (is (ct/dense? sel-tens))
+       (is (ct/as-vector sel-tens)))
+
+     (let [sel-tens (ct/select mat-tens 1 :all 2)]
+       (is (m/equals [2 5 8]
+                     (ct/to-double-array sel-tens)))
+       (is (m/equals [3]
+                     (m/shape sel-tens)))
+       (is (not (ct/dense? sel-tens)))))))
+
+
+(defn select-transpose-interaction
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [img-dim 4
+         mat-tens (ct/->tensor (partition img-dim (repeat (* img-dim img-dim) [1 2 3])))
+         planar-tens (ct/transpose mat-tens [2 0 1])
+         n-pixels (* img-dim img-dim)]
+     (let [r-tens (ct/select planar-tens 0 :all :all)
+           g-tens (ct/select planar-tens 1 :all :all)
+           b-tens (ct/select planar-tens 2 :all :all)]
+       (is (m/equals (repeat n-pixels 1) (ct/to-double-array r-tens)))
+       (is (m/equals (repeat n-pixels 2) (ct/to-double-array g-tens)))
+       (is (m/equals (repeat n-pixels 3) (ct/to-double-array b-tens)))
+       (let [bgr-tens (ct/new-tensor [img-dim img-dim 3])
+             bgr-planes (ct/transpose bgr-tens [2 0 1])]
+         (m/assign! (ct/select bgr-planes 0 :all :all) b-tens)
+         (m/assign! (ct/select bgr-planes 1 :all :all) g-tens)
+         (m/assign! (ct/select bgr-planes 2 :all :all) r-tens)
+         (is (m/equals (flatten (partition img-dim (repeat (* img-dim img-dim) [3 2 1])))
+                       (ct/to-double-array bgr-tens))))))))
+
+
+(defn convolution-operator
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [batch-size 3
+         num-in-channels 4
+         num-out-channels 3
+         input-dim 4
+         input (ct/->tensor (->> (range (* input-dim input-dim batch-size num-in-channels))
+                                 (partition input-dim)
+                                 (partition input-dim)
+                                 (partition num-in-channels)))
+         conv-desc (ct/convolution-descriptor datatype num-out-channels num-in-channels
+                                              3 3 0 0 1 1)
+         {:keys [output-width output-height]} (ct/get-convolution-output-dimensions conv-desc input-dim input-dim)
+         output-width (long output-width)
+         output-height (long output-height)
+         output (ct/new-tensor [batch-size num-out-channels output-height output-width])
+         output-gradient (-> (ct/->tensor (repeat (* batch-size
+                                                     output-width output-height
+                                                     num-out-channels) 1))
+                             (ct/in-place-reshape [batch-size num-out-channels
+                                                   output-height output-width]))
+         algorithms (ct/choose-convolution-algorithms conv-desc input-dim input-dim batch-size 1000)
+         workspace (ct/new-tensor [(long (get algorithms :workspace-size))])
+         weights (ct/->tensor (take num-out-channels
+                                    (partition (* 3 3 num-in-channels) (range))))
+         bias-gradient (ct/new-tensor [num-out-channels])
+         weight-gradient (ct/new-tensor (ct/shape weights))
+         input-gradient (ct/new-tensor (ct/shape input))]
+     ;;Make sure that we test out pre-existing conditions.
+     (m/assign! output 1)
+     (m/assign! weight-gradient 1)
+     (m/assign! input-gradient 1)
+     (ct/convolution-forward! output 0.0 input weights workspace conv-desc algorithms)
+     (is (m/equals   [25062.0, 25692.0, 27582.0, 28212.0, 62646.0, 64572.0, 70350.0,
+                      72276.0, 100230.0, 103452.0, 113118.0, 116340.0, 65382.0, 66012.0,
+                      67902.0, 68532.0, 185910.0, 187836.0, 193614.0, 195540.0, 306438.0,
+                      309660.0, 319326.0, 322548.0, 105702.0, 106332.0, 108222.0,
+                      108852.0, 309174.0, 311100.0, 316878.0, 318804.0, 512646.0,
+                      515868.0, 525534.0, 528756.0]
+                     (ct/to-double-array output)))
+
+     (ct/convolution-backward-weights! weight-gradient 0.0 output-gradient input workspace conv-desc algorithms)
+     (is (m/equals   [798.0, 810.0, 822.0, 846.0, 858.0, 870.0, 894.0, 906.0, 918.0,
+                      990.0, 1002.0, 1014.0, 1038.0, 1050.0, 1062.0, 1086.0, 1098.0,
+                      1110.0, 1182.0, 1194.0, 1206.0, 1230.0, 1242.0, 1254.0, 1278.0,
+                      1290.0, 1302.0, 1374.0, 1386.0, 1398.0, 1422.0, 1434.0, 1446.0,
+                      1470.0, 1482.0, 1494.0, 798.0, 810.0, 822.0, 846.0, 858.0, 870.0,
+                      894.0, 906.0, 918.0, 990.0, 1002.0, 1014.0, 1038.0, 1050.0, 1062.0,
+                      1086.0, 1098.0, 1110.0, 1182.0, 1194.0, 1206.0, 1230.0, 1242.0,
+                      1254.0, 1278.0, 1290.0, 1302.0, 1374.0, 1386.0, 1398.0, 1422.0,
+                      1434.0, 1446.0, 1470.0, 1482.0, 1494.0, 798.0, 810.0, 822.0, 846.0,
+                      858.0, 870.0, 894.0, 906.0, 918.0, 990.0, 1002.0, 1014.0, 1038.0,
+                      1050.0, 1062.0, 1086.0, 1098.0, 1110.0, 1182.0, 1194.0, 1206.0,
+                      1230.0, 1242.0, 1254.0, 1278.0, 1290.0, 1302.0, 1374.0, 1386.0,
+                      1398.0, 1422.0, 1434.0, 1446.0, 1470.0, 1482.0, 1494.0]
+                   (ct/to-double-array weight-gradient)))
+
+     (ct/convolution-backward-data! input-gradient 0.0 output-gradient weights workspace conv-desc algorithms)
+     (is (m/equals [108.0, 219.0, 225.0, 114.0, 225.0, 456.0, 468.0, 237.0, 243.0,
+                    492.0, 504.0, 255.0, 126.0, 255.0, 261.0, 132.0, 135.0, 273.0,
+                    279.0, 141.0, 279.0, 564.0, 576.0, 291.0, 297.0, 600.0, 612.0,
+                    309.0, 153.0, 309.0, 315.0, 159.0, 162.0, 327.0, 333.0, 168.0,
+                    333.0, 672.0, 684.0, 345.0, 351.0, 708.0, 720.0, 363.0, 180.0,
+                    363.0, 369.0, 186.0, 189.0, 381.0, 387.0, 195.0, 387.0, 780.0,
+                    792.0, 399.0, 405.0, 816.0, 828.0, 417.0, 207.0, 417.0, 423.0,
+                    213.0, 108.0, 219.0, 225.0, 114.0, 225.0, 456.0, 468.0, 237.0,
+                    243.0, 492.0, 504.0, 255.0, 126.0, 255.0, 261.0, 132.0, 135.0,
+                    273.0, 279.0, 141.0, 279.0, 564.0, 576.0, 291.0, 297.0, 600.0,
+                    612.0, 309.0, 153.0, 309.0, 315.0, 159.0, 162.0, 327.0, 333.0,
+                    168.0, 333.0, 672.0, 684.0, 345.0, 351.0, 708.0, 720.0, 363.0,
+                    180.0, 363.0, 369.0, 186.0, 189.0, 381.0, 387.0, 195.0, 387.0,
+                    780.0, 792.0, 399.0, 405.0, 816.0, 828.0, 417.0, 207.0, 417.0,
+                    423.0, 213.0, 108.0, 219.0, 225.0, 114.0, 225.0, 456.0, 468.0,
+                    237.0, 243.0, 492.0, 504.0, 255.0, 126.0, 255.0, 261.0, 132.0,
+                    135.0, 273.0, 279.0, 141.0, 279.0, 564.0, 576.0, 291.0, 297.0,
+                    600.0, 612.0, 309.0, 153.0, 309.0, 315.0, 159.0, 162.0, 327.0,
+                    333.0, 168.0, 333.0, 672.0, 684.0, 345.0, 351.0, 708.0, 720.0,
+                    363.0, 180.0, 363.0, 369.0, 186.0, 189.0, 381.0, 387.0, 195.0,
+                    387.0, 780.0, 792.0, 399.0, 405.0, 816.0, 828.0, 417.0, 207.0,
+                    417.0, 423.0, 213.0]
+                   (ct/to-double-array input-gradient))))))

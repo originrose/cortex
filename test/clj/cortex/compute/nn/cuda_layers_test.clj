@@ -45,6 +45,9 @@
 (def-double-float-test softmax-batch-channels
   (verify-layers/softmax-batch-channels (create-context)))
 
+(def-double-float-test softmax-image
+  (verify-layers/softmax-image (create-context)))
+
 (def-double-float-test conv-layer
   (verify-layers/basic-conv-layer (create-context)))
 

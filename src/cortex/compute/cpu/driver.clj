@@ -1,7 +1,8 @@
 (ns cortex.compute.cpu.driver
   (:require [cortex.compute.driver :as drv]
             [cortex.compute.math :as c-math]
-            [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
+            [think.datatype.core :refer [v-aget v-aset] :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.datatype.marshal :as marshal]
             [clojure.core.async :as async]
             [think.resource.core :as resource]
@@ -134,6 +135,65 @@ Use with care; the synchonization primitives will just hang with this stream."
     int-data))
 
 
+(defmacro datatype->view-cast-fn
+  [dtype buf]
+  (condp = dtype
+    :byte `(marshal/as-byte-array-view ~buf)
+    :short `(marshal/as-short-array-view ~buf)
+    :int `(marshal/as-int-array-view ~buf)
+    :long `(marshal/as-long-array-view ~buf)
+    :float `(marshal/as-float-array-view ~buf)
+    :double `(marshal/as-double-array-view ~buf)))
+
+
+(defmacro datatype->cast-fn
+  [dtype val]
+  (condp = dtype
+    :byte `(byte ~val)
+    :short `(short ~val)
+    :int `(int ~val)
+    :long `(long ~val)
+    :float `(float ~val)
+    :double `(double ~val)))
+
+
+
+(defmacro ^:private indexed-copy-impl-macro
+  [datatype]
+  `(fn [dev-src# dev-src-indexes# src-stride#
+        dev-dst# dev-dst-indexes# dst-stride#
+        n-elems-per-idx#]
+     (let [dev-src# (datatype->view-cast-fn ~datatype dev-src#)
+           dev-src-indexes# (datatype->view-cast-fn :int dev-src-indexes#)
+           src-stride# (long src-stride#)
+           dev-dst# (datatype->view-cast-fn ~datatype dev-dst#)
+           dev-dst-indexes# (datatype->view-cast-fn :int dev-dst-indexes#)
+           dst-stride# (long dst-stride#)
+           n-elems-per-idx# (long n-elems-per-idx#)
+           n-indexes# (.length dev-src-indexes#)]
+       (parallel/parallel-for
+        vec-idx# n-indexes#
+        (let [src-idx# (v-aget dev-src-indexes# vec-idx#)
+              dst-idx# (v-aget dev-dst-indexes# vec-idx#)
+              src-offset# (* src-idx# src-stride#)
+              dst-offset# (* dst-idx# dst-stride#)]
+          (c-for
+           [elem-idx# 0 (< elem-idx# n-elems-per-idx#) (inc elem-idx#)]
+           (v-aset dev-dst# (+ dst-offset# elem-idx#)
+                   (v-aget dev-src# (+ src-offset# elem-idx#)))))))))
+
+
+(defmacro ^:private indexed-copy-iter
+  []
+  (->> (for [dtype dtype-base/datatypes]
+         [dtype `(indexed-copy-impl-macro ~dtype)])
+       (into {})))
+
+
+(def indexed-copy-table
+  (indexed-copy-iter))
+
+
 (extend-type CPUStream
   drv/PStream
   (copy-host->device [stream host-buffer host-offset
@@ -148,35 +208,23 @@ Use with care; the synchonization primitives will just hang with this stream."
       (dtype/copy! dev-a dev-a-off dev-b dev-b-off elem-count)))
   (memset [stream device-buffer device-offset elem-val elem-count]
     (with-stream-dispatch stream
-      (dtype/set-constant! device-buffer device-offset elem-val elem-count)))
+      (dtype-base/set-constant! device-buffer device-offset elem-val elem-count)))
   (create-event [stream]
     (let [^CPUEvent event (->CPUEvent (async/chan))]
       (with-stream-dispatch stream
         (async/close! (.input-chan event)))
       event))
+  (indexed-copy-impl [stream dev-src dev-src-indexes src-stride
+                      dev-dst dev-dst-indexes dst-stride
+                      n-elems-per-idx]
+    (with-stream-dispatch stream
+      ((get indexed-copy-table (dtype/get-datatype dev-src))
+       dev-src dev-src-indexes src-stride
+       dev-dst dev-dst-indexes dst-stride
+       n-elems-per-idx)))
   (sync-event [stream event]
     (with-stream-dispatch stream
-      (drv/wait-for-event event)))
-  (indexed-copy-impl [stream dev-a dev-a-indexes dev-a-stride
-                      dev-b dev-b-indexes dev-b-stride n-elems-per-idx]
-    (let [dev-a-indexes (to-int-array dev-a-indexes)
-          dev-b-indexes (to-int-array dev-b-indexes)]
-     (with-stream-dispatch stream
-       ;;TODO - update dtype library to support this striding.
-       (if (and (= n-elems-per-idx dev-a-stride)
-                (= n-elems-per-idx dev-b-stride))
-         (dtype/indexed-copy! (dtype/->view dev-a) 0 dev-a-indexes
-                              (dtype/->view dev-b) 0 dev-b-indexes
-                              (long n-elems-per-idx))
-         (let [dev-a-stride (long dev-a-stride)
-               dev-b-stride (long dev-b-stride)
-               n-elems-per-idx (long n-elems-per-idx)
-               n-indexes (alength dev-a-indexes)]
-           (parallel/parallel-for
-            idx n-indexes
-            (dtype/copy! dev-a (* dev-a-stride (aget dev-a-indexes idx))
-                         dev-b (* dev-b-stride (aget dev-b-indexes idx))
-                         n-elems-per-idx))))))))
+      (drv/wait-for-event event))))
 
 (extend-type CPUEvent
   drv/PEvent

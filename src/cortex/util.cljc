@@ -75,6 +75,13 @@
     (throw (ex-info "Bad idx->one-hot" {:idx idx :p p})))
   (assoc (vec (repeat p 0.0)) idx 1.0))
 
+
+(defn one-hot-encode
+  "Given a classes vector c, return a one-hot encoded vector
+in '(count c)-dimensional' space"
+  [classes class]
+  (mapv #(if (= class %) 1.0 0.0) classes))
+
 ;;;; Timing
 
 (defmacro ctime*

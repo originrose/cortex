@@ -41,7 +41,8 @@ def export_model(model_def, model_weights):
     for p in net.params:
         weight_group = layer_weights.create_group(p)
         weight_group[p + '_W'] = create_dataset_from_blob(f, net.params[p][0])
-        weight_group[p + '_b'] = create_dataset_from_blob(f, net.params[p][1])
+        if len(net.params[p]) > 1:
+            weight_group[p + '_b'] = create_dataset_from_blob(f, net.params[p][1])
 
     f.close()
 

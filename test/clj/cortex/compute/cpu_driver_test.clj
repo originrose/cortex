@@ -15,7 +15,7 @@
   []
   (cpu/driver))
 
-(def-all-dtype-test simple-stream
+(def-double-float-test simple-stream
   (verify-driver/simple-stream (driver) test-utils/*datatype*))
 
 (def-double-float-test indexed-copy

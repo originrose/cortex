@@ -8,8 +8,10 @@
             [clojure.core.matrix.macros :refer [c-for]]
             [cortex.compute.driver :as drv]
             [think.datatype.core :as dtype]
+            [think.datatype.base :as dtype-base]
             [think.resource.core :as resource]
-            [cortex.tensor :as ct]))
+            [cortex.tensor :as ct]
+            [cortex.tensor.dimensions :as ct-dims]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -168,17 +170,6 @@ result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];
   (batch-size [item] (.batch-size item)))
 
 
-(defn make-java-array
-  "Given a datatype and a specific amount of data then produce an array.  If there is no fast path
-then an array of a given type is produced."
-  [datatype data]
-  (let [data (or (mp/as-double-array data)
-                 data)]
-    (if (dtype/is-primitive-array? data)
-      data
-      (dtype/make-array-of-type datatype (vec (m/eseq data))))))
-
-
 (defprotocol PGetDeviceBuffer
   (device-buffer [item]
     "Given a generic object product the device buffer backing data store for the object."))
@@ -192,7 +183,7 @@ then an array of a given type is produced."
 (defrecord DeviceArray [device-buffer ^Tensor tensor])
 
 (extend-type DeviceArray
-  dtype/PDatatype
+  dtype-base/PDatatype
   (get-datatype [ary] (dtype/get-datatype (.device-buffer ary)))
   mp/PElementCount
   (element-count [ary] (mp/element-count (.tensor ary)))
@@ -203,7 +194,7 @@ then an array of a given type is produced."
   (batch-size [ary] (batch-size (.tensor ary)))
   PGetDeviceBuffer
   (device-buffer [ary] (.device-buffer ary))
-  dtype/PView
+  dtype-base/PView
   (->view-impl [ary offset length]
     (dtype/->view (.device-buffer ary) offset length)))
 
@@ -214,12 +205,19 @@ argument for creating an array storing a batch of data."
   ([stream datatype data batch-size]
    (let [batch-size (long batch-size)
          data-shape (m/shape data)
-         data-ary (make-java-array datatype data)
-         ;;synchronous call.
-         data-ptr (drv/host-array->device-buffer stream data-ary :datatype datatype)
-         n-elems (m/ecount data-ary)
+         n-elems (long (apply * data-shape))
+         device (drv/get-device stream)
+         host-buffer (drv/allocate-host-buffer
+                      (drv/get-driver device)
+                      n-elems datatype)
+         dev-buffer (drv/allocate-device-buffer n-elems datatype
+                                                        :device device)
          tensor (core-mat-shape->tensor data-shape batch-size)]
-     (->DeviceArray data-ptr tensor)))
+     (dtype/copy-raw->item! data host-buffer 0)
+     (drv/copy-host->device stream host-buffer 0 dev-buffer 0 n-elems)
+     (drv/sync-stream stream)
+     (resource/release host-buffer)
+     (->DeviceArray dev-buffer tensor)))
   ([stream datatype data] (array stream datatype data 1)))
 
 
@@ -496,5 +494,5 @@ and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 ou
                      [1]
                      tens-shape)]
     (ct/construct-tensor (drv/current-device)
-                         (ct/dimensions tens-shape)
+                         (ct-dims/dimensions tens-shape)
                          (device-buffer ary))))

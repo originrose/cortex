@@ -1,7 +1,7 @@
 (ns cortex.compute.array-view-math
   (:require [cortex.compute.math-util :refer :all]
             [clojure.core.matrix.macros :refer [c-for]]
-            [think.datatype.core :refer [v-aget-rem v-aset-rem v-aget v-aset] :as dtype]
+            [think.datatype.core :refer [v-aget v-aset] :as dtype]
             [think.resource.core :as resource])
   (:import [com.github.fommil.netlib BLAS]
            [java.util Random]
@@ -38,11 +38,15 @@
          y-view# (ArrayView/toView ~y)
          x-view# (ArrayView/toView ~x)
          res-view# (ArrayView/toView ~result)
+         res-len# (.length res-view#)
+         x-len# (.length x-view#)
+         y-len# (.length y-view#)
          num-elems# (Math/max (.length x-view#) (.length y-view#))]
      (c-for [idx# 0 (< idx# num-elems#) (inc idx#)]
-            (v-aset-rem res-view# idx#
-                  (+ (* alpha# (v-aget-rem x-view# idx#))
-                     (* beta# (v-aget-rem y-view# idx#)))))))
+            (v-aset res-view# (rem idx#
+                                   res-len#)
+                  (+ (* alpha# (v-aget x-view# (rem idx# x-len#)))
+                     (* beta# (v-aget y-view# (rem idx# y-len#))))))))
 
 
 (defmacro mul-rows-impl

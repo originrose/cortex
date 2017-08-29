@@ -14,7 +14,12 @@ namespace tensor { namespace operations {
       return lhs < rhs ? lhs : rhs;
     }
 
-    struct operation_type
+    template<typename dtype>
+    __device__ inline dtype op_bit_and(dtype lhs, dtype rhs) {
+      return (dtype) ((int) lhs & (int) rhs);
+    }
+
+    struct binary_operation_type
     {
       enum _enum
       {
@@ -24,6 +29,8 @@ namespace tensor { namespace operations {
 	divide,
 	min,
 	max,
+	bit_and,
+	eq,
       };
     };
 
@@ -37,18 +44,22 @@ namespace tensor { namespace operations {
       template<typename dtype>
       __device__ dtype operator()( dtype lhs, dtype rhs ) const {
 	switch( op_type ) {
-	case operation_type::add:
+	case binary_operation_type::add:
 	  return  lhs + rhs;
-	case operation_type::subtract:
+	case binary_operation_type::subtract:
 	  return reverse_operands ? rhs - lhs : lhs - rhs;
-	case operation_type::multiply:
+	case binary_operation_type::multiply:
 	  return lhs * rhs;
-	case operation_type::divide:
+	case binary_operation_type::divide:
 	  return reverse_operands ? rhs / lhs : lhs / rhs;
-	case operation_type::max:
+	case binary_operation_type::max:
 	  return op_max(lhs, rhs);
-	case operation_type::min:
+	case binary_operation_type::min:
 	  return op_min(lhs, rhs);
+	case binary_operation_type::bit_and:
+	  return op_bit_and(lhs,rhs);
+	case binary_operation_type::eq:
+	  return (dtype) lhs == rhs ? 1 : 0;
 	};
 	return (dtype) 0;
       }
@@ -64,6 +75,9 @@ namespace tensor { namespace operations {
 	negate,
 	tanh,
 	logistic,
+	exp,
+	sqrt,
+	noop,
       };
     };
 
@@ -145,6 +159,30 @@ namespace tensor { namespace operations {
       __device__ float operator()(float data) { return 1.0 / (1.0 + expf(- data)); }
     };
 
+    template<typename dtype>
+    struct unary_exp
+    {
+      __device__ dtype operator()(dtype data) { return static_cast<dtype>( exp((double) data) ); }
+    };
+
+    template<>
+    struct unary_exp<float>
+    {
+      __device__ float operator()(float data) { return expf(data); }
+    };
+
+    template<typename dtype>
+    struct unary_sqrt
+    {
+      __device__ dtype operator()(dtype data) { return static_cast<dtype>( sqrt( (double) data) ); }
+    };
+
+    template<>
+    struct unary_sqrt<float>
+    {
+      __device__ float operator()(float data) { return sqrtf(data); }
+    };
+
     struct general_unary_operation
     {
       int op_type;
@@ -166,6 +204,12 @@ namespace tensor { namespace operations {
 	  return unary_tanh<dtype>()(lhs);
 	case unary_operation_type::logistic:
 	  return unary_logistic<dtype>()(lhs);
+	case unary_operation_type::exp:
+	  return unary_exp<dtype>()(lhs);
+	case unary_operation_type::sqrt:
+	  return unary_sqrt<dtype>()(lhs);
+	case unary_operation_type::noop:
+	  return lhs;
 	};
 	return (dtype) 0;
       }
@@ -204,6 +248,7 @@ namespace tensor { namespace operations {
 	return (dtype) 0;
       }
     };
+
   }}
 
 

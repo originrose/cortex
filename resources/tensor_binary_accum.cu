@@ -18,9 +18,11 @@ void binary_accum(dtype* dest, const general_index_system& dest_sys, dtype dest_
 {
   int elem_idx = blockDim.x * blockIdx.x + threadIdx.x;
   if ( elem_idx < n_elems ) {
-    perform_cas(dest + dest_sys(elem_idx),
+    int max_shape[5];
+    general_index_system::get_max_shape(dest_sys, rhs_sys, max_shape );
+    perform_cas(dest + dest_sys(elem_idx, max_shape),
 		tensor::accum_constant_op<dtype>( dest_alpha,
-						  rhs_alpha * rhs[rhs_sys(elem_idx)],
+						  rhs_alpha * rhs[rhs_sys(elem_idx, max_shape)],
 						  operation ) );
   }
 }
