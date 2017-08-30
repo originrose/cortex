@@ -232,12 +232,12 @@
 (defn train
   [& [batch-size]]
   (let [batch-size (or batch-size 4)
-        epoch-size 1024
+        epoch-size 4096
         network (load-network "models/resnet50.nippy" :fc1000 layers-to-add)]
     (train/train-n network
                    (partial train-ds epoch-size batch-size)
                    (partial test-ds batch-size)
-                   :batch-size batch-size :epoch-count 5)))
+                   :batch-size batch-size :epoch-count 100)))
 
 
 
