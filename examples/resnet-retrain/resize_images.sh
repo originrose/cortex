@@ -1,5 +1,9 @@
 #!/bin/bash
 
-for file in $(find ./data/ -name '*.png'); do
-    mogrify -resize 224x224 $file
+FILES=$(find data -name "*.tif")
+for x in $FILES; do
+    convert $x -resize 224x224 "${x/\.tif/\.png}"
 done
+
+
+rm $FILES

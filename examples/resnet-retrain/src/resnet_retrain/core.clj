@@ -100,14 +100,16 @@
                                   class-mapping
                                   :colorspace :rgb
                                   :normalize false
-                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68 :bgr-reorder true))
+                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68
+                                                                               :bgr-reorder true))
                                 (experiment-util/infinite-class-balanced-dataset))
                             (-> test-folder
                                 (experiment-util/create-dataset-from-folder
                                   class-mapping
                                   :colorspace :rgb
                                   :normalize false
-                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68 :bgr-reorder true)))]
+                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68
+                                                                               :bgr-reorder true)))]
         network (load-network "models/resnet50.nippy" :fc1000 layers-to-add)
         batch-size (or batch-size 1)]
     (train/train-n network train-ds test-ds :batch-size batch-size :epoch-count 5)))
