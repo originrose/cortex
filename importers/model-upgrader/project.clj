@@ -1,4 +1,4 @@
-(defproject model-upgrader "0.9.12-SNAPSHOT"
+(defproject model-upgrader "0.9.13-SNAPSHOT"
   :description "Upgrade a cortex model to the most recent version."
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
