@@ -108,8 +108,8 @@
                obs))
      :labels (util/idx->one-hot (class-name->index (.. file getParentFile getName))
                                 (count (keys class-name->index)))}
-    (catch Throwable _
-      (println "Problem converting file to observation:" (.getPath file)))))
+    (catch Throwable e
+      (println "Problem converting file to observation:" (.getPath file) e))))
 
 
 (defn create-dataset-from-folder
