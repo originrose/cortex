@@ -1,6 +1,6 @@
 # resnet-retrain
 
-A Clojure library designed to ... well, that part is up to you.
+[dataset](http://vision.ucmerced.edu/datasets/landuse.html)
 
 ## Usage
 
