@@ -112,17 +112,29 @@
       (println "Problem converting file to observation:" (.getPath file) e))))
 
 
+(defn batch-pad-seq
+  "Ensure a sequence of things is of length commensurate with batch-size"
+  [batch-size item-seq]
+  (->> item-seq
+       (partition batch-size batch-size (->> (take-last batch-size item-seq)
+                                             repeat
+                                             flatten))
+       flatten))
+
+
 (defn create-dataset-from-folder
   "Turns a folder of folders of png images into a dataset (a sequence of maps)."
-  [folder-name class-mapping & {:keys [image-aug-fn post-process-fn datatype colorspace normalize]
+  [folder-name class-mapping & {:keys [image-aug-fn post-process-fn datatype colorspace normalize batch-size]
                                 :or {datatype :float
                                      colorspace :gray
-                                     normalize :true}}]
+                                     normalize :true
+                                     batch-size 1}}]
   (println "Building dataset from folder:" folder-name)
   (->> folder-name
        (io/as-file)
        (file-seq)
        (filter #(.endsWith (.getName ^File %) "png"))
+       (batch-pad-seq batch-size)
        (map (partial file->observation
                      class-mapping
                      image-aug-fn

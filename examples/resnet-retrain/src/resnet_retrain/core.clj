@@ -85,12 +85,29 @@
 
 ;; TRAINING ;;
 
-(def classes
+(defn classes
+  []
   (into [] (.list (io/file "data/train"))))
 
-(def class-mapping
-  {:class-name->index (zipmap classes (range))
-   :index->class-name (zipmap (range) classes)})
+(defn class-mapping
+  []
+  {:class-name->index (zipmap (classes) (range))
+   :index->class-name (zipmap (range) (classes))})
+
+
+(defn check-file-sizes
+  []
+  (->> (concat (file-seq (io/file "data/train"))
+               (file-seq (io/file "data/test")))
+       (filter #(.endsWith (.getName %) "png"))
+       (remove #(try (let [img (i/load-image %)]
+                       (and (= 224 (image/width img))
+                            (= 224 (image/height img))))
+                     (catch Throwable e
+                       (println (format "Failed to load image %s" %))
+                       (println e)
+                       true)))))
+
 
 
 (defn train
@@ -98,17 +115,19 @@
   (let [batch-size (or batch-size 4)
         [train-ds test-ds] [(-> train-folder
                                 (experiment-util/create-dataset-from-folder
-                                  class-mapping
+                                  (class-mapping)
                                   :colorspace :rgb
                                   :normalize false
+                                  :batch-size batch-size
                                   :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68
                                                                                :bgr-reorder true))
                                 (experiment-util/infinite-class-balanced-dataset))
                             (-> test-folder
                                 (experiment-util/create-dataset-from-folder
-                                  class-mapping
+                                  (class-mapping)
                                   :colorspace :rgb
                                   :normalize false
+                                  :batch-size batch-size
                                   :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68
                                                                                :bgr-reorder true)))]
         network (load-network "models/resnet50.nippy" :fc1000 layers-to-add)]
