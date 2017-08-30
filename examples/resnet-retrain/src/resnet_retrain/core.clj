@@ -13,7 +13,12 @@
             [cortex.nn.traverse :as traverse]
             [cortex.graph :as graph]
             [cortex.util :as util]
-            [cortex.experiment.util :as experiment-util])
+            [cortex.experiment.util :as experiment-util]
+            [cortex.compute.cpu.tensor-math :as cpu-tm]
+            [cortex.tensor :as ct]
+            [think.datatype.core :as dtype]
+            [think.parallel.core :as parallel]
+            [cortex.compute.cpu.driver :as cpu-driver])
   (:gen-class))
 
 
@@ -109,29 +114,130 @@
                        true)))))
 
 
+(defn dataset-from-folder
+  [folder-name infinite?]
+  (cond-> (->> (file-seq (io/file folder-name))
+               (filter #(.endsWith ^String (.getName %) "png"))
+               (map (fn [file-data]
+                      {:class-name (.. file-data getParentFile getName)
+                       :file file-data})))
+    infinite?
+    (experiment-util/infinite-class-balanced-seq :class-key :class-name)))
+
+
+(defn src-ds-item->net-input
+  [{:keys [class-name file] :as entry}]
+  (let [img-dim 224
+        src-image (i/load-image file)
+        ;;Ensure image is correct size
+        src-image (if-not (and (= (image/width src-image) img-dim)
+                               (= (image/height src-image) img-dim))
+                    (i/resize src-image img-dim img-dim)
+                    src-image)
+        ary-data (image/->array src-image)
+        ;;mask out the b-g-r channels
+        mask-tensor (-> (ct/->tensor [(bit-shift-left 0xFF 16)
+                                      (bit-shift-left 0xFF 8)
+                                      0xFF]
+                                     :datatype :int)
+                        (ct/in-place-reshape [3 1 1]))
+        ;;Divide to get back to range of 0-255
+        div-tensor (-> (ct/->tensor [(bit-shift-left 1 16)
+                                     (bit-shift-left 1 8)
+                                     1]
+                                    :datatype :int)
+                       (ct/in-place-reshape [3 1 1]))
+        ;;Use the normalization the network expects
+        subtrack-tensor (-> (ct/->tensor [123.68 116.779 103.939])
+                            (ct/in-place-reshape [3 1 1]))
+        ;;Array of packed integer data
+        img-tensor (-> (cpu-tm/as-tensor ary-data)
+                       (ct/in-place-reshape [img-dim img-dim]))
+        ;;Result will be b-g-r planar data
+        intermediate (ct/new-tensor [3 img-dim img-dim] :datatype :int)
+        result (ct/new-tensor [3 img-dim img-dim])]
+    (ct/binary-op! intermediate 1.0 img-tensor 1.0 mask-tensor :bit-and)
+    (ct/binary-op! intermediate 1.0 intermediate 1.0 div-tensor :/)
+    (ct/assign! result intermediate)
+    ;;Switch to floating point for final subtract
+    (ct/binary-op! result 1.0 result 1.0 subtrack-tensor :-)
+    (when-not (->> (classes)
+                   (filter (partial = class-name))
+                   first)
+      (throw (ex-info "Class not found in classes"
+                      {:classes (classes)
+                       :class-name class-name})))
+    {:class-name class-name
+     :labels (util/one-hot-encode (classes) class-name)
+     :data (cpu-tm/as-java-array result)
+     :filepath (.getPath file)}))
+
+
+(defn net-input->image
+  [{:keys [data]}]
+  (cpu-tm/tensor-context
+   (let [img-dim 224
+         ;;src is in normalized bgr space
+         src-tens (-> (cpu-tm/as-tensor data)
+                      (ct/in-place-reshape [3 img-dim img-dim]))
+         subtrack-tensor (-> (ct/->tensor [123.68 116.779 103.939] :datatype (dtype/get-datatype src-tens))
+                             (ct/in-place-reshape [3 1 1]))
+         div-tensor (-> (ct/->tensor [(bit-shift-left 1 16)
+                                      (bit-shift-left 1 8)
+                                      1]
+                                     :datatype (dtype/get-datatype src-tens))
+                       (ct/in-place-reshape [3 1 1]))
+         intermediate-float (ct/new-tensor [3 img-dim img-dim]
+                                           :datatype (dtype/get-datatype src-tens))
+         intermediate-int (ct/new-tensor [3 img-dim img-dim]
+                                         :datatype :int)
+         result (ct/new-tensor [img-dim img-dim] :datatype :int)]
+     (ct/binary-op! intermediate-float 1.0 src-tens 1.0 subtrack-tensor :+)
+     (ct/binary-op! intermediate-float 1.0 intermediate-float 1.0 div-tensor :*)
+     (ct/assign! intermediate-int intermediate-float)
+     ;;Sum together to reverse the bit shifting
+     (ct/binary-op! result 1.0 result 1.0 intermediate-int :+)
+     ;;Add back in alpha else we just get black images
+     (ct/binary-op! result 1.0 result 1.0 (bit-shift-left 1 24) :+)
+     (image/array-> (image/new-image 224 224) (cpu-tm/as-java-array result)))))
+
+
+(defn convert-one-ds-item
+  [ds-item]
+  (src-ds-item->net-input ds-item))
+
+
+(defn train-ds
+  [epoch-size batch-size]
+  (when-not (= 0 (rem (long epoch-size)
+                      (long batch-size)))
+    (throw (ex-info "Batch size is not commensurate with epoch size" {:epoch-size epoch-size
+                                                                      :batch-size batch-size})))
+  (ct/with-stream (cpu-driver/main-thread-cpu-stream)
+   (ct/with-datatype :float
+     (->> (dataset-from-folder "data/train" true)
+          (take epoch-size)
+          (parallel/queued-pmap batch-size src-ds-item->net-input)))))
+
+
+(defn test-ds
+  [batch-size]
+  (ct/with-stream (cpu-driver/main-thread-cpu-stream)
+   (ct/with-datatype :float
+     (->> (dataset-from-folder "data/test" false)
+          (experiment-util/batch-pad-seq batch-size)
+          (parallel/queued-pmap batch-size src-ds-item->net-input)))))
+
 
 (defn train
   [& [batch-size]]
   (let [batch-size (or batch-size 4)
-        [train-ds test-ds] [(-> train-folder
-                                (experiment-util/create-dataset-from-folder
-                                  (class-mapping)
-                                  :colorspace :rgb
-                                  :normalize false
-                                  :batch-size batch-size
-                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68
-                                                                               :bgr-reorder true))
-                                (experiment-util/infinite-class-balanced-dataset))
-                            (-> test-folder
-                                (experiment-util/create-dataset-from-folder
-                                  (class-mapping)
-                                  :colorspace :rgb
-                                  :normalize false
-                                  :batch-size batch-size
-                                  :post-process-fn #(patch/patch-mean-subtract % 103.939 116.779 123.68
-                                                                               :bgr-reorder true)))]
+        epoch-size 1024
         network (load-network "models/resnet50.nippy" :fc1000 layers-to-add)]
-    (train/train-n network train-ds test-ds :batch-size batch-size :epoch-count 5)))
+    (train/train-n network
+                   (partial train-ds epoch-size batch-size)
+                   (partial test-ds batch-size)
+                   :batch-size batch-size :epoch-count 5)))
 
 
 

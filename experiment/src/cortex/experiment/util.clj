@@ -72,6 +72,15 @@
        (partition epoch-size)))
 
 
+(defn infinite-class-balanced-seq
+  [map-seq & {:keys [class-key]}]
+  (->> (group-by class-key map-seq)
+       (map (fn [[_ v]]
+              (->> (repeatedly #(shuffle v))
+                   (mapcat identity))))
+       (apply interleave)))
+
+
 ;; Classification dataset utils
 (defn infinite-class-balanced-dataset
   "Given a dataset, returns an infinite sequence of maps perfectly
@@ -79,11 +88,7 @@
   [map-seq & {:keys [class-key epoch-size]
               :or {class-key :labels
                    epoch-size 1024}}]
-  (->> (group-by class-key map-seq)
-       (map (fn [[_ v]]
-              (->> (repeatedly #(shuffle v))
-                   (mapcat identity))))
-       (apply interleave)
+  (->> (infinite-class-balanced-seq map-seq :class-key class-key)
        (partition epoch-size)))
 
 

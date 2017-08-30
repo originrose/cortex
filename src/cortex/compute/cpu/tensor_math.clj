@@ -38,11 +38,59 @@
    (ct-dims/elem-idx->addr-ary rev-shape rev-strides rev-max-shape arg)))
 
 
+(defrecord SimpleElemIdxToAddr []
+  ElemIdxToAddressFunction
+  (^long idx_to_address [this ^long arg]
+   arg))
+
+
+(defrecord SimpleBcastAddr [^long elem-count ^long bcast-amt]
+  ElemIdxToAddressFunction
+  (^long idx_to_address [this ^long arg]
+   (rem (quot arg bcast-amt)
+        elem-count)))
+
+
+(defrecord SimpleRepeatAddr [^long elem-count]
+  ElemIdxToAddressFunction
+  (^long idx_to_address [this ^long arg]
+   (rem arg elem-count)))
+
+
 (defn ^:private get-elem-dims->address
   ^ElemIdxToAddressFunction [dims max-shape]
-  (let [{:keys [reverse-shape reverse-strides]} (ct-dims/->reverse-data dims max-shape)]
-    (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
-                     (int-array (vec (reverse max-shape))))))
+  ;;Special cases here for speed
+  (let [dense? (ct-dims/dense? dims)
+        increasing? (ct-dims/access-increasing? dims)
+        min-shape (drop-while #(= 1 %) (:shape dims))]
+    (cond
+      ;;Special case for indexes that increase monotonically
+      (and (= (:shape dims)
+              max-shape)
+           dense?
+           increasing?)
+      (->SimpleElemIdxToAddr)
+      ;;Special case for broadcasting a vector across an image (like applying bias).
+      (and (= (ct-dims/ecount dims)
+              (apply max (:shape dims)))
+           dense?
+           increasing?)
+      (let [ec (ct-dims/ecount dims)
+            ec-idx (long
+                    (->> (map-indexed vector (ct-dims/left-pad-ones (:shape dims) max-shape))
+                         (filter #(= ec (second %)))
+                         (ffirst)))
+            broadcast-amt (long (apply * 1 (drop (+ 1 ec-idx) max-shape)))]
+        (->SimpleBcastAddr ec broadcast-amt))
+      (and dense?
+           increasing?
+           (= min-shape
+              (take-last (count min-shape) max-shape)))
+      (->SimpleRepeatAddr (ct-dims/ecount dims))
+      :else
+      (let [{:keys [reverse-shape reverse-strides]} (ct-dims/->reverse-data dims max-shape)]
+        (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
+                         (int-array (vec (reverse max-shape))))))))
 
 
 (defmacro ^:private assign-constant-impl
@@ -1539,6 +1587,7 @@
 
 (defn as-java-array
   [cpu-tensor]
+  (drv/sync-stream ct/*stream*)
   (let [dev-buffer (ct/tensor->buffer cpu-tensor)]
     (condp = (dtype/get-datatype dev-buffer)
       :byte (.data ^ByteArrayView dev-buffer)
