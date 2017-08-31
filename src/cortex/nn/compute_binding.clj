@@ -206,8 +206,18 @@
    (keys (get traversal :buffers))))
 
 
+(defn- generate-pooling-buffers
+  [compute-binding traversal batch-size
+   gradients? numeric-gradients?
+   backward-buffers
+   alloc-host-fn
+   backend]
+  (let [pools (:pools ())]))
+
+
 (defn bind-context-to-network
-  "Bind an execution context to a network.  This should return a new network with any specific information the context needs embedded in it.  The network contains at least:
+  "Bind an execution context to a network.  This should return a new network with any specific
+  information the context needs embedded in it.  The network contains at least:
   {:compute-graph ...
    :traversal   ...
    :batch-size  ...}"
