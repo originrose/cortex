@@ -381,3 +381,105 @@ the client's perspective is located in the buffers section."
   [traversal]
   (->> (get traversal :backward)
        traversal-buffers))
+
+
+(defn record-first-seen-buffer-id-index
+  "Return a map of buffer id to the first time we have seen it"
+  [buffer-list]
+  (->> buffer-list
+       (reduce (fn [retval {:keys [id stream idx] :as entry}]
+                 (let [identifier (if id
+                                    {:id id}
+                                    {:stream stream})]
+                  (cond-> retval
+                    (not (contains? retval identifier))
+                    (assoc identifier idx))))
+               {})
+       (group-by second)
+       (map (fn [[k v]]
+              [k (-> (map first v)
+                     set)]))
+       (into {})))
+
+
+(comment
+
+      (->> access-pattern
+         (reduce (fn [retval {:keys [id stream allocation-events]}]
+                   (let [identifier (if id
+                                      {:id id}
+                                      {:stream stream})]
+                    (cond-> retval
+                      (contains? allocation-events :allocated)
+
+                      (contains? allocation-events :deallocated)
+                      ((fn [retval]
+                         (let [[pools available] retval
+                               pool-id (->> pools
+                                            (filter #(contains? (second %) identifier))
+                                            ffirst)]
+                           [pools (conj available pool-id)]))))))
+                 [{} #{}])))
+
+
+(defn generate-traversal-buffer-pools
+  "Generate a set of pools to use for the buffers.  The traversal system guarantees that it is safe to use the pool
+with a reshape to the buffer shape in question."
+  [traversal]
+  (let [access-pattern
+        (->> (concat (map (fn [{:keys [incoming outgoing] :as entry}]
+                            {:buffers (->> (concat incoming outgoing)
+                                           (map #(assoc % :usage #{:buffer})))})
+                          (:forward traversal))
+                     (map (fn [{:keys [incoming outgoing] :as entry}]
+                            {:buffers (->> (concat incoming outgoing)
+                                           (map #(assoc % :usage #{:buffer :gradient})))})
+                          (:backward traversal)))
+             (map-indexed (fn [idx buf-entry]
+                            (assoc buf-entry :idx idx)))
+             vec)
+        raw-access-pattern (->> access-pattern
+                                (mapcat (fn [{:keys [buffers idx]}]
+                                          (map #(assoc % :idx idx) buffers))))
+        first-access-map (record-first-seen-buffer-id-index raw-access-pattern)
+        last-access-map (record-first-seen-buffer-id-index (reverse raw-access-pattern))]
+    {:access-pattern access-pattern
+     :pools
+     (->> access-pattern
+          (mapv (fn [{:keys [buffers idx] :as entry}]
+                  (assoc entry
+                         :buffers
+                         (mapv (fn [{:keys [id stream] :as buf-entry}]
+                                 (let [identifier (if id {:id id} {:stream stream})]
+                                   (cond-> (assoc buf-entry :allocation-events #{})
+                                     (get-in first-access-map [idx identifier])
+                                     (update :allocation-events conj :allocated)
+                                     (get-in last-access-map [idx identifier])
+                                     (update :allocation-events conj :deallocated))))
+                               buffers))))
+          ;;Now each buffer entry can state definitively
+          (reduce (fn [retval {:keys [buffers] :as entry}]
+                    ;;Consider all allocation events for the function first
+                    (let [retval (reduce (fn [retval {:keys [id stream allocation-events usage]}]
+                                           (let [identifier (if id {:id id} {:stream stream})
+                                                 [pools available] retval
+                                                 [pool-id available] (if-let [pool-id (first available)]
+                                                                       [pool-id (disj available pool-id)]
+                                                                       [(count pools) available])]
+                                             [(update pools pool-id #(assoc % identifier usage)) available]))
+                                         retval
+                                         (filter #(contains? (get % :allocation-events) :allocated) buffers))]
+                      ;;Consider the deallocation events second
+                      (reduce (fn [retval {:keys [id stream allocation-events usage]}]
+                                (let [identifier (if id {:id id} {:stream stream})
+                                      [pools available] retval
+                                      pool-id (->> pools
+                                                   (filter #(contains? (second %) identifier))
+                                                   ffirst)]
+                                  [(update pools pool-id
+                                           #(assoc % identifier usage))
+                                   (conj available pool-id)]))
+                              retval
+                              (filter #(contains? (get % :allocation-events) :deallocated) buffers))))
+                  [{} #{}])
+          first)}))

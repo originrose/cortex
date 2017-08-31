@@ -604,4 +604,23 @@
                   :outgoing [{:id :linear-1}]}
                  {:id :softmax-1 :incoming [{:id :linear-1}]
                   :outgoing [{:id :softmax-1}]}]
-            (get train-traversal :forward))))))
+                (get train-traversal :forward))))
+        (is (= [nil nil]
+               (minimal-diff
+                {0 {{:id :linear-1} #{:buffer :gradient}
+                    {:id :max-pooling-1} #{:buffer}
+                    {:id :max-pooling-2} #{:buffer}
+                    {:id :max-pooling-3} #{:buffer}
+                    {:stream :data} #{:buffer}}
+                 1 {{:id :convolutional-1} #{:buffer}
+                    {:id :convolutional-2} #{:buffer}
+                    {:id :convolutional-3} #{:buffer}
+                    {:id :convolutional-4} #{:buffer}
+                    {:id :join-1} #{:buffer}
+                    {:id :join-2} #{:buffer}
+                    {:id :join-3} #{:buffer :gradient}}
+                 2 {{:id :r1} #{:buffer}
+                    {:id :r2} #{:buffer}
+                    {:id :r3} #{:buffer}
+                    {:id :softmax-1} #{:buffer :gradient}}}
+                (:pools (traverse/generate-traversal-buffer-pools train-traversal)))))))

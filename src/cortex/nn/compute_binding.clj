@@ -174,6 +174,38 @@
     [network loss-function]))
 
 
+(defn- generate-non-pooling-buffers
+  [compute-binding traversal batch-size
+   gradients? numeric-gradients?
+   backward-buffers
+   alloc-host-fn
+   backend]
+  (reduce
+   (fn [compute-binding buffer-key]
+     (update-in compute-binding [:traversal-buffers buffer-key]
+                (fn [buffer]
+                  (or buffer
+                      (let [buffer-size (-> (get-in traversal
+                                                    [:buffers buffer-key :dimension])
+                                            (graph/dimensions->size))
+                            gradients? (and gradients?
+                                            (contains? backward-buffers buffer-key))
+                            numeric-gradients? (and numeric-gradients?
+                                                    (contains? backward-buffers
+                                                               buffer-key))]
+                        (cond-> {:buffer (backend/new-array backend [buffer-size]
+                                                            batch-size)}
+                          gradients?
+                          (assoc :gradient (backend/new-array backend [buffer-size]
+                                                              batch-size))
+                          numeric-gradients?
+                          (assoc :numeric-gradient (alloc-host-fn (* buffer-size batch-size))
+                                 :host-buffer (alloc-host-fn (* buffer-size
+                                                             batch-size)))))))))
+   compute-binding
+   (keys (get traversal :buffers))))
+
+
 (defn bind-context-to-network
   "Bind an execution context to a network.  This should return a new network with any specific information the context needs embedded in it.  The network contains at least:
   {:compute-graph ...
@@ -193,6 +225,8 @@
         gradients? (or gradients? (= traverse-type :training))
         driver (drv/get-driver backend)
         datatype (dtype/get-datatype backend)
+        pooling? (and (not gradients?)
+                      (not numeric-gradients?))
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))
         backward-buffers (if gradients?
@@ -227,31 +261,11 @@
               (map :id)))
 
         ;; Setup the traversal buffers (for passing activations and gradients)
-        compute-binding
-        (reduce
-         (fn [compute-binding buffer-key]
-           (update-in compute-binding [:traversal-buffers buffer-key]
-                      (fn [buffer]
-                        (or buffer
-                            (let [buffer-size (-> (get-in traversal
-                                                          [:buffers buffer-key :dimension])
-                                                  (graph/dimensions->size))
-                                  gradients? (and gradients?
-                                                  (contains? backward-buffers buffer-key))
-                                  numeric-gradients? (and numeric-gradients?
-                                                          (contains? backward-buffers
-                                                                     buffer-key))]
-                              (cond-> {:buffer (backend/new-array backend [buffer-size]
-                                                                  batch-size)}
-                                gradients?
-                                (assoc :gradient (backend/new-array backend [buffer-size]
-                                                                    batch-size))
-                                numeric-gradients?
-                                (assoc :numeric-gradient (alloc-host (* buffer-size batch-size))
-                                       :host-buffer (alloc-host (* buffer-size
-                                                                   batch-size)))))))))
-         compute-binding
-         (keys (get traversal :buffers)))
+        compute-binding (generate-non-pooling-buffers compute-binding traversal batch-size
+                                                      gradients? numeric-gradients?
+                                                      backward-buffers alloc-host
+                                                      backend)
+
         network (assoc network
                        :compute-binding
                        (assoc compute-binding :backend backend))
