@@ -652,4 +652,4 @@ input dimensions."
 
 (defmethod graph/get-node-metadata :split
   [desc]
-  {:passes #{:training :inference}})
+  {:passes #{:training}})

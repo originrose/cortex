@@ -118,16 +118,23 @@
           [[] {} #{}])
         first)))
 
+(defn- graph-node->pass-type
+  [graph-node pass-type]
+  (if (get graph-node :non-trainable?)
+    :inference
+    pass-type))
+
 
 (defn filter-traversal
   "Removes bits of the traversal that aren't needed (e.g. no dropout used in
   inference), and then corrects the input/output ids accordingly."
   [{:keys [compute-graph] :as network} pass-type traversal]
   (->> traversal
-       ;;Logically if a node is removed here then that means that it does assigns its
+       ;;Logically if a node is removed here then that means that it assigns its
        ;;input to its output.
-       (reduce (fn [[traversal input-alias-map] {:keys [incoming id] :as entry}]
+       (reduce (fn [[traversal input-alias-map] {:keys [incoming id outgoing] :as entry}]
                  (let [graph-node (graph/get-node compute-graph id)
+                       pass-type (graph-node->pass-type graph-node pass-type)
                        pass-set (layers/get-pass-set graph-node)
                        new-incoming (flatten (map #(get input-alias-map (get % :id) %)
                                                   incoming))]
@@ -137,17 +144,20 @@
                                    :incoming new-incoming))
                       input-alias-map]
                      [(conj traversal entry)
-                      (assoc input-alias-map id
-                             ;;The things coming from this node now are a combination of
-                             ;;whatever was coming into it and any stream outputs.
-                             (concat new-incoming
-                                     (->> (get entry :outgoing)
-                                          (filter #(contains? % :stream)))))])))
+                      (reduce (fn [input-alias-map {:keys [id stream]}]
+                                (assoc input-alias-map
+                                       (or id stream)
+                                       (concat new-incoming
+                                               (->> outgoing
+                                                    (filter #(contains? % :stream))))))
+                              input-alias-map
+                              outgoing)])))
                [[] {}])
        first
        reverse
        (reduce (fn [[traversal output-alias-map] {:keys [id outgoing] :as entry}]
                  (let [graph-node (get-in compute-graph [:nodes id])
+                       pass-type (graph-node->pass-type graph-node pass-type)
                        pass-set (layers/get-pass-set graph-node)
                        new-outgoing (flatten (map #(get output-alias-map
                                                         (get % :id) %) outgoing))]
