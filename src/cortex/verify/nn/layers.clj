@@ -23,7 +23,8 @@
          (execute/current-backend)
          batch-size
          (traverse/training-traversal network :keep-non-trainable? true)
-         bind-opts))))
+         (assoc bind-opts
+                :disable-pooling? true)))))
 
 
 (defn set-id-and-bind-test-network

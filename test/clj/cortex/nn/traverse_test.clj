@@ -272,6 +272,7 @@
               :centers {:buffer-id :center-loss-1-centers-1}}}
            (traverse/gradient-loss-function network traversal)))))
 
+
 (deftest appending-layers-to-network
   (testing
     "Ensures that a network built by piecing together a built-network and set of layers is
@@ -334,7 +335,6 @@
              (set (keys (get-in chopped-net [:compute-graph :buffers]))))))))
 
 
-
 (deftest inference-after-train
   (let [network (build-big-description)]
     (is (= #{:output}
@@ -375,6 +375,7 @@
              {:id :concat, :incoming [{:stream :left} {:id :right}], :outgoing [{:id :concat}]}
              {:id :linear-1, :incoming [{:id :concat}], :outgoing [{:id :linear-1}]}]
             (get inference-traversal :forward))))))
+
 
 (deftest concatenate-traversal-2
   (let [train-traversal (-> (network/linear-network [(layers/input 10 10 10)
@@ -450,6 +451,7 @@
    (layers/convolutional 1 0 1 10  :id :chop-here)
    (layers/softmax :id :label)])
 
+
 (defn mnist-yolo-network []
   (let [network (network/resize-input (network/linear-network resizable-net) 118 118 1)
         chopped-net (network/dissoc-layers-from-network network :chop-here)
@@ -473,20 +475,151 @@
         traversal (traverse/training-traversal test-net)]
     (is (= [nil nil]
            (minimal-diff
-            [{:id :convolutional-1, :incoming [{:stream :data}], :outgoing [{:id :convolutional-1}],
-              :pass :inference}
-             {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]
-              :pass :inference}
-             {:id :dropout-1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :dropout-1}], :pass :inference}
-             {:id :convolutional-2, :incoming [{:id :dropout-1}], :outgoing [{:id :convolutional-2}],
-              :pass :inference}
-             {:id :max-pooling-2, :incoming [{:id :convolutional-2}], :outgoing [{:id :max-pooling-2}],
-              :pass :inference}
-             {:id :convolutional-3, :incoming [{:id :max-pooling-2}], :outgoing [{:id :convolutional-3}],
-              :pass :inference}
-             {:id :relu-1, :incoming [{:id :convolutional-3}], :outgoing [{:id :relu-1}], :pass :inference}
-             {:id :convolutional-4, :incoming [{:id :relu-1}], :outgoing [{:id :convolutional-4}], :pass :inference}
-             {:id :dropout-2, :incoming [{:id :convolutional-4}], :outgoing [{:id :dropout-2}], :pass :inference}
-             {:id :relu-2, :incoming [{:id :dropout-2}], :outgoing [{:id :relu-2}], :pass :inference}
-             {:id :label, :incoming [{:id :relu-2}], :outgoing [{:id :label}]}]
+            [{:id :convolutional-1 :incoming [{:stream :data}] :outgoing [{:id :convolutional-1}] :pass :inference}
+             {:id :max-pooling-1 :incoming [{:id :convolutional-1}] :outgoing [{:id :max-pooling-1}] :pass :inference}
+             {:id :convolutional-2 :incoming [{:id :max-pooling-1}] :outgoing [{:id :convolutional-2}] :pass :inference}
+             {:id :max-pooling-2 :incoming [{:id :convolutional-2}] :outgoing [{:id :max-pooling-2}] :pass :inference}
+             {:id :convolutional-3 :incoming [{:id :max-pooling-2}] :outgoing [{:id :convolutional-3}] :pass :inference}
+             {:id :relu-1 :incoming [{:id :convolutional-3}] :outgoing [{:id :relu-1}] :pass :inference}
+             {:id :convolutional-4 :incoming [{:id :relu-1}] :outgoing [{:id :convolutional-4}] :pass :inference}
+             {:id :relu-2 :incoming [{:id :convolutional-4}] :outgoing [{:id :relu-2}] :pass :inference}
+             {:id :label :incoming [{:id :relu-2}] :outgoing [{:id :label}]}]
             (get traversal :forward))))))
+
+
+(def resnet-like-net
+  [(layers/input 28 28 1 :id :data)
+   (layers/convolutional 3 0 1 20)
+   (layers/max-pooling 2 0 2)
+   (layers/split :id :s1)
+   (layers/convolutional 3 1 1 20)
+   (layers/relu :id :r1)
+   (layers/join :parents [:r1 :s1])
+   (layers/max-pooling 2 0 2)
+   (layers/split :id :s2)
+   (layers/convolutional 3 1 1 20)
+   (layers/relu :id :r2)
+   (layers/join :parents [:r2 :s2])
+   (layers/max-pooling 2 0 2)
+   (layers/split :id :s3)
+   (layers/convolutional 3 1 1 20)
+   (layers/relu :id :r3)
+   (layers/join :parents [:r3 :s3])
+   (layers/linear 10 :id :chop-here)
+   (layers/softmax)])
+
+
+(deftest basic-resnet-traverse
+  (let [test-net (network/linear-network resnet-like-net)
+        infer-traversal (traverse/inference-traversal test-net)
+        train-traversal (traverse/training-traversal test-net)]
+    ;;Note the lack of any splits in the forward pass.  If we aren't generating gradients then the splits aren't
+    ;;necessary.
+    (is (= [nil nil]
+           (minimal-diff
+            [{:id :convolutional-1, :incoming [{:stream :data}], :outgoing [{:id :convolutional-1}]}
+             {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]}
+             {:id :convolutional-2, :incoming [{:id :max-pooling-1}], :outgoing [{:id :convolutional-2}]}
+             {:id :r1, :incoming [{:id :convolutional-2}], :outgoing [{:id :r1}]}
+             {:id :join-1, :incoming [{:id :r1} {:id :max-pooling-1}], :outgoing [{:id :join-1}]}
+             {:id :max-pooling-2, :incoming [{:id :join-1}], :outgoing [{:id :max-pooling-2}]}
+             {:id :convolutional-3, :incoming [{:id :max-pooling-2}], :outgoing [{:id :convolutional-3}]}
+             {:id :r2, :incoming [{:id :convolutional-3}], :outgoing [{:id :r2}]}
+             {:id :join-2, :incoming [{:id :r2} {:id :max-pooling-2}], :outgoing [{:id :join-2}]}
+             {:id :max-pooling-3, :incoming [{:id :join-2}], :outgoing [{:id :max-pooling-3}]}
+             {:id :convolutional-4, :incoming [{:id :max-pooling-3}], :outgoing [{:id :convolutional-4}]}
+             {:id :r3, :incoming [{:id :convolutional-4}], :outgoing [{:id :r3}]}
+             {:id :join-3, :incoming [{:id :r3} {:id :max-pooling-3}], :outgoing [{:id :join-3}]}
+             {:id :chop-here, :incoming [{:id :join-3}], :outgoing [{:id :chop-here}]}
+             {:id :softmax-1, :incoming [{:id :chop-here}], :outgoing [{:id :softmax-1}]}]
+            (get infer-traversal :forward))))
+
+    (is (= [nil nil]
+           (minimal-diff
+            [{:id :convolutional-1, :incoming [{:stream :data}], :outgoing [{:id :convolutional-1}]}
+             {:id :max-pooling-1, :incoming [{:id :convolutional-1}], :outgoing [{:id :max-pooling-1}]}
+             {:id :s1, :incoming [{:id :max-pooling-1}], :outgoing [{:id :s1-1} {:id :s1-2}]}
+             {:id :convolutional-2, :incoming [{:id :s1-1}], :outgoing [{:id :convolutional-2}]}
+             {:id :r1, :incoming [{:id :convolutional-2}], :outgoing [{:id :r1}]}
+             {:id :join-1, :incoming [{:id :r1} {:id :s1-2}], :outgoing [{:id :join-1}]}
+             {:id :max-pooling-2, :incoming [{:id :join-1}], :outgoing [{:id :max-pooling-2}]}
+             {:id :s2, :incoming [{:id :max-pooling-2}], :outgoing [{:id :s2-1} {:id :s2-2}]}
+             {:id :convolutional-3, :incoming [{:id :s2-1}], :outgoing [{:id :convolutional-3}]}
+             {:id :r2, :incoming [{:id :convolutional-3}], :outgoing [{:id :r2}]}
+             {:id :join-2, :incoming [{:id :r2} {:id :s2-2}], :outgoing [{:id :join-2}]}
+             {:id :max-pooling-3, :incoming [{:id :join-2}], :outgoing [{:id :max-pooling-3}]}
+             {:id :s3, :incoming [{:id :max-pooling-3}], :outgoing [{:id :s3-1} {:id :s3-2}]}
+             {:id :convolutional-4, :incoming [{:id :s3-1}], :outgoing [{:id :convolutional-4}]}
+             {:id :r3, :incoming [{:id :convolutional-4}], :outgoing [{:id :r3}]}
+             {:id :join-3, :incoming [{:id :r3} {:id :s3-2}], :outgoing [{:id :join-3}]}
+             {:id :chop-here, :incoming [{:id :join-3}], :outgoing [{:id :chop-here}]}
+             {:id :softmax-1, :incoming [{:id :chop-here}], :outgoing [{:id :softmax-1}]}]
+            (get train-traversal :forward))))))
+
+
+(defn resnet-retrain-net
+  []
+  (let [test-net (network/linear-network resnet-like-net)
+        chopped-net (network/dissoc-layers-from-network test-net :chop-here)
+        ;;Freeze all the nodes
+        nodes (get-in chopped-net [:compute-graph :nodes])
+        new-node-params (mapv (fn [params] (assoc params :non-trainable? true)) (vals nodes))
+        frozen-nodes (zipmap (keys nodes) new-node-params)
+        frozen-net (assoc-in chopped-net [:compute-graph :nodes] frozen-nodes)
+        layers-to-add (map first [(layers/linear 50)
+                                  (layers/softmax)])]
+    (network/assoc-layers-to-network frozen-net layers-to-add)))
+
+
+(deftest resnet-retrain-traverse
+  (let [test-net (resnet-retrain-net)
+        train-traversal (traverse/training-traversal test-net)]
+        (is (= [nil nil]
+               (minimal-diff
+                [{:id :convolutional-1 :incoming [{:stream :data}]
+                  :outgoing [{:id :convolutional-1}] :pass :inference}
+                 {:id :max-pooling-1 :incoming [{:id :convolutional-1}]
+                  :outgoing [{:id :max-pooling-1}] :pass :inference}
+                 {:id :convolutional-2 :incoming [{:id :max-pooling-1}]
+                  :outgoing [{:id :convolutional-2}] :pass :inference}
+                 {:id :r1 :incoming [{:id :convolutional-2}] :outgoing [{:id :r1}] :pass :inference}
+                 {:id :join-1 :incoming [{:id :r1} {:id :max-pooling-1}]
+                  :outgoing [{:id :join-1}] :pass :inference}
+                 {:id :max-pooling-2 :incoming [{:id :join-1}]
+                  :outgoing [{:id :max-pooling-2}] :pass :inference}
+                 {:id :convolutional-3 :incoming [{:id :max-pooling-2}]
+                  :outgoing [{:id :convolutional-3}] :pass :inference}
+                 {:id :r2 :incoming [{:id :convolutional-3}] :outgoing [{:id :r2}] :pass :inference}
+                 {:id :join-2 :incoming [{:id :r2} {:id :max-pooling-2}]
+                  :outgoing [{:id :join-2}] :pass :inference}
+                 {:id :max-pooling-3 :incoming [{:id :join-2}]
+                  :outgoing [{:id :max-pooling-3}] :pass :inference}
+                 {:id :convolutional-4 :incoming [{:id :max-pooling-3}]
+                  :outgoing [{:id :convolutional-4}] :pass :inference}
+                 {:id :r3 :incoming [{:id :convolutional-4}]
+                  :outgoing [{:id :r3}] :pass :inference}
+                 {:id :join-3 :incoming [{:id :r3} {:id :max-pooling-3}]
+                  :outgoing [{:id :join-3}] :pass :inference}
+                 {:id :linear-1 :incoming [{:id :join-3}]
+                  :outgoing [{:id :linear-1}]}
+                 {:id :softmax-1 :incoming [{:id :linear-1}]
+                  :outgoing [{:id :softmax-1}]}]
+                (get train-traversal :forward))))
+        (is (= [nil nil]
+               (minimal-diff
+                {0 {:buf-list #{{{:id :linear-1} :buffer} {{:id :max-pooling-1} :buffer}
+                                {{:id :max-pooling-2} :buffer} {{:id :max-pooling-3} :buffer}
+                                {{:stream :data} :buffer}}
+                    :max-size 3380}
+                 1 {:buf-list #{{{:id :convolutional-1} :buffer}
+                                {{:id :convolutional-2} :buffer}
+                                {{:id :convolutional-3} :buffer}
+                                {{:id :convolutional-4} :buffer}
+                                {{:id :join-1} :buffer}
+                                {{:id :join-2} :buffer}
+                                {{:id :join-3} :buffer}}
+                    :max-size 13520}
+                 2 {:buf-list #{{{:id :r1} :buffer} {{:id :r2} :buffer} {{:id :r3} :buffer} {{:id :softmax-1} :buffer}} :max-size 3380}
+                 3 {:buf-list #{{{:id :join-3} :gradient} {{:id :softmax-1} :gradient}} :max-size 320}
+                 4 {:buf-list #{{{:id :linear-1} :gradient}} :max-size 50}}
+                (:pools (traverse/generate-traversal-buffer-pools train-traversal)))))))

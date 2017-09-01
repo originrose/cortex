@@ -238,6 +238,15 @@ to be reversed for the most efficient implementation."
     {:reverse-shape rev-shape
      :reverse-strides rev-strides}))
 
+
+(defn left-pad-ones
+  [shape-vec max-shape-vec]
+  (->> (concat (repeat (- (count max-shape-vec)
+                          (count shape-vec))
+                       1)
+               shape-vec)))
+
+
 (defn dimension-seq->max-shape
   "Given a sequence of dimensions return a map of:
 {:max-shape - the maximum dim across shapes for all dims

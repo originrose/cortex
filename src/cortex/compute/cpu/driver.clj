@@ -78,12 +78,13 @@
      (resource/track retval)))
   ([device] (cpu-stream device (atom nil))))
 
+(declare driver)
 
 (defn main-thread-cpu-stream
   "Create a cpu stream that will execute everything immediately inline.
 Use with care; the synchonization primitives will just hang with this stream."
   ^CPUStream []
-  (->CPUStream nil nil nil nil))
+  (->CPUStream (drv/default-device (driver)) nil nil nil))
 
 
 (defn is-main-thread-cpu-stream?
@@ -223,8 +224,9 @@ Use with care; the synchonization primitives will just hang with this stream."
        dev-dst dev-dst-indexes dst-stride
        n-elems-per-idx)))
   (sync-event [stream event]
-    (with-stream-dispatch stream
-      (drv/wait-for-event event))))
+    (when-not (is-main-thread-cpu-stream? stream)
+      (with-stream-dispatch stream
+        (drv/wait-for-event event)))))
 
 (extend-type CPUEvent
   drv/PEvent

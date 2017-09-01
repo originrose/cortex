@@ -26,10 +26,11 @@
            batch-size 1
            network
            (as-> network network
+             ;;Disable pooling as that will definitely break the buffer-by-buffer comparison
              (compute-binding/bind-context-to-network network
                                                       (execute/current-backend)
                                                       batch-size (traverse/training-traversal network)
-                                                      {})
+                                                      {:disable-pooling? true})
                (compute-binding/traverse context network {(first roots) input} :inference)
                ;;save gradients at this point implies save io buffers
                (compute-binding/save-to-network context network {:save-gradients? true}))

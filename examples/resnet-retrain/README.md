@@ -1,12 +1,29 @@
 # resnet-retrain
 
-A Clojure library designed to ... well, that part is up to you.
+[dataset](http://vision.ucmerced.edu/datasets/landuse.html)
 
-## Usage
 
-FIXME
+unzip to data directory.  Should have this directory structure:
 
-## License
+```
+data/UCMerced_LandUse/Images
+```
+
+Run resize_images.sh
+
+Start repl
+
+```
+(create-train-test-folders "data/UCMerced_LandUse/Images")
+```
+
+You should be ready to train now.
+
+
+```
+(train)
+```
+
 
 Copyright © 2017 FIXME
 
