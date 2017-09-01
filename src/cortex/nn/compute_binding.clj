@@ -207,12 +207,57 @@
 
 
 (defn- generate-pooling-buffers
-  [compute-binding traversal batch-size
-   gradients? numeric-gradients?
-   backward-buffers
-   alloc-host-fn
-   backend]
-  (let [pools (:pools ())]))
+  [compute-binding traversal batch-size backend]
+  (let [buffer-map (:buffers traversal)
+        pools (->> (:pools (traverse/generate-traversal-buffer-pools traversal))
+                   (map (fn [[idx {:keys [buf-list max-size] :as entry}]]
+                          [idx (assoc entry
+                                      :buffer (backend/new-array backend [max-size]
+                                                                 batch-size))]))
+                   (into {}))
+        traversal-buffers
+        (reduce (fn [traversal-buffers [idx {:keys [buf-list max-size buffer]}]]
+                  (reduce (fn [traversal-buffers buflist-entry]
+                            (let [[[buf-id usage]] (seq buflist-entry)
+                                  buf-dims (get-in buffer-map [buf-id :dimension])
+                                  desired-size (* batch-size
+                                                  (:channels buf-dims)
+                                                  (:height buf-dims)
+                                                  (:width buf-dims))
+                                  specific-buf (math/->DeviceArray (drv/sub-buffer (:device-buffer buffer)
+                                                                                   0
+                                                                                   desired-size)
+                                                                   (math/->Tensor batch-size
+                                                                                  (:channels buf-dims)
+                                                                                  (:height buf-dims)
+                                                                                  (:width buf-dims)
+                                                                                  math/planar-order))]
+                              (when-not (<= desired-size
+                                            (math/ecount buffer))
+                                (throw (ex-info "Buffer allocation error:"
+                                                {:desired-size desired-size
+                                                 :ecount (math/ecount buffer)
+                                                 :buffer-id buf-id
+                                                 :pools (traverse/generate-traversal-buffer-pools traversal)})))
+                              (assoc-in traversal-buffers [buf-id usage] specific-buf)))
+                          traversal-buffers
+                          buf-list))
+                (get compute-binding :traversal-buffers)
+                pools)
+        ;;Allocate any buffers not included in the traversal information (streams used
+        ;;only for loss do not get included in the traversal)
+        traversal-buffers
+        (reduce (fn [traversal-buffers [buf-id {:keys [dimension]}]]
+                  (let [buf-size (graph/dimensions->size dimension)]
+                    (assoc-in traversal-buffers [buf-id :buffer]
+                              (backend/new-array backend [buf-size] batch-size))))
+                traversal-buffers
+                (->> buffer-map
+                     (filter #(contains? (first %) :stream))
+                     (remove #(contains? traversal-buffers (first %)))))]
+    (assoc compute-binding
+           :traversal-buffers traversal-buffers
+           :traversal-pools pools)))
 
 
 (defn bind-context-to-network
@@ -225,18 +270,21 @@
    backend
    batch-size
    traversal
-   {:keys [gradients? numeric-gradients? optimizer] :as options}]
+   {:keys [gradients? numeric-gradients? disable-pooling? optimizer] :as options}]
   (let [network (assoc network
                        :compute-binding {:batch-size batch-size}
                        :traversal traversal)
         stream-map (get traversal :stream-map)
         id->node-map (get compute-graph :nodes)
         traverse-type (get traversal :type)
+        ;;If the user is forcing gradients then that is something different.
+        pooling? (and (not gradients?)
+                      (not numeric-gradients?)
+                      (not disable-pooling?))
+        ;;Set the gradients flag for the general case of training.
         gradients? (or gradients? (= traverse-type :training))
         driver (drv/get-driver backend)
         datatype (dtype/get-datatype backend)
-        pooling? (and (not gradients?)
-                      (not numeric-gradients?))
         alloc-host (fn [elem-count]
                      (drv/allocate-host-buffer driver elem-count datatype))
         backward-buffers (if gradients?
@@ -271,10 +319,12 @@
               (map :id)))
 
         ;; Setup the traversal buffers (for passing activations and gradients)
-        compute-binding (generate-non-pooling-buffers compute-binding traversal batch-size
-                                                      gradients? numeric-gradients?
-                                                      backward-buffers alloc-host
-                                                      backend)
+        compute-binding (if pooling?
+                          (generate-pooling-buffers compute-binding traversal batch-size backend)
+                          (generate-non-pooling-buffers compute-binding traversal batch-size
+                                                        gradients? numeric-gradients?
+                                                        backward-buffers alloc-host
+                                                        backend))
 
         network (assoc network
                        :compute-binding

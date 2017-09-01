@@ -607,20 +607,19 @@
                 (get train-traversal :forward))))
         (is (= [nil nil]
                (minimal-diff
-                {0 {{:id :linear-1} #{:buffer :gradient}
-                    {:id :max-pooling-1} #{:buffer}
-                    {:id :max-pooling-2} #{:buffer}
-                    {:id :max-pooling-3} #{:buffer}
-                    {:stream :data} #{:buffer}}
-                 1 {{:id :convolutional-1} #{:buffer}
-                    {:id :convolutional-2} #{:buffer}
-                    {:id :convolutional-3} #{:buffer}
-                    {:id :convolutional-4} #{:buffer}
-                    {:id :join-1} #{:buffer}
-                    {:id :join-2} #{:buffer}
-                    {:id :join-3} #{:buffer :gradient}}
-                 2 {{:id :r1} #{:buffer}
-                    {:id :r2} #{:buffer}
-                    {:id :r3} #{:buffer}
-                    {:id :softmax-1} #{:buffer :gradient}}}
+                {0 {:buf-list #{{{:id :linear-1} :buffer} {{:id :max-pooling-1} :buffer}
+                                {{:id :max-pooling-2} :buffer} {{:id :max-pooling-3} :buffer}
+                                {{:stream :data} :buffer}}
+                    :max-size 3380}
+                 1 {:buf-list #{{{:id :convolutional-1} :buffer}
+                                {{:id :convolutional-2} :buffer}
+                                {{:id :convolutional-3} :buffer}
+                                {{:id :convolutional-4} :buffer}
+                                {{:id :join-1} :buffer}
+                                {{:id :join-2} :buffer}
+                                {{:id :join-3} :buffer}}
+                    :max-size 13520}
+                 2 {:buf-list #{{{:id :r1} :buffer} {{:id :r2} :buffer} {{:id :r3} :buffer} {{:id :softmax-1} :buffer}} :max-size 3380}
+                 3 {:buf-list #{{{:id :join-3} :gradient} {{:id :softmax-1} :gradient}} :max-size 320}
+                 4 {:buf-list #{{{:id :linear-1} :gradient}} :max-size 50}}
                 (:pools (traverse/generate-traversal-buffer-pools train-traversal)))))))
