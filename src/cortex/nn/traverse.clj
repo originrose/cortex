@@ -384,7 +384,7 @@ the client's perspective is located in the buffers section."
 
 
 (defn record-first-seen-buffer-id-index
-  "Return a map of buffer id to the first time we have seen it"
+  "Return a map of index to a list of buffers first seen at that index."
   [buffer-list]
   (->> buffer-list
        (reduce (fn [retval {:keys [id stream idx usage] :as entry}]
@@ -404,6 +404,9 @@ the client's perspective is located in the buffers section."
 
 
 (defn buffer-seq
+  "Flatten out the buffers datastructure on the access patter to a flat list of
+{:allocation-event [alloc-or-dealloc usage] id-or-stream}.  This simplifies the reductions
+to actually build up the pools and track the allocation/deallocation of the buffers."
   [buffers allocation-event]
   (->> buffers
        (mapcat (fn [{:keys [allocation-events] :as entry}]
@@ -412,32 +415,17 @@ the client's perspective is located in the buffers section."
                       allocation-events)))
        (filter #(and (= (first (get % :allocation-event)) allocation-event)))))
 
-(comment
-       (->> access-pattern
-          (mapv (fn [{:keys [buffers idx] :as entry}]
-                  (assoc entry
-                         :buffers
-                         (mapv (fn [{:keys [id stream] :as buf-entry}]
-                                 (let [identifier (if id {:id id} {:stream stream})]
-                                   (cond-> (assoc buf-entry :allocation-events #{})
-                                     (get-in first-access-map [idx identifier])
-                                     (update :allocation-events conj :allocated)
-                                     (get-in last-access-map [idx identifier])
-                                     (update :allocation-events conj :deallocated))))
-                               buffers))))
-          (#(do
-              (println (buffer-seq (:buffers (last %)) :deallocated))
-              %))
-          ;;Now each buffer entry can state definitively if it was allocated at this position or not.
-
-          first))
-
 
 (defn generate-traversal-buffer-pools
   "Generate a set of pools to use for the buffers.  The traversal system guarantees that it is safe to use the pool
-with a reshape to the buffer shape in question."
+with a reshape to the buffer shape in question.  So many buffers are assigned to a single pool and we guarantee
+that those buffers can overwrite each other because the data in the buffer isn't useful at the time the other
+buffer is overwritting this buffer."
   [traversal]
   (let [possible-usages [:buffer :gradient]
+        ;;Create a datastructure that represents the buffers accessed in order assuming a forward, then a backward pass.
+        ;;This datastructure contains an integer representing the function index and a list of buffers.  Each buffer
+        ;;can be accessed either as a buffer or as a gradient.
         access-pattern
         (->> (concat (map (fn [{:keys [incoming outgoing] :as entry}]
                             {:buffers (->> (concat incoming outgoing)
@@ -450,6 +438,9 @@ with a reshape to the buffer shape in question."
              (map-indexed (fn [idx buf-entry]
                             (assoc buf-entry :idx idx)))
              vec)
+        ;;Flatten out the datastructure so we just have a list of {buffer, usage idx}. This is the structure
+        ;;most amenable to detecting the initial access to a particular buffer,usage pair and the last access
+        ;;to a particular buffer,usage pair.
         raw-access-pattern (->> access-pattern
                                 (mapcat (fn [{:keys [buffers idx]}]
                                           (mapcat (fn [buffer]
@@ -461,6 +452,8 @@ with a reshape to the buffer shape in question."
                                                   buffers))))
         first-access-map (record-first-seen-buffer-id-index raw-access-pattern)
         last-access-map (record-first-seen-buffer-id-index (reverse raw-access-pattern))
+        ;;Rebuild the access pattern mixing in the keys :allocated for initial usage and :deallocated for
+        ;;the last usage.
         buffered-access-pattern
         (->> access-pattern
              (mapv (fn [{:keys [buffers idx] :as entry}]
@@ -483,6 +476,9 @@ with a reshape to the buffer shape in question."
                                               identifier-seq)))
                                   buffers)))))
         buffers (get traversal :buffers)
+        ;;Run through each function (index) in order and first allocate all buffers into a list of virtual pools
+        ;;and then deallocate all buffers to the available set.  A pool is only available if no buffers it owns are
+        ;;in-flight.
         pools (->> (reduce (fn [retval {:keys [buffers] :as entry}]
                              ;;Consider all allocation events for the function first
                              (let [retval (reduce (fn [retval {:keys [id stream allocation-event]}]
@@ -496,7 +492,8 @@ with a reshape to the buffer shape in question."
                                                                                   set)) available]))
                                                   retval
                                                   (buffer-seq buffers :allocated))]
-                               ;;Consider the deallocation events second
+                               ;;Now imagine the function runs.  After it is complete, we can consider
+                               ;;the deallocation events.
                                (reduce (fn [retval {:keys [id stream allocation-event]}]
                                          (let [identifier {(if id {:id id} {:stream stream})
                                                            (second allocation-event)}
@@ -508,9 +505,13 @@ with a reshape to the buffer shape in question."
                                             (conj available pool-id)]))
                                        retval
                                        (buffer-seq buffers :deallocated))))
+                           ;;We build up a map of index-to-pool and a set of available indexes.
                            [{} #{}]
                            buffered-access-pattern)
+                   ;;The available set should contain all pools at this point; we throw it away.
                    first
+                   ;;Calculate the max-size of any buffer that is assigned to a given pool.  This saves any downstream
+                   ;;systems from having to do this potentially error prone (due to funky destructuring) calculation.
                    (map (fn [[idx buf-list]]
                           (let [max-size (->> buf-list
                                               (map #(get buffers (ffirst %)))
@@ -519,5 +520,6 @@ with a reshape to the buffer shape in question."
                             [idx {:max-size max-size
                                   :buf-list buf-list}])))
                    (into {}))]
+    ;;It is useful to visually confirm the access pattern and the pool allocation.
     {:access-pattern buffered-access-pattern
      :pools pools}))

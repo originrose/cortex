@@ -194,7 +194,52 @@
              {:id :relu-1} {:dimension {:channels 20, :height 12, :width 12}},
              {:id :relu-2} {:dimension {:channels 50, :height 4, :width 4}},
              {:stream :data} {:dimension {:channels 1, :height 28, :width 28}}}
-            (get inference-traversal :buffers))))))
+            (get inference-traversal :buffers))))
+
+    (is (= [nil nil]
+           (minimal-diff
+            {0 {:buf-list #{{{:id :convolutional-1} :buffer} {{:stream :data} :buffer}}, :max-size 11520},
+             1 {:buf-list #{{{:id :dropout-1} :buffer}}, :max-size 784},
+             2 {:buf-list #{{{:id :max-pooling-1} :buffer}}, :max-size 2880},
+             3 {:buf-list #{{{:id :relu-1} :buffer}}, :max-size 2880},
+             4 {:buf-list #{{{:id :dropout-1} :gradient} {{:id :dropout-2} :buffer} {{:id :max-pooling-1} :gradient}}, :max-size 2880},
+             5 {:buf-list #{{{:id :convolutional-2} :buffer}}, :max-size 3200},
+             6 {:buf-list #{{{:id :max-pooling-2} :buffer}}, :max-size 800},
+             7 {:buf-list #{{{:id :convolutional-1} :gradient} {{:id :convolutional-2} :gradient} {{:id :relu-1} :gradient} {{:id :relu-2} :buffer}}, :max-size 11520},
+             8 {:buf-list #{{{:id :dropout-3} :buffer}}, :max-size 800},
+             9 {:buf-list #{{{:id :batch-normalization-1} :buffer}}, :max-size 800},
+             10 {:buf-list #{{{:id :linear-1} :buffer}}, :max-size 500},
+             11 {:buf-list #{{{:id :feature} :buffer}}, :max-size 500},
+             12 {:buf-list #{{{:id :dropout-4} :buffer}}, :max-size 500},
+             13 {:buf-list #{{{:id :batch-normalization-1} :gradient} {{:id :feature} :gradient} {{:id :linear-2} :buffer} {{:id :relu-2} :gradient}}, :max-size 800},
+             14 {:buf-list #{{{:id :output} :buffer}}, :max-size 10},
+             15 {:buf-list #{{{:id :dropout-2} :gradient}
+                             {{:id :dropout-3} :gradient}
+                             {{:id :dropout-4} :gradient}
+                             {{:id :linear-1} :gradient}
+                             {{:id :max-pooling-2} :gradient}
+                             {{:id :output} :gradient}},
+                 :max-size 2880},
+             16 {:buf-list #{{{:id :linear-2} :gradient}}, :max-size 10}}
+            (:pools (traverse/generate-traversal-buffer-pools training-traversal)))))
+
+    (is (= [nil nil]
+           (minimal-diff
+            {0 {:buf-list #{{{:id :convolutional-2} :buffer}
+                            {{:id :linear-1} :buffer}
+                            {{:id :linear-2} :buffer}
+                            {{:id :max-pooling-1} :buffer}
+                            {{:id :relu-2} :buffer}
+                            {{:stream :data} :buffer}},
+                :max-size 3200},
+             1 {:buf-list #{{{:id :batch-normalization-1} :buffer}
+                            {{:id :convolutional-1} :buffer}
+                            {{:id :feature} :buffer}
+                            {{:id :max-pooling-2} :buffer}
+                            {{:id :output} :buffer}
+                            {{:id :relu-1} :buffer}},
+                :max-size 11520}}
+            (:pools (traverse/generate-traversal-buffer-pools inference-traversal)))))))
 
 
 (deftest non-trainable-zero-attenuation
