@@ -501,9 +501,26 @@ https://cloojure.github.io/doc/core.matrix/clojure.core.matrix.html#var-select"
   "Create a sub matrix of tensor.  Tensor will be interpreted as width being n-cols
 and the rest of the dimensions being squashed into n-rows."
   ^Tensor [^Tensor tensor row-start row-length col-start col-length]
-  (select tensor
-          (range row-start (+ (long row-start) (long row-length)))
-          (range col-start (+ (long col-start) (long col-length)))))
+  (let [tensor (as-2d-matrix tensor)
+        dimensions (tensor->dimensions tensor)
+        [n-rows n-cols] (m/shape tensor)
+        n-rows (long n-rows)
+        n-cols (long n-cols)
+        row-start (long row-start)
+        col-start (long col-start)
+        dimensions (:dimensions tensor)
+        rev-shape (dims/reversev (:shape dimensions))
+        rev-strides (dims/reversev (:strides dimensions))
+        elem-addr (long (dims/elem-idx->addr rev-shape rev-strides rev-shape
+                                             (+ (* row-start n-cols)
+                                                col-start)))
+        tens-buf (compute-drv/sub-buffer (:buffer tensor) elem-addr
+                                         (- (ecount (:buffer tensor))
+                                            elem-addr))]
+    (assoc tensor
+           :buffer tens-buf
+           :dimensions {:shape [row-length col-length]
+                        :strides (get-in tensor [:dimensions :strides])})))
 
 
 
