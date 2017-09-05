@@ -178,6 +178,41 @@ Furthermore infer should be both wrapped in a resource context and completely re
          (partition batch-size)
          (map #(apply merge-with conj initial-map %)))))
 
+(defn- augment-streams
+  [network dataset batch-size]
+  (let [batches (->> (dataset-batches dataset batch-size)
+                     (map (partial graph/augment-streams (network/network->graph network))))
+        _ (when (empty? batches)
+            (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
+                            {:batch-size batch-size
+                             :dataset-count (count dataset)})))]
+    batches))
+
+
+(defn- update-traversal
+  [network traversal batches]
+  (let [first-batch (first batches)]
+    (update traversal :buffers
+            (fn [buffer-map]
+              (->> buffer-map
+                   (map (fn [[k v]]
+                          ;;Is this an augmented buffer
+                          (if (get-in k [:stream :augmentation])
+                            (let [aug-key (get k :stream)
+                                  batch-entry (get first-batch aug-key)]
+                              (when-not batch-entry
+                                (throw (ex-info "Failed to find dataset element for augmented key:"
+                                                {:aug-key aug-key
+                                                 :dataset-keys (keys first-batch)})))
+                              (let [elem-size (-> (if (map? batch-entry)
+                                                    (get batch-entry :data)
+                                                    batch-entry)
+                                                  first
+                                                  m/ecount)]
+                                [k (assoc v :dimension {:width elem-size})]))
+                            [k v])))
+                   (into {}))))))
+
 
 (defn- augment-streams-and-update-traversal
   "Use the graph to augment any incoming streams.  Then use the first item from the batch to get the
@@ -186,34 +221,8 @@ augmented element count for the traversal buffers that pertain augmented streams
 because at this point augmented streams do not need to specify a shape, so the shape must be derived
 from the size of their result and the traversal information updated to take this into account."
   [network traversal dataset batch-size]
-  (let [batches (->> (dataset-batches dataset batch-size)
-                     (map (partial graph/augment-streams (network/network->graph network))))
-        _ (when (empty? batches)
-            (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
-                            {:batch-size batch-size
-                             :dataset-count (count dataset)})))
-        first-batch (first batches)
-        traversal
-        (update traversal :buffers
-                (fn [buffer-map]
-                  (->> buffer-map
-                       (map (fn [[k v]]
-                              ;;Is this an augmented buffer
-                              (if (get-in k [:stream :augmentation])
-                                (let [aug-key (get k :stream)
-                                      batch-entry (get first-batch aug-key)]
-                                  (when-not batch-entry
-                                    (throw (ex-info "Failed to find dataset element for augmented key:"
-                                                    {:aug-key aug-key
-                                                     :dataset-keys (keys first-batch)})))
-                                  (let [elem-size (-> (if (map? batch-entry)
-                                                        (get batch-entry :data)
-                                                        batch-entry)
-                                                      first
-                                                      m/ecount)]
-                                   [k (assoc v :dimension {:width elem-size})]))
-                                [k v])))
-                       (into {}))))]
+  (let [batches (augment-streams network dataset batch-size)
+        traversal (update-traversal network traversal batches)]
     {:traversal traversal
      :batches batches}))
 
@@ -417,21 +426,21 @@ from the size of their result and the traversal information updated to take this
   (let [context (or context (compute-context :datatype datatype))]
     (with-compute-context context
       (let [optimizer (or optimizer (adam/adam))
-            {:keys [traversal batches]} (augment-streams-and-update-traversal
-                                         network
-                                         (traverse/training-traversal network)
-                                         dataset
-                                         batch-size)
+            batches (augment-streams network dataset batch-size)
+
+            traversal (update-traversal network
+                                        (traverse/training-traversal network)
+                                        batches)
             network (compute-binding/bind-context-to-network
                      network
                      (current-backend)
                      batch-size
                      traversal
-                     {:optimizer optimizer})
-            uploading-batches (dataset->uploading-batches network batches batch-size
-                                                          batch-transfer-parallelism
-                                                          true)]
-        (doseq [{:keys [stream->buffer-map batch-stream]} uploading-batches]
+                     {:optimizer optimizer})]
+        (doseq [{:keys [stream->buffer-map batch-stream]}
+                (dataset->uploading-batches network batches batch-size
+                                            batch-transfer-parallelism
+                                            true)]
           ;;Ensure the data is uploaded
           (drv/sync-streams batch-stream (compute-binding/stream network))
           (train-batch! network stream->buffer-map :optimize? true)
@@ -451,11 +460,10 @@ from the size of their result and the traversal information updated to take this
                       :as options}]
   (let [context (or context (compute-context :datatype datatype))]
     (with-compute-context context
-      (let [{:keys [traversal batches]} (augment-streams-and-update-traversal
-                                         network
-                                         (traverse/inference-traversal network)
-                                         dataset
-                                         batch-size)
+      (let [batches (augment-streams network dataset batch-size)
+            traversal (update-traversal network
+                                        (traverse/inference-traversal network)
+                                        batches)
             network (compute-binding/bind-context-to-network
                      network
                      (current-backend)
@@ -463,18 +471,15 @@ from the size of their result and the traversal information updated to take this
                      traversal
                      {})
             datatype (dtype/get-datatype (current-backend))
-            ;;Replace the incoming stream buffers with the ones from the batching system.
-            uploading-batches (dataset->uploading-batches network batches batch-size
-                                                          batch-transfer-parallelism
-                                                          false)
-
             output-buffers (compute-binding/output-binding-buffers network
                                                                    batch-size
                                                                    datatype
                                                                    (if loss-outputs?
                                                                      :training
                                                                      :inference))]
-        (->> uploading-batches
+        (->> (dataset->uploading-batches network batches batch-size
+                                         batch-transfer-parallelism
+                                         false)
              (mapcat (fn [{:keys [stream->buffer-map batch-stream]}]
                        ;;Ensure data has finished before going on to next thing
                        (drv/sync-streams batch-stream (compute-binding/stream network))

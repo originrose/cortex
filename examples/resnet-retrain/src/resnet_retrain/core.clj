@@ -234,6 +234,7 @@
   (let [batch-size (or batch-size 32)
         epoch-size 4096
         network (load-network "models/resnet50.nippy" :fc1000 layers-to-add)]
+    (println "training using batch size of" batch-size)
     (train/train-n network
                    (partial train-ds epoch-size batch-size)
                    (partial test-ds batch-size)
