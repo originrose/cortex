@@ -217,7 +217,10 @@
    (ct/with-datatype :float
      (->> (dataset-from-folder "data/train" true)
           (take epoch-size)
-          (parallel/queued-pmap (* 2 batch-size) src-ds-item->net-input)))))
+          (partition batch-size)
+          (parallel/queued-pmap 3 #(time (mapv src-ds-item->net-input %)))
+          (apply concat)
+          vec))))
 
 
 (defn test-ds

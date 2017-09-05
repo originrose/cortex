@@ -169,6 +169,11 @@ Furthermore infer should be both wrapped in a resource context and completely re
   :ok)
 
 
+(defn- print-time-info
+  [name]
+  #_(println (format "%s - %s - %s" name (.getId (Thread/currentThread)) (System/currentTimeMillis))))
+
+
 (defn dataset-batches
   "Paritions the dataset into batches and does the seq-of-maps ->
   map-of-seqs transformation."
@@ -176,12 +181,22 @@ Furthermore infer should be both wrapped in a resource context and completely re
   (let [initial-map (zipmap (keys (first dataset)) (repeat []))]
     (->> dataset
          (partition batch-size)
-         (map #(apply merge-with conj initial-map %)))))
+         (map #(do
+                 (print-time-info :dataset-batches-start)
+                 (let [retval (apply merge-with conj initial-map %)]
+                   (print-time-info :dataset-batches-end)
+                   retval))))))
 
 (defn- augment-streams
   [network dataset batch-size]
-  (let [batches (->> (dataset-batches dataset batch-size)
-                     (map (partial graph/augment-streams (network/network->graph network))))
+  (let [graph-augmentations (graph/get-stream-augmentation-arguments (network/network->graph network))
+        batches (->> (dataset-batches dataset batch-size)
+                     (map (fn [item]
+                            (print-time-info :augment-streams-start)
+                            (let [retval
+                                  (graph/perform-stream-augmentations graph-augmentations item)]
+                              (print-time-info :augment-streams-end)
+                              retval))))
         _ (when (empty? batches)
             (throw (ex-info "Batches were empty, perhaps batch-size > (count dataset)?"
                             {:batch-size batch-size
@@ -395,7 +410,7 @@ from the size of their result and the traversal information updated to take this
 
 
 (defn- dataset->uploading-batches
-  [network batches batch-size batch-transfer-parallelism training?]
+  [network batches batch-transfer-parallelism training?]
   (let [batch-transfer-parallelism (long (max batch-transfer-parallelism 1))
         device (drv/current-device)
         batch-buffer-seq (->> (range batch-transfer-parallelism)
@@ -412,7 +427,9 @@ from the size of their result and the traversal information updated to take this
                            (apply concat)))
          (parallel/queued-pmap (- batch-transfer-parallelism 1)
                                (fn [{:keys [batch-buffers stream->buffer-map stream batch]}]
+                                 (print-time-info :upload-batch-start)
                                  (load-batch! stream batch batch-buffers)
+                                 (print-time-info :upload-batch-end)
                                  {:stream->buffer-map stream->buffer-map
                                   :batch-stream stream})))))
 
@@ -438,14 +455,16 @@ from the size of their result and the traversal information updated to take this
                      traversal
                      {:optimizer optimizer})]
         (doseq [{:keys [stream->buffer-map batch-stream]}
-                (dataset->uploading-batches network batches batch-size
+                (dataset->uploading-batches network batches
                                             batch-transfer-parallelism
                                             true)]
+          (print-time-info :train-start)
           ;;Ensure the data is uploaded
           (drv/sync-streams batch-stream (compute-binding/stream network))
           (train-batch! network stream->buffer-map :optimize? true)
           ;;Ensure the network is finished before we upload more things.
-          (drv/sync-streams (compute-binding/stream network) batch-stream))
+          (drv/sync-streams (compute-binding/stream network) batch-stream)
+          (print-time-info :train-end))
         (compute-binding/save-to-network context network {:save-optimizer-parameters? true})))))
 
 
@@ -477,7 +496,7 @@ from the size of their result and the traversal information updated to take this
                                                                    (if loss-outputs?
                                                                      :training
                                                                      :inference))]
-        (->> (dataset->uploading-batches network batches batch-size
+        (->> (dataset->uploading-batches network batches
                                          batch-transfer-parallelism
                                          false)
              (mapcat (fn [{:keys [stream->buffer-map batch-stream]}]
