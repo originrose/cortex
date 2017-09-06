@@ -692,13 +692,17 @@ that do not already exist.  Returns a new graph."
     (dfs-seq graph)))
 
 
-(defn augment-streams
-  "Augment the streams in the map and return a new map of data."
-  [graph stream-map]
+(defn get-stream-augmentation-arguments
+  [graph]
   (->> (dfs-seq graph)
        (map #(get-node graph %))
        (mapcat get-node-arguments)
-       (filter #(= :stream-augmentation (get % :type)))
+       (filter #(= :stream-augmentation (get % :type)))))
+
+
+(defn perform-stream-augmentations
+  [stream-aug-args stream-map]
+  (->> stream-aug-args
        (map (fn [{:keys [stream augmentation] :as arg}]
               (when-not (contains? stream-map stream)
                 (throw (ex-info "Failed to find stream for augmentation"
@@ -718,6 +722,13 @@ that do not already exist.  Returns a new graph."
                                    :error e}))))))
        (into {})
        (merge stream-map)))
+
+
+(defn augment-streams
+  "Augment the streams in the map and return a new map of data."
+  [graph stream-map]
+  (-> (get-stream-augmentation-arguments graph)
+      (perform-stream-augmentations stream-map)))
 
 
 (defmulti resolve-argument

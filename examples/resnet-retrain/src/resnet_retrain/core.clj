@@ -217,7 +217,8 @@
    (ct/with-datatype :float
      (->> (dataset-from-folder "data/train" true)
           (take epoch-size)
-          (parallel/queued-pmap batch-size src-ds-item->net-input)))))
+          (parallel/queued-pmap (* 2 batch-size) src-ds-item->net-input)
+          vec))))
 
 
 (defn test-ds
@@ -226,18 +227,19 @@
    (ct/with-datatype :float
      (->> (dataset-from-folder "data/test" false)
           (experiment-util/batch-pad-seq batch-size)
-          (parallel/queued-pmap batch-size src-ds-item->net-input)))))
+          (parallel/queued-pmap (* 2 batch-size) src-ds-item->net-input)))))
 
 
 (defn train
   [& [batch-size]]
-  (let [batch-size (or batch-size 4)
+  (let [batch-size (or batch-size 32)
         epoch-size 4096
         network (load-network "models/resnet50.nippy" :fc1000 layers-to-add)]
+    (println "training using batch size of" batch-size)
     (train/train-n network
                    (partial train-ds epoch-size batch-size)
                    (partial test-ds batch-size)
-                   :batch-size batch-size :epoch-count 100)))
+                   :batch-size batch-size :epoch-count 1)))
 
 
 

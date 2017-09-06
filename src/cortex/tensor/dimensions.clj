@@ -11,9 +11,18 @@ shape and stride of the dimension objects.")
      (throw (ex-info ~error-msg ~extra-data))))
 
 
-(defn- reversev
+(defn reversev
   [item-seq]
-  (vec (reverse item-seq)))
+  (if (vector? item-seq)
+    (let [len (count item-seq)
+          retval (transient [])]
+      (loop [idx 0]
+        (if (< idx len)
+          (do
+            (conj! retval (item-seq (- len idx 1)))
+            (recur (inc idx)))
+          (persistent! retval))))
+    (vec (reverse item-seq))))
 
 
 (defn- extend-strides
