@@ -12,7 +12,8 @@ https://groups.google.com/forum/#!forum/clojure-cortex
 
 ## Usage
 
-`[thinktopic/cortex 0.9.10]`
+[![Clojars Project](https://clojars.org/thinktopic/cortex/latest-version.svg)](https://clojars.org/thinktopic/cortex)
+
 
 All libraries are released on [clojars](https://clojars.org/thinktopic/cortex).  Cortex is not 1.0 yet preliminary and you should expect quite a few things to change
 over time but it should allow you to train some initial classifiers or regressions.  Note that the save format has not stabilized and although we do
