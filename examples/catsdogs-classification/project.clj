@@ -1,7 +1,7 @@
-(defproject catsdogs-classification "0.9.14-SNAPSHOT"
+(defproject catsdogs-classification "0.9.14"
   :description "An example of using experiment/classification on mnist."
   :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
-                 [thinktopic/experiment "0.9.14-SNAPSHOT"]
+                 [thinktopic/experiment "0.9.14"]
                  [org.clojure/tools.cli "0.3.5"]
 
                  ; to manipulate images

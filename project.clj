@@ -1,4 +1,4 @@
-(defproject thinktopic/cortex "0.9.14-SNAPSHOT"
+(defproject thinktopic/cortex "0.9.14"
   :description "A neural network toolkit for Clojure."
   :url "https://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
