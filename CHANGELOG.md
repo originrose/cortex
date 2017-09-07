@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+##[0.9.14]
+### Added
+- Yolo-style loss implemented with the tensor framework.
+- Many optimizations and bugfixes around the tensor system.
+- Lots of fast paths of the tensor system mapped to cudnn functions.
+- Resnet50 optimizations - Memory significantly decreased (batch size of 32 possible in well under 1G video RAM).
+- Resnet50 optimizations - Elide split when doing inference; simply reuse buffer without any copy operations.
+- Resnet50 optimizations - GPU now pegged at 100% while training; batch upload happening during compute 100% of the time.
+
 ## [0.9.11]
 ### Bugs fixed
 - Memory leak calling cuda kernels (!!)
