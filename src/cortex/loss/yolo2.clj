@@ -716,7 +716,25 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 
 ;; Code to handle the predictions once they are made
-;;
+
+(defn prediction->boxes
+  [pred prob-threshold]
+  (for [col (range *grid-y*)
+        row (range *grid-x*)
+        b (range (anchor-count))]
+    (let [[x y w h c] (take 5 (m/select pred col row b :all))
+          box-x (/ (+ col (sigmoid x)) *grid-x*)
+          box-y (/ (+ row (sigmoid y)) *grid-y*)
+          [box-w box-h] (->> [w h] (m/exp)
+                             (m/emul (get *anchors* b))
+                             (m/emul (grid-ratio))
+                             (m/sqrt))
+          box-c (sigmoid c)
+          class-probs (drop 5 (m/select pred row col b :all))
+          ;; replace all probs < threshold with 0's
+          box-probs (->> (m/emul box-c (softmax class-probs))
+                         (mapv #(if (> % prob-threshold) % 0.0)))]
+      (concat [box-x box-y box-w box-h] box-probs))))
 
 
 (defn- center-and-size->corners [[x y w h]]
@@ -752,24 +770,7 @@ into account the class probabilities *and* the bounding box probability."
          ;; the product of obj conf and cond prob and has small values zeroed out.
          ;; to check if that is happening we can print out the before and after with label.
          ;; That is a necessary tool anyway.
-         boxes  (for [col (range *grid-y*)
-                      row (range *grid-x*)
-                      b (range (anchor-count))]
-                  (let [[x y w h c] (take 5 (m/select pred col row b :all))
-                        box-x (/ (+ col (sigmoid x)) *grid-x*)
-                        box-y (/ (+ row (sigmoid y)) *grid-y*)
-                        [box-w box-h] (->> [w h] (m/exp)
-                                           (m/emul (get *anchors* b))
-                                           (m/emul (grid-ratio))
-                                           (m/sqrt))
-                        box-c (sigmoid c)
-                        class-probs (drop 5 (m/select pred row col b :all))
-                        ;; replace all probs < threshold with 0's
-                        box-probs (->> (m/emul box-c (softmax class-probs))
-                                       (mapv #(if (> % prob-threshold) % 0.0)))]
-                    (concat [box-x box-y box-w box-h] box-probs)))
-
-
+         boxes (prediction->boxes pred prob-threshold)
          NMS-boxes (reduce
                     (fn [boxes class-index]
                       (let [sorted-boxes (->> boxes
