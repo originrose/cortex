@@ -716,7 +716,27 @@ If there are two equal max values then you will get a two-hot encoded vector."
 
 
 ;; Code to handle the predictions once they are made
-;;
+
+(defn prediction->boxes
+  [pred prob-threshold]
+  (for [col (range *grid-y*)
+        row (range *grid-x*)
+        b (range (anchor-count))]
+    (let [[x y w h c] (take 5 (m/select pred col row b :all))
+          box-x (/ (+ col (sigmoid x)) *grid-x*)
+          box-y (/ (+ row (sigmoid y)) *grid-y*)
+          [box-w box-h] (->> [w h] (m/exp)
+                             (m/emul (get *anchors* b))
+                             (m/emul (grid-ratio))
+                             (m/sqrt))
+          box-c (sigmoid c)
+          class-probs (-> (drop 5 (m/select pred row col b :all))
+                          softmax)
+          ;; replace all probs < threshold with 0's
+          box-probs (->> (m/emul box-c (softmax class-probs))
+                         (mapv #(if (> % prob-threshold) % 0.0)))]
+      (concat [box-x box-y box-w box-h] box-probs [{:box-probability box-c
+                                                    :class-probabilities class-probs}]))))
 
 
 (defn- center-and-size->corners [[x y w h]]
@@ -732,10 +752,10 @@ If there are two equal max values then you will get a two-hot encoded vector."
 ;; list of possible 3's all together.
 (defn yolo-nms
   "Take a yolo network output and perform a specialized non-maximal-suppression that takes
-into account the class probabilities *and* the bounding box probability."
+  into account the class probabilities *and* the bounding box probability."
   [pred grid-x grid-y anchors
    prob-threshold iou-threshold
-   class-name->label]
+   classes-vec]
   (when (or (nil? grid-x)
             (nil? grid-y)
             (nil? anchors))
@@ -746,56 +766,46 @@ into account the class probabilities *and* the bounding box probability."
   (with-bindings {#'*grid-x* grid-x
                   #'*grid-y* grid-y
                   #'*anchors* anchors}
-   (let [
-         ;; boxes returns a matrix, for which each row is an x-y-w-h + class prob vector,
-         ;; in which x-y-w-h are all scaled to [0,1] and the class prob vector is
-         ;; the product of obj conf and cond prob and has small values zeroed out.
-         ;; to check if that is happening we can print out the before and after with label.
-         ;; That is a necessary tool anyway.
-         boxes  (for [col (range *grid-y*)
-                      row (range *grid-x*)
-                      b (range (anchor-count))]
-                  (let [[x y w h c] (take 5 (m/select pred col row b :all))
-                        box-x (/ (+ col (sigmoid x)) *grid-x*)
-                        box-y (/ (+ row (sigmoid y)) *grid-y*)
-                        [box-w box-h] (->> [w h] (m/exp)
-                                           (m/emul (get *anchors* b))
-                                           (m/emul (grid-ratio))
-                                           (m/sqrt))
-                        box-c (sigmoid c)
-                        class-probs (drop 5 (m/select pred row col b :all))
-                        ;; replace all probs < threshold with 0's
-                        box-probs (->> (m/emul box-c (softmax class-probs))
-                                       (mapv #(if (> % prob-threshold) % 0.0)))]
-                    (concat [box-x box-y box-w box-h] box-probs)))
+    (let [
+          ;; boxes returns a matrix, for which each row is an x-y-w-h + class prob vector,
+          ;; in which x-y-w-h are all scaled to [0,1] and the class prob vector is
+          ;; the product of obj conf and cond prob and has small values zeroed out.
+          ;; to check if that is happening we can print out the before and after with label.
+          ;; That is a necessary tool anyway.
+          boxes (prediction->boxes pred prob-threshold)
+          NMS-boxes (reduce
+                     (fn [boxes class-index]
+                       (let [sorted-boxes (->> boxes
+                                               (filter #(< 0 (nth % class-index)))
+                                               (sort-by #(nth % class-index) >))]
+                         ;; perform  NMS for this particular class
+                         (reduce
+                          (fn [s-boxes i]
+                            (let [current-item (nth s-boxes i)
+                                  current-box (take 4 current-item)
+                                  current-prob (nth current-item class-index)]
+                              ;; suppress boxes if lower prob confidence (i.e. ranked lower in list) AND high iou
+                              (concat (take (+ i 1) s-boxes)
+                                      (map (fn [compare-item]
+                                             (let [compare-box (take 4 compare-item)
+                                                   compare-prob (nth compare-item class-index)]
+                                               (if (= 0.0 compare-prob)
+                                                 compare-item
+                                                 ;; if high iou with current, set prob to 0
+                                                 (if (>= (iou current-box compare-box) iou-threshold)
+                                                   (assoc (vec compare-item) class-index 0.0)
+                                                   compare-item))))
+                                           (drop (+ i 1) s-boxes)))))
+                          sorted-boxes (range (count sorted-boxes)))))
+                     boxes
+                     (range 4 (+ 4 (count classes-vec))))]
 
-
-         NMS-boxes (reduce
-                    (fn [boxes class-index]
-                      (let [sorted-boxes (->> boxes
-                                              (filter #(< 0 (nth % class-index)))
-                                              (sort-by #(nth % class-index) >))]
-                        ;; perform  NMS for this particular class
-                        (reduce
-                         (fn [s-boxes i]
-                           (let [current-item (nth s-boxes i)
-                                 current-box (take 4 current-item)
-                                 current-prob (nth current-item class-index)]
-                             ;; suppress boxes if lower prob confidence (i.e. ranked lower in list) AND high iou
-                             (concat (take (+ i 1) s-boxes)
-                                     (map (fn [compare-item]
-                                            (let [compare-box (take 4 compare-item)
-                                                  compare-prob (nth compare-item class-index)]
-                                              (if (= 0.0 compare-prob)
-                                                compare-item
-                                                ;; if high iou with current, set prob to 0
-                                                (if (>= (iou current-box compare-box) iou-threshold)
-                                                  (assoc (vec compare-item) class-index 0.0)
-                                                  compare-item))))
-                                          (drop (+ i 1) s-boxes)))))
-                         sorted-boxes (range (count sorted-boxes)))))
-                    boxes (range 4 (+ 4 (classes-count))))]
-
-     (->> NMS-boxes
-          (filter #(< prob-threshold (apply max (drop 4 %))))
-          (map #(concat (center-and-size->corners %) [(class-name->label (drop 4 %))]))))))
+      (->> NMS-boxes
+           (filter #(< prob-threshold (apply max (drop 4 (drop-last %)))))
+           (map (fn [data]
+                  (let [probs (drop 4 (drop-last data))
+                        prob-max-index (util/max-index probs)]
+                   (merge (last data)
+                          {:bounding-box (center-and-size->corners data)
+                           :class (get classes-vec prob-max-index)
+                           :class-probability (nth probs prob-max-index)}))))))))
