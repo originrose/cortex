@@ -730,11 +730,13 @@ If there are two equal max values then you will get a two-hot encoded vector."
                              (m/emul (grid-ratio))
                              (m/sqrt))
           box-c (sigmoid c)
-          class-probs (drop 5 (m/select pred row col b :all))
+          class-probs (-> (drop 5 (m/select pred row col b :all))
+                          softmax)
           ;; replace all probs < threshold with 0's
           box-probs (->> (m/emul box-c (softmax class-probs))
                          (mapv #(if (> % prob-threshold) % 0.0)))]
-      (concat [box-x box-y box-w box-h] box-probs))))
+      (concat [box-x box-y box-w box-h] box-probs [{:box-probability box-c
+                                                    :class-probabilities class-probs}]))))
 
 
 (defn- center-and-size->corners [[x y w h]]
@@ -795,8 +797,15 @@ If there are two equal max values then you will get a two-hot encoded vector."
                                                    compare-item))))
                                            (drop (+ i 1) s-boxes)))))
                           sorted-boxes (range (count sorted-boxes)))))
-                     boxes (range 4 (+ 4 (count classes-vec))))]
+                     boxes
+                     (range 4 (+ 4 (count classes-vec))))]
 
       (->> NMS-boxes
-           (filter #(< prob-threshold (apply max (drop 4 %))))
-           (map #(concat (center-and-size->corners %) [(get classes-vec (util/max-index (drop 4 %)))]))))))
+           (filter #(< prob-threshold (apply max (drop 4 (drop-last %)))))
+           (map (fn [data]
+                  (let [probs (drop 4 (drop-last data))
+                        prob-max-index (util/max-index probs)]
+                   (merge (last data)
+                          {:bounding-box (center-and-size->corners data)
+                           :class (get classes-vec prob-max-index)
+                           :class-probability (nth probs prob-max-index)}))))))))
