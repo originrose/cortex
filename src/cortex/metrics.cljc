@@ -149,3 +149,108 @@
          y_hat (threshold y_est thresh)]
      {:accuracy (accuracy y y_hat)
       :threshold thresh})))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; METRICS FOR LOCALIZATION WITH CLASSIFICATION ;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- map-values
+  "Apply a function val-fn element-wise the the values of a hashmap hm."
+  [val-fn hm]
+  (zipmap (keys hm) (map val-fn (vals hm))))
+
+(defn- bb-matches
+  "Returns the list of label-prediction pairs that have a 'good' bounding box match with one another,
+  where 'good' is detemined by the iou function and the iou-threshold.
+  How the list is built:
+  1. Calculate a list IOU containing the intersection over union (iou) for each label-prediction pair (l, p).
+  2. Add the pair (l,p) with highest iou to the list C of matches.
+  3. Remove any pairs from IOU that have either l or p in them, since those boxes can only be used once.
+  4. If IOU is non-empty return to step 2, otherwise return C."
+  [labels predictions iou-fn iou-threshold]
+  (let [IOU (->> (for [l labels p predictions] {:iou (iou-fn l p) :label l :prediction p})
+                 (remove #(> iou-threshold (:iou %)))
+                 (sort-by :iou >))]
+    (loop [M IOU C []]
+      (if (empty? M)
+        C
+        (let [match (first M)]
+          (recur (remove #(or (= (:label match) (:label %))
+                              (= (:prediction match) (:prediction %))) M)
+                 (conj C match)))))))
+
+
+(defn- per-class-metrics
+  "Returns the sensitivity, precision, and F1 scores given labels and predictions, which are assumed to be of the same class c.
+   Since finding and classifying objects is not a binary valued test, these are only analogues of the well-known sensitivity, precision and F1 for binary tests.
+   The definitions are as follows:
+  Location Sensitivity = #(correctly located and classified objects with class c) / #(labels with class c)
+  Location Precision = #(correctly located and classified objects with class c) / #(predictions with class c)
+  Location F1 = harmonic mean of sensitivity and precision."
+  [labels predictions iou-fn iou-threshold]
+  (let [bb-matches (bb-matches labels predictions iou-fn iou-threshold)
+        label-count (count labels)
+        pred-count (count predictions)
+        bb-count (count bb-matches)]
+    (map-values double
+                {:location-sensitivity (if (= 0 label-count)
+                                         1
+                                         (/ bb-count label-count))
+                 :location-precision   (if (= 0 pred-count)
+                                         1
+                                         (/ bb-count pred-count))
+                 :location-F1          (if (= 0 (+ label-count pred-count))
+                                         1
+                                         (/ (* 2 bb-count) (+ label-count pred-count)))})))
+
+(defn- global-metrics
+  "Returns 5 numbers:
+  1. Location Sensitivity (also called RECALL) = #(bb-matches) / #(labels)
+  2. Location Precision = #(bb-matches) / #(predictions)
+  3. Location F1 = harmonic mean of (1) and (2) = 2 * #(bb-matches) / #(labels) + #(predictions)
+  4. Classification accuracy = #(bb-matches with correct class) / #(bb-matches)
+  5. Global F1 = (Location F1) * (Classification accuracy) = 2 * #(bb-matches with correct class) / #(labels) + #(predictions)"
+  [labels predictions label->class-fn iou-fn iou-threshold]
+  (let [bb-matches (bb-matches labels predictions iou-fn iou-threshold)
+        bb-matches-with-correct-class (filter #(= (label->class-fn (:label %)) (label->class-fn (:prediction %))) bb-matches)
+        label-count (count labels)
+        pred-count (count predictions)
+        bb-count (count bb-matches)
+        bb-with-class-count (count bb-matches-with-correct-class)]
+    (map-values double
+                {:location-sensitivity    (if (= 0 label-count)
+                                            1
+                                            (/ bb-count label-count))
+                 :location-precision      (if (= 0 pred-count)
+                                            1
+                                            (/ bb-count pred-count))
+                 :location-F1             (if (= 0 (+ label-count pred-count))
+                                            1
+                                            (/ (* 2 bb-count) (+ label-count pred-count)))
+                 :classification-accuracy (if (= 0 bb-count)
+                                            1
+                                            (/ bb-with-class-count bb-count))
+                 :global-F1               (if (= 0 (+ label-count pred-count))
+                                            1
+                                            (/ (* 2 bb-with-class-count) (+ label-count pred-count)))})))
+
+(defn all-metrics
+  "Returns global and per-class metrics for a given set of labels and predictions.
+  - label->class-fn should take a label or prediction and return the class as a string or keyword.
+  - iou-fn should take a label and prediction and return the intersection over union score
+  - iou-threshold determines what iou value constitutes a matching bounding box.
+  ** NOTE: If labels and predictions are produced from a sequence of images,
+     ensure that the bounding boxes are shifted in each image so that there is not an overlap."
+  [labels predictions label->class-fn iou-fn iou-threshold]
+  (let [labels-by-class      (group-by label->class-fn labels)
+        predictions-by-class (group-by label->class-fn predictions)],
+    (merge {:global-metrics (global-metrics labels predictions label->class-fn iou-fn iou-threshold)}
+           {:per-class-metrics
+            (for [class (sort (keys labels-by-class))]
+              (merge {:class class}
+                     (per-class-metrics
+                       (get labels-by-class class)
+                       (get predictions-by-class class)
+                       iou-fn
+                       iou-threshold)))})))
+
