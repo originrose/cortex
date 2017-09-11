@@ -447,18 +447,17 @@
                                    (cuda-base/value->ptr dest-alpha dest-dtype)
                                    dest-tensor
                                    (->ptr dest))))))
-       (do
-        (if reverse-operands?
-          (tm/binary-op! stream
-                         dest dest-dims
-                         y y-dims y-alpha
-                         dest dest-dims dest-alpha
-                         n-elems operation)
-          (tm/binary-op! stream
-                         dest dest-dims
-                         dest dest-dims dest-alpha
-                         y y-dims y-alpha
-                         n-elems operation))))))
+       (if reverse-operands?
+         (tm/binary-op! stream
+                        dest dest-dims
+                        y y-dims y-alpha
+                        dest dest-dims dest-alpha
+                        n-elems operation)
+         (tm/binary-op! stream
+                        dest dest-dims
+                        dest dest-dims dest-alpha
+                        y y-dims y-alpha
+                        n-elems operation)))))
 
   (binary-op! [stream
                dest dest-dims

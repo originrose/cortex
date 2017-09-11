@@ -11,7 +11,8 @@
             [cortex.compute.driver :refer [dtype-cast]]
             [cortex.compute.cpu.driver :as cpu-drv]
             [cortex.compute.math-util :as mu]
-            [clojure.core.matrix :as m])
+            [clojure.core.matrix :as m]
+            [cortex.tensor.dimensions :as tens-dims])
   (:import [org.bytedeco.javacpp cuda
             BytePointer IntPointer LongPointer DoublePointer
             Pointer PointerPointer FloatPointer ShortPointer
@@ -1452,9 +1453,8 @@ relies only on blockDim.x block.x and thread.x"
                            shape)
                    vec)
         strides (when strides
-                  (->> (concat (take (- 4 strides-count) (repeat (first strides)))
-                               strides)
-                       vec))]
+                  (tens-dims/extend-strides shape strides))]
+    #_(println "shape" shape "strides" strides)
     (cudnn-call (cudnn/cudnnCreateTensorDescriptor retval))
     ;;set the format
     (cudnn-call (cudnn/cudnnSetTensor4dDescriptor
