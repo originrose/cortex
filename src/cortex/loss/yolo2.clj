@@ -753,7 +753,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
 (defn yolo-nms
   "Take a yolo network output and perform a specialized non-maximal-suppression that takes
   into account the class probabilities *and* the bounding box probability."
-  [pred grid-x grid-y anchors
+  [prediction grid-x grid-y anchors
    prob-threshold iou-threshold
    classes-vec]
   (when (or (nil? grid-x)
@@ -766,7 +766,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
   (with-bindings {#'*grid-x* grid-x
                   #'*grid-y* grid-y
                   #'*anchors* anchors}
-    (let [
+    (let [pred (m/reshape prediction [*grid-x* *grid-y* (anchor-count) (+ 5 (count classes-vec))])
           ;; boxes returns a matrix, for which each row is an x-y-w-h + class prob vector,
           ;; in which x-y-w-h are all scaled to [0,1] and the class prob vector is
           ;; the product of obj conf and cond prob and has small values zeroed out.
@@ -775,28 +775,30 @@ If there are two equal max values then you will get a two-hot encoded vector."
           boxes (prediction->boxes pred prob-threshold)
           NMS-boxes (reduce
                      (fn [boxes class-index]
-                       (let [sorted-boxes (->> boxes
-                                               (filter #(< 0 (nth % class-index)))
-                                               (sort-by #(nth % class-index) >))]
+                       (let [sorted-boxes (sort-by #(nth % class-index) > boxes)]
                          ;; perform  NMS for this particular class
                          (reduce
-                          (fn [s-boxes i]
-                            (let [current-item (nth s-boxes i)
-                                  current-box (take 4 current-item)
-                                  current-prob (nth current-item class-index)]
-                              ;; suppress boxes if lower prob confidence (i.e. ranked lower in list) AND high iou
-                              (concat (take (+ i 1) s-boxes)
-                                      (map (fn [compare-item]
-                                             (let [compare-box (take 4 compare-item)
-                                                   compare-prob (nth compare-item class-index)]
-                                               (if (= 0.0 compare-prob)
-                                                 compare-item
-                                                 ;; if high iou with current, set prob to 0
-                                                 (if (>= (iou current-box compare-box) iou-threshold)
-                                                   (assoc (vec compare-item) class-index 0.0)
-                                                   compare-item))))
-                                           (drop (+ i 1) s-boxes)))))
-                          sorted-boxes (range (count sorted-boxes)))))
+                           (fn [boxes i]
+                             (let [current-item (nth boxes i)
+                                   current-box (take 4 current-item)
+                                   current-prob (nth current-item class-index)]
+                               (if (= 0.0 current-prob)
+                                 boxes
+                                 ;; suppress boxes if lower prob confidence (i.e. ranked lower in list) AND high iou
+                                 (concat (take (+ i 1) boxes)
+                                         (map (fn [compare-item]
+                                                (let [compare-box (take 4 compare-item)
+                                                      compare-prob (nth compare-item class-index)]
+                                                  ;; my addition: if compare-item has prob of 0, don't even calculate iou
+                                                  ;; (println " Compare prob: " compare-prob)
+                                                  (if (= 0.0 compare-prob)
+                                                    compare-item
+                                                    ;; else, if high iou with current, set prob to 0
+                                                    (if (>= (iou current-box compare-box) iou-threshold)
+                                                      (assoc (vec compare-item) class-index 0.0)
+                                                      compare-item))))
+                                              (drop (+ i 1) boxes))))))
+                           sorted-boxes (range (count sorted-boxes)))))
                      boxes
                      (range 4 (+ 4 (count classes-vec))))]
 
