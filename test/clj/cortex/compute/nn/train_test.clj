@@ -29,7 +29,7 @@
 (deftest mnist-sgd
   (verify-train/train-mnist-sgd (create-context)))
 
-(def-double-float-test dataset-batch-size-mismatch
+(deftest dataset-batch-size-mismatch
   (verify-train/dataset-batch-size-mismatch (create-context)))
 
 (def-double-float-test multithread-infer

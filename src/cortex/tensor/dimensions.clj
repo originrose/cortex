@@ -25,7 +25,7 @@ shape and stride of the dimension objects.")
     (vec (reverse item-seq))))
 
 
-(defn- extend-strides
+(defn extend-strides
   [shape strides]
   (let [rev-strides (reversev strides)
         rev-shape (reversev shape)]
