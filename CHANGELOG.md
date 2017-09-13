@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+##[0.9.17]
+### Added
+- Metrics for rating object detection systems.
+- Special NMS algorithm used for yolo is now in and unit tested.
+
+
 ##[0.9.14]
 ### Added
 - Yolo-style loss implemented with the tensor framework.
