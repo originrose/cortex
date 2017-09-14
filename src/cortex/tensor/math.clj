@@ -194,7 +194,6 @@ resource/release *must* be a valid call on the returned value.")
                                   batch-size
                                   max-ideal-workspace-size use-defaults?])
 
-
   (convolution-forward! [stream
                          output output-dims output-alpha
                          input input-dims
