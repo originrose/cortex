@@ -733,7 +733,7 @@ If there are two equal max values then you will get a two-hot encoded vector."
           class-probs (-> (drop 5 (m/select pred row col b :all))
                           softmax)
           ;; replace all probs < threshold with 0's
-          box-probs (->> (m/emul box-c (softmax class-probs))
+          box-probs (->> (m/emul box-c class-probs)
                          (mapv #(if (> % prob-threshold) % 0.0)))]
       (concat [box-x box-y box-w box-h] box-probs [{:box-probability box-c
                                                     :class-probabilities class-probs}]))))
