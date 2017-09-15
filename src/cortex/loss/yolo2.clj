@@ -114,7 +114,7 @@
 (defn sigmoid-gradient [x] (* x (- 1 x)))
 
 (defn softmax [v]
-  (let [exp-v (m/exp v)]
+  (let [exp-v (m/exp (m/sub v (apply max v)))]
     (m/div exp-v (m/esum exp-v))))
 
 (defn softmax-gradient
@@ -767,11 +767,6 @@ If there are two equal max values then you will get a two-hot encoded vector."
                   #'*grid-y* grid-y
                   #'*anchors* anchors}
     (let [pred (m/reshape prediction [*grid-x* *grid-y* (anchor-count) (+ 5 (count classes-vec))])
-          ;; boxes returns a matrix, for which each row is an x-y-w-h + class prob vector,
-          ;; in which x-y-w-h are all scaled to [0,1] and the class prob vector is
-          ;; the product of obj conf and cond prob and has small values zeroed out.
-          ;; to check if that is happening we can print out the before and after with label.
-          ;; That is a necessary tool anyway.
           boxes (prediction->boxes pred prob-threshold)
           NMS-boxes (reduce
                      (fn [boxes class-index]
@@ -811,3 +806,75 @@ If there are two equal max values then you will get a two-hot encoded vector."
                           {:bounding-box (center-and-size->corners data)
                            :class (get classes-vec prob-max-index)
                            :class-probability (nth probs prob-max-index)}))))))))
+
+
+(defn- prediction->objects
+  "Convert yolo net output to human-readable form.  More precisely, returns:
+  1. bounding-box-xywh = bounding box in x-y-w-h coords,
+     on a scale such that w = 1 corresponds to the network image input width and same for height.
+  2. bounding-box = bounding box on same scale as above, but in upper left corner - lower right corner coords.
+  3. class = the string class prediction for the object.
+  4. class-probability = (confidence there is an object at all) * (probability such an object has the given class)
+  Note: w-h (and also upper left, lower right corner coords) may be outside of the range [0,1].
+        This means the network is predicting a bounding box which does not fit within the image,
+        which could be the correct answer if it is predicting a box for an object which is halfway out of the picture."
+  [prediction classes-vec]
+  (let [pred (m/reshape prediction [*grid-x* *grid-y* (anchor-count) (+ 5 (count classes-vec))])]
+    (for [col (range *grid-y*)
+         row (range *grid-x*)
+         b   (range (anchor-count))]
+     (let [[x y w h c] (take 5 (m/select pred col row b :all))
+           box-x          (/ (+ col (sigmoid x)) *grid-x*)
+           box-y          (/ (+ row (sigmoid y)) *grid-y*)
+           [box-w box-h] (->> [w h] (m/exp) (m/emul (get *anchors* b)) (m/emul (grid-ratio)) (m/sqrt))
+           box-confidence (sigmoid c)
+           class-probs    (-> (drop 5 (m/select pred row col b :all)) (softmax))
+           class-index    (util/max-index class-probs)]
+       {:bounding-box-xywh [box-x box-y box-w box-h]
+        :bounding-box (center-and-size->corners [box-x box-y box-w box-h])
+        :class             (nth classes-vec class-index)
+        :class-probability (* box-confidence (nth class-probs class-index))}))))
+
+(defn nms-filter
+  "Remove each object that overlaps with another object and has lower class probability."
+  [boxes iou-threshold]
+  (reduce (fn [sorted-boxes i]
+            (concat (take (inc i) sorted-boxes)
+                    (filter #(> iou-threshold (iou (:bounding-box-xywh (nth sorted-boxes i)) (:bounding-box-xywh %)))
+                            (drop (inc i) sorted-boxes))))
+          (sort-by :class-probability > boxes) (range (count boxes))))
+
+(defn yolo-non-overlapping-nms
+  "NMS for image sets in which items from different classes are not expected to overlap
+  (for example a car and truck would not have high iou in overhead imagery).  "
+  [prediction grid-x grid-y anchors prob-threshold iou-threshold classes-vec]
+  (with-bindings {#'*grid-x* grid-x
+                  #'*grid-y* grid-y
+                  #'*anchors* anchors}
+    (let [boxes     (->> (prediction->objects prediction classes-vec)
+                         (filter #(< prob-threshold (:class-probability %))))
+          NMS-boxes (nms-filter boxes iou-threshold)]
+      {:certainty-threshold prob-threshold
+       :iou-suppression-threshold iou-threshold
+       :all-boxes        boxes
+       :suppressed-boxes NMS-boxes})))
+
+(defn yolo-overlapping-nms
+  "Take a yolo network output and perform a non-maximal-suppression that takes
+  into account the class probabilities *and* the bounding box probability.  Mopre precisely,
+  an object that overlaps with another object of the *same class* and has lower class probability is removed."
+  [prediction grid-x grid-y anchors prob-threshold iou-threshold classes-vec]
+  (with-bindings {#'*grid-x* grid-x
+                  #'*grid-y* grid-y
+                  #'*anchors* anchors}
+    (let [boxes     (->> (prediction->objects prediction classes-vec)
+                         (filter #(< prob-threshold (:class-probability %))))
+          NMS-boxes-overlapping (->> (group-by :class boxes)
+                                     (vals)
+                                     (map #(nms-filter % iou-threshold))
+                                     (apply concat))]
+
+      {:certainty-threshold prob-threshold
+       :iou-suppression-threshold iou-threshold
+       :all-boxes        boxes
+       :suppressed-boxes NMS-boxes-overlapping})))
