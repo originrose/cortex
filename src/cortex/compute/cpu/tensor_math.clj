@@ -1078,6 +1078,142 @@
              (v-aset output-ary# ~'input-addr (+ input-val# output-val#)))))))))
 
 
+(defmacro max-pooling-forward-impl
+  [datatype]
+  `(fn [output# input# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)]
+       (impl/convolution-outer-kernel
+         config# :pooling
+         (impl/convolution-roll-unroll-inner-kernel
+           (let [input-val# (datatype->cast-fn ~datatype
+                                               (if ~'input-valid?
+                                                 (v-aget input-ary# ~'input-addr)
+                                                 0.0))
+                 output-addr# (+ (* ~'out-y ~'output-width)
+                                 ~'out-x
+                                 ~'chan-output-offset)
+                 k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
+                 output-val# (v-aget output-ary# output-addr#)]
+             (when (or (= 0 k-idx#)
+                       (> input-val# output-val#))
+               (v-aset output-ary# output-addr# input-val#))))))))
+
+
+(defmacro max-pooling-backward-impl
+  [datatype]
+  `(fn [input-gradient# input# output# output-gradient# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)
+           input-gradient-ary# (datatype->view-cast-fn ~datatype input-gradient#)
+           output-gradient-ary# (datatype->view-cast-fn ~datatype output-gradient#)]
+       (impl/convolution-outer-kernel
+         config# :pooling
+         (impl/convolution-roll-unroll-inner-kernel
+           (let [input-addr# ~'input-addr
+                 input-val# (datatype->cast-fn ~datatype
+                                               (if ~'input-valid?
+                                                 (v-aget input-ary# input-addr#)
+                                                 0.0))
+                 output-addr# (+ (* ~'out-y ~'output-width)
+                                 ~'out-x
+                                 ~'chan-output-offset)
+                 k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
+                 output-val# (v-aget output-ary# output-addr#)]
+             (when (= input-val# output-val#)
+               (v-aset input-gradient-ary# input-addr#
+                       (+ (v-aget input-gradient-ary# input-addr#)
+                          (v-aget output-gradient-ary# output-addr#))))))))))
+
+(defmacro avg-pooling-forward-impl
+  [datatype]
+  `(fn [output# input# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)]
+       (impl/convolution-outer-kernel
+         config# :pooling
+         (impl/convolution-roll-unroll-inner-kernel
+           (let [input-val# (datatype->cast-fn ~datatype (if ~'input-valid?
+                                        (v-aget input-ary# ~'input-addr)
+                                        0.0))
+                 output-addr# (+ (* ~'out-y ~'output-width)
+                                 ~'out-x
+                                 ~'chan-output-offset)
+                 k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
+                 output-val# (datatype->cast-fn ~datatype (if (= 0 k-idx#)
+                                         0
+                                         (v-aget output-ary# output-addr#)))]
+             (v-aset output-ary# output-addr#
+                     (+ output-val#
+                        (/ input-val#
+                           ~'kernel-num-elems)))))))))
+
+(defmacro avg-pooling-backward-impl
+  [datatype]
+  `(fn [input-gradient# input# output# output-gradient# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+            output-ary# (datatype->view-cast-fn ~datatype output#)
+            input-gradient-ary# (datatype->view-cast-fn ~datatype input-gradient#)
+            output-gradient-ary# (datatype->view-cast-fn ~datatype output-gradient#)]
+        (impl/convolution-outer-kernel
+          config# :pooling
+          (impl/convolution-roll-unroll-inner-kernel
+            (when ~'input-valid?
+              (let [input-addr# ~'input-addr
+                    input-val# (v-aget input-ary# input-addr#)
+                    output-addr# (+ (* ~'out-y ~'output-width)
+                                    ~'out-x
+                                    ~'chan-output-offset)
+                    output-val# (v-aget output-ary# output-addr#)]
+                (v-aset input-gradient-ary# input-addr#
+                        (+ (v-aget input-gradient-ary# input-addr#)
+                           (/ (v-aget output-gradient-ary# output-addr#)
+                              ~'kernel-num-elems))))))))))
+
+(defmacro avg-exc-pad-pooling-forward-impl
+  [datatype]
+  `(fn [output# input# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)]
+       (impl/convolution-outer-kernel
+         config# :pooling
+         (impl/convolution-roll-unroll-inner-kernel
+           (let [input-val# (datatype->cast-fn ~datatype (if ~'input-valid?
+                                        (v-aget input-ary# ~'input-addr)
+                                        0.0))
+                 output-addr# (+ (* ~'out-y ~'output-width)
+                                 ~'out-x
+                                 ~'chan-output-offset)
+                 output-val# (v-aget output-ary# output-addr#)]
+             (v-aset output-ary# output-addr#
+                     (+ output-val#
+                        (/ input-val#
+                           ~'exc-pad-kernel-num-elems)))))))))
+
+(defmacro avg-exc-pad-pooling-backward-impl
+  [datatype]
+  `(fn [input-gradient# input# output# output-gradient# config#]
+     (let [input-ary# (datatype->view-cast-fn ~datatype input#)
+           output-ary# (datatype->view-cast-fn ~datatype output#)
+           input-gradient-ary# (datatype->view-cast-fn ~datatype input-gradient#)
+           output-gradient-ary# (datatype->view-cast-fn ~datatype output-gradient#)]
+       (impl/convolution-outer-kernel
+         config# :pooling
+         (impl/convolution-roll-unroll-inner-kernel
+           (when ~'input-valid?
+             (let [input-addr# ~'input-addr
+                   input-val# (v-aget input-ary# input-addr#)
+                   output-addr# (+ (* ~'out-y ~'output-width)
+                                   ~'out-x
+                                   ~'chan-output-offset)
+                   k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
+                   output-val# (v-aget output-ary# output-addr#)]
+               (v-aset input-gradient-ary# input-addr#
+                       (+ (v-aget input-gradient-ary# input-addr#)
+                          (/ (v-aget output-gradient-ary# output-addr#)
+                             ~'exc-pad-kernel-num-elems))))))))))
+
+
 (defonce cpu-nn-ops-types [:float :double])
 
 
@@ -1095,7 +1231,14 @@
        :softmax-eltwise! `(softmax-eltwise-forward-impl ~ops-type)
        :softmax-spatial! `(softmax-spatial-forward-impl ~ops-type)
        :planar-input->convolution! `(cpu-planar-input->convolution!-impl ~ops-type)
-       :convolution->planar-output! `(cpu-convolution->planar-output!-impl ~ops-type)}])
+       :convolution->planar-output! `(cpu-convolution->planar-output!-impl ~ops-type)
+       :max-pooling-forward! `(max-pooling-forward-impl ~ops-type)
+       :max-pooling-backward! `(max-pooling-backward-impl ~ops-type)
+       :avg-pooling-forward! `(avg-pooling-forward-impl ~ops-type)
+       :avg-pooling-backward! `(avg-pooling-backward-impl ~ops-type)
+       :avg-exc-pad-pooling-forward! `(avg-exc-pad-pooling-forward-impl ~ops-type)
+       :avg-exc-pad-pooling-backward! `(avg-exc-pad-pooling-backward-impl ~ops-type)
+       }])
    (into {})))
 
 
@@ -1576,7 +1719,77 @@
                                                  in-width in-height
                                                  output-width output-height))))
                  dorun))
-          (catch Throwable e (println e)))))))
+          (catch Throwable e (println e))))))
+
+  (pooling-descriptor [stream
+                       datatype kern-width kern-height
+                       pad-x pad-y stride-x stride-y pool-op dimension-op]
+    ;;No return here, we have no special descriptor setup
+    )
+
+  (pooling-forward! [stream
+                     output output-dims output-alpha
+                     input input-dims
+                     pool-descriptor]
+    (let [[batch-size channels in-height in-width] (get input-dims :shape)
+          [_ _ out-height out-width] (get output-dims :shape)
+          old-skool (->old-skool-conv-desc pool-descriptor
+                                           in-width in-height
+                                           out-width out-height)
+          pool-op (get pool-descriptor :pool-op)
+          full-op-name (keyword (str (name pool-op) "-pooling-forward!"))
+          datatype (dtype/get-datatype output)
+          op-fn (get-in cpu-nn-ops [datatype full-op-name])
+          dev (compute-drv/get-device stream)
+          input (ct/->Tensor dev input-dims input)
+          output (ct/->Tensor dev output-dims output)]
+      (when-not op-fn
+        (throw (ex-info "Failed to find cpu pooling op:"
+                        {:op-name  full-op-name
+                         :datatype datatype})))
+      (cpu-driver/with-stream-dispatch
+        stream
+        (->> (slice-batches output input)
+             (pmap (fn [[output input]]
+                     (op-fn (ct/tensor->buffer output)
+                            (ct/tensor->buffer input)
+                            old-skool)))
+             dorun))))
+
+  (pooling-backward! [stream
+                      input-grad input-grad-dims input-grad-alpha
+                      input input-dims
+                      output output-dims
+                      output-grad output-grad-dims
+                      pool-descriptor]
+    (let [[batch-size channels in-height in-width] (get input-dims :shape)
+          [_ _ out-height out-width] (get output-dims :shape)
+          old-skool (->old-skool-conv-desc pool-descriptor
+                                           in-width in-height
+                                           out-width out-height)
+          pool-op (get pool-descriptor :pool-op)
+          full-op-name (keyword (str (name pool-op) "-pooling-backward!"))
+          datatype (dtype/get-datatype output)
+          op-fn (get-in cpu-nn-ops [datatype full-op-name])
+          dev (compute-drv/get-device stream)
+          input (ct/->Tensor dev input-dims input)
+          output (ct/->Tensor dev output-dims output)
+          input-grad (ct/->Tensor dev input-grad-dims input-grad)
+          output-grad (ct/->Tensor dev output-grad-dims output-grad)]
+      (when-not op-fn
+        (throw (ex-info "Failed to find cpu pooling op:"
+                        {:op-name  full-op-name
+                         :datatype datatype})))
+      (cpu-driver/with-stream-dispatch
+        stream
+        (->> (slice-batches output input input-grad output-grad)
+             (pmap (fn [[output input input-grad output-grad]]
+                     (op-fn (ct/tensor->buffer input-grad)
+                            (ct/tensor->buffer input)
+                            (ct/tensor->buffer output)
+                            (ct/tensor->buffer output-grad)
+                            old-skool)))
+             dorun)))))
 
 
 (defn as-tensor

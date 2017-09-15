@@ -1,7 +1,7 @@
 (ns cortex.tensor
   "Tensor library used to implement the basic math abstraction in cortex.  This abstraction is
   meant to provide a language in which to implement new things but that explicitly avoids access
-  to certain parts of the comput ecosystem that the engine driving the ecosystem is expected to
+  to certain parts of the compute ecosystem that the engine driving the ecosystem is expected to
   manage.  Clients should not, for instance, access the stream or the datatype directly.
 
 There is an implicit assumption throughout this file that implementations will loop through
@@ -1459,8 +1459,9 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
       :or {dimension-op :ceil pool-op :max}}]
   (let [retval {:in-channels  channels
                 :out-channels channels
-                :kern-width   kern-width
-                :kern-height  kern-height
+                :datatype datatype
+                :kernel-width   kern-width
+                :kernel-height  kern-height
                 :pad-x        pad-x
                 :pad-y        pad-y
                 :stride-x     stride-x
@@ -1497,8 +1498,7 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
   (external-library-check! "pooling-backward!" input-gradient input output output-gradient)
   (ensure-conv-io pool-descriptor [input-gradient input] [output output-gradient])
   (tm/pooling-backward! (check-stream)
-                        (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
-                        input-grad-alpha
+                        (tensor->buffer input-gradient) (tensor->dimensions input-gradient) input-grad-alpha
                         (tensor->buffer input) (tensor->dimensions input)
                         (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
                         (tensor->buffer output) (tensor->dimensions output)
