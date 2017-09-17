@@ -355,6 +355,46 @@ and then forward many times for every parameter of the network."
        (->ConvolutionLayer backend layer conv-desc algorithms workspace)))))
 
 
+(defrecord PoolingLayer [backend layer batch-size pool-desc]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (tensor/with-datatype (dtype/get-datatype backend)
+      (tensor/with-stream (nn-backend/get-stream)
+        (let [output (->conv-tensor (graph/node->output-dimension layer) batch-size (first-buffer output-buffers))
+              input (->conv-tensor (graph/node->input-dimension layer) batch-size (first-buffer input-buffers))]
+          (tensor/pooling-forward! output 0.0 input pool-desc)))))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (tensor/with-datatype (dtype/get-datatype backend)
+      (tensor/with-stream (nn-backend/get-stream)
+        (let [output (->conv-tensor (graph/node->output-dimension layer) batch-size (first-buffer output-buffers))
+              output-gradient (->conv-tensor (graph/node->output-dimension layer) batch-size
+                                             (first-gradient output-buffers))
+              input (->conv-tensor (graph/node->input-dimension layer) batch-size (first-buffer input-buffers))
+              input-gradient (->conv-tensor (graph/node->input-dimension layer) batch-size
+                                            (first-gradient input-buffers))]
+          (tensor/pooling-backward! input-gradient 0.0 input output output-gradient pool-desc))))))
+
+
+(defmethod create :max-pooling
+  [backend layer batch-size]
+    (tensor/with-datatype (dtype/get-datatype backend)
+      (tensor/with-stream (nn-backend/get-stream)
+        (let [{:keys [kernel-width kernel-height pad-x pad-y stride-x stride-y]} layer
+              {:keys [channels height width]} (graph/node->input-dimension layer)
+              output-dims (graph/node->output-dimension layer)
+              output-width (get output-dims :width)
+              output-height (get output-dims :height)
+              pool-desc (tensor/pooling-descriptor (dtype/get-datatype backend)
+                                                   channels
+                                                   kernel-width kernel-height
+                                                   pad-x pad-y
+                                                   stride-x stride-y
+                                                   :dimension-op (get layer :dimension-op)
+                                                   :pool-op (get layer :pool-op))]
+       (->PoolingLayer backend layer batch-size pool-desc)))))
+
+
 (defrecord Prelu [backend layer scale-buffer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]

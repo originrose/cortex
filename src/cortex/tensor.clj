@@ -1500,8 +1500,8 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
   (tm/pooling-backward! (check-stream)
                         (tensor->buffer input-gradient) (tensor->dimensions input-gradient) input-grad-alpha
                         (tensor->buffer input) (tensor->dimensions input)
-                        (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
                         (tensor->buffer output) (tensor->dimensions output)
+                        (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
                         pool-descriptor)
   input-gradient)
 

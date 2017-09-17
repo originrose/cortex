@@ -1110,20 +1110,18 @@
        (impl/convolution-outer-kernel
          config# :pooling
          (impl/convolution-roll-unroll-inner-kernel
-           (let [input-addr# ~'input-addr
-                 input-val# (datatype->cast-fn ~datatype
-                                               (if ~'input-valid?
-                                                 (v-aget input-ary# input-addr#)
-                                                 0.0))
-                 output-addr# (+ (* ~'out-y ~'output-width)
-                                 ~'out-x
-                                 ~'chan-output-offset)
-                 k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
-                 output-val# (v-aget output-ary# output-addr#)]
-             (when (= input-val# output-val#)
-               (v-aset input-gradient-ary# input-addr#
-                       (+ (v-aget input-gradient-ary# input-addr#)
-                          (v-aget output-gradient-ary# output-addr#))))))))))
+          (when ~'input-valid?
+            (let [input-addr# ~'input-addr
+                  input-val#  (v-aget input-ary# input-addr#)
+                  output-addr# (+ (* ~'out-y ~'output-width)
+                                  ~'out-x
+                                  ~'chan-output-offset)
+                  k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
+                  output-val# (v-aget output-ary# output-addr#)]
+              (when (= input-val# output-val#)
+                (v-aset input-gradient-ary# input-addr#
+                        (+ (v-aget input-gradient-ary# input-addr#)
+                           (v-aget output-gradient-ary# output-addr#)))))))))))
 
 (defmacro avg-pooling-forward-impl
   [datatype]
@@ -1784,11 +1782,15 @@
         stream
         (->> (slice-batches output input input-grad output-grad)
              (pmap (fn [[output input input-grad output-grad]]
-                     (op-fn (ct/tensor->buffer input-grad)
-                            (ct/tensor->buffer input)
-                            (ct/tensor->buffer output)
-                            (ct/tensor->buffer output-grad)
-                            old-skool)))
+                     (try
+                       (op-fn (ct/tensor->buffer input-grad)
+                              (ct/tensor->buffer input)
+                              (ct/tensor->buffer output)
+                              (ct/tensor->buffer output-grad)
+                              old-skool)
+                       (catch Throwable e
+                         (clojure.pprint/pprint e)
+                         (throw e)))))
              dorun)))))
 
 
