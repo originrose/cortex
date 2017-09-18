@@ -10,10 +10,11 @@
             [cortex.tensor.dimensions :as ct-dims])
   (:import [cortex.compute.cuda.driver CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer SizeTPointer
-            cublas cublas$cublasContext
-            cudnn cudnn$cudnnContext
-            cudnn$cudnnConvolutionStruct
-            cudnn$cudnnFilterStruct]))
+                                 cublas cublas$cublasContext
+                                 cudnn cudnn$cudnnContext
+                                 cudnn$cudnnConvolutionStruct
+                                 cudnn$cudnnFilterStruct
+                                 cudnn$cudnnPoolingStruct]))
 
 
 (set! *warn-on-reflection* true)
@@ -261,7 +262,7 @@
           value (drv/dtype-cast value datatype)
           assign-fn (cuda-base/get-or-create-fn stream :tensor-assign-constant datatype
                                                 #(cuda-base/load-all-datatype-function
-                                                  "tensor_assign_constant"))
+                                                   "tensor_assign_constant"))
           n-elems (long n-elems)]
       (apply cuda-base/launch-linear-kernel
              (concat [stream assign-fn n-elems 0
@@ -277,7 +278,7 @@
           assign-fn (cuda-base/get-or-create-fn stream :tensor-assign
                                                 [lhs-dtype rhs-dtype]
                                                 #(cuda-base/load-2-datatype-function
-                                                  "tensor_assign"))]
+                                                   "tensor_assign"))]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream assign-fn n-elems 0]
                          [(cuda-base/->ptr dest)]
@@ -294,7 +295,7 @@
           unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-accum
                                               dest-dtype
                                               #(cuda-base/load-cas-datatype-function
-                                                "tensor_unary_accum"))]
+                                                 "tensor_unary_accum"))]
       (if (and (datatype-cudnn-compatible? dest-dtype)
                (or (= op :logistic)
                    (= op :tanh)))
@@ -316,7 +317,7 @@
           unop-fn (cuda-base/get-or-create-fn stream :tensor-unary-op
                                               dest-dtype
                                               #(cuda-base/load-all-datatype-function
-                                                "tensor_unary_op"))]
+                                                 "tensor_unary_op"))]
       (if (and (datatype-cudnn-compatible? dest-dtype)
                (or (= op :logistic)
                    (= op :tanh))
@@ -342,7 +343,7 @@
           binop-fn (cuda-base/get-or-create-fn stream :tensor-accum-constant
                                                dest-dtype
                                                #(cuda-base/load-cas-datatype-function
-                                                 "tensor_accum_constant"))
+                                                  "tensor_accum_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
       (if (and (= :max operation)
                (= 0.0 scalar)
@@ -366,7 +367,7 @@
           binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-op-constant
                                                dest-dtype
                                                #(cuda-base/load-all-datatype-function
-                                                 "tensor_binary_op_constant"))
+                                                  "tensor_binary_op_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
       (if (and (= x-dims dest-dims)
                (= 0.0 (double scalar))
@@ -399,25 +400,25 @@
         ;;try to hit cudnn fast path
         (resource/with-resource-context
           (cuda-base/cudnn-with-stream
-           stream
-           (let [dest-dtype (dtype/get-datatype dest)
-                 dest-tensor (cuda-base/tensor-with-strides dest-dtype (:shape dest-dims) (:strides dest-dims))
-                 y-tensor (cuda-base/tensor-with-strides dest-dtype (:shape y-dims) (:strides y-dims))]
-             (cuda-base/cudnn-call
-              (cudnn/cudnnConvolutionBackwardBias
-               cudnn-context
-               (cuda-base/value->ptr y-alpha dest-dtype)
-               y-tensor
-               (->ptr y)
-               (cuda-base/value->ptr dest-alpha dest-dtype)
-               dest-tensor
-               (->ptr dest))))))
+            stream
+            (let [dest-dtype (dtype/get-datatype dest)
+                  dest-tensor (cuda-base/tensor-with-strides dest-dtype (:shape dest-dims) (:strides dest-dims))
+                  y-tensor (cuda-base/tensor-with-strides dest-dtype (:shape y-dims) (:strides y-dims))]
+              (cuda-base/cudnn-call
+                (cudnn/cudnnConvolutionBackwardBias
+                  cudnn-context
+                  (cuda-base/value->ptr y-alpha dest-dtype)
+                  y-tensor
+                  (->ptr y)
+                  (cuda-base/value->ptr dest-alpha dest-dtype)
+                  dest-tensor
+                  (->ptr dest))))))
         ;;fallback to generic slow path
         (let [dest-dtype (dtype/get-datatype dest)
               binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-accum
                                                    dest-dtype
                                                    #(cuda-base/load-cas-datatype-function
-                                                     "tensor_binary_accum"))
+                                                      "tensor_binary_accum"))
               ->dtype #(drv/dtype-cast % dest-dtype)]
           (apply cuda-base/launch-linear-kernel
                  (-> (concat [stream binop-fn n-elems 0]
@@ -430,34 +431,34 @@
                              (operation->cuda operation reverse-operands?)
                              [n-elems])
                      vec))))
-     (if (and (= operation :+)
-              (dims-cudnn-compatible? dest-dims y-dims)
-              (datatype-cudnn-compatible? (dtype/get-datatype dest)))
-       (resource/with-resource-context
-         (cuda-base/cudnn-with-stream
-          stream
-          (let [dest-dtype (dtype/get-datatype dest)
-                dest-tensor (cuda-base/tensor-with-strides dest-dtype (:shape dest-dims) (:strides dest-dims))
-                y-tensor (cuda-base/tensor-with-strides dest-dtype (:shape y-dims) (:strides y-dims))]
-            (cuda-base/cudnn-call
-             (cudnn/cudnnAddTensor cudnn-context
-                                   (cuda-base/value->ptr y-alpha dest-dtype)
-                                   y-tensor
-                                   (->ptr y)
-                                   (cuda-base/value->ptr dest-alpha dest-dtype)
-                                   dest-tensor
-                                   (->ptr dest))))))
-       (if reverse-operands?
-         (tm/binary-op! stream
-                        dest dest-dims
-                        y y-dims y-alpha
-                        dest dest-dims dest-alpha
-                        n-elems operation)
-         (tm/binary-op! stream
-                        dest dest-dims
-                        dest dest-dims dest-alpha
-                        y y-dims y-alpha
-                        n-elems operation)))))
+      (if (and (= operation :+)
+               (dims-cudnn-compatible? dest-dims y-dims)
+               (datatype-cudnn-compatible? (dtype/get-datatype dest)))
+        (resource/with-resource-context
+          (cuda-base/cudnn-with-stream
+            stream
+            (let [dest-dtype (dtype/get-datatype dest)
+                  dest-tensor (cuda-base/tensor-with-strides dest-dtype (:shape dest-dims) (:strides dest-dims))
+                  y-tensor (cuda-base/tensor-with-strides dest-dtype (:shape y-dims) (:strides y-dims))]
+              (cuda-base/cudnn-call
+                (cudnn/cudnnAddTensor cudnn-context
+                                      (cuda-base/value->ptr y-alpha dest-dtype)
+                                      y-tensor
+                                      (->ptr y)
+                                      (cuda-base/value->ptr dest-alpha dest-dtype)
+                                      dest-tensor
+                                      (->ptr dest))))))
+        (if reverse-operands?
+          (tm/binary-op! stream
+                         dest dest-dims
+                         y y-dims y-alpha
+                         dest dest-dims dest-alpha
+                         n-elems operation)
+          (tm/binary-op! stream
+                         dest dest-dims
+                         dest dest-dims dest-alpha
+                         y y-dims y-alpha
+                         n-elems operation)))))
 
   (binary-op! [stream
                dest dest-dims
@@ -468,7 +469,7 @@
           binop-fn (cuda-base/get-or-create-fn stream :tensor-binary-op
                                                dest-dtype
                                                #(cuda-base/load-all-datatype-function
-                                                 "tensor_binary_op"))
+                                                  "tensor_binary_op"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream binop-fn n-elems 0]
@@ -495,7 +496,7 @@
           ternop-fn (cuda-base/get-or-create-fn stream :tensor-ternary-op
                                                 dest-dtype
                                                 #(cuda-base/load-all-datatype-function
-                                                  "tensor_ternary_op"))
+                                                   "tensor_ternary_op"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream ternop-fn n-elems 0]
@@ -525,7 +526,7 @@
           ternop-fn (cuda-base/get-or-create-fn stream :tensor-ternary-op-constant
                                                 dest-dtype
                                                 #(cuda-base/load-all-datatype-function
-                                                  "tensor_ternary_op_constant"))
+                                                   "tensor_ternary_op_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream ternop-fn n-elems 0]
@@ -554,7 +555,7 @@
           ternop-fn (cuda-base/get-or-create-fn stream :tensor-ternary-op-constant_constant
                                                 dest-dtype
                                                 #(cuda-base/load-all-datatype-function
-                                                  "tensor_ternary_op_constant_constant"))
+                                                   "tensor_ternary_op_constant_constant"))
           ->dtype #(drv/dtype-cast % dest-dtype)]
       (apply cuda-base/launch-linear-kernel
              (-> (concat [stream ternop-fn n-elems 0]
@@ -578,7 +579,7 @@
           reduce-fn (cuda-base/get-or-create-fn stream :tensor-unary-reduce
                                                 output-dtype
                                                 #(cuda-base/load-all-datatype-function
-                                                  "tensor_unary_reduce"))
+                                                   "tensor_unary_reduce"))
           ->dtype #(drv/dtype-cast % output-dtype)
           input-col-len (int (last (ct-dims/shape input-dims)))
           n-elems (int (ct-dims/ecount output-dims))]
@@ -590,10 +591,10 @@
                          (dimensions->cuda input-dims)
                          [(->dtype input-alpha)]
                          [(condp = op
-                             :max (int 0)
-                             :min (int 1)
-                             :sum (int 2)
-                             :mean (int 3)) input-col-len n-elems])
+                            :max (int 0)
+                            :min (int 1)
+                            :sum (int 2)
+                            :mean (int 3)) input-col-len n-elems])
                  vec))))
 
   (gemm! [stream
@@ -608,11 +609,11 @@
                             :b [b-col-count b-colstride]
                             }))
     (cmu/col->row-gemm
-     (partial (get-in blas-fn-map [(dtype/get-datatype C) :gemm]) stream)
-     trans-a? trans-b? a-row-count a-col-count b-col-count
-     alpha A a-colstride
-     B b-colstride
-     beta C c-colstride))
+      (partial (get-in blas-fn-map [(dtype/get-datatype C) :gemm]) stream)
+      trans-a? trans-b? a-row-count a-col-count b-col-count
+      alpha A a-colstride
+      B b-colstride
+      beta C c-colstride))
 
   (gemv! [stream
           c inc-c
@@ -621,9 +622,9 @@
           x inc-x
           beta]
     (cmu/col->row-gemv
-     (partial (get-in blas-fn-map [(dtype/get-datatype c) :gemv]) stream)
-     trans-a? a-row-count a-col-count alpha A a-colstride
-     x inc-x beta c inc-c))
+      (partial (get-in blas-fn-map [(dtype/get-datatype c) :gemv]) stream)
+      trans-a? a-row-count a-col-count alpha A a-colstride
+      x inc-x beta c inc-c))
 
   (batch-normalize-eltwise! [stream
                              output input means variances scale bias epsilon
@@ -634,22 +635,22 @@
             io-tensor (cuda-base/tensor datatype batch-count 1 1 element-count)
             var-tensor (cuda-base/tensor datatype 1 1 1 element-count)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnBatchNormalizationForwardInference
-           cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           io-tensor
-           (->ptr input)
-           io-tensor
-           (->ptr output)
-           var-tensor
-           (->ptr scale)
-           (->ptr bias)
-           (->ptr means)
-           (->ptr variances)
-           (double epsilon)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnBatchNormalizationForwardInference
+              cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              io-tensor
+              (->ptr input)
+              io-tensor
+              (->ptr output)
+              var-tensor
+              (->ptr scale)
+              (->ptr bias)
+              (->ptr means)
+              (->ptr variances)
+              (double epsilon)))))))
 
   (batch-normalize-spatial! [stream
                              output input means variances scale bias epsilon
@@ -659,22 +660,22 @@
             io-tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)
             var-tensor (cuda-base/tensor datatype 1 channel-count 1 1)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnBatchNormalizationForwardInference
-           cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           io-tensor
-           (->ptr input)
-           io-tensor
-           (->ptr output)
-           var-tensor
-           (->ptr scale)
-           (->ptr bias)
-           (->ptr means)
-           (->ptr variances)
-           (double epsilon)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnBatchNormalizationForwardInference
+              cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              io-tensor
+              (->ptr input)
+              io-tensor
+              (->ptr output)
+              var-tensor
+              (->ptr scale)
+              (->ptr bias)
+              (->ptr means)
+              (->ptr variances)
+              (double epsilon)))))))
 
   (batch-normalize-update-and-apply-eltwise! [stream
                                               output input
@@ -688,25 +689,25 @@
             io-tensor (cuda-base/tensor datatype batch-count 1 1 element-count)
             var-tensor (cuda-base/tensor datatype 1 1 1 element-count)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnBatchNormalizationForwardTraining
-           cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           io-tensor
-           (->ptr input)
-           io-tensor
-           (->ptr output)
-           var-tensor
-           (->ptr scale)
-           (->ptr bias)
-           (double average-factor)
-           (->ptr running-means)
-           (->ptr running-variances)
-           (double epsilon)
-           (->ptr batch-means)
-           (->ptr batch-variances)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnBatchNormalizationForwardTraining
+              cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              io-tensor
+              (->ptr input)
+              io-tensor
+              (->ptr output)
+              var-tensor
+              (->ptr scale)
+              (->ptr bias)
+              (double average-factor)
+              (->ptr running-means)
+              (->ptr running-variances)
+              (double epsilon)
+              (->ptr batch-means)
+              (->ptr batch-variances)))))))
 
   (batch-normalize-update-and-apply-spatial! [stream
                                               output input
@@ -720,25 +721,25 @@
             io-tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)
             var-tensor (cuda-base/tensor datatype 1 channel-count 1 1)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnBatchNormalizationForwardTraining
-           cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           io-tensor
-           (->ptr input)
-           io-tensor
-           (->ptr output)
-           var-tensor
-           (->ptr scale)
-           (->ptr bias)
-           (double average-factor)
-           (->ptr running-means)
-           (->ptr running-variances)
-           (double epsilon)
-           (->ptr batch-means)
-           (->ptr batch-variances)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnBatchNormalizationForwardTraining
+              cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              io-tensor
+              (->ptr input)
+              io-tensor
+              (->ptr output)
+              var-tensor
+              (->ptr scale)
+              (->ptr bias)
+              (double average-factor)
+              (->ptr running-means)
+              (->ptr running-variances)
+              (double epsilon)
+              (->ptr batch-means)
+              (->ptr batch-variances)))))))
 
   (batch-normalize-gradients-eltwise! [stream
                                        input-gradient scale-gradient
@@ -751,27 +752,27 @@
             io-tensor (cuda-base/tensor datatype batch-count 1 1 element-count)
             var-tensor (cuda-base/tensor datatype 1 1 1 element-count)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnBatchNormalizationBackward
-           cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           io-tensor
-           (->ptr input)
-           io-tensor
-           (->ptr output-gradient)
-           io-tensor
-           (->ptr input-gradient)
-           var-tensor
-           (->ptr scale)
-           (->ptr scale-gradient)
-           (->ptr bias-gradient)
-           (double epsilon)
-           (->ptr batch-means)
-           (->ptr batch-variances)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnBatchNormalizationBackward
+              cudnn-context cudnn/CUDNN_BATCHNORM_PER_ACTIVATION
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              io-tensor
+              (->ptr input)
+              io-tensor
+              (->ptr output-gradient)
+              io-tensor
+              (->ptr input-gradient)
+              var-tensor
+              (->ptr scale)
+              (->ptr scale-gradient)
+              (->ptr bias-gradient)
+              (double epsilon)
+              (->ptr batch-means)
+              (->ptr batch-variances)))))))
 
   (batch-normalize-gradients-spatial! [stream
                                        input-gradient scale-gradient
@@ -784,27 +785,27 @@
             io-tensor (cuda-base/tensor datatype batch-count channel-count 1 element-count)
             var-tensor (cuda-base/tensor datatype 1 channel-count 1 1)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnBatchNormalizationBackward
-           cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           (value->ptr 1.0 datatype) ;;alpha
-           (value->ptr 0.0 datatype) ;;beta
-           io-tensor
-           (->ptr input)
-           io-tensor
-           (->ptr output-gradient)
-           io-tensor
-           (->ptr input-gradient)
-           var-tensor
-           (->ptr scale)
-           (->ptr scale-gradient)
-           (->ptr bias-gradient)
-           (double epsilon)
-           (->ptr batch-means)
-           (->ptr batch-variances)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnBatchNormalizationBackward
+              cudnn-context cudnn/CUDNN_BATCHNORM_SPATIAL
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              (value->ptr 1.0 datatype)                     ;;alpha
+              (value->ptr 0.0 datatype)                     ;;beta
+              io-tensor
+              (->ptr input)
+              io-tensor
+              (->ptr output-gradient)
+              io-tensor
+              (->ptr input-gradient)
+              var-tensor
+              (->ptr scale)
+              (->ptr scale-gradient)
+              (->ptr bias-gradient)
+              (double epsilon)
+              (->ptr batch-means)
+              (->ptr batch-variances)))))))
 
   (activation-gradient! [stream
                          input-gradient input-grad-dims
@@ -832,20 +833,20 @@
                                                          (:shape output-dims)
                                                          (:strides output-dims)))]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnActivationBackward cudnn-context
-                                         (act-type->cudnn op)
-                                         (value->ptr 1 datatype)
-                                         output-tens
-                                         (->ptr output)
-                                         out-grad-tens
-                                         (->ptr output-gradient)
-                                         output-tens
-                                         (->ptr output)
-                                         (value->ptr 0 datatype)
-                                         in-grad-tens
-                                         (->ptr input-gradient)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnActivationBackward cudnn-context
+                                           (act-type->cudnn op)
+                                           (value->ptr 1 datatype)
+                                           output-tens
+                                           (->ptr output)
+                                           out-grad-tens
+                                           (->ptr output-gradient)
+                                           output-tens
+                                           (->ptr output)
+                                           (value->ptr 0 datatype)
+                                           in-grad-tens
+                                           (->ptr input-gradient)))))))
 
   (softmax-eltwise! [stream
                      output output-dims
@@ -859,17 +860,17 @@
                         (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
                         out-tensor)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnSoftmaxForward cudnn-context
-                                     cudnn/CUDNN_SOFTMAX_ACCURATE
-                                     cudnn/CUDNN_SOFTMAX_MODE_INSTANCE
-                                     (value->ptr 1 datatype)
-                                     in-tensor
-                                     (->ptr input)
-                                     (value->ptr 0 datatype)
-                                     out-tensor
-                                     (->ptr output)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnSoftmaxForward cudnn-context
+                                       cudnn/CUDNN_SOFTMAX_ACCURATE
+                                       cudnn/CUDNN_SOFTMAX_MODE_INSTANCE
+                                       (value->ptr 1 datatype)
+                                       in-tensor
+                                       (->ptr input)
+                                       (value->ptr 0 datatype)
+                                       out-tensor
+                                       (->ptr output)))))))
 
   (softmax-spatial! [stream
                      output output-dims
@@ -883,23 +884,23 @@
                         (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
                         out-tensor)]
         (cuda-base/cudnn-with-stream
-         stream
-         (cuda-base/cudnn-call
-          (cudnn/cudnnSoftmaxForward cudnn-context
-                                     cudnn/CUDNN_SOFTMAX_ACCURATE
-                                     cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
-                                     (value->ptr 1 datatype)
-                                     in-tensor
-                                     (->ptr input)
-                                     (value->ptr 0 datatype)
-                                     out-tensor
-                                     (->ptr output)))))))
+          stream
+          (cuda-base/cudnn-call
+            (cudnn/cudnnSoftmaxForward cudnn-context
+                                       cudnn/CUDNN_SOFTMAX_ACCURATE
+                                       cudnn/CUDNN_SOFTMAX_MODE_CHANNEL
+                                       (value->ptr 1 datatype)
+                                       in-tensor
+                                       (->ptr input)
+                                       (value->ptr 0 datatype)
+                                       out-tensor
+                                       (->ptr output)))))))
 
   (convolution-descriptor [stream
                            datatype out-channels in-channels kernel-width kernel-height
                            pad-x pad-y stride-x stride-y]
     (let [^cudnn$cudnnConvolutionStruct conv-desc (cudnn$cudnnConvolutionStruct.)
-          ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct. )
+          ^cudnn$cudnnFilterStruct filter-desc (cudnn$cudnnFilterStruct.)
           tensor-datatype (cuda-base/dtype->cudnn datatype)]
       (cuda-base/cudnn-call (cudnn/cudnnCreateConvolutionDescriptor conv-desc))
       (cuda-base/cudnn-call (cudnn/cudnnCreateFilterDescriptor filter-desc))
@@ -953,78 +954,78 @@
             (throw (Exception. (format "Calculated output dimensions %s and cudnn output dimensions %s are off"
                                        [h w] [output-height output-width])))))
         (cuda-base/cudnn-with-stream
-         stream
+          stream
 
-         (if-not use-defaults?
-           (do
-             (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionForwardAlgorithm
-                                    cudnn-context
-                                    input-tensor
-                                    filter-desc
-                                    conv-desc
-                                    output-tensor
-                                    cudnn/CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT
-                                    max-ideal-workspace-size
-                                    forward-algo))
-             (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterAlgorithm
-                                    cudnn-context
-                                    input-tensor
-                                    output-tensor
-                                    conv-desc
-                                    filter-desc
-                                    cudnn/CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT
-                                    max-ideal-workspace-size
-                                    backward-filter-algo))
-             (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataAlgorithm
-                                    cudnn-context
-                                    filter-desc
-                                    output-tensor
-                                    conv-desc
-                                    input-tensor
-                                    cudnn/CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT
-                                    max-ideal-workspace-size
-                                    backward-data-algo)))
-           (do
-             (dtype/set-value! forward-algo 0 cudnn/CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM)
-             (dtype/set-value! backward-filter-algo 0 cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0)
-             (dtype/set-value! backward-data-algo 0 cudnn/CUDNN_CONVOLUTION_BWD_DATA_ALGO_0)))
+          (if-not use-defaults?
+            (do
+              (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionForwardAlgorithm
+                                      cudnn-context
+                                      input-tensor
+                                      filter-desc
+                                      conv-desc
+                                      output-tensor
+                                      cudnn/CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT
+                                      max-ideal-workspace-size
+                                      forward-algo))
+              (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterAlgorithm
+                                      cudnn-context
+                                      input-tensor
+                                      output-tensor
+                                      conv-desc
+                                      filter-desc
+                                      cudnn/CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT
+                                      max-ideal-workspace-size
+                                      backward-filter-algo))
+              (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataAlgorithm
+                                      cudnn-context
+                                      filter-desc
+                                      output-tensor
+                                      conv-desc
+                                      input-tensor
+                                      cudnn/CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT
+                                      max-ideal-workspace-size
+                                      backward-data-algo)))
+            (do
+              (dtype/set-value! forward-algo 0 cudnn/CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM)
+              (dtype/set-value! backward-filter-algo 0 cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0)
+              (dtype/set-value! backward-data-algo 0 cudnn/CUDNN_CONVOLUTION_BWD_DATA_ALGO_0)))
 
 
-         (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionForwardWorkspaceSize
-                                cudnn-context
-                                input-tensor
-                                filter-desc
-                                conv-desc
-                                output-tensor
-                                (.get forward-algo)
-                                forward-workspace-size))
+          (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionForwardWorkspaceSize
+                                  cudnn-context
+                                  input-tensor
+                                  filter-desc
+                                  conv-desc
+                                  output-tensor
+                                  (.get forward-algo)
+                                  forward-workspace-size))
 
-         (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterWorkspaceSize
-                                cudnn-context
-                                input-tensor
-                                output-tensor
-                                conv-desc
-                                filter-desc
-                                (.get backward-filter-algo)
-                                backward-filter-workspace-size))
+          (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardFilterWorkspaceSize
+                                  cudnn-context
+                                  input-tensor
+                                  output-tensor
+                                  conv-desc
+                                  filter-desc
+                                  (.get backward-filter-algo)
+                                  backward-filter-workspace-size))
 
-         (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataWorkspaceSize
-                                cudnn-context
-                                filter-desc
-                                output-tensor
-                                conv-desc
-                                input-tensor
-                                (.get backward-data-algo)
-                                backward-data-workspace-size)))
-        {:forward {:algorithm (dtype/get-value forward-algo 0)
-                   :workspace-size (.get forward-workspace-size)}
-         :backward-filter {:algorithm (dtype/get-value backward-filter-algo 0)
+          (cuda-base/cudnn-call (cudnn/cudnnGetConvolutionBackwardDataWorkspaceSize
+                                  cudnn-context
+                                  filter-desc
+                                  output-tensor
+                                  conv-desc
+                                  input-tensor
+                                  (.get backward-data-algo)
+                                  backward-data-workspace-size)))
+        {:forward         {:algorithm      (dtype/get-value forward-algo 0)
+                           :workspace-size (.get forward-workspace-size)}
+         :backward-filter {:algorithm      (dtype/get-value backward-filter-algo 0)
                            :workspace-size (.get backward-filter-workspace-size)}
-         :backward-data {:algorithm (dtype/get-value backward-data-algo 0)
-                         :workspace-size (.get backward-data-workspace-size 0)}
-         :workspace-size (long (max (long (.get forward-workspace-size))
-                                    (long (.get backward-filter-workspace-size))
-                                    (long (.get backward-data-workspace-size))))})))
+         :backward-data   {:algorithm      (dtype/get-value backward-data-algo 0)
+                           :workspace-size (.get backward-data-workspace-size 0)}
+         :workspace-size  (long (max (long (.get forward-workspace-size))
+                                     (long (.get backward-filter-workspace-size))
+                                     (long (.get backward-data-workspace-size))))})))
 
   (convolution-forward! [stream
                          output output-dims output-alpha
@@ -1034,30 +1035,30 @@
                          conv-descriptor algorithms]
     (resource/with-resource-context
       (cuda-base/cudnn-with-stream
-       stream
-       (let [[batch-size in-channels in-height in-width] (get input-dims :shape)
-             [batch-size out-channels out-height out-width] (get output-dims :shape)
-             {:keys [datatype descriptor]} conv-descriptor
-             input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
-             output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
-             ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
-             ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
-             forward-algorithm (long (get-in algorithms [:forward :algorithm]))]
-         (cuda-base/cudnn-call
-          (cudnn/cudnnConvolutionForward
-           cudnn-context
-           (value->ptr 1 datatype)
-           input-tensor
-           (->ptr input)
-           filter-desc
-           (->ptr weights)
-           conv-desc
-           forward-algorithm
-           (->ptr workspace)
-           (int workspace-ecount)
-           (value->ptr output-alpha datatype)
-           output-tensor
-           (->ptr output)))))))
+        stream
+        (let [[batch-size in-channels in-height in-width] (get input-dims :shape)
+              [batch-size out-channels out-height out-width] (get output-dims :shape)
+              {:keys [datatype descriptor]} conv-descriptor
+              input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
+              output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
+              ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
+              ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
+              forward-algorithm (long (get-in algorithms [:forward :algorithm]))]
+          (cuda-base/cudnn-call
+            (cudnn/cudnnConvolutionForward
+              cudnn-context
+              (value->ptr 1 datatype)
+              input-tensor
+              (->ptr input)
+              filter-desc
+              (->ptr weights)
+              conv-desc
+              forward-algorithm
+              (->ptr workspace)
+              (int workspace-ecount)
+              (value->ptr output-alpha datatype)
+              output-tensor
+              (->ptr output)))))))
 
   (convolution-backward-weights! [stream
                                   weight-gradient weight-gradient-dims weight-gradient-alpha
@@ -1067,29 +1068,29 @@
                                   conv-descriptor algorithms]
     (resource/with-resource-context
       (cuda-base/cudnn-with-stream
-       stream
-       (let [{:keys [datatype descriptor]} conv-descriptor
-             [batch-size in-channels in-height in-width] (get input-dims :shape)
-             [batch-size out-channels out-height out-width] (get output-gradient-dims :shape)
-             input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
-             output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
-             ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
-             ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
-             backward-filter-algorithm (get-in algorithms [:backward-filter :algorithm])]
-         (cuda-base/cudnn-call (cudnn/cudnnConvolutionBackwardFilter
-                                cudnn-context
-                                (value->ptr 1 datatype)
-                                input-tensor
-                                (->ptr input)
-                                output-tensor
-                                (->ptr output-gradient)
-                                conv-desc
-                                backward-filter-algorithm
-                                (->ptr workspace)
-                                (long workspace-ecount)
-                                (value->ptr weight-gradient-alpha datatype)
-                                filter-desc
-                                (->ptr weight-gradient)))))))
+        stream
+        (let [{:keys [datatype descriptor]} conv-descriptor
+              [batch-size in-channels in-height in-width] (get input-dims :shape)
+              [batch-size out-channels out-height out-width] (get output-gradient-dims :shape)
+              input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
+              output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
+              ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
+              ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
+              backward-filter-algorithm (get-in algorithms [:backward-filter :algorithm])]
+          (cuda-base/cudnn-call (cudnn/cudnnConvolutionBackwardFilter
+                                  cudnn-context
+                                  (value->ptr 1 datatype)
+                                  input-tensor
+                                  (->ptr input)
+                                  output-tensor
+                                  (->ptr output-gradient)
+                                  conv-desc
+                                  backward-filter-algorithm
+                                  (->ptr workspace)
+                                  (long workspace-ecount)
+                                  (value->ptr weight-gradient-alpha datatype)
+                                  filter-desc
+                                  (->ptr weight-gradient)))))))
 
   (convolution-backward-data! [stream
                                input-gradient input-gradient-dims input-gradient-alpha
@@ -1099,37 +1100,112 @@
                                conv-descriptor algorithms]
     (resource/with-resource-context
       (cuda-base/cudnn-with-stream
-       stream
-       (let [{:keys [datatype descriptor]} conv-descriptor
-             [batch-size in-channels in-height in-width] (get input-gradient-dims :shape)
-             [batch-size out-channels out-height out-width] (get output-gradient-dims :shape)
-             input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
-             output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
-             ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
-             ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
-             backward-data-algorithm (get-in algorithms [:backward-data :algorithm])]
-         (cuda-base/cudnn-call
-          (cudnn/cudnnConvolutionBackwardData
-           cudnn-context
-           (value->ptr 1 datatype)
-           filter-desc
-           (->ptr weights)
-           output-tensor
-           (->ptr output-gradient)
-           conv-desc
-           backward-data-algorithm
-           (->ptr workspace)
-           workspace-ecount
-           (value->ptr input-gradient-alpha datatype)
-           input-tensor
-           (->ptr input-gradient))))))))
+        stream
+        (let [{:keys [datatype descriptor]} conv-descriptor
+              [batch-size in-channels in-height in-width] (get input-gradient-dims :shape)
+              [batch-size out-channels out-height out-width] (get output-gradient-dims :shape)
+              input-tensor (cuda-base/tensor datatype batch-size in-channels in-height in-width)
+              output-tensor (cuda-base/tensor datatype batch-size out-channels out-height out-width)
+              ^cudnn$cudnnConvolutionStruct conv-desc (:conv-desc descriptor)
+              ^cudnn$cudnnFilterStruct filter-desc (:filter-desc descriptor)
+              backward-data-algorithm (get-in algorithms [:backward-data :algorithm])]
+          (cuda-base/cudnn-call
+            (cudnn/cudnnConvolutionBackwardData
+              cudnn-context
+              (value->ptr 1 datatype)
+              filter-desc
+              (->ptr weights)
+              output-tensor
+              (->ptr output-gradient)
+              conv-desc
+              backward-data-algorithm
+              (->ptr workspace)
+              workspace-ecount
+              (value->ptr input-gradient-alpha datatype)
+              input-tensor
+              (->ptr input-gradient)))))))
+
+  (pooling-descriptor [stream
+                       datatype kern-width kern-height
+                       pad-x pad-y stride-x stride-y pool-op dimension-op]
+    (let [pooling-desc (cudnn$cudnnPoolingStruct.)]
+      (cuda-base/cudnn-call (cudnn/cudnnCreatePoolingDescriptor pooling-desc))
+      (resource/track pooling-desc)
+      (cuda-base/cudnn-call (cudnn/cudnnSetPooling2dDescriptor
+                              pooling-desc
+                              (condp = pool-op
+                                :max cudnn/CUDNN_POOLING_MAX
+                                :avg cudnn/CUDNN_POOLING_AVERAGE_COUNT_INCLUDE_PADDING
+                                :avg-exc-pad cudnn/CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING)
+                              cudnn/CUDNN_PROPAGATE_NAN
+                              (int kern-height) (int kern-width)
+                              (int pad-y) (int pad-x)
+                              (int stride-y) (int stride-x)))
+      pooling-desc))
+
+  (pooling-forward! [stream
+                     output output-dims output-alpha
+                     input input-dims
+                     pool-descriptor]
+    (resource/with-resource-context
+      (cuda-base/cudnn-with-stream
+        stream
+        (let [{:keys [datatype descriptor]} pool-descriptor
+              in-tensor (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
+              out-tensor (cuda-base/tensor-with-strides datatype (:shape output-dims) (:strides output-dims))
+              ^cudnn$cudnnPoolingStruct cudnn-pool-desc descriptor]
+          (cuda-base/cudnn-call
+            (cudnn/cudnnPoolingForward
+              cudnn-context
+              cudnn-pool-desc
+              (value->ptr 1 datatype)
+              in-tensor
+              (->ptr input)
+              (value->ptr output-alpha datatype)
+              out-tensor
+              (->ptr output)))))))
+
+  (pooling-backward! [stream
+                      input-grad input-grad-dims input-grad-alpha
+                      input input-dims
+                      output output-dims
+                      output-grad output-grad-dims
+                      pool-descriptor]
+    (resource/with-resource-context
+      (cuda-base/cudnn-with-stream
+        stream
+        (let [{:keys [datatype descriptor]} pool-descriptor
+              in-tensor (cuda-base/tensor-with-strides datatype (:shape input-dims) (:strides input-dims))
+              out-tensor (cuda-base/tensor-with-strides datatype (:shape output-dims) (:strides output-dims))
+              out-grad-tensor (cuda-base/tensor-with-strides datatype
+                                                             (:shape output-grad-dims)
+                                                             (:strides output-grad-dims))
+              in-grad-tensor (cuda-base/tensor-with-strides datatype
+                                                            (:shape input-grad-dims)
+                                                            (:strides input-grad-dims))
+              ^cudnn$cudnnPoolingStruct cudnn-pool-desc descriptor]
+          (cuda-base/cudnn-call
+            (cudnn/cudnnPoolingBackward
+              cudnn-context
+              cudnn-pool-desc
+              (value->ptr 1 datatype)
+              out-tensor
+              (->ptr output)
+              out-grad-tensor
+              (->ptr output-grad)
+              in-tensor
+              (->ptr input)
+              (value->ptr input-grad-alpha datatype)
+              in-grad-tensor
+              (->ptr input-grad)))))
 
 
-(defmacro tensor-context
-  [& body]
-  `(resource/with-resource-context
-     (first (drv/with-compute-device
-              (drv/default-device (cuda-base/driver))
-              (with-bindings {#'ct/*stream* (drv/create-stream)
-                              #'ct/*datatype* :float}
-                ~@body)))))
+
+      (defmacro tensor-context
+        [& body]
+        `(resource/with-resource-context
+           (first (drv/with-compute-device
+                    (drv/default-device (cuda-base/driver))
+                    (with-bindings {#'ct/*stream*   (drv/create-stream)
+                                    #'ct/*datatype* :float}
+                      ~@body))))))))

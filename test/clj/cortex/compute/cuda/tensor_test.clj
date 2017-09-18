@@ -101,3 +101,7 @@
 
 (def-all-dtype-test select-transpose-interaction
   (verify-tensor/select-transpose-interaction (create-driver) *datatype*))
+
+
+(def-double-float-test pooling-operator
+  (verify-tensor/pooling-operator (create-driver) *datatype*))

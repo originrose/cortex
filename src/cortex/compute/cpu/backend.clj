@@ -64,74 +64,10 @@
 (defprotocol PCPUNetworkImpl
   "Implementation of various functions based on buffer datatype."
   (cpu-fill [buffer value])
-  (cpu-max-pooling-forward [input output conv-config])
-  (cpu-max-pooling-backward [input output input-gradient output-gradient conv-config])
-  (cpu-avg-pooling-forward [input output conv-config])
-  (cpu-avg-pooling-backward [input output input-gradient output-gradient conv-config])
-  (cpu-avg-exc-pad-pooling-forward [input output conv-config])
-  (cpu-avg-exc-pad-pooling-backward [input output input-gradient output-gradient conv-config])
   (cpu-prepare-bernoulli-dropout [mult-buffer rand-buffer probability])
   (cpu-prepare-gaussian-dropout [mult-buffer rand-buffer])
   (cpu-lrn-forward [input output input-tensor n k alpha beta])
   (cpu-lrn-backward [input output-gradient input-gradient input-tensor n k alpha beta]))
-
-
-
-(defmacro cpu-act-forward-impl
-  [act-type input output cast-fn]
-  `(let [src# (ArrayView/toView ~input)
-         dest# (ArrayView/toView ~output)
-         n-elems# (.length src#)
-         val-0# (~cast-fn 0)
-         val-1# (~cast-fn 1)]
-     (cond
-       (= ~act-type :logistic)
-       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
-              (v-aset dest# idx#
-                    (/ val-1#
-                       (+ val-1# (Math/exp (- (v-aget src# idx#)))))))
-       (= ~act-type :relu)
-       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
-              (v-aset dest# idx#
-                    (Math/max (v-aget src# idx#) val-0#)))
-       (= ~act-type :tanh)
-       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
-              (v-aset dest# idx#
-                    (Math/tanh (v-aget src# idx#)))))))
-
-(defmacro cpu-act-backward-impl
-  [act-type input output output-gradient input-gradient cast-fn]
-  `(let [src# (ArrayView/toView ~input)
-         dest# (ArrayView/toView ~output)
-         src-grad# (ArrayView/toView ~input-gradient)
-         dest-grad# (ArrayView/toView ~output-gradient)
-         n-elems# (.length src#)
-         val-1# (~cast-fn 1)
-         val-0# (~cast-fn 0)]
-     (cond
-       (= ~act-type :logistic)
-       ;; input gradient = output * (1 - output) * output-gradient
-       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
-              (let [out-val# (v-aget dest# idx#)]
-                (v-aset src-grad# idx#
-                        (* out-val#
-                           (- val-1# out-val#)
-                           (v-aget dest-grad# idx#)))))
-       (= ~act-type :relu)
-       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
-              (let [mult# (~cast-fn (if (> (v-aget src# idx#)
-                                           val-0#)
-                                      1
-                                      0))]
-                (v-aset src-grad# idx#
-                      (* mult# (v-aget dest-grad# idx#)))))
-       (= ~act-type :tanh)
-       (c-for [idx# 0 (< idx# n-elems#) (inc idx#)]
-              (let [out-val# (v-aget dest# idx#)]
-                (v-aset src-grad# idx#
-                      (* (- val-1#
-                            (* out-val# out-val#))
-                         (v-aget dest-grad# idx#))))))))
 
 
 (defmacro array-max
@@ -153,133 +89,6 @@
               (+ sum-val# (v-aget ~ary (+ ~start-idx idx#))))
        sum-val#)))
 
-
-(defmacro cpu-max-pooling-forward-impl
-  [input output config cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         output-ary# (ArrayView/toView ~output)]
-     (impl/convolution-outer-kernel
-      ~config :pooling
-      (impl/convolution-roll-unroll-inner-kernel
-       (let [input-val# (~cast-fn (if ~'input-valid?
-                                  (v-aget input-ary# ~'input-addr)
-                                  0.0))
-             output-addr# (+ (* ~'out-y ~'output-width)
-                             ~'out-x
-                             ~'chan-output-offset)
-             k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
-             output-val# (v-aget output-ary# output-addr#)]
-         (when (or (= 0 k-idx#)
-                   (> input-val# output-val#))
-           (v-aset output-ary# output-addr# input-val#)))))))
-
-
-(defmacro cpu-max-pooling-backward-impl
-  [input output input-gradient output-gradient config cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         output-ary# (ArrayView/toView ~output)
-         input-gradient-ary# (ArrayView/toView ~input-gradient)
-         output-gradient-ary# (ArrayView/toView ~output-gradient)]
-     (impl/convolution-outer-kernel
-      ~config :pooling
-      (impl/convolution-roll-unroll-inner-kernel
-       (let [input-addr# ~'input-addr
-             input-val# (~cast-fn (if ~'input-valid?
-                                  (v-aget input-ary# input-addr#)
-                                  0.0))
-             output-addr# (+ (* ~'out-y ~'output-width)
-                             ~'out-x
-                             ~'chan-output-offset)
-             k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
-             output-val# (v-aget output-ary# output-addr#)]
-         (when (= input-val# output-val#)
-           (v-aset input-gradient-ary# input-addr#
-                 (+ (v-aget input-gradient-ary# input-addr#)
-                    (v-aget output-gradient-ary# output-addr#)))))))))
-
-(defmacro cpu-avg-pooling-forward-impl
-  [input output config cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         output-ary# (ArrayView/toView ~output)]
-     (impl/convolution-outer-kernel
-      ~config :pooling
-      (impl/convolution-roll-unroll-inner-kernel
-       (let [input-val# (~cast-fn (if ~'input-valid?
-                                  (v-aget input-ary# ~'input-addr)
-                                  0.0))
-             output-addr# (+ (* ~'out-y ~'output-width)
-                             ~'out-x
-                             ~'chan-output-offset)
-             k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
-             output-val# (~cast-fn (if (= 0 k-idx#)
-                                     0
-                                     (v-aget output-ary# output-addr#)))]
-         (v-aset output-ary# output-addr#
-                 (+ output-val#
-                    (/ input-val#
-                       ~'kernel-num-elems))))))))
-
-(defmacro cpu-avg-pooling-backward-impl
-  [input output input-gradient output-gradient config cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         output-ary# (ArrayView/toView ~output)
-         input-gradient-ary# (ArrayView/toView ~input-gradient)
-         output-gradient-ary# (ArrayView/toView ~output-gradient)]
-     (impl/convolution-outer-kernel
-      ~config :pooling
-      (impl/convolution-roll-unroll-inner-kernel
-       (when ~'input-valid?
-        (let [input-addr# ~'input-addr
-              input-val# (v-aget input-ary# input-addr#)
-              output-addr# (+ (* ~'out-y ~'output-width)
-                              ~'out-x
-                              ~'chan-output-offset)
-              output-val# (v-aget output-ary# output-addr#)]
-          (v-aset input-gradient-ary# input-addr#
-                  (+ (v-aget input-gradient-ary# input-addr#)
-                     (/ (v-aget output-gradient-ary# output-addr#)
-                        ~'kernel-num-elems)))))))))
-
-(defmacro cpu-avg-exc-pad-pooling-forward-impl
-  [input output config cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         output-ary# (ArrayView/toView ~output)]
-     (impl/convolution-outer-kernel
-      ~config :pooling
-      (impl/convolution-roll-unroll-inner-kernel
-       (let [input-val# (~cast-fn (if ~'input-valid?
-                                  (v-aget input-ary# ~'input-addr)
-                                  0.0))
-             output-addr# (+ (* ~'out-y ~'output-width)
-                             ~'out-x
-                             ~'chan-output-offset)
-             output-val# (v-aget output-ary# output-addr#)]
-         (v-aset output-ary# output-addr#
-                 (+ output-val#
-                    (/ input-val#
-                       ~'exc-pad-kernel-num-elems))))))))
-
-(defmacro cpu-avg-exc-pad-pooling-backward-impl
-  [input output input-gradient output-gradient config cast-fn]
-  `(let [input-ary# (ArrayView/toView ~input)
-         output-ary# (ArrayView/toView ~output)
-         input-gradient-ary# (ArrayView/toView ~input-gradient)
-         output-gradient-ary# (ArrayView/toView ~output-gradient)]
-     (impl/convolution-outer-kernel
-      ~config :pooling
-      (impl/convolution-roll-unroll-inner-kernel
-       (when ~'input-valid?
-        (let [input-addr# ~'input-addr
-              input-val# (v-aget input-ary# input-addr#)
-              output-addr# (+ (* ~'out-y ~'output-width)
-                              ~'out-x
-                              ~'chan-output-offset)
-              k-idx# (+ (* ~'k-y ~'kernel-width) ~'k-x)
-              output-val# (v-aget output-ary# output-addr#)]
-          (v-aset input-gradient-ary# input-addr#
-                  (+ (v-aget input-gradient-ary# input-addr#)
-                     (/ (v-aget output-gradient-ary# output-addr#)
-                        ~'exc-pad-kernel-num-elems)))))))))
 
 (defmacro cpu-prepare-bernoulli-impl
   [mult-buffer rand-buffer probability cast-fn]
@@ -548,24 +357,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (double value)))
-  (cpu-max-pooling-forward [input ^DoubleArrayView output conv-config]
-    (cpu-max-pooling-forward-impl input output conv-config double))
-  (cpu-max-pooling-backward [input ^DoubleArrayView output ^DoubleArrayView input-gradient
-                             ^DoubleArrayView output-gradient conv-config]
-    (cpu-max-pooling-backward-impl input output input-gradient output-gradient conv-config
-                                   double))
-  (cpu-avg-pooling-forward [input ^DoubleArrayView output conv-config]
-    (cpu-avg-pooling-forward-impl input output conv-config double))
-  (cpu-avg-pooling-backward [input ^DoubleArrayView output ^DoubleArrayView input-gradient
-                             ^DoubleArrayView output-gradient conv-config]
-    (cpu-avg-pooling-backward-impl input output input-gradient output-gradient conv-config
-                                   double))
-  (cpu-avg-exc-pad-pooling-forward [input ^DoubleArrayView output conv-config]
-    (cpu-avg-exc-pad-pooling-forward-impl input output conv-config double))
-  (cpu-avg-exc-pad-pooling-backward [input ^DoubleArrayView output ^DoubleArrayView input-gradient
-                             ^DoubleArrayView output-gradient conv-config]
-    (cpu-avg-exc-pad-pooling-backward-impl input output input-gradient output-gradient conv-config
-                                   double))
   (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
     (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability double))
   (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
@@ -583,24 +374,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (float value)))
-  (cpu-max-pooling-forward [input ^FloatArrayView output conv-config]
-    (cpu-max-pooling-forward-impl input output conv-config float))
-  (cpu-max-pooling-backward [input ^FloatArrayView output ^FloatArrayView input-gradient
-                             ^FloatArrayView output-gradient conv-config]
-    (cpu-max-pooling-backward-impl input output input-gradient output-gradient conv-config
-                                   float))
-  (cpu-avg-pooling-forward [input ^FloatArrayView output conv-config]
-    (cpu-avg-pooling-forward-impl input output conv-config float))
-  (cpu-avg-pooling-backward [input ^FloatArrayView output ^FloatArrayView input-gradient
-                             ^FloatArrayView output-gradient conv-config]
-    (cpu-avg-pooling-backward-impl input output input-gradient output-gradient conv-config
-                                   float))
-  (cpu-avg-exc-pad-pooling-forward [input ^FloatArrayView output conv-config]
-    (cpu-avg-exc-pad-pooling-forward-impl input output conv-config float))
-  (cpu-avg-exc-pad-pooling-backward [input ^FloatArrayView output ^FloatArrayView input-gradient
-                                     ^FloatArrayView output-gradient conv-config]
-    (cpu-avg-exc-pad-pooling-backward-impl input output input-gradient output-gradient conv-config
-                                           float))
   (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
     (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability float))
   (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
@@ -633,83 +406,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   "Create a implementation layer for the cpu backend."
   (fn [backend layer batch-size]
     (get layer :type)))
-
-
-(defn conv-type-layer->conv-config
-  "Backwards compatibility function necessary as the node format has changed over time."
-  [conv-layer]
-  (let [input-dims (first (graph/node->input-dimensions conv-layer))
-        output-dims (first (graph/node->output-dimensions conv-layer))]
-    (assoc conv-layer
-           :input-channels (get input-dims :channels)
-           :input-width (get input-dims :width)
-           :input-height (get input-dims :height)
-           :input-size (graph/dimensions->size input-dims)
-           :output-channels (get output-dims :channels)
-           :output-width (get output-dims :width)
-           :output-height (get output-dims :height)
-           :output-size (graph/dimensions->size output-dims))))
-
-
-
-(defrecord MaxPooling [backend conv-config]
-  compute-protocols/ComputeLayer
-  (forward [layer parameters input-buffers output-buffers]
-    (let [input (compute-layers/first-buffer input-buffers)
-          output (compute-layers/first-buffer output-buffers)
-          pool-op (get conv-config :pool-op :max)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
-        (doall (pmap (fn [[input output]]
-                       (condp = pool-op
-                         :max
-                         (cpu-max-pooling-forward (device-array->view input)
-                                                  (device-array->view output)
-                                                  conv-config)
-                         :avg
-                         (cpu-avg-pooling-forward (device-array->view input)
-                                                  (device-array->view output)
-                                                  conv-config)
-                         :avg-exc-pad
-                         (cpu-avg-exc-pad-pooling-forward (device-array->view input)
-                                                          (device-array->view output)
-                                                          conv-config)))
-                     (math/batched-data-to-per-input-data [input output]))))))
-
-  (backward [layer parameters output-buffers input-buffers]
-    (let [input (compute-layers/first-buffer input-buffers)
-          output (compute-layers/first-buffer output-buffers)
-          input-gradient (compute-layers/first-gradient input-buffers)
-          output-gradient (compute-layers/first-gradient output-buffers)
-          pool-op (get conv-config :pool-op :avg)]
-      (cpu-drv/with-stream-dispatch (drv/get-stream (.backend layer))
-        (doall (pmap (fn [[input output input-gradient output-gradient]]
-                       (cpu-fill (device-array->view input-gradient) 0)
-                       (condp = pool-op
-                         :max
-                         (cpu-max-pooling-backward (device-array->view input)
-                                                   (device-array->view output)
-                                                   (device-array->view input-gradient)
-                                                   (device-array->view output-gradient)
-                                                   conv-config)
-                         :avg
-                         (cpu-avg-pooling-backward (device-array->view input)
-                                                   (device-array->view output)
-                                                   (device-array->view input-gradient)
-                                                   (device-array->view output-gradient)
-                                                   conv-config)
-                         :avg-exc-pad
-                         (cpu-avg-exc-pad-pooling-backward (device-array->view input)
-                                                           (device-array->view output)
-                                                           (device-array->view input-gradient)
-                                                           (device-array->view output-gradient)
-                                                           conv-config)))
-                     (math/batched-data-to-per-input-data
-                      [input output input-gradient output-gradient])))))))
-
-
-(defmethod cpu-layer :max-pooling
-  [backend layer batch-size]
-  (->MaxPooling backend (conv-type-layer->conv-config layer)))
 
 
 (defn- layer-output->tensor
