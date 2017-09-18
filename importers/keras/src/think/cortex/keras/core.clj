@@ -94,9 +94,10 @@
   [{:keys [config inbound_nodes]}]
   (let [[kernel-x kernel-y] (:pool_size config)
         [stride-x stride-y] (:strides config)
-        layer             (layers/convolutional-type-layer :max-pooling
-                                                           kernel-x kernel-y 0 0
-                                                           stride-x stride-y 0 :floor)
+        layer             (-> (layers/convolutional-type-layer :max-pooling
+                                                               kernel-x kernel-y 0 0
+                                                               stride-x stride-y 0 :floor)
+                              (assoc :pool-op :max))
         layer-id            (-> config :name keyword)]
     (if inbound_nodes
       (assoc layer :id layer-id :parents (inbound-nodes->parents inbound_nodes))
