@@ -1,8 +1,8 @@
-(defproject thinktopic/experiment "0.9.19"
+(defproject thinktopic/experiment "0.9.20-SNAPSHOT"
   :description "A higher-level library for performing experiments with cortex."
   :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
                  [org.clojure/clojurescript "1.9.854"]
-                 [thinktopic/cortex "0.9.19"]
+                 [thinktopic/cortex "0.9.20-SNAPSHOT"]
                  [thinktopic/think.image "0.4.16"]
                  [org.shark8me/tfevent-sink "0.1.3"]
                  ;;Default way of displaying anything is a web page.
