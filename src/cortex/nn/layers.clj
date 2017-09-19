@@ -348,12 +348,12 @@ If the input contains no channels then you get a scale factor per input paramete
   [layer-type kernel-width kernel-height pad-x pad-y
    stride-x stride-y num-kernels dimension-op
    & args]
-  (when (or (= 0 stride-x)
-            (= 0 stride-y))
-    (throw (Exception. "Convolutional layers must of stride >= 1")))
-  (when (or (= 0 kernel-width)
-            (= 0 kernel-height))
-    (throw (Exception. "Convolutional layers must of kernel dimensions >= 1")))
+  (when (or (> 1 stride-x)
+            (> 1 stride-y))
+    (throw (Exception. "Convolutional layers must have stride >= 1")))
+  (when (or (> 1 kernel-width)
+            (> 1 kernel-height))
+    (throw (Exception. "Convolutional layers must have kernel dimensions >= 1")))
   (merge-args {:type layer-type :kernel-width kernel-width :kernel-height kernel-height
                :pad-x pad-x :pad-y pad-y :stride-x stride-x :stride-y stride-y
                :num-kernels num-kernels :dimension-op dimension-op}
