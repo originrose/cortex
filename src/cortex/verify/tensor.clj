@@ -873,11 +873,14 @@ for the cuda backend."
                                   (partition dimension)
                                   (partition channels)))
           max-pooling-desc (tensor/pooling-descriptor datatype channels 3 3 1 1 2 2
-                                                      :pool-op :max)
+                                                      :pool-op :max
+                                                      :dimension-op :floor)
           avg-pooling-desc (tensor/pooling-descriptor datatype channels 3 3 1 1 2 2
-                                                      :pool-op :avg)
+                                                      :pool-op :avg
+                                                      :dimension-op :floor)
           avg-exc-pad-pooling-desc (tensor/pooling-descriptor datatype channels 3 3 1 1 2 2
-                                                              :pool-op :avg-exc-pad)
+                                                              :pool-op :avg-exc-pad
+                                                              :dimension-op :floor)
           {:keys [output-width output-height]} (tensor/get-convolution-output-dimensions
                                                  max-pooling-desc
                                                  dimension dimension)
