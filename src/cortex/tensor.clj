@@ -1329,12 +1329,14 @@ a few compatibility issues."
 :height
 }"
   [conv-descriptor input-width input-height]
-  {:output-width (get-padded-strided-dimension input-width (:pad-x conv-descriptor)
-                                               (:kernel-width conv-descriptor) (:stride-x conv-descriptor)
-                                               :floor)
-   :output-height (get-padded-strided-dimension input-height (:pad-y conv-descriptor)
-                                                (:kernel-height conv-descriptor) (:stride-y conv-descriptor)
-                                                :floor)})
+  (let [{:keys [dimension-op]
+         :or {dimension-op :floor}} conv-descriptor]
+   {:output-width (get-padded-strided-dimension input-width (:pad-x conv-descriptor)
+                                                (:kernel-width conv-descriptor) (:stride-x conv-descriptor)
+                                                dimension-op)
+    :output-height (get-padded-strided-dimension input-height (:pad-y conv-descriptor)
+                                                 (:kernel-height conv-descriptor) (:stride-y conv-descriptor)
+                                                 dimension-op)}))
 
 
 (defn choose-convolution-algorithms
