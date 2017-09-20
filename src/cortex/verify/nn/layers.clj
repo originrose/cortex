@@ -424,7 +424,6 @@
 
 (defn basic-conv-layer
   [context]
-
   (let [batch-size 10
         channel-count 4
         input (repeat batch-size (range 1 10))
@@ -465,7 +464,10 @@
            (m/eseq (get-in parameters [:bias :buffer :gradient]))))
     (is (= (flatten (repeat batch-size (map double [10.0 20.0 10.0 20.0 40.0 20.0 20.0 40.0 20.0
                                                     10.0 20.0 10.0])))
-           (m/eseq input-gradient)))))
+           (m/eseq input-gradient))))
+  (testing "Test bad strides and dims."
+    (is (thrown? Exception (layers/convolutional -1 0 1 1)))
+    (is (thrown? Exception (layers/convolutional 3 0 -1 1)))))
 
 
 
