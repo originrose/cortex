@@ -1,7 +1,7 @@
 (ns cortex.tensor
   "Tensor library used to implement the basic math abstraction in cortex.  This abstraction is
   meant to provide a language in which to implement new things but that explicitly avoids access
-  to certain parts of the comput ecosystem that the engine driving the ecosystem is expected to
+  to certain parts of the compute ecosystem that the engine driving the ecosystem is expected to
   manage.  Clients should not, for instance, access the stream or the datatype directly.
 
 There is an implicit assumption throughout this file that implementations will loop through
@@ -920,13 +920,18 @@ The leading dimensions of both vectors must match."
                                  (map (comp dims/access-increasing? :dimensions) tensors))}))
 
 
+(defn- external-library-check!
+  [method-name & tensors]
+  (apply ensure-datatypes (get-datatype (first tensors)) (rest tensors))
+  (apply ensure-same-device tensors)
+  (ensure-cudnn-datatype (get-datatype (first tensors)) method-name)
+  (apply ensure-external-library-compatible tensors))
+
+
 (defn gemm!
   "C = alpha * (trans-a? A) * (trans-b? B) + beta * C."
   ^Tensor [C trans-a? trans-b? alpha A B beta]
-  (ensure-datatypes (get-datatype C) A B)
-  (ensure-same-device C A B)
-  (ensure-cudnn-datatype (get-datatype C) "gemm")
-  (ensure-external-library-compatible C A B)
+  (external-library-check! "gemm!" C A B)
   (let [[a-row-count a-col-count :as a-shape] (trans-2d-shape trans-a? A)
         [b-row-count b-col-count :as b-shape] (trans-2d-shape trans-b? B)
         [c-row-count c-col-count :as c-shape] (tensor->2d-shape C)
@@ -980,11 +985,8 @@ So either it is dense *or* num-columns is 1"
 (defn gemv!
   "c = alpha * (trans-a? A) * x + beta * c"
   ^Tensor [c trans-a? alpha A x beta]
-  (ensure-datatypes (get-datatype c) A x)
-  (ensure-same-device c A x)
-  (ensure-cudnn-datatype (get-datatype c) "gemv")
+  (external-library-check! "gemv!" c A x)
   (ensure-vector-indexable x c)
-  (ensure-external-library-compatible c A x)
   (let [[a-row-count a-col-count] (tensor->2d-shape A)
         inc-x (blas-vector-increment x)
         inc-c (blas-vector-increment c)
@@ -1009,10 +1011,7 @@ preconditions and then returns the type of batch normalization required (spatial
                       [1 (first input-shape)]
                       input-shape)
         input (first io-args)]
-    (apply ensure-datatypes (get-datatype (first all-args)) all-args)
-    (apply ensure-same-device all-args)
-    (ensure-cudnn-datatype (get-datatype (first io-args)) "batch-normalize")
-    (apply ensure-external-library-compatible (concat io-args mean-var-bias-scale-args))
+    (apply external-library-check! "batch-normalize" all-args)
     (when-not-error (> (double epsilon) 1e-5)
       "Epsilon cannot be smaller than 1e-5 (cudnn limitation"
       {:epsilon epsilon})
@@ -1251,10 +1250,7 @@ If the input has 3 dimensions, then the first dimensions is interpreted
 as a batch-count, the second as a channel-count and the third as an element
 count.  This will perform per-element, per-batch spatial softmax across the channels."
   ^Tensor [output input]
-  (ensure-datatypes (get-datatype output) input)
-  (ensure-same-device output input)
-  (ensure-cudnn-datatype (get-datatype input) "softmax!")
-  (ensure-external-library-compatible input output)
+  (external-library-check! "softmax!" output input)
   (when-not-error (= (shape output)
                      (shape input))
     "Input, output shapes do not match"
@@ -1333,12 +1329,14 @@ a few compatibility issues."
 :height
 }"
   [conv-descriptor input-width input-height]
-  {:output-width (get-padded-strided-dimension input-width (:pad-x conv-descriptor)
-                                               (:kernel-width conv-descriptor) (:stride-x conv-descriptor)
-                                               :floor)
-   :output-height (get-padded-strided-dimension input-height (:pad-y conv-descriptor)
-                                                (:kernel-height conv-descriptor) (:stride-y conv-descriptor)
-                                                :floor)})
+  (let [{:keys [dimension-op]
+         :or {dimension-op :floor}} conv-descriptor]
+   {:output-width (get-padded-strided-dimension input-width (:pad-x conv-descriptor)
+                                                (:kernel-width conv-descriptor) (:stride-x conv-descriptor)
+                                                dimension-op)
+    :output-height (get-padded-strided-dimension input-height (:pad-y conv-descriptor)
+                                                 (:kernel-height conv-descriptor) (:stride-y conv-descriptor)
+                                                 dimension-op)}))
 
 
 (defn choose-convolution-algorithms
@@ -1414,9 +1412,7 @@ where direction may be:
   "Perform convolution forward.  Input,output must be 4d tensors while weights
 must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspace-size]) ecount"
   [output output-alpha input weights workspace conv-descriptor algorithms]
-  (ensure-datatypes (get-datatype output) input weights)
-  (ensure-same-device output input weights)
-  (ensure-conv-weight-dims-match input weights conv-descriptor)
+  (external-library-check! "convolution-forward!" output input weights)
   (ensure-conv-io conv-descriptor [input] [output])
   (tm/convolution-forward! (check-stream)
                            (tensor->buffer output) (tensor->dimensions output) output-alpha
@@ -1429,6 +1425,7 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
 
 (defn convolution-backward-weights!
   [weight-gradient weight-gradient-alpha output-gradient input workspace conv-descriptor algorithms]
+  (external-library-check! "convolution-backward-weights!" weight-gradient output-gradient input)
   (tm/convolution-backward-weights! (check-stream)
                                     (tensor->buffer weight-gradient) (tensor->dimensions weight-gradient)
                                     weight-gradient-alpha
@@ -1441,6 +1438,8 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
 
 (defn convolution-backward-data!
   [input-gradient input-gradient-alpha output-gradient weights workspace conv-descriptor algorithms]
+  (external-library-check! "convolution-backward-data!" input-gradient output-gradient weights)
+  (ensure-conv-io conv-descriptor [input-gradient] [output-gradient])
   (tm/convolution-backward-data! (check-stream)
                                  (tensor->buffer input-gradient) (tensor->dimensions input-gradient)
                                  input-gradient-alpha
@@ -1448,6 +1447,64 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
                                  (tensor->buffer weights) (tensor->dimensions weights)
                                  (tensor->buffer workspace) (ecount workspace)
                                  conv-descriptor algorithms)
+  input-gradient)
+
+
+(def pool-operations #{:max :avg :avg-exc-pad})
+
+
+(defn pooling-descriptor
+  "Create a descriptor for the pooling system.  This is required to pass into pooling forward and pooling backward."
+  [datatype channels kern-width kern-height
+   pad-x pad-y stride-x stride-y
+   & {:keys [dimension-op pool-op]
+      :or {dimension-op :ceil pool-op :max}}]
+  (let [retval {:in-channels  channels
+                :out-channels channels
+                :datatype datatype
+                :kernel-width   kern-width
+                :kernel-height  kern-height
+                :pad-x        pad-x
+                :pad-y        pad-y
+                :stride-x     stride-x
+                :stride-y     stride-y
+                :pool-op      pool-op
+                :dimension-op dimension-op}]
+    (ensure-non-nil retval)
+    (when-not (get pool-operations pool-op)
+      (throw (ex-info "Max pooling layers have three possible pool operations:"
+                      {:possible-operation-set pool-operations
+                       :pool-op                pool-op})))
+    (assoc retval
+      :descriptor (tm/pooling-descriptor (check-stream)
+                                         datatype kern-width kern-height
+                                         pad-x pad-y stride-x stride-y pool-op dimension-op))))
+
+
+(defn pooling-forward!
+  [output output-alpha input pool-descriptor]
+  (external-library-check! "pooling-forward!" output input)
+  (ensure-conv-io pool-descriptor [input] [output])
+  (tm/pooling-forward! (check-stream)
+                       (tensor->buffer output)
+                       (tensor->dimensions output)
+                       output-alpha
+                       (tensor->buffer input)
+                       (tensor->dimensions input)
+                       pool-descriptor)
+  output)
+
+
+(defn pooling-backward!
+  [input-gradient input-grad-alpha input output output-gradient pool-descriptor]
+  (external-library-check! "pooling-backward!" input-gradient input output output-gradient)
+  (ensure-conv-io pool-descriptor [input-gradient input] [output output-gradient])
+  (tm/pooling-backward! (check-stream)
+                        (tensor->buffer input-gradient) (tensor->dimensions input-gradient) input-grad-alpha
+                        (tensor->buffer input) (tensor->dimensions input)
+                        (tensor->buffer output) (tensor->dimensions output)
+                        (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
+                        pool-descriptor)
   input-gradient)
 
 

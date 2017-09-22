@@ -194,7 +194,6 @@ resource/release *must* be a valid call on the returned value.")
                                   batch-size
                                   max-ideal-workspace-size use-defaults?])
 
-
   (convolution-forward! [stream
                          output output-dims output-alpha
                          input input-dims
@@ -216,4 +215,21 @@ resource/release *must* be a valid call on the returned value.")
                                output-gradient output-gradient-dims
                                weights weights-dims
                                workspace workspace-ecount
-                               conv-descriptor algorithms]))
+                               conv-descriptor algorithms])
+
+
+  (pooling-descriptor [stream
+                       datatype kern-width kern-height
+                       pad-x pad-y stride-x stride-y pool-op dimension-op])
+
+  (pooling-forward! [stream
+                     output output-dims output-alpha
+                     input input-dims
+                     pool-descriptor])
+
+  (pooling-backward! [stream
+                      input-grad input-grad-dims input-grad-alpha
+                      input input-dims
+                      output output-dims
+                      output-grad output-grad-dims
+                      pool-descriptor]))
