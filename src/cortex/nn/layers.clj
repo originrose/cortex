@@ -263,7 +263,7 @@ If the input contains no channels then you get a scale factor per input paramete
 (defn dropout
   "Bernoulli dropout where random (flat distribution) activations are zeroed out.
   Probability is the probability that an activation will survive so a probability of
-  1 means no dropout while a probability of will zero out the activation vector."
+  1 means no dropout while a probability of zero will zero out the activation vector."
   ([arg]
    (let [args (if (map? arg)
                 arg
