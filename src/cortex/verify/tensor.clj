@@ -3,6 +3,7 @@
             [cortex.compute.driver :as drv]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
+            [clojure.core.matrix.stats :as stats]
             [cortex.util :as util]
             [cortex.tensor :as tensor]))
 
@@ -999,3 +1000,34 @@ for the cuda backend."
                        0.2777777777777778 0.1111111111111111 0.1111111111111111]
                       (vec (ct/to-double-array avg-exc-pad-input-gradient))
                       1e-4))))))
+
+(defn rand-operator
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (testing "Gaussian rand"
+     (let [test-vec (->> (range 1 11)
+                         (mapcat (fn [idx]
+                                   (let [tens (tensor/rand! (tensor/new-tensor [10000])
+                                                            (tensor/gaussian-distribution
+                                                             :mean idx :variance idx))
+                                         values (tensor/to-double-array tens)]
+                                     [(stats/mean values)
+                                      (stats/variance values)])))
+                         vec)]
+       (is (m/equals [1 1 2 2 3 3 4 4 5 5 6 6 7 7 8 8 9 9 10 10]
+                     test-vec
+                     1))))
+   (testing "Flat rand"
+     (let [test-vec (->> (range 1 11)
+                         (mapcat (fn [idx]
+                                   (let [tens (tensor/rand! (tensor/new-tensor [10000])
+                                                            (tensor/flat-distribution
+                                                             :minimum (- idx 2)
+                                                             :maximum (+ idx 2)))
+                                         values (tensor/to-double-array tens)]
+                                     [(stats/mean values)])))
+                         vec)]
+       (is (m/equals [1 2 3 4 5 6 7 8 9 10]
+                     test-vec
+                     1))))))

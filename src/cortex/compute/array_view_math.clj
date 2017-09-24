@@ -25,7 +25,6 @@
   ;;Create a scale vector with either 1.0 in the row if the row-len is < the
   ;;l2 constraint or (/ l2-max-constraint row-len) otherwise.
   (l2-constraint-scale [a inc-a l2-max-constraint])
-  (generate-rands [rand-buffer distribution])
   (select [a res lt-zero ge-zero])
   (indirect-add [x alpha x-indexes beta y y-indexes
                  result res-indexes n-elems-per-idx]))
@@ -211,8 +210,6 @@
     (elem-mul-impl a inc-a alpha b inc-b res inc-res double))
   (l2-constraint-scale [^DoubleArrayView a inc-a l2-max-constraint]
     (l2-constraint-scale-impl a inc-a l2-max-constraint double))
-  (generate-rands [^DoubleArrayView rand-buffer distribution elem-count]
-    (throw (Exception. "Random generation operates on float buffers for CUDA compatibility")))
   (select [^DoubleArrayView a ^DoubleArrayView res lt-zero ge-zero]
     (select-impl a res lt-zero ge-zero double))
   (indirect-add [^DoubleArrayView x alpha ^IntArrayView x-indexes
@@ -296,36 +293,6 @@
     (elem-mul-impl a inc-a alpha b inc-b res inc-res float))
   (l2-constraint-scale [^FloatArrayView a inc-a l2-max-constraint]
     (l2-constraint-scale-impl a inc-a l2-max-constraint float))
-  (generate-rands [^FloatArrayView rand-buffer distribution]
-    (let [rand-view (ArrayView/toView rand-buffer)
-          rand-gen (Random.)
-          elem-count (.length rand-view)]
-      (cond
-        (= (:type distribution) :gaussian)
-        (let [mean (float (:mean distribution))
-              variance (float (:variance distribution))
-              sum-var (float-array 2)]
-          (c-for [idx 0 (< idx elem-count) (inc idx)]
-                 (let [next-rand (.nextGaussian rand-gen)]
-                   (v-aset rand-view idx next-rand)
-                   (aset sum-var 0 (+ (aget sum-var 0) next-rand))
-                   (aset sum-var 1 (+ (aget sum-var 1)
-                                      (float (Math/abs next-rand))))))
-          (let [actual-variance (/ (aget sum-var 1) elem-count)
-                variance-fix (float (Math/sqrt (if (> actual-variance 0.0)
-                                                 (/ variance actual-variance)
-                                                 actual-variance)))
-                actual-mean (/ (aget sum-var 0) elem-count)
-                adjusted-mean (* actual-mean variance-fix)
-                mean-fix (- mean adjusted-mean)]
-            (c-for [idx 0 (< idx elem-count) (inc idx)]
-                   (v-aset rand-view idx (+ (* variance-fix (v-aget rand-view idx))
-                                            mean-fix)))))
-        (= (:type distribution) :flat)
-        (c-for [idx 0 (< idx elem-count) (inc idx)]
-               (v-aset rand-view idx (float (.nextFloat rand-gen))))
-        :else
-        (throw (Exception. (str "Unrecognized distribution: " distribution))))))
   (select [^FloatArrayView a ^FloatArrayView res lt-zero ge-zero]
     (select-impl a res lt-zero ge-zero float))
   (indirect-add [^FloatArrayView x alpha ^IntArrayView x-indexes

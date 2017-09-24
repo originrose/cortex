@@ -16,11 +16,13 @@
             [think.resource.core :as resource]
             [cortex.tensor :as ct]
             [cortex.tensor.dimensions :as ct-dims]
-            [cortex.nn.impl :as impl])
+            [cortex.nn.impl :as impl]
+            [clojure.core.matrix.stats :as stats])
   (:import [cortex.compute.cpu.driver CPUStream]
            [com.github.fommil.netlib BLAS]
            [think.datatype DoubleArrayView FloatArrayView
-            LongArrayView IntArrayView ShortArrayView ByteArrayView]))
+            LongArrayView IntArrayView ShortArrayView ByteArrayView]
+           [java.security SecureRandom]))
 
 
 (set! *unchecked-math* :warn-on-boxed)
@@ -1791,7 +1793,31 @@
                        (catch Throwable e
                          (clojure.pprint/pprint e)
                          (throw e)))))
-             dorun)))))
+             dorun))))
+  (rand! [stream
+          dest dest-dims
+          {:keys [type] :as distribution}]
+    (let [rand-view (datatype->view-cast-fn :float dest)
+          elem-count (ct-dims/ecount dest-dims)
+          rand-gen (SecureRandom.)]
+      (cond
+        (= (:type distribution) :gaussian)
+        (let [mean (float (:mean distribution))
+              multiplier (Math/sqrt (float (:variance distribution)))]
+          (c-for [idx 0 (< idx elem-count) (inc idx)]
+                 (let [next-rand (+ (* multiplier (.nextGaussian rand-gen))
+                                    mean)]
+                   (v-aset rand-view idx next-rand))))
+        (= (:type distribution) :flat)
+        (let [minimum (float (:minimum distribution))
+              maximum (float (:maximum distribution))
+              range (- maximum minimum)]
+         (c-for [idx 0 (< idx elem-count) (inc idx)]
+                (v-aset rand-view idx (+ minimum
+                                         (* (.nextFloat rand-gen)
+                                            range)))))
+        :else
+        (throw (Exception. (str "Unrecognized distribution: " distribution)))))))
 
 
 (defn as-tensor

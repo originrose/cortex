@@ -169,54 +169,55 @@ a datastructure that shares the backing store."
   "The reason this function is not part of forward is that in the off case
 you want to check gradients you need to call prepare-forward once precisely
 and then forward many times for every parameter of the network."
-  [{:keys [backend layer mult-buffer rand-buffer]} batch-size]
-  (let [dis-type (if (= (:distribution layer) :bernoulli)
-                   (math/flat-desc)
-                   (math/gaussian-desc 1 (:variance layer)))
-        elem-count (* (long batch-size) (long (graph/node->input-size layer)))]
-    (math/generate-rands (nn-backend/get-stream)
-                         (math/device-buffer rand-buffer)
-                         dis-type)
-    (if (= (:distribution layer) :bernoulli)
-      (nn-backend/prepare-bernoulli-dropout! backend (:probability layer)
-                                             rand-buffer mult-buffer)
-      (nn-backend/prepare-gaussian-dropout! backend rand-buffer mult-buffer))))
+  [{:keys [backend layer mult-buffer rand-buffer]}]
+  (tensor/with-stream (nn-backend/get-stream)
+    (let [distribution (if (= (:distribution layer) :bernoulli)
+                         (let [maximum (float (:probability layer))
+                               minimum (- maximum 1.0)]
+                          (tensor/flat-distribution :minimum minimum :maximum maximum))
+                         (tensor/gaussian-distribution :mean 1 :variance (:variance layer)))]
+      (tensor/rand! rand-buffer distribution)
+      (when-not (identical? mult-buffer rand-buffer)
+        (tensor/assign! mult-buffer rand-buffer))
+      (when (= (:distribution layer) :bernoulli)
+        ;;We set a multiplicative constant so that a network with dropout
+        ;;produces a signal of the same magnitude as it would be without the dropout
+        (tensor/ternary-op! mult-buffer 1.0 mult-buffer
+                            0.0 0.0
+                            1.0 (/ 1.0 (double
+                                        (:probability layer)))
+                            :select)))))
 
 
 (defrecord Dropout [backend layer batch-size mult-buffer rand-buffer]
   compute-protocols/ComputeLayer
   (forward [this parameter-buffers input-buffers output-buffers]
-    (let [input (first-buffer input-buffers)
-          output (first-buffer output-buffers)]
-      (math/elem-mul (nn-backend/get-stream)
-                    1.0 (math/device-buffer input) 1
-                    (math/device-buffer mult-buffer) 1
-                    (math/device-buffer output) 1)))
+    (tensor/with-stream (nn-backend/get-stream)
+     (let [input (->simple-batch-tensor (first-buffer input-buffers))
+           output (->simple-batch-tensor (first-buffer output-buffers))]
+       (tensor/binary-op! output 1.0 input 1.0 mult-buffer :*))))
+
   (backward [this parameter-buffers output-buffers input-buffers]
-    (let [input-gradient (first-gradient input-buffers)
-          output-gradient (first-gradient output-buffers)]
-     (math/elem-mul (nn-backend/get-stream)
-                    1.0 (math/device-buffer output-gradient) 1
-                    (math/device-buffer mult-buffer) 1
-                    (math/device-buffer input-gradient) 1)))
+    (tensor/with-stream (nn-backend/get-stream)
+     (let [input-gradient (->simple-batch-tensor (first-gradient input-buffers))
+           output-gradient (->simple-batch-tensor (first-gradient output-buffers))]
+       (tensor/binary-op! input-gradient 1.0 output-gradient 1.0 mult-buffer :*))))
 
   compute-protocols/ComputePrepareForward
   (prepare-forward! [this parameter-buffers input-buffers output-buffers]
-    (dropout-prepare-forward! this batch-size)))
-
+    (dropout-prepare-forward! this)))
 
 
 (defmethod create :dropout
   [backend node batch-size]
-  (let [n-items (long (graph/node->input-size node))
-        mult-buffer (nn-backend/new-array backend [n-items]
-                                          batch-size)
-        rand-buffer (math/->DeviceArray (nn-backend/allocate-rand-buffer
-                                         backend
-                                         (math/ensure-factor-of-2
-                                          (* n-items (long batch-size))))
-                                        (math/tensor batch-size 1 1 n-items))]
-    (->Dropout backend node batch-size mult-buffer rand-buffer)))
+  (tensor/with-stream (nn-backend/get-stream)
+    (tensor/with-datatype (dtype/get-datatype backend)
+      (let [n-items (long (graph/node->input-size node))
+            mult-buffer (tensor/new-tensor [batch-size n-items])
+            rand-buffer (if (= :float (dtype/get-datatype mult-buffer))
+                          mult-buffer
+                          (tensor/new-tensor [batch-size n-items] :datatype :float))]
+        (->Dropout backend node batch-size mult-buffer rand-buffer)))))
 
 
 (defrecord BatchNormalization [backend layer batch-means batch-variances

@@ -64,8 +64,6 @@
 (defprotocol PCPUNetworkImpl
   "Implementation of various functions based on buffer datatype."
   (cpu-fill [buffer value])
-  (cpu-prepare-bernoulli-dropout [mult-buffer rand-buffer probability])
-  (cpu-prepare-gaussian-dropout [mult-buffer rand-buffer])
   (cpu-lrn-forward [input output input-tensor n k alpha beta])
   (cpu-lrn-backward [input output-gradient input-gradient input-tensor n k alpha beta]))
 
@@ -88,31 +86,6 @@
        (recur (inc idx#)
               (+ sum-val# (v-aget ~ary (+ ~start-idx idx#))))
        sum-val#)))
-
-
-(defmacro cpu-prepare-bernoulli-impl
-  [mult-buffer rand-buffer probability cast-fn]
-  `(let [probability# (~cast-fn ~probability)
-         scale-val# (~cast-fn (/ 1.0 probability#))
-         mult-ary# (ArrayView/toView ~mult-buffer)
-         elem-count# (.length mult-ary#)
-         rand-ary# (ArrayView/toView ~rand-buffer)]
-     (c-for [idx# 0 (< idx# elem-count#) (inc idx#)]
-            (v-aset mult-ary# idx#
-                    (~cast-fn (if (> (v-aget rand-ary# idx#)
-                                     probability#)
-                                0.0
-                                scale-val#))))))
-
-
-(defmacro cpu-prepare-gaussian-impl
-  [mult-buffer rand-buffer cast-fn]
-  `(let [mult-ary# (ArrayView/toView ~mult-buffer)
-         elem-count# (.length mult-ary#)
-         rand-ary# (ArrayView/toView ~rand-buffer)]
-     (c-for [idx# 0 (< idx# elem-count#) (inc idx#)]
-            (v-aset mult-ary# idx#
-                    (~cast-fn (v-aget rand-ary# idx#))))))
 
 
 
@@ -357,10 +330,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (double value)))
-  (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
-    (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability double))
-  (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
-    (cpu-prepare-gaussian-impl mult-buffer rand-buffer double))
   (cpu-lrn-forward [input ^DoubleArrayView output ^Tensor input-tensor n k alpha beta]
     (cpu-lrn-forward-impl input output input-tensor n k alpha beta double))
   (cpu-lrn-backward [input ^DoubleArrayView output-gradient ^DoubleArrayView input-gradient
@@ -374,10 +343,6 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
   (cpu-fill [buffer value]
     (Arrays/fill (.data buffer) (.offset buffer)
                  (+ (.offset buffer) (.length buffer)) (float value)))
-  (cpu-prepare-bernoulli-dropout [mult-buffer ^FloatArrayView rand-buffer probability]
-    (cpu-prepare-bernoulli-impl mult-buffer rand-buffer probability float))
-  (cpu-prepare-gaussian-dropout [mult-buffer ^FloatArrayView rand-buffer]
-    (cpu-prepare-gaussian-impl mult-buffer rand-buffer float))
   (cpu-lrn-forward [input ^FloatArrayView output ^Tensor input-tensor n k alpha beta]
     (cpu-lrn-forward-impl input output input-tensor n k alpha beta float))
   (cpu-lrn-backward [input ^FloatArrayView output-gradient ^FloatArrayView input-gradient
@@ -442,14 +407,4 @@ https://github.com/thinktopic/cortex/blob/local-response-normalization/sage/loca
 (extend-type CPUBackend
   nn-backend/PLayerCreation
   (create [backend layer batch-size]
-    (cpu-layer backend layer batch-size))
-  nn-backend/PDropout
-  (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer]
-    (cpu-drv/with-stream-dispatch (.stream backend)
-      (cpu-prepare-bernoulli-dropout (device-array->view mult-buffer)
-                                     (device-array->view rand-buffer) probability)))
-  ;;Gaussian distribution copied to mult buffer.
-  (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]
-    (cpu-drv/with-stream-dispatch (.stream backend)
-      (cpu-prepare-gaussian-dropout (device-array->view mult-buffer)
-                                    (device-array->view rand-buffer)))))
+    (cpu-layer backend layer batch-size)))
