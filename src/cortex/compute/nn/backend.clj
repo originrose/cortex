@@ -50,12 +50,6 @@ some specific data from a description.  Most layers need to implement
 computelayer/forward,backward."
   (create [backend layer batch-size]))
 
-(defprotocol PDropout
-  ;;Flat distribution -> scaled 1 or 0 multiplicative buffer.
-  (prepare-bernoulli-dropout! [backend probability rand-buffer mult-buffer])
-  ;;Gaussian distribution copied to mult buffer.
-  (prepare-gaussian-dropout! [backend rand-buffer mult-buffer]))
-
 (defn array
   ([backend data items-per-batch]
    (math/array (get-stream) (dtype/get-datatype backend)
