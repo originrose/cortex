@@ -1000,6 +1000,60 @@ So either it is dense *or* num-columns is 1"
   c)
 
 
+(defn gaussian-distribution
+  "Create a Gaussian distribution description"
+  [& {:keys [mean variance]
+      :or {mean 0
+           variance 1}}]
+  {:type :gaussian
+   :mean (double mean)
+   :variance (double variance)})
+
+
+(defn flat-distribution
+  "Create a flat distribution description.
+Flat (equal) distribution including minimum but excluding maximum
+[minimum maximum)"
+  [& {:keys [minimum maximum]
+      :or {minimum 0 maximum 1}}]
+  (when-not-error (< (double minimum)
+                     (double maximum))
+    "Minimum must be less than maximum"
+    {:minimum minimum
+     :maximum maximum})
+  {:type :flat
+   :minimum (double minimum)
+   :maximum (double maximum)})
+
+
+(defn- valid-distribution?
+  "This screams for spec."
+  [{:keys [type] :as distribution}]
+  (when-not-error (or (= type :gaussian)
+                      (= type :flat))
+    "Invalid distibution type"
+    {:valid-types #{:flat :gaussian}
+     :type type}))
+
+
+(defn rand!
+  "Generate a pool of random numbers.
+Due to cuda limitations, this function is limited to floating point numbers."
+  ^Tensor [dest distribution]
+  (when-not-error (= :float (get-datatype dest))
+    "Can only generate rands into floating point buffers"
+    {:expected-datatype :float
+     :received-datatype (get-datatype dest)})
+  (when-not-error (and (dense? dest)
+                       (dims/access-increasing? (tensor->dimensions dest)))
+    "Rand generation must have simple dense buffers" {})
+  (valid-distribution? distribution)
+  (tm/rand! (check-stream)
+            (tensor->buffer dest)
+            (tensor->dimensions dest)
+            distribution)
+  dest)
+
 
 (defn- batch-normalize-setup
   "The various batch normalize calls all have a set of setup rules.  This checks all

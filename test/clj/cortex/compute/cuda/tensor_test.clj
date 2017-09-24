@@ -105,3 +105,8 @@
 
 (def-double-float-test pooling-operator
   (verify-tensor/pooling-operator (create-driver) *datatype*))
+
+
+;;Note that this is not a float-double test.
+(deftest rand-operator
+  (verify-tensor/rand-operator (create-driver) :float))
