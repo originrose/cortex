@@ -73,8 +73,6 @@ to be same length as a and b. The inc params are related to strides.")
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     "Given a vector that contains x^2,
 a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
-  (generate-rands [stream rand-buffer distribution]
-    "Generate some random numbers defined by the distribution.")
   (select [stream src-buf dest-buf less-zero-value equal-or-greater-val]
     "Check buffer value against zero and set it to one value if it is less than zero
 and another value if it is greater or equal to zero:

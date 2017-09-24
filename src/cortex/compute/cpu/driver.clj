@@ -349,9 +349,6 @@ Use with care; the synchonization primitives will just hang with this stream."
     (with-stream-dispatch stream
       (avm/l2-constraint-scale (dtype/->view a) inc-a l2-max-constraint)))
 
-  (generate-rands [stream rand-buffer distribution]
-    (with-stream-dispatch stream
-      (avm/generate-rands (dtype/->view rand-buffer) distribution)))
 
   (select [stream src-buf buffer less-zero-value equal-or-greater-val]
     (with-stream-dispatch stream

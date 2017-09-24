@@ -951,8 +951,7 @@ relies only on blockDim.x block.x and thread.x"
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream])
   (cuda-mul-rows [A a-colstride x inc-x a-row-count a-col-count C c-colstride stream])
   (cuda-elem-mul [x inc-x alpha y inc-y res inc-res elem-count stream])
-  (cuda-l2-constraint-scale [a inc-a a-elem-count l2-max-constraint stream])
-  (cuda-generate-rands [rand-buffer distribution elem-count stream]))
+  (cuda-l2-constraint-scale [a inc-a a-elem-count l2-max-constraint stream]))
 
 
 (defn bool->blas-trans
@@ -1092,9 +1091,7 @@ relies only on blockDim.x block.x and thread.x"
   (cuda-l2-constraint-scale [a inc-a elem-count l2-max-constraint stream]
     (launch-linear-kernel stream (dev-fn-from-stream stream :l2-constraint-scale :double)
                           (long elem-count) 0
-                          a (int inc-a) (double l2-max-constraint) (int elem-count)))
-  (cuda-generate-rands [rand-buffer distribution elem-count stream]
-    (throw (Exception. "Cuda cannot generate double rands"))))
+                          a (int inc-a) (double l2-max-constraint) (int elem-count))))
 
 (extend-type FloatPointer
   PCudaMath
@@ -1167,25 +1164,7 @@ relies only on blockDim.x block.x and thread.x"
   (cuda-l2-constraint-scale [a inc-a elem-count l2-max-constraint stream]
     (launch-linear-kernel stream (dev-fn-from-stream stream :l2-constraint-scale :float)
                           (long elem-count) 0
-                          a (int inc-a) (float l2-max-constraint) (int elem-count)))
-  (cuda-generate-rands [rand-buffer distribution elem-count stream]
-    (rand-with-stream
-     stream
-     (cond
-       (= (:type distribution) :gaussian)
-       (let [mean (float (:mean distribution))
-             variance (float (:variance distribution))
-             stddev (Math/sqrt variance)]
-         (curand-call (curand/curandGenerateNormal
-                       ^curand$curandGenerator_st rand-context
-                       rand-buffer
-                       (long elem-count) mean stddev)))
-       (= (:type distribution) :flat)
-       (curand-call (curand/curandGenerateUniform
-                     ^curand$curandGenerator_st rand-context
-                     rand-buffer (long elem-count)))
-       :else
-       (throw (Exception. (str "Unrecognized distribution type: " distribution)))))))
+                          a (int inc-a) (float l2-max-constraint) (int elem-count))))
 
 (extend-type CudaStream
   drv/PStream
@@ -1303,11 +1282,6 @@ relies only on blockDim.x block.x and thread.x"
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     (cuda-l2-constraint-scale (->ptr a) inc-a (quot (math/ecount a) (long inc-a))
                               l2-max-constraint stream))
-  (generate-rands [stream rand-buffer distribution]
-    (when-not (= 0 (rem (math/ecount rand-buffer) 2))
-      (throw (Exception.
-              (format "Cuda devices are only capabled of generating even numbers of rands."))))
-    (cuda-generate-rands (->ptr rand-buffer) distribution (math/ecount rand-buffer) stream))
   (select [stream src-buf dest-buf lt-zero ge-zero]
     (let [elem-count (long (m/ecount src-buf))
           datatype (dtype/get-datatype src-buf)]
