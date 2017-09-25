@@ -232,4 +232,6 @@ resource/release *must* be a valid call on the returned value.")
                       input input-dims
                       output output-dims
                       output-grad output-grad-dims
-                      pool-descriptor]))
+                      pool-descriptor])
+
+  (rand! [stream dest dest-dims distribution]))

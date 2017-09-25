@@ -10,11 +10,12 @@
             [cortex.tensor.dimensions :as ct-dims])
   (:import [cortex.compute.cuda.driver CudaStream]
            [org.bytedeco.javacpp Pointer IntPointer DoublePointer FloatPointer SizeTPointer
-                                 cublas cublas$cublasContext
-                                 cudnn cudnn$cudnnContext
-                                 cudnn$cudnnConvolutionStruct
-                                 cudnn$cudnnFilterStruct
-                                 cudnn$cudnnPoolingStruct]))
+            cublas cublas$cublasContext
+            cudnn cudnn$cudnnContext
+            cudnn$cudnnConvolutionStruct
+            cudnn$cudnnFilterStruct
+            cudnn$cudnnPoolingStruct
+            curand curand$curandGenerator_st]))
 
 
 (set! *warn-on-reflection* true)
@@ -1208,4 +1209,34 @@
                     (drv/default-device (cuda-base/driver))
                     (with-bindings {#'ct/*stream*   (drv/create-stream)
                                     #'ct/*datatype* :float}
-                      ~@body))))))))
+                      ~@body)))))))
+
+  (rand! [stream
+          dest dest-dims
+          distribution]
+    (let [elem-count (ct-dims/ecount dest-dims)]
+     (cuda-base/rand-with-stream
+      stream
+      (cond
+        (= (:type distribution) :gaussian)
+        (let [mean (float (:mean distribution))
+              variance (float (:variance distribution))
+              stddev (Math/sqrt variance)]
+          (cuda-base/curand-call (curand/curandGenerateNormal
+                                  ^curand$curandGenerator_st rand-context
+                                  ^FloatPointer (->ptr dest)
+                                  (long elem-count) mean stddev)))
+        (= (:type distribution) :flat)
+        (do
+         (cuda-base/curand-call (curand/curandGenerateUniform
+                                 ^curand$curandGenerator_st rand-context
+                                 ^FloatPointer (->ptr dest) (long elem-count)))
+         (when-not (and (= 0.0 (float (:minimum distribution)))
+                        (= 1.0 (float (:maximum distribution))))
+           (let [tens (ct/->Tensor (drv/get-device stream) dest-dims dest)
+                 minimum (float (:minimum distribution))
+                 maximum (float (:maximum distribution))
+                 range (- maximum minimum)]
+             (ct/binary-op! tens range tens 1.0 minimum :+))))
+        :else
+        (throw (Exception. (str "Unrecognized distribution type: " distribution))))))))

@@ -60,31 +60,15 @@ Also, for an example of using cortex in a more real-world scenario please see:
 
 #### Ubuntu
 
-[Download Cuda](https://developer.nvidia.com/cuda-downloads) and follow the installation commands provided
-
-    $ sudo dpkg -i cuda-repo-<distro>_<version>_<architecture>.deb
-    $ sudo apt-get update
-    $ sudo apt-get install cuda
-
-Install the Cuda driver and any dependencies. Use driver version specific to device being used (to check on Ubuntu: System Settings -> Software & Updates -> Additional Drivers)
-
-    $ sudo apt-get install nvidia-<driver version>
+    $ sudo apt install nvidia-cuda-toolkit
+    reboot
+    
 
 [Install cuDNN](https://developer.nvidia.com/cudnn) and copy the cuDNN files to the corresponding folders in the local cuda installation (probably at /usr/local/cuda). For reference, follow the "Installing cuDNN" section [here](http://www.pyimagesearch.com/2016/07/04/how-to-install-cuda-toolkit-and-cudnn-for-deep-learning/).
 
-Add Cuda to the PATH in `~/.bashrc`
-
-    # CUDA Toolkit
-    export CUDA_HOME=/usr/local/cuda
-    export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:$LD_LIBRARY_PATH
-    export PATH=${CUDA_HOME}/bin:${PATH}
-
-Run `$ nvcc -V` to make sure cuda version is as expected.
-
 To check everything is working, run `$ nvidia-smi`
 
-Depending on which distribution you're on you will either have cuda7.5 or cuda8.0. Current master is 8.0, so if you're running 7.5 you will need to change the javacpp dependency in your project file of the [mnist Example](https://github.com/thinktopic/cortex/blob/master/examples/mnist-classification/project.clj).
-
+You should now have cuda8.0 installed. Current master is 8.0, so if you're running 7.5 you will need to change the javacpp dependency in your project file of the [mnist Example](https://github.com/thinktopic/cortex/blob/master/examples/mnist-classification/project.clj).
 
 #### Mac OS
 These instructions follow the gpu setup from [Tensor Flow](https://github.com/tensorflow/tensorflow/blob/master/tensorflow/g3doc/get_started/os_setup.md#optional-setup-gpu-for-mac), i.e.:
