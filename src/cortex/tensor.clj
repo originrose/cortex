@@ -1562,6 +1562,61 @@ must be a 2d tensor.  Workspace must be of (get-in algorithms [:forward :workspa
   input-gradient)
 
 
+;; (defn lrn-descriptor
+;;   "LRN (local-response-normalization) is only partially supported (CUDA only).  A better pathway
+;;   forward for this functionality is to use a kernel size of 1 and same number of output channels
+;;   as input channels."
+;;   [& {:keys [n k alpha beta]
+;;       :or {n 5 k 2 alpha 1e-4 beta 0.75}}]
+;;   (tm/lrn-descriptor (check-stream) n k alpha beta))
+
+
+;; (defn lrn-forward!
+;;   "Run the lrn algorithm forward across channels:
+;; a[i] = a[i] / ((k + alpha*(windowed-summation a[i-n/2]^2...a[i+n/2]^2))^beta)"
+;;   [output input lrn-descriptor]
+;;   (let [in-shape (m/shape input)
+;;         out-shape (m/shape output)]
+;;    (when-not-error (= in-shape out-shape)
+;;      "Input and output shapes must match"
+;;      {:input-shape in-shape
+;;       :output-shape out-shape})
+;;    (when-not-error (>= (count out-shape) 3)
+;;      "tensor must be of at least rank 3"
+;;      {:input-shape in-shape
+;;       :output-shape out-shape})
+;;    (ensure-datatypes (get-datatype output) input)
+;;    (ensure-cudnn-datatype (get-datatype output) "lrn-forward")
+;;    (tm/lrn-forward! (tensor->buffer output) (tensor->dimensions output)
+;;                     (tensor->buffer input) (tensor->dimensions input)
+;;                     lrn-descriptor)
+;;    output))
+
+
+;; (defn lrn-backward!
+;;   "Run the lrn algorithm backward across channels.
+;;   See cortex/examples/sage/local-response-normalization.sage"
+;;   [input-gradient output input output-gradient lrn-descriptor]
+;;   (let [in-shape (m/shape input)
+;;         out-shape (m/shape output)
+;;         in-grad-shape (m/shape input-gradient)]
+;;    (when-not-error (= in-shape out-shape)
+;;      "Input and output shapes must match"
+;;      {:input-shape in-shape
+;;       :output-shape out-shape})
+;;    (when-not-error (>= (count out-shape) 3)
+;;      "tensor must be of at least rank 3"
+;;      {:input-shape in-shape
+;;       :output-shape out-shape})
+;;    (ensure-datatypes (get-datatype output) input)
+;;    (ensure-cudnn-datatype (get-datatype output) "lrn-forward")
+;;    (tm/lrn-forward! (tensor->buffer output) (tensor->dimensions output)
+;;                     (tensor->buffer input) (tensor->dimensions input)
+;;                     lrn-descriptor)
+;;    output)
+;;   )
+
+
 (extend-type Tensor
   mp/PVectorView
   (as-vector [m]
