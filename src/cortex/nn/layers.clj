@@ -467,7 +467,7 @@ a few compatibility issues."
    (assert (and kernel-dim pad stride))
    (let [retval (-> (apply convolutional-type-layer :max-pooling
                           kernel-dim kernel-dim pad pad
-                          stride stride 0 :ceil (flatten (seq args)))
+                          stride stride 0 :ceil (apply concat (seq args)))
                    (#(if (contains? % :pool-op)
                        %
                        (assoc % :pool-op :max))))]
