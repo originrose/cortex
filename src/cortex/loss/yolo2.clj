@@ -767,6 +767,10 @@ If there are two equal max values then you will get a two-hot encoded vector."
                   #'*grid-y* grid-y
                   #'*anchors* anchors}
     (let [pred (m/reshape prediction [*grid-x* *grid-y* (anchor-count) (+ 5 (count classes-vec))])
+          ;; boxes returns a matrix, for which each row is an x-y-w-h + class prob vector,
+          ;; in which x-y-w-h are all scaled to [0,1] and the class prob vector is
+          ;; the product of obj conf and cond prob and has small values zeroed out.
+          ;; to check if that is happening we can print out the before and after with label.
           boxes (prediction->boxes pred prob-threshold)
           NMS-boxes (reduce
                      (fn [boxes class-index]

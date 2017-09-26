@@ -367,7 +367,7 @@ If the input contains no channels then you get a scale factor per input paramete
    (assert (and kernel-dim pad stride num-kernels))
    [(assoc
      (apply convolutional-type-layer :convolutional kernel-dim kernel-dim
-            pad pad stride stride num-kernels :floor (flatten (seq args)))
+            pad pad stride stride num-kernels :floor (apply concat (seq args)))
      :dimension-op :floor)])
   ([kernel-dim pad stride num-kernels & args]
    ;;We have to force the dimension operation to be floor for convolutional operations

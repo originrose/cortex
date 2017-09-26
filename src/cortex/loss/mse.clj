@@ -52,3 +52,16 @@
 (defmethod graph/generate-stream-definitions :mse-loss
   [graph mse-loss]
   (util/generate-loss-term-stream-definitions graph mse-loss))
+
+(defn evaluate-mse
+  "Provide a percentage correct for softmax.  This is much easier to interpret than
+the actual log-loss of the softmax unit."
+  [guesses answers]
+  (if (or (not (pos? (count guesses)))
+          (not (pos? (count answers)))
+          (not= (count guesses) (count answers)))
+    (throw (Exception. (format "evaluate-softmax: guesses [%d] and answers [%d] count must both be positive and equal."
+                               (count guesses)
+                               (count answers)))))
+  (/ (m/esum (map (fn [g a] (m/magnitude (m/sub (m/as-vector g) (m/as-vector a)))) guesses answers))
+     (count guesses)))
