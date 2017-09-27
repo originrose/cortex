@@ -110,3 +110,7 @@
 ;;Note that this is not a float-double test.
 (deftest rand-operator
   (verify-tensor/rand-operator (create-driver) :float))
+
+
+(def-double-float-test lrn-operator
+  (verify-tensor/lrn-operator (create-driver) *datatype*))

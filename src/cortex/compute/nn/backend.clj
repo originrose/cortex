@@ -44,12 +44,6 @@
   *current-backend-stream*)
 
 
-(defprotocol PLayerCreation
-  "For layers completely implemented in the backend we allow the backend to create
-some specific data from a description.  Most layers need to implement
-computelayer/forward,backward."
-  (create [backend layer batch-size]))
-
 (defn array
   ([backend data items-per-batch]
    (math/array (get-stream) (dtype/get-datatype backend)

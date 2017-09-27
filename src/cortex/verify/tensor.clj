@@ -1031,3 +1031,81 @@ for the cuda backend."
        (is (m/equals [1 2 3 4 5 6 7 8 9 10]
                      test-vec
                      1))))))
+
+
+(defn- lrn-forward-backward
+  [num-input-channels lrn-n]
+   (let [batch-size 2
+         input-dim 2
+         input-num-pixels (* input-dim input-dim)
+         n-input (* num-input-channels input-num-pixels)
+         input (-> (tensor/->tensor (flatten (repeat batch-size (range n-input))))
+                   (tensor/in-place-reshape [batch-size num-input-channels input-dim input-dim]))
+         output-gradient (-> (tensor/->tensor (repeat (* batch-size n-input) 1.0))
+                             (tensor/in-place-reshape [batch-size num-input-channels input-dim input-dim]))
+         output (tensor/new-tensor (m/shape input))
+         input-gradient (tensor/new-tensor (m/shape input))
+         lrn-desc (tensor/lrn-descriptor :n lrn-n :k 1 :alpha 1 :beta 1)]
+     (tensor/lrn-forward! output input lrn-desc)
+     (tensor/lrn-backward! input-gradient output input output-gradient lrn-desc)
+     {:output (vec (tensor/to-double-array output))
+      :input-gradient (vec (tensor/to-double-array input-gradient))
+      :input-data (vec (tensor/to-double-array input))}))
+
+
+(defn lrn-operator
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (testing "lrn with n 1"
+     (let [{:keys [output input-gradient input-data]} (lrn-forward-backward 3 1)]
+       (is (m/equals (mapv #(/ (double %) (+ 1 (* % %))) input-data)
+                     output
+                     1e-4))
+       (is (m/equals [1.0 0.0 -0.12000000000000002 -0.07999999999999999 -0.0519031141868512
+                      -0.03550295857988165 -0.02556610664718773 -0.019200000000000002
+                      -0.0149112426035503  -0.01189767995240928 -0.009704930889128518
+                      -0.008062348830959416 1.0 0.0 -0.12000000000000002 -0.07999999999999999
+                      -0.0519031141868512 -0.03550295857988165 -0.02556610664718773 -0.019200000000000002
+                      -0.0149112426035503 -0.01189767995240928 -0.009704930889128518 -0.008062348830959416]
+                     input-gradient
+                     1e-4))))
+   (testing "lrn with n 2"
+     (let [{:keys [output input-gradient]} (lrn-forward-backward 3 2)]
+       (is (m/equals (vec
+                      (flatten
+                       (repeat 2
+                               [0.0 0.07142857142857142 0.09523809523809523 0.1
+                                0.0975609756097561 0.09259259259259259 0.08695652173913043
+                                0.08139534883720931 0.24242424242424243 0.21686746987951808
+                                0.19607843137254902 0.17886178861788618])))
+                     output
+                     1e-4))
+       (is (m/equals [0.1111111111111111 0.06461185297164132 0.03602827394347783 0.020493960699477193
+                      -0.014512656716972328 -0.016183480513356906 -0.016136733799491102 -0.015355548198598244
+                      -0.02846648301193755 -0.022935113949774988 -0.0188389081122645 -0.015731376825963386
+                      0.1111111111111111 0.06461185297164132 0.03602827394347783 0.020493960699477193
+                      -0.014512656716972328 -0.016183480513356906 -0.016136733799491102 -0.015355548198598244
+                      -0.02846648301193755 -0.022935113949774988 -0.0188389081122645 -0.015731376825963386]
+                     input-gradient
+                     1e-4))))
+   (testing "lrn with n 3"
+     (let [{:keys [output input-gradient]} (lrn-forward-backward 3 3)]
+      (is (m/equals (mapv double
+                          (flatten
+                           (repeat 2
+                                   [0.0 0.10344827586206898 0.13953488372093023
+                                    0.14754098360655737 0.14457831325301207 0.13636363636363638
+                                    0.1258741258741259 0.11538461538461539 0.28915662650602414
+                                    0.24770642201834867 0.21582733812949642
+                                    0.19075144508670522 ])))
+                    output
+                    1e-4))
+      (is (m/equals  [0.15789473684210528 0.09383457316653729 0.05326649810721716 0.030864211553852466
+                      -0.005661199012919144 -0.04352114602312829 -0.04715638623434852 -0.04169062137988738
+                      -0.047466976339091305 -0.03569676147971518 -0.027076332292621106 -0.020863959610017586
+                      0.15789473684210528 0.09383457316653729 0.05326649810721716 0.030864211553852466
+                      -0.005661199012919144 -0.04352114602312829 -0.04715638623434852 -0.04169062137988738
+                      -0.047466976339091305 -0.03569676147971518 -0.027076332292621106 -0.020863959610017586]
+                    input-gradient
+                    1e-4))))))
