@@ -15,6 +15,7 @@
             cudnn$cudnnConvolutionStruct
             cudnn$cudnnFilterStruct
             cudnn$cudnnPoolingStruct
+            cudnn$cudnnLRNStruct
             curand curand$curandGenerator_st]))
 
 
@@ -248,6 +249,17 @@
             (long (nth (reverse (:shape dest-dims)) 2)))
         (= dest-max (ct-dims/ecount dest-dims))
         (= max-shape (:shape y-dims)))))
+
+(defn- lrn-descriptor
+    [n k alpha beta]
+    (let [desc (cudnn$cudnnLRNStruct.)]
+      (cuda-base/cudnn-call (cudnn/cudnnCreateLRNDescriptor desc))
+      (cuda-base/cudnn-call (cudnn/cudnnSetLRNDescriptor desc
+                                               (int n)
+                                               (double alpha)
+                                               (double beta)
+                                               (double k)))
+      (resource/track desc)))
 
 
 (defrecord ConvDesc [^cudnn$cudnnConvolutionStruct conv-desc
@@ -1239,4 +1251,71 @@
                  range (- maximum minimum)]
              (ct/binary-op! tens range tens 1.0 minimum :+))))
         :else
-        (throw (Exception. (str "Unrecognized distribution type: " distribution))))))))
+        (throw (Exception. (str "Unrecognized distribution type: " distribution)))))))
+
+
+  (lrn-descriptor [stream n k alpha beta]
+    (lrn-descriptor n k alpha beta))
+
+  (lrn-forward! [stream
+                 output output-dims
+                 input input-dims
+                 lrn-descriptor]
+    (resource/with-resource-context
+      (let [dtype (dtype/get-datatype input)
+            input-tens (cuda-base/tensor-with-strides dtype
+                                                      (:shape input-dims)
+                                                      (:strides input-dims))
+            output-tens (cuda-base/tensor-with-strides dtype
+                                                       (:shape output-dims)
+                                                       (:strides output-dims))]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call (cudnn/cudnnLRNCrossChannelForward
+                                cudnn-context
+                                lrn-descriptor
+                                cudnn/CUDNN_LRN_CROSS_CHANNEL_DIM1
+                                (value->ptr 1.0 dtype)
+                                input-tens
+                                (->ptr input)
+                                (value->ptr 0.0 dtype)
+                                output-tens
+                                (->ptr output)))))))
+
+  (lrn-backward! [stream
+                  input-gradient input-grad-dims
+                  output output-dims
+                  input input-dims
+                  output-gradient output-grad-dims
+                  lrn-descriptor]
+    (resource/with-resource-context
+      (let [dtype (dtype/get-datatype input)
+            input-tens (cuda-base/tensor-with-strides dtype
+                                                      (:shape input-dims)
+                                                      (:strides input-dims))
+            output-tens (cuda-base/tensor-with-strides dtype
+                                                       (:shape output-dims)
+                                                       (:strides output-dims))
+            input-grad-tens (cuda-base/tensor-with-strides dtype
+                                                           (:shape input-grad-dims)
+                                                           (:strides input-grad-dims))
+            output-grad-tens (cuda-base/tensor-with-strides dtype
+                                                            (:shape output-grad-dims)
+                                                            (:strides output-grad-dims))]
+        (cuda-base/cudnn-with-stream
+         stream
+         (cuda-base/cudnn-call
+          (cudnn/cudnnLRNCrossChannelBackward
+           cudnn-context
+           lrn-descriptor
+           cudnn/CUDNN_LRN_CROSS_CHANNEL_DIM1
+           (value->ptr 1.0 dtype)
+           output-tens
+           (->ptr output)
+           output-grad-tens
+           (->ptr output-gradient)
+           input-tens
+           (->ptr input)
+           (value->ptr 0.0 dtype)
+           input-grad-tens
+           (->ptr input-gradient))))))))

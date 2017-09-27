@@ -31,22 +31,11 @@ implementation as possible."
   (get-in buffer-vec [0 :gradient]))
 
 
-(defn softmax-backward!
-  "Helper function for implementations."
-  [stream input-gradient output-gradient]
-  (math/assign! stream input-gradient output-gradient))
-
-
 ;; TODO: rename me, and/or merge these into cortex.nn.layers
 (defmulti create
   "Create a compute layer"
   (fn [backend node batch-size]
     (:type node)))
-
-
-(defmethod create :default
-  [backend node batch-size]
-  (nn-backend/create backend node batch-size))
 
 
 (defn- ->simple-batch-tensor
@@ -334,7 +323,6 @@ and then forward many times for every parameter of the network."
         (tensor/convolution-backward-data! input-gradient 0.0 output-gradient weights
                                            workspace conv-desc algorithms)))))
 
-
 (defmethod create :convolutional
   [backend layer batch-size]
   (tensor/with-datatype (dtype/get-datatype backend)
@@ -354,6 +342,34 @@ and then forward many times for every parameter of the network."
                                                             batch-size 100000)
            workspace (tensor/new-tensor [(get algorithms :workspace-size)])]
        (->ConvolutionLayer backend layer conv-desc algorithms workspace)))))
+
+
+(defrecord LocalResponseNormalization [backend batch-size layer lrn-descriptor]
+  compute-protocols/ComputeLayer
+  (forward [this parameter-buffers input-buffers output-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [output (->conv-tensor (graph/node->output-dimension layer) batch-size (first-buffer output-buffers))
+            input (->conv-tensor (graph/node->input-dimension layer) batch-size (first-buffer input-buffers))]
+        (tensor/lrn-forward! output input lrn-descriptor))))
+
+  (backward [this parameter-buffers output-buffers input-buffers]
+    (tensor/with-stream (nn-backend/get-stream)
+      (let [output (->conv-tensor (graph/node->output-dimension layer) batch-size (first-buffer output-buffers))
+            input (->conv-tensor (graph/node->input-dimension layer) batch-size (first-buffer input-buffers))
+            output-gradient (->conv-tensor (graph/node->output-dimension layer) batch-size
+                                           (first-gradient output-buffers))
+            input-gradient (->conv-tensor (graph/node->output-dimension layer) batch-size
+                                          (first-gradient input-buffers))]
+        (tensor/lrn-backward! input-gradient output input output-gradient lrn-descriptor)))))
+
+
+(defmethod create :local-response-normalization
+  [backend layer batch-size]
+  (tensor/with-datatype (dtype/get-datatype backend)
+   (tensor/with-stream (nn-backend/get-stream)
+     (let [{:keys [n k alpha beta]} layer
+           lrn-desc (tensor/lrn-descriptor :n n :k k :alpha alpha :beta beta)]
+       (->LocalResponseNormalization backend batch-size layer lrn-desc)))))
 
 
 (defrecord PoolingLayer [backend layer batch-size pool-desc]

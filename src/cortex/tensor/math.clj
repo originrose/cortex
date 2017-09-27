@@ -234,4 +234,19 @@ resource/release *must* be a valid call on the returned value.")
                       output-grad output-grad-dims
                       pool-descriptor])
 
-  (rand! [stream dest dest-dims distribution]))
+  (rand! [stream dest dest-dims distribution])
+
+
+  (lrn-descriptor [stream n k alpha beta])
+
+  (lrn-forward! [stream
+                 output output-dims
+                 input input-dims
+                 lrn-descriptor])
+
+  (lrn-backward! [stream
+                  input-gradient input-grad-dims
+                  output output-dims
+                  input input-dims
+                  output-gradient output-grad-dims
+                  lrn-descriptor]))
