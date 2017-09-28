@@ -1,10 +1,10 @@
 (ns cortex.gaussian
   "Namespace for working with gaussian distributions."
   (:require [clojure.core.matrix :as m])
-  (:import [java.util Random]))
+  (:import [java.security SecureRandom]))
 
 
-(def ^:dynamic ^Random *RAND-GENERATOR* (Random.))
+(def ^:dynamic ^SecureRandom *RAND-GENERATOR* (SecureRandom.))
 
 (defn rand-normal ^double []
   (.nextDouble *RAND-GENERATOR*))
