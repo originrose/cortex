@@ -268,6 +268,87 @@
   (release-resource [this]))
 
 
+#_(defn- output-cuda-conv-information
+  [cudnn-context conv-desc filter-desc
+   datatype input-dims output-dims
+   input-tensor output-tensor
+   backward-filter-algorithm
+   workspace-ecount]
+  (let [size-retval (SizeTPointer. 1)
+        dtype-retval (IntPointer. 1)
+        format_t (IntPointer. 1)
+        nb-dims (IntPointer. 1)
+        filter-dims (IntPointer. 5)
+        conv_ph (IntPointer. 1)
+        conv_pw (IntPointer. 1)
+        conv_u (IntPointer. 1)
+        conv_v (IntPointer. 1)
+        conv_dh (IntPointer. 1)
+        conv_dw (IntPointer. 1)
+        conv_mode (IntPointer. 1)
+        conv_datatype (IntPointer. 1)]
+    (cuda-base/cudnn-call
+     (cudnn/cudnnGetConvolutionBackwardFilterWorkspaceSize cudnn-context
+                                                           input-tensor
+                                                           output-tensor
+                                                           conv-desc
+                                                           filter-desc
+                                                           backward-filter-algorithm
+                                                           size-retval))
+
+    (cuda-base/cudnn-call
+     (cudnn/cudnnGetConvolution2dDescriptor conv-desc
+                                            conv_ph
+                                            conv_pw
+                                            conv_u
+                                            conv_v
+                                            conv_dh
+                                            conv_dw
+                                            conv_mode
+                                            conv_datatype))
+    (cuda-base/cudnn-call
+     (cudnn/cudnnGetFilterNdDescriptor filter-desc
+                                       5
+                                       dtype-retval
+                                       format_t
+                                       nb-dims
+                                       filter-dims))
+    (clojure.pprint/pprint {:backward-filter-algo backward-filter-algorithm
+                            :cudnn-algos {:CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0
+                                          cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0
+                                          :CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1
+                                          cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1
+                                          :CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3
+                                          cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3
+                                          :CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT
+                                          cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT
+                                          :CUDNN_CONVOLUTION_BWD_FILTER_ALG_FFT_TILING
+                                          cudnn/CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING}
+                            :workspace-size workspace-ecount
+                            :required-size (.get size-retval 0)
+                            :input-dims [batch-size in-channels in-height in-width]
+                            :output-dims [batch-size out-channels out-height out-width]
+                            :gradient-alpha weight-gradient-alpha
+                            :input-tensor input-tensor
+                            :output-tensor output-tensor
+                            :filter {:dims  (->> (range (.get nb-dims 0))
+                                                 (mapv #(.get filter-dims (int %))))
+                                     :dtype (.get dtype-retval 0)
+                                     :expected-dtype (cuda-base/dtype->cudnn datatype)
+                                     :format (.get format_t 0)
+                                     :expected-format (cudnn/CUDNN_TENSOR_NCHW)}
+                            :datatype datatype
+                            :conv-desc {:conv-ph (.get conv_ph 0)
+                                        :conv-pw (.get conv_pw 0)
+                                        :conv-u (.get conv_u 0)
+                                        :conv-v (.get conv_v 0)
+                                        :conv-dh (.get conv_dh 0)
+                                        :conv-dw (.get conv_dw 0)
+                                        :conv-mode (.get conv_mode 0)
+                                        :expected-mode (cudnn/CUDNN_CROSS_CORRELATION)
+                                        :conv-dtype (.get conv_datatype 0)}})))
+
+
 (extend-type CudaStream
   tm/TensorMath
   (assign-constant! [stream buffer dimensions value n-elems]
@@ -928,7 +1009,8 @@
                                                                    pad-y pad-x
                                                                    stride-y stride-x
                                                                    1 1
-                                                                   cudnn/CUDNN_CROSS_CORRELATION))
+                                                                   cudnn/CUDNN_CROSS_CORRELATION
+                                                                   tensor-datatype))
 
       (->ConvDesc conv-desc filter-desc)))
 

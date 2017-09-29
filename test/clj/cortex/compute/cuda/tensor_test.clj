@@ -83,8 +83,8 @@
   (verify-tensor/unary-reduce (create-driver) *datatype*))
 
 
-(def-double-float-test convolution-operator
-  (verify-tensor/convolution-operator (create-driver) *datatype*))
+(deftest convolution-operator
+  (verify-tensor/convolution-operator (create-driver) :float))
 
 
 (def-all-dtype-test transpose

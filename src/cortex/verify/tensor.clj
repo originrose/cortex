@@ -816,6 +816,7 @@ for the cuda backend."
                       515868.0, 525534.0, 528756.0]
                      (ct/to-double-array output)))
 
+
      (ct/convolution-backward-weights! weight-gradient 0.0 output-gradient input workspace conv-desc algorithms)
      (is (m/equals   [798.0, 810.0, 822.0, 846.0, 858.0, 870.0, 894.0, 906.0, 918.0,
                       990.0, 1002.0, 1014.0, 1038.0, 1050.0, 1062.0, 1086.0, 1098.0,
@@ -831,6 +832,7 @@ for the cuda backend."
                       1230.0, 1242.0, 1254.0, 1278.0, 1290.0, 1302.0, 1374.0, 1386.0,
                       1398.0, 1422.0, 1434.0, 1446.0, 1470.0, 1482.0, 1494.0]
                    (ct/to-double-array weight-gradient)))
+
 
      (ct/convolution-backward-data! input-gradient 0.0 output-gradient weights workspace conv-desc algorithms)
      (is (m/equals [108.0, 219.0, 225.0, 114.0, 225.0, 456.0, 468.0, 237.0, 243.0,
@@ -855,7 +857,10 @@ for the cuda backend."
                     363.0, 180.0, 363.0, 369.0, 186.0, 189.0, 381.0, 387.0, 195.0,
                     387.0, 780.0, 792.0, 399.0, 405.0, 816.0, 828.0, 417.0, 207.0,
                     417.0, 423.0, 213.0]
-                   (ct/to-double-array input-gradient))))))
+                   (ct/to-double-array input-gradient)))
+
+
+)))
 
 
 (defn pooling-operator
