@@ -5,19 +5,19 @@
             [cortex.compute.nn.backend :as backend]
             [cortex.loss.util :as util]
             [cortex.loss.core :as loss]
-            [cortex.graph :as graph]))
+            [cortex.graph :as graph]
+            [cortex.tensor :as tensor]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Compute implementation
 (defn- calculate-cross-entropy-gradient
   [backend v target gradient]
-  (let [stream (backend/get-stream)
-        elem-count (m/ecount gradient)
-        alpha 1.0]
-    (math/subtract stream
-                   alpha (math/device-buffer v)
-                   alpha (math/device-buffer target)
-                   (math/device-buffer gradient))))
+  (tensor/with-stream
+    (backend/get-stream)
+    (let [target (math/->batch-ct target)
+          gradient (math/->batch-ct gradient)
+          v (math/->batch-ct v)]
+      (tensor/binary-op! gradient 1.0 v 1.0 target :-))))
 
 
 (defrecord SoftmaxLoss [loss-term backend]

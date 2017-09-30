@@ -4,23 +4,21 @@
             [cortex.compute.nn.backend :as backend]
             [cortex.loss.core :as loss]
             [cortex.loss.util :as util]
-            [cortex.graph :as graph]))
+            [cortex.graph :as graph]
+            [cortex.tensor :as tensor]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Compute implementation
 (defrecord MSELoss [loss-term backend]
   util/PComputeLoss
   (compute-loss-gradient [this buffer-map]
-    (let [v (get-in buffer-map [:output :buffer])
-          gradient (get-in buffer-map [:output :gradient])
-          target (get-in buffer-map [:labels :buffer])
-          stream (backend/get-stream)
-          [batch-size output-size] (math/batch-shape v)
-          alpha (/ 2.0 (double output-size))]
-    (math/subtract stream
-                   alpha (math/device-buffer v)
-                   alpha (math/device-buffer target)
-                   (math/device-buffer gradient)))))
+    (tensor/with-stream (backend/get-stream)
+      (let [v (math/->batch-ct (get-in buffer-map [:output :buffer]))
+            gradient (math/->batch-ct (get-in buffer-map [:output :gradient]))
+            target (math/->batch-ct (get-in buffer-map [:labels :buffer]))
+            [batch-size output-size] (m/shape v)
+            alpha (/ 2.0 (double output-size))]
+        (tensor/binary-op! gradient alpha v alpha target :-)))))
 
 
 (defmethod util/create-compute-loss-term :mse-loss
