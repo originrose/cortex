@@ -3,7 +3,7 @@
   :url "https://github.com/thinktopic/cortex"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
+  :dependencies [[org.clojure/clojure "1.9.0-beta1"]
                  [thinktopic/think.datatype "0.3.17"]
                  [com.github.fommil.netlib/all "1.1.2" :extension "pom"]
                  [com.taoensso/nippy "2.13.0"]
