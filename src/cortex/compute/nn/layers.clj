@@ -408,7 +408,7 @@ and then forward many times for every parameter of the network."
                                                    pad-x pad-y
                                                    stride-x stride-y
                                                    :dimension-op (get layer :dimension-op)
-                                                   :pool-op (get layer :pool-op))]
+                                                   :pool-op (or (get layer :pool-op) :max))]
        (->PoolingLayer backend layer batch-size pool-desc)))))
 
 
