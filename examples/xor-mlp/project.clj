@@ -1,4 +1,4 @@
-(defproject xor-mlp "0.9.22"
+(defproject xor-mlp "0.9.23-SNAPSHOT"
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [thinktopic/experiment "0.9.22"]]
+                 [thinktopic/experiment "0.9.23-SNAPSHOT"]]
   :repl-options {:init-ns xor-mlp.core})
