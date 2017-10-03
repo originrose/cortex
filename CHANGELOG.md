@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.9.22]
+### Bugs Fixed
+ * Backwards compatibility issue with pooling layers and older models which didn't include :pool-op (this changes the behavior between [:max :avg :avg-exc-pad]
+
 ## [0.9.21]
 ### Bugs Fixed
 - ```(layers/convolutional 3 0 1 64 :parents [:split-1])``` will work now.
