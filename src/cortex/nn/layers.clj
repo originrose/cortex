@@ -289,7 +289,7 @@ If the input contains no channels then you get a scale factor per input paramete
      (assert (:variance args))
      [(assoc args
              :type :dropout
-             :ditribution :gaussian)]))
+             :distribution :gaussian)]))
   ([variance & args]
    [(merge-args
      {:type :dropout :distribution :gaussian :variance variance}
