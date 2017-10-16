@@ -160,7 +160,9 @@ you want to check gradients you need to call prepare-forward once precisely
 and then forward many times for every parameter of the network."
   [{:keys [backend layer mult-buffer rand-buffer]}]
   (tensor/with-stream (nn-backend/get-stream)
-    (let [distribution (if (= (:distribution layer) :bernoulli)
+    (let [layer-distribution (:distribution layer)
+          _ (assert (#{:bernoulli :gaussian} layer-distribution))
+          distribution (if (= layer-distribution :bernoulli)
                          (let [maximum (float (:probability layer))
                                minimum (- maximum 1.0)]
                           (tensor/flat-distribution :minimum minimum :maximum maximum))
@@ -168,7 +170,7 @@ and then forward many times for every parameter of the network."
       (tensor/rand! rand-buffer distribution)
       (when-not (identical? mult-buffer rand-buffer)
         (tensor/assign! mult-buffer rand-buffer))
-      (when (= (:distribution layer) :bernoulli)
+      (when (= layer-distribution :bernoulli)
         ;;We set a multiplicative constant so that a network with dropout
         ;;produces a signal of the same magnitude as it would be without the dropout
         (tensor/ternary-op! mult-buffer 1.0 mult-buffer
