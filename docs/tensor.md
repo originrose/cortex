@@ -104,8 +104,8 @@ marshalling as this would explode the space of function signatures
 needed for all types.
 
 * Unary:  `y = op(a*x)`
-* Binary: `y = op(a\*x, b*z)`
-* Ternary: `y = op(a\*x, b\*w, c*z)`
+* Binary: `y = op(a&astx, b&astz)`
+* Ternary: `y = op(a&astx, b&astw, c*z)`
 
 
 All of these operations allow any or all of the operands to be
