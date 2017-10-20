@@ -103,9 +103,9 @@ They are defined for all datatypes but none of the operations allow of
 marshalling as this would explode the space of function signatures
 needed for all types.
 
-* Unary:  `y = op(a*x)`
-* Binary: `y = op(a&astx, b&astz)`
-* Ternary: `y = op(a&astx, b&astw, c*z)`
+* Unary:  `y = op(a * x)`
+* Binary: `y = op(a &ast x, b &ast z)`
+* Ternary: `y = op(a &ast x, b &ast w, c*z)`
 
 
 All of these operations allow any or all of the operands to be
