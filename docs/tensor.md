@@ -128,7 +128,7 @@ To add a new operation one needs basically 4 steps:
 4.  Add the op to the [operations.h](../resources/operations.h) header in resources.
 5.  Recompile all .cu functions (or just tensors):
 ```bash
-pusd resources && touch *.cu && ./compile_nvcc.sh && popd
+pushd resources && touch *.cu && ./compile_nvcc.sh && popd
 ```
 
 Your new operation is now setup and will work across all supported broadcast patterns and potentially all datatypes.
