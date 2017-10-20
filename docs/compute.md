@@ -37,7 +37,7 @@ Components of the compute abstraction:
 (ns documentation)
 ```clojure
   "Base set of protocols required to move information from the host to the device as well as
-  enable some form of computation on a given device.  Thsere is a cpu implementation provided for
+  enable some form of computation on a given device.  There is a cpu implementation provided for
   reference.
 
   Base datatypes are defined:
@@ -83,3 +83,5 @@ There are currently two drivers written for the compute engine:
 
 1. [cpu](../src/cortex/compute/cpu/driver.clj)
 2. [cuda](../src/cortex/compute/cuda/driver.clj)
+
+**Please note that there are vestigial math implementations in those files that are subsumed by the tensor api**
