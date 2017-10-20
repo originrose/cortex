@@ -150,5 +150,5 @@ The rules for broadcasting in the tensor system are:
 3. While indexing through the specific operand, take the remainder of the dimension index with the specific operands index.
 4. The operation's overall element count is (apply * max-shape).
 
-* Reference [cpu](https://github.com/thinktopic/cortex/blob/master/src/cortex/tensor/dimensions.clj#L189) implementation.
-* Reference [cuda](https://github.com/thinktopic/cortex/blob/master/resources/index_system.h) implementation.
+* Reference [cpu](../src/cortex/tensor/dimensions.clj#L189) implementation.
+* Reference [cuda](../resources/index_system.h) implementation.
