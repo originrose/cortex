@@ -3,7 +3,7 @@
   enable some form of computation on a given device.  There is a cpu implementation provided for
   reference.
 
-  Three basic datatypes are defined:
+  Base datatypes are defined:
    * Driver: Enables enumeration of devices and creation of host buffers.
    * Device: Creates streams and device buffers.
    * Stream: Stream of execution occuring on the device.

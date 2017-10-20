@@ -12,9 +12,6 @@ It does mean, however, that certain conditions that would actually be error case
   detect because one has to check for remainders being zero (which potentially could cause a
   divide by zero error) instead of just checking for equality.
 
-Assignment has two forms
-y = x
-y[idx] = x[idx]
 
 For binary operations there are four forms:
 
@@ -27,22 +24,15 @@ Op may be: [:+ :* :/].
 
 In the non-indexed cases the element counts of y or x may differ but they need to be
   commensurate meaning that the smaller evenly divides the larger.  When writing to result it is
-  important that result is as large as the largest.
+  important that result is as large as the largest.  This is a relaxation of the numpy broadcasting
+  rules to allow more forms of broadcasting; the check is that the remainder is zero; not that
+  the smaller dimension is 1.
 
-For indexed cases we can't enforce really any constraints but if a location in result is written
-  to more than once then the outcome is not defined; this is considered a programmatic error
-  *!!that cannot be detected at runtime!!* Locations in Y may be written to more than once.
 
 In general we want as much error checking and analysis done in this file as opposed to at the
   implementation level (compute stream level) so that different implementations of this
   duplicate the least number of possible operations and so their edge cases agree to the extent
-  possible.
-
-
-For indirect operations element count is num-indexes * num-columns.  After that they should obey
-  the same rules if the element counts of various things do not match meaning the smaller should
-  evenly divide the larger and if a separate result is provided it must be the size of the
-  larger."
+  possible."
   (:require [cortex.compute.driver :as compute-drv]
             [think.datatype.core :as dtype]
             [think.datatype.base :as dtype-base]
