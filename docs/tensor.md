@@ -121,7 +121,7 @@ These are accessible through the tensor unary-op! binary-op! and ternary-op! fun
 respectively.
 
 
-To add a new operation one needs basically 4 steps:
+To add a new operation one needs basically 5 steps:
 1.  Decide the keyword and the type of operation.
 2.  Add the op to the [appropriate cpu op dispatch table](https://github.com/thinktopic/cortex/blob/master/src/cortex/compute/cpu/tensor_math.clj#L172)
 3.  Add the op to the [appropriate gpu op dispatch table](https://github.com/thinktopic/cortex/blob/master/src/cortex/compute/cuda/tensor_math.clj#L57)
