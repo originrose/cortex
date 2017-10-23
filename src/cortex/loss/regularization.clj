@@ -7,55 +7,52 @@
             [cortex.compute.nn.backend :as backend]
             [cortex.graph :as graph]
             [cortex.loss.core :as loss]
-            [cortex.loss.util :as util]))
+            [cortex.loss.util :as util]
+            [cortex.tensor :as tensor]))
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; util
-(defn- get-regularization-target
-  "Get the target buffer for this regularization term.  It could either be a node
-output or a particular node parameter."
-  [loss-term buffer-map]
-  (get buffer-map :output))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Compute implementation
 (defrecord L1RegularizationLoss [loss-term backend l1-buffer]
   util/PComputeLoss
   (compute-loss-gradient [this buffer-map]
-    (let [stream (backend/get-stream)
-          param-entry (get-regularization-target loss-term buffer-map)
-          param-buf (get param-entry :buffer)
-          gradient (get param-entry :gradient)]
-      (math/select stream param-buf l1-buffer -1 1)
-      (math/sum stream 1.0 l1-buffer 0.0 gradient gradient))))
+    (tensor/with-stream
+      (backend/get-stream)
+      (let [param-entry (get buffer-map :output)
+            param-buf (math/->vector-ct (get param-entry :buffer))
+            gradient (math/->vector-ct (get param-entry :gradient))]
+        (tensor/ternary-op! l1-buffer 1.0 param-buf 1.0 -1 1.0 1 :select)
+        (tensor/binary-op! gradient 1.0 gradient 1.0 l1-buffer :+)))))
 
 
 (defmethod util/create-compute-loss-term :l1-regularization
   [backend network loss-term batch-size]
-  (let [datatype (dtype/get-datatype backend)
-        graph (:compute-graph network)
-        argument (graph/get-node-argument loss-term :output)
-        term-size (->> (graph/get-argument-shape graph
-                                                 loss-term
-                                                 argument)
-                       (apply *))
-        term-size (if (= (get argument :type)
-                         :node-output)
-                    (* term-size batch-size)
-                    term-size)]
-    (->L1RegularizationLoss loss-term backend
-                            (drv/allocate-device-buffer term-size datatype))))
+  (tensor/with-stream
+    (backend/get-stream)
+    (tensor/with-datatype
+      (dtype/get-datatype backend)
+      (let [graph (:compute-graph network)
+            argument (graph/get-node-argument loss-term :output)
+            term-size (->> (graph/get-argument-shape graph
+                                                     loss-term
+                                                     argument)
+                           (apply *))
+            term-size (if (= (get argument :type)
+                             :node-output)
+                        (* term-size batch-size)
+                        term-size)]
+        (->L1RegularizationLoss loss-term backend
+                                (tensor/new-tensor [term-size]))))))
 
 
 (defrecord L2RegularizationLoss [loss-term backend]
   util/PComputeLoss
   (compute-loss-gradient [this buffer-map]
-    (let [param-entry (get-regularization-target loss-term buffer-map)
-          stream (backend/get-stream)
-          target (math/device-buffer (get param-entry :buffer))
-          gradient (math/device-buffer (get param-entry :gradient))]
-      (math/sum stream 1.0 target 0.0 gradient gradient))))
+    (tensor/with-stream (backend/get-stream)
+      (let [param-entry (get buffer-map :output)
+            target (math/->vector-ct (get param-entry :buffer))
+            gradient (math/->vector-ct (get param-entry :gradient))]
+        (tensor/binary-op! gradient 1.0 target 1.0 gradient :+)))))
 
 
 (defmethod util/create-compute-loss-term :l2-regularization
@@ -88,7 +85,7 @@ entry in addition to a node-id."
 
 (defmethod loss/loss :l1-regularization
   [loss-term buffer-map]
-  (-> (get-regularization-target loss-term buffer-map)
+  (-> (get buffer-map :output)
       m/abs
       m/esum))
 
@@ -106,7 +103,7 @@ entry in addition to a node-id."
 (defmethod loss/loss :l2-regularization
   [loss-term buffer-map]
   ;;divide by 2 to make the gradient's work out correctly.
-  (/ (-> (get-regularization-target loss-term buffer-map)
+  (/ (-> (get buffer-map :output)
          m/as-vector
          m/magnitude)
      2.0))

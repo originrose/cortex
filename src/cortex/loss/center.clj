@@ -27,8 +27,11 @@
           monotonic-indexes (math/device-buffer monotonic-indexes)
           beta (- 1.0 alpha)]
       ;;First distribute centers according to labels
-      (drv/indexed-copy stream (math/device-buffer centers) (math/device-buffer label-indexes)
-                        (math/device-buffer batch-centers) (math/device-buffer monotonic-indexes) n-elems)
+      (drv/indexed-copy stream
+                        (math/device-buffer centers)
+                        (math/device-buffer label-indexes)
+                        (math/device-buffer batch-centers)
+                        (math/device-buffer monotonic-indexes) n-elems)
       ;;gradient = feature - center
       (math/subtract stream 1.0 output-buffer 1.0 batch-centers output-gradient)
       ;;copy features to batch-centers to start to calculate new centers

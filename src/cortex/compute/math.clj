@@ -494,3 +494,13 @@ and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 ou
     (ct/construct-tensor (drv/current-device)
                          (ct-dims/dimensions tens-shape)
                          (device-buffer ary))))
+
+(defn ->batch-ct
+  [ary]
+  (-> (array->cortex-tensor ary)
+      ct/as-batch-matrix))
+
+(defn ->vector-ct
+   [ary]
+   (-> (array->cortex-tensor ary)
+       ct/as-vector))
