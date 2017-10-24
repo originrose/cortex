@@ -1,9 +1,5 @@
 # resnet-retrain
 
-## Snapshot version of Cortex
-To run the snapshot version you will first need to run `lein install` in the root of the cortex project, then `cd experiment` and run `lein install`.
-
-
 [dataset](http://vision.ucmerced.edu/datasets/landuse.html)
 
 
