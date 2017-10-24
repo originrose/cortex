@@ -273,7 +273,7 @@
 
 
 (defn get-class [idx]
-  "A convienence function to get the class size"
+  "A convienence function to get the class name"
     (get (classes) idx))
 
 (defn label-one
