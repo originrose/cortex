@@ -5,4 +5,5 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [thinktopic/experiment "0.9.23-SNAPSHOT"]]
   :uberjar-name "resnet-retrain.jar"
+  :jvm-opts ["-Xmx2000m"]
   :main resnet-retrain.core)
