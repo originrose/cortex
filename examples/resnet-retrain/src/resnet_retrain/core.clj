@@ -259,7 +259,42 @@
     (* 4 batch-size vals-per-batch)))
 
 
-(defn -main
+(defn train-again
+  "incrementally improve upon the trained model"
   [& [batch-size]]
-  (train (when batch-size
-           (Integer/parseInt batch-size))))
+  (let [batch-size (or batch-size 32)
+        epoch-size 4096
+        network (util/read-nippy-file "trained-network.nippy")]
+    (println "training using batch size of" batch-size)
+    (train/train-n network
+                   (partial train-ds epoch-size batch-size)
+                   (partial test-ds batch-size)
+                   :batch-size batch-size :epoch-count 1)))
+
+
+(defn get-class [idx]
+  "A convienence function to get the class name"
+    (get (classes) idx))
+
+(defn label-one
+  "Take an arbitrary test image and label it."
+  []
+  (let [data-item  (rand-nth (test-ds 100))]
+    (->> data-item :filepath (i/load-image) (i/show))
+    {:answer (->> data-item :labels util/max-index get-class)
+     :guess (->> (execute/run (util/read-nippy-file "trained-network.nippy") [data-item])
+                 (first)
+                 (:labels)
+                 (util/max-index)
+                 (get-class))}))
+
+(defn -main
+  [& [batch-size continue]]
+  (let [batch-size-num (when batch-size (Integer/parseInt batch-size))]
+    (if continue
+      (do
+        (println "Training again....")
+        (train-again batch-size-num))
+      (do
+        (println "Training fresh from RESNET-50")
+        (train batch-size-num)))))
