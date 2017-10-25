@@ -4,8 +4,8 @@
             [mikera.image.core :as image]
             [incanter.core :as inc-core]
             [incanter.charts :as inc-charts]
-            [cortex.nn.network :as net]
-            [tsne.core :as tsne]))
+            [cortex.nn.execute :as execute]
+            [think.tsne.core :as tsne]))
 
 
 (defonce a-shift (int 24))
@@ -105,7 +105,7 @@ the row and column counts of the weights are perfect squares."
   [network data softmax-labels title & {:keys [tsne-iterations]
                                         :or {tsne-iterations 1000}}]
   (let [_ (println "running network:" title)
-        samples (net/run network data)
+        samples (execute/run network data)
         labels (mapv index-of-label softmax-labels)
         _ (println (format "tsne-ifying %d samples" (m/row-count data)))
         tsne-data (tsne/tsne samples 2 :iters tsne-iterations)]

@@ -79,8 +79,12 @@ Building dataset from folder: mnist/test
 
 A randomly selected handwritten digit from the test dataset is chosen, shown in a popup, and classified using the last exported network. Notably, the `label-one` function only uses functionality from base `cortex`, and none from the `experiment` framework. `cortex` as a library has many fewer dependencies, which simplifies deployment of systems that only need inference without the complexities of the experiment training machinery.
 
-## `train.sh`
+## Running from uberjar
 
-The included `train.sh` shell script uses a Makefile and java to run the entire process outside of Lein. It starts a lot faster, runs a bit faster, and hopefully hints at a more repeatable process.
+You can also build as a uberjar and run the entire process outside of Lein. It starts a lot faster, runs a bit faster, and hopefully hints at a more repeatable process.
+
+`lein uberjar`
+
+and then `java -jar target/classify-example.jar`
 
 Copyright © 2016 ThinkTopic, LLC.
