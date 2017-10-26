@@ -27,11 +27,17 @@
 (def-double-float-test sigmoid
   (verify-layers/test-activation (create-context) :logistic))
 
+(def-double-float-test swish
+  (verify-layers/test-activation (create-context) :swish))
+
 (def-double-float-test tanh
   (verify-layers/test-activation (create-context) :tanh))
 
 (def-double-float-test sigmoid-batch
   (verify-layers/test-activation-batch (create-context) :logistic))
+
+(def-double-float-test swish-batch
+  (verify-layers/test-activation-batch (create-context) :swish))
 
 (def-double-float-test tanh-batch
   (verify-layers/test-activation-batch (create-context) :tanh))

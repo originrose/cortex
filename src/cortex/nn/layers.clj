@@ -41,12 +41,12 @@ constructors are all variable args with the extra arguments expected to be
 ;;decides what to do from there.
 (defmethod graph/initialize-graph-parameter-buffer :auto-weight-initialization
   [graph node argument shape initialization]
-  (let [activation-set #{:tanh :relu :logistic}
+  (let [activation-set #{:tanh :relu :logistic :swish}
         next-activation (->> (graph/relative-dfs-seq graph (get node :id))
                              (map #(get (graph/get-node graph %) :type))
                              (filter activation-set)
                              first)]
-    (if (= next-activation :relu)
+    (if (#{:relu :swish} next-activation)
       (buf-init/initialize-buffer {:type :relu
                                    :shape shape})
       (buf-init/initialize-buffer {:type :xavier
@@ -206,6 +206,18 @@ constructors are all variable args with the extra arguments expected to be
   (default-layer-metadata))
 
 
+(defn swish
+ "https://arxiv.org/pdf/1710.05941 a self gated activation function.
+  f(x) = x * sigmoid(x)"
+  [& args]
+  [(merge-args {:type :swish} args)])
+
+
+(defmethod graph/get-node-metadata :swish
+  [& args]
+  (default-layer-metadata))
+
+
 (defn prelu
   "https://arxiv.org/pdf/1502.01852.pdf
 At this point we only support per-channel scale, not across channel scale.
@@ -325,6 +337,11 @@ If the input contains no channels then you get a scale factor per input paramete
   [num-output & args]
   (concat (apply linear num-output (seq-without-id args))
           (apply relu args)))
+
+(defn linear->swish
+  [num-output & args]
+  (concat (apply linear num-output (seq-without-id args))
+          (apply swish args)))
 
 
 (defn linear->tanh
