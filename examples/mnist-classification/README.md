@@ -83,4 +83,15 @@ A randomly selected handwritten digit from the test dataset is chosen, shown in 
 
 The included `train.sh` shell script uses a Makefile and java to run the entire process outside of Lein. It starts a lot faster, runs a bit faster, and hopefully hints at a more repeatable process.
 
+## Interactive document
+
+To execute the example as an interactive document run the command:
+
+```
+lein liq
+```
+
+Wait for the functions to load. Now you can interactively evaluate the code in the example.
+
+
 Copyright © 2016 ThinkTopic, LLC.
