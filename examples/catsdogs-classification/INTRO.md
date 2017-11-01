@@ -93,7 +93,7 @@ Setting up a datasource is done with the experiment-util/create-dataset-from-fol
    (experiment-util/infinite-class-balanced-dataset)))
 ```
 
-The initial description of the network has been kept identical as the mnist classification example
+The initial description of the network has been kept identical as the mnist classification example (although you might want to experiment with different configurations for example, taking the dropout layers out)
 
 ```
 (defn initial-description
