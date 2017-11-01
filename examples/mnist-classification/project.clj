@@ -14,6 +14,10 @@
   :jvm-opts ["-Xmx2000m"]
   :uberjar-name "classify-example.jar"
 
+  :profiles {:liq {:dependencies [[mogenslund/liquid "0.8.2"]]
+             :main dk.salza.liq.core}}
+  :aliases {"liq" ["with-profile" "liq" "run" "--load=.liq"]}
+
   :clean-targets ^{:protect false} [:target-path
                                     "figwheel_server.log"
                                     "resources/public/out/"
