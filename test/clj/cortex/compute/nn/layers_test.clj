@@ -22,6 +22,12 @@
 (def-double-float-test relu-activation-batch
   (verify-layers/relu-activation-batch (create-context)))
 
+(def-double-float-test swish-activation
+  (verify-layers/test-activation (create-context) :swish))
+
+(def-double-float-test swish-activation-batch
+  (verify-layers/test-activation-batch (create-context) :swish))
+
 (def-double-float-test linear
   (verify-layers/linear (create-context)))
 

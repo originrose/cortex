@@ -3,18 +3,18 @@
 cortex protocols around nn layers and provide some implementation of their respective types
 in order to ease the implementation burden across backends and ensure as much of a unified
 implementation as possible."
-  (:require [cortex.compute.nn.backend :as nn-backend]
-            [cortex.compute.math :as math]
+  (:require [clojure.core.matrix :as m]
             [cortex.compute.driver :as drv]
-            [clojure.core.matrix :as m]
-            [cortex.util :as util]
+            [cortex.compute.math :as math]
+            [cortex.compute.nn.activations :as activations]
+            [cortex.compute.nn.backend :as nn-backend]
             [cortex.compute.nn.protocols :as compute-protocols]
-            [think.resource.core :as resource]
-            [think.datatype.core :as dtype]
             [cortex.graph :as graph]
             [cortex.nn.layers :as cortex-layers]
             [cortex.tensor :as tensor]
-            [cortex.util :as util]))
+            [cortex.util :as util]
+            [think.datatype.core :as dtype]
+            [think.resource.core :as resource]))
 
 
 (set! *warn-on-reflection* true)
@@ -96,9 +96,10 @@ a datastructure that shares the backing store."
             output (->tensor (first-buffer output-buffers))
             input (->tensor (first-buffer input-buffers))]
         (condp = act-type
-          :logistic (tensor/unary-op! output 1.0 input :logistic)
-          :tanh (tensor/unary-op! output 1.0 input :tanh)
-          :relu (tensor/binary-op! output 1.0 input 0 0 :max)))))
+          :logistic (activations/logistic input output)
+          :tanh (activations/tanh input output)
+          :relu (activations/relu input output)
+          :swish (activations/swish input output)))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
     (tensor/with-stream (nn-backend/get-stream)
@@ -106,13 +107,20 @@ a datastructure that shares the backing store."
             output (->tensor (first-buffer output-buffers))
             input-gradient (->tensor (first-gradient input-buffers))
             output-gradient (->tensor (first-gradient output-buffers))]
-        (tensor/activation-gradient! input-gradient output-gradient output act-type)))))
+        (condp = act-type
+          :logistic (activations/logistic-gradient input-gradient output-gradient output)
+          :tanh (activations/tanh-gradient input-gradient output-gradient output)
+          :relu (activations/relu-gradient input-gradient output-gradient output)
+          :swish (activations/swish-gradient input-gradient output-gradient output))))))
 
 
 (defmethod create :relu
   [backend node batch-size]
   (->ActivationLayer :relu node))
 
+(defmethod create :swish
+  [backend node batch-size]
+  (->ActivationLayer :swish node))
 
 (defmethod create :logistic
   [backend node batch-size]
