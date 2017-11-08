@@ -28,7 +28,6 @@
 (defn save-network
   "Saves a trained network out to the filesystem."
   [network network-filename]
-  (println "Saving network to" network-filename)
   (util/write-nippy-file network-filename network)
   network)
 
@@ -77,7 +76,9 @@
                                                       loss-val
                                                       current-best-loss))
         epoch (get new-network :epoch-count)]
-    (println (format "Loss for epoch %s: (current) %s (best) %s" epoch loss-val current-best-loss))
+    (println (format "Loss for epoch %3d: (current) %.8f (best) %.8f%s"
+                     epoch loss-val current-best-loss
+                     (if best-network? " [new best]" "")))
     {:best-network? best-network?
      :network updated-network}))
 
