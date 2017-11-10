@@ -762,7 +762,7 @@ and the rest of the dimensions being squashed into n-rows."
 
 
 (def binary-operations
-  [:+ :- :* :/ :max :min :bit-and :eq])
+  [:+ :- :* :/ :max :min :bit-and :bit-xor :eq :> :>= :< :<=])
 
 
 (defn binary-op!

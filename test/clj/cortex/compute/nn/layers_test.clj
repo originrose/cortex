@@ -28,6 +28,12 @@
 (def-double-float-test swish-activation-batch
   (verify-layers/test-activation-batch (create-context) :swish))
 
+(def-double-float-test selu-activation
+  (verify-layers/test-activation (create-context) :selu))
+
+(def-double-float-test selu-activation-batch
+  (verify-layers/test-activation-batch (create-context) :selu))
+
 (def-double-float-test linear
   (verify-layers/linear (create-context)))
 
@@ -96,3 +102,4 @@
 
 (def-double-float-test join-+-2
   (verify-layers/join-+-2 (create-context)))
+

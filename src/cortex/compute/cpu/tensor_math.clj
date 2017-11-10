@@ -247,7 +247,20 @@
     :max `(if (> ~x ~y) ~x ~y)
     :min `(if (> ~x ~y) ~y ~x)
     :bit-and `(bit-and (unchecked-int ~x) (unchecked-int ~y))
+    :bit-xor `(bit-xor (unchecked-int ~x) (unchecked-int ~y))
     :eq `(if (= ~x ~y)
+           1
+           0)
+    :> `(if (> ~x ~y)
+           1
+           0)
+    :>= `(if (>= ~x ~y)
+           1
+           0)
+    :< `(if (< ~x ~y)
+           1
+           0)
+    :<= `(if (<= ~x ~y)
            1
            0)))
 

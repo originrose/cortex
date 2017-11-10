@@ -243,6 +243,16 @@
   (defn fx [v] (* v (sigmoid v)))
   (defn dswish [v] (+  (fx v) (* (sigmoid v) (- 1 (fx v)))))
 
+  (def SELU_ALPHA 1.6732632423543772848170429916717)
+  (def SELU_LAMBDA 1.0507009873554804934193349852946)
+  (defn selu [x] (if (pos? x)
+                   (* SELU_LAMBDA x)
+                   (* SELU_LAMBDA (- (* SELU_ALPHA (Math/exp x)) SELU_ALPHA))))
+
+  (defn dselu [x] (if (pos? x)
+                    SELU_LAMBDA
+                    (* SELU_LAMBDA SELU_ALPHA (Math/exp x))))
+
   (def input  [-1 1 -1 1 -1 1 -1 1 -1 1])
   (def forward-logistic (mapv sigmoid input))
   (def backward-logistic (->> forward-logistic
@@ -250,8 +260,14 @@
                               (map * input)))
   (def forward-swish (mapv swish input))
   (def backward-swish (->> forward-swish
-                              (map dswish)
-                              (map * input)))
+                           (map dswish)
+                           (map * input)))
+
+  (def forward-selu (mapv selu input))
+  (def backward-selu (->> forward-selu
+                          (map dselu)
+                          (mapv * input)))
+
 
   (def batch-input [-5 -4 -3 -2 -1 0 1 2 3 4])
   (def forward-logistic-batch (mapv sigmoid batch-input))
@@ -262,6 +278,12 @@
   (def backward-swish-batch (->> forward-swish-batch
                                  (map dswish)
                                  (mapv * batch-input)))
+
+  (def forward-selu-batch (mapv selu batch-input))
+  (def backward-selu-batch (->> forward-selu-batch
+                                 (map dselu)
+                                 (mapv * batch-input)))
+
 )
 
 
@@ -283,7 +305,13 @@
            -0.7615941559557649 0.7615941559557649]
           [-0.41997434161402614 0.41997434161402614 -0.41997434161402614 0.41997434161402614
            -0.41997434161402614 0.41997434161402614 -0.41997434161402614 0.41997434161402614
-           -0.41997434161402614 0.41997434161402614]]})
+           -0.41997434161402614 0.41997434161402614]]
+   :selu [[-1.1113307378125625 1.0507009873554805 -1.1113307378125625 1.0507009873554805
+           -1.1113307378125625 1.0507009873554805 -1.1113307378125625 1.0507009873554805
+           -1.1113307378125625 1.0507009873554805]
+          [-0.5786268790075374 1.0507009873554805 -0.5786268790075374 1.0507009873554805
+           -0.5786268790075374 1.0507009873554805 -0.5786268790075374 1.0507009873554805
+           -0.5786268790075374 1.0507009873554805]]})
 
 (defn test-activation
   [context act-type]
@@ -337,7 +365,20 @@
                 (repeat activation-batch-size
                         [-2.416354975472916 -1.856234354263459 -1.2873014189882364
                          -0.7638334409883287 -0.36713290505919505 0.0 0.835403899885462
-                         2.1475760812469877 3.277268515997532 4.220215568779826])))]})
+                         2.1475760812469877 3.277268515997532 4.220215568779826])))]
+
+   :selu [(vec
+               (flatten
+                (repeat activation-batch-size
+                        [-1.74625336066962 -1.7258986281898945 -1.6705687287671118
+                         -1.520166468595695 -1.1113307378125625 0.0 1.0507009873554805
+                         2.101401974710961 3.1521029620664414 4.202803949421922])))
+              (vec
+               (flatten
+                (repeat activation-batch-size
+                        [-1.5332932256617793 -1.2518582388020294 -0.9923066122192254
+                         -0.768906439142725 -0.5786268790075374 0.0 1.0507009873554805
+                         2.101401974710961 3.1521029620664414 4.202803949421922])))]})
 
 (defn test-activation-batch
   [context act-type]

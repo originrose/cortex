@@ -48,7 +48,12 @@
            :min 4
            :max 5
            :bit-and 6
-           :eq 7))])
+           :bit-xor 7
+           :eq 8
+           :> 9
+           :>= 10
+           :< 11
+           :<= 12))])
   ([operation rev-ops?]
    (conj (operation->cuda operation)
          (int (if rev-ops? 1 0)))))
