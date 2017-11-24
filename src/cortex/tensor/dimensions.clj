@@ -54,7 +54,7 @@
 
 (defn disambiguate-shape
   [shape-vec]
-  (mapv ->disambiguate-shape-entry shape-vec))
+  (mapv disambiguate-shape-entry shape-vec))
 
 
 (defn direct-shape?
@@ -136,7 +136,8 @@
 (defn- ensure-direct-shape
   [shape-seq]
   (when-not (direct-shape? shape-seq)
-    (throw (ex-info "Index buffers not supported for this operation." {}))))
+    (throw (ex-info "Index buffers not supported for this operation." {})))
+  shape-seq)
 
 
 (defn ->2d-shape
