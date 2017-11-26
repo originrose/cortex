@@ -34,6 +34,13 @@
   (^long idx_to_address [^long arg]))
 
 
+;;This is the only one that will work with indirect addressing.
+(defrecord GeneralElemIdxToAddr [rev-shape rev-strides rev-max-shape]
+  ElemIdxToAddressFunction
+  (^long idx_to_address [this ^long arg]
+   (ct-dims/elem-idx->addr rev-shape rev-strides rev-max-shape arg)))
+
+
 (defrecord ElemIdxToAddr [^ints rev-shape ^ints rev-strides ^ints rev-max-shape]
   ElemIdxToAddressFunction
   (^long idx_to_address [this ^long arg]
@@ -58,41 +65,73 @@
   (^long idx_to_address [this ^long arg]
    (rem arg elem-count)))
 
+(defn- ensure-simple-tensor
+  [tensor]
+  (let [dims (:dimensions tensor)
+        dense? (ct-dims/dense? dims)
+        increasing? (ct-dims/access-increasing? dims)
+        direct? (ct-dims/direct? dims)]
+    (when-not (and dense? increasing? direct?)
+      (throw (ex-info "Tensors used for indexing must be direct, increasing, and dense"
+                      {:dense? dense?
+                       :increasing? increasing?
+                       :direct? direct?
+                       :dimensions dims})))
+    tensor))
 
 (defn ^:private get-elem-dims->address
   ^ElemIdxToAddressFunction [dims max-shape]
   ;;Special cases here for speed
   (let [dense? (ct-dims/dense? dims)
         increasing? (ct-dims/access-increasing? dims)
-        min-shape (drop-while #(= 1 %) (:shape dims))]
+        ;;Any indirect addressing?
+        direct? (ct-dims/direct? dims)
+        min-shape (drop-while #(= 1 %) (ct-dims/shape dims))]
     (cond
       ;;Special case for indexes that increase monotonically
-      (and (= (:shape dims)
+      (and direct?
+           (= (:shape dims)
               max-shape)
            dense?
            increasing?)
       (->SimpleElemIdxToAddr)
       ;;Special case for broadcasting a vector across an image (like applying bias).
-      (and (= (ct-dims/ecount dims)
-              (apply max (:shape dims)))
+      (and direct?
+           (= (ct-dims/ecount dims)
+              (apply max (ct-dims/shape dims)))
            dense?
            increasing?)
       (let [ec (ct-dims/ecount dims)
             ec-idx (long
-                    (->> (map-indexed vector (ct-dims/left-pad-ones (:shape dims) max-shape))
+                    (->> (map-indexed vector (ct-dims/left-pad-ones (ct-dims/shape dims) max-shape))
                          (filter #(= ec (second %)))
                          (ffirst)))
             broadcast-amt (long (apply * 1 (drop (+ 1 ec-idx) max-shape)))]
         (->SimpleBcastAddr ec broadcast-amt))
-      (and dense?
+      (and direct?
+           dense?
            increasing?
            (= min-shape
               (take-last (count min-shape) max-shape)))
       (->SimpleRepeatAddr (ct-dims/ecount dims))
       :else
       (let [{:keys [reverse-shape reverse-strides]} (ct-dims/->reverse-data dims max-shape)]
-        (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
-                         (int-array (vec (reverse max-shape))))))))
+        (if direct?
+          (->ElemIdxToAddr (int-array reverse-shape) (int-array reverse-strides)
+                           (int-array (vec (reverse max-shape))))
+          (do
+            #_(clojure.pprint/pprint {:reverse-shape reverse-shape
+                                      :reverse-strides reverse-strides
+                                      :reverse-max-shape (ct-dims/reversev max-shape)})
+            (->GeneralElemIdxToAddr (mapv (fn [item]
+                                            (if (number? item)
+                                              item
+                                              ;;dtype/get-value works on pure buffers.
+                                              (ct/tensor->buffer
+                                               (ensure-simple-tensor item))))
+                                          reverse-shape)
+                                    reverse-strides
+                                    (ct-dims/reversev max-shape))))))))
 
 
 (defmacro ^:private assign-constant-impl

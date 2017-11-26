@@ -7,7 +7,8 @@
   Shape vectors may have an index buffer in them at a specific dimension instead of a number.
   This means that that dimension should be indexed indirectly.  If a shape has any index buffers
   then it is considered an indirect shape."
-  (:require [clojure.core.matrix :as m]))
+  (:require [clojure.core.matrix :as m]
+            [think.datatype.core :as dtype]))
 
 
 (defmacro when-not-error
@@ -190,6 +191,16 @@
            (= max-stride shape-num)))))
 
 
+(defn direct?
+  [{:keys [shape]}]
+  (direct-shape? shape))
+
+
+(defn indirect?
+  [dims]
+  (not (direct? dims)))
+
+
 (defn access-increasing?
   "Are these dimensions setup such a naive seq through the data will be accessing memory in
   order.  This is necessary for external library interfaces (blas, cudnn).  An example would be
@@ -223,8 +234,7 @@
           (loop [idx (long 0)
                  arg (long arg)
                  offset (long 0)]
-            (if (and (> arg 0)
-                     (< idx num-items))
+            (if (< idx num-items)
               (let [next-max (long (rev-max-shape idx))
                     next-stride (long (rev-strides idx))
                     next-dim-entry (rev-shape idx)
@@ -234,10 +244,11 @@
                 (recur (inc idx)
                        (quot arg next-max)
                        (+ offset (* next-stride
-                                    (if (number? next-dim)
+                                    (if (number? next-dim-entry)
                                       shape-idx
-                                      (long (m/mget next-dim
-                                                    shape-idx)))))))
+                                      (long (dtype/get-value
+                                             next-dim-entry
+                                             shape-idx)))))))
               offset)))))
 
 
@@ -547,7 +558,11 @@ https://cloojure.github.io/doc/core.matrix/clojure.core.matrix.html#var-select"
                                      (remove (comp number? first)))
           new-strides (->> (map second rev-arg-shape-strides)
                            reversev)
-          new-shape (->> (map (comp count first) rev-arg-shape-strides)
+          new-shape (->> rev-arg-shape-strides
+                         (map #(let [item (first %)]
+                                 (if (vector? item)
+                                   (count item)
+                                   item)))
                          reversev)]
       {:dimensions {:shape new-shape
                     :strides new-strides}

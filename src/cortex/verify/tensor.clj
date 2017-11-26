@@ -1109,3 +1109,18 @@ for the cuda backend."
                       -0.047466976339091305 -0.03569676147971518 -0.027076332292621106 -0.020863959610017586]
                     input-gradient
                     1e-4))))))
+
+
+
+(defn indexed-tensor
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [mat-tens (ct/->tensor (repeat 2 (partition 3 (range 9))))
+         ;;Indexing only guaranteed to work for integers
+         index-tens (ct/->tensor [1 2 1 2 1 2] :datatype :int)
+         sel-tens (ct/select mat-tens :all :all index-tens)]
+     (is (= [2 3 6]
+            (ct/shape sel-tens)))
+     (is (m/equals (flatten (repeat 2 [1 2 1 2 1 2 4 5 4 5 4 5 7 8 7 8 7 8]))
+                   (vec (ct/to-double-array sel-tens)))))))
