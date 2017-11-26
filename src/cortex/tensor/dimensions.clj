@@ -509,6 +509,13 @@ https://cloojure.github.io/doc/core.matrix/clojure.core.matrix.html#var-select"
                                       :argument arg})
                                    (vec arg))
                                  (number? arg) arg
+                                 ;;Is this something shape-able
+                                 (vector? (m/shape arg))
+                                 (let [arg-shape (m/shape arg)]
+                                   (when-not (= 1 (count arg-shape))
+                                     (throw (ex-info "Index arguments must be vectors"
+                                                     {:arg-shape arg-shape})))
+                                   arg)
                                  :else
                                  (throw (ex-info "argument to select of incorrect type"
                                                  {:arg arg}))))
@@ -517,16 +524,21 @@ https://cloojure.github.io/doc/core.matrix/clojure.core.matrix.html#var-select"
           ;;Generate sequence of partial sums
           rev-shape-products (reduce (fn [sums item]
                                    (if sums
-                                     (conj sums (* (long item) (long (last sums))))
+                                     (conj sums (* (disambiguate-shape-entry item)
+                                                   (long (last sums))))
                                      [item]))
                                  nil
                                  rev-shape)
+          ;;Calculate the first element index of the new item assuming
           first-elem-idx (reduce (fn [idx [arg prev-shape-product]]
                                    (+ (long idx)
                                       (* (long (or prev-shape-product 1))
-                                         (long (if (number? arg)
-                                                 arg
-                                                 (first arg))))))
+                                         (long (cond
+                                                 (number? arg) arg
+                                                 (vector? arg) (first arg)
+                                                 ;;If we are doing indirect indexing then assume 0 relative index
+                                                 :else
+                                                 0)))))
                                  0
                                  (map vector rev-args
                                       (concat [nil] rev-shape-products)))
