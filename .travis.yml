@@ -3,7 +3,7 @@ requires: sudo
 services:
   - docker
 before_install:
-  - rm -fr ~/.m2/repository/thinktopic/cortex
+  - sudo rm -fr ~/.m2/repository/thinktopic/cortex
 script:
  ./scripts/docker-test.sh
 cache:
