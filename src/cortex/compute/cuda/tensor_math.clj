@@ -242,9 +242,9 @@
 
 (defn- dims-cudnn-compatible?
   [& args]
-  (let [{:keys [max-shape new-dims]} (apply ct-dims/dimension-seq->max-shape args)]
-    (and (every? ct-dims/access-increasing? new-dims)
-         (every? (partial dimensions-shape-1-or-equal? max-shape) new-dims))))
+  (let [{:keys [max-shape dimensions]} (apply ct-dims/dimension-seq->max-shape args)]
+    (and (every? ct-dims/access-increasing? dimensions)
+         (every? (partial dimensions-shape-1-or-equal? max-shape) dimensions))))
 
 
 (defn- datatype-cudnn-compatible?

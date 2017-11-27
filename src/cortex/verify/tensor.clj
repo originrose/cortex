@@ -1,11 +1,11 @@
 (ns cortex.verify.tensor
   (:require [cortex.tensor :as ct]
+            [cortex.tensor.dimensions :as ct-dims]
             [cortex.compute.driver :as drv]
             [clojure.test :refer :all]
             [clojure.core.matrix :as m]
             [clojure.core.matrix.stats :as stats]
-            [cortex.util :as util]
-            [cortex.tensor :as tensor]))
+            [cortex.util :as util]))
 
 
 (defmacro tensor-context
@@ -873,16 +873,16 @@ for the cuda backend."
                                   (partition dimension)
                                   (partition dimension)
                                   (partition channels)))
-          max-pooling-desc (tensor/pooling-descriptor datatype channels 3 3 1 1 2 2
+          max-pooling-desc (ct/pooling-descriptor datatype channels 3 3 1 1 2 2
                                                       :pool-op :max
                                                       :dimension-op :floor)
-          avg-pooling-desc (tensor/pooling-descriptor datatype channels 3 3 1 1 2 2
+          avg-pooling-desc (ct/pooling-descriptor datatype channels 3 3 1 1 2 2
                                                       :pool-op :avg
                                                       :dimension-op :floor)
-          avg-exc-pad-pooling-desc (tensor/pooling-descriptor datatype channels 3 3 1 1 2 2
+          avg-exc-pad-pooling-desc (ct/pooling-descriptor datatype channels 3 3 1 1 2 2
                                                               :pool-op :avg-exc-pad
                                                               :dimension-op :floor)
-          {:keys [output-width output-height]} (tensor/get-convolution-output-dimensions
+          {:keys [output-width output-height]} (ct/get-convolution-output-dimensions
                                                  max-pooling-desc
                                                  dimension dimension)
           max-output (ct/new-tensor [batch-size channels output-width output-height])
@@ -1008,10 +1008,10 @@ for the cuda backend."
    (testing "Gaussian rand"
      (let [test-vec (->> (range 1 11)
                          (mapcat (fn [idx]
-                                   (let [tens (tensor/rand! (tensor/new-tensor [10000])
-                                                            (tensor/gaussian-distribution
+                                   (let [tens (ct/rand! (ct/new-tensor [10000])
+                                                            (ct/gaussian-distribution
                                                              :mean idx :variance idx))
-                                         values (tensor/to-double-array tens)]
+                                         values (ct/to-double-array tens)]
                                      [(stats/mean values)
                                       (stats/variance values)])))
                          vec)]
@@ -1021,11 +1021,11 @@ for the cuda backend."
    (testing "Flat rand"
      (let [test-vec (->> (range 1 11)
                          (mapcat (fn [idx]
-                                   (let [tens (tensor/rand! (tensor/new-tensor [10000])
-                                                            (tensor/flat-distribution
+                                   (let [tens (ct/rand! (ct/new-tensor [10000])
+                                                            (ct/flat-distribution
                                                              :minimum (- idx 2)
                                                              :maximum (+ idx 2)))
-                                         values (tensor/to-double-array tens)]
+                                         values (ct/to-double-array tens)]
                                      [(stats/mean values)])))
                          vec)]
        (is (m/equals [1 2 3 4 5 6 7 8 9 10]
@@ -1039,18 +1039,18 @@ for the cuda backend."
          input-dim 2
          input-num-pixels (* input-dim input-dim)
          n-input (* num-input-channels input-num-pixels)
-         input (-> (tensor/->tensor (flatten (repeat batch-size (range n-input))))
-                   (tensor/in-place-reshape [batch-size num-input-channels input-dim input-dim]))
-         output-gradient (-> (tensor/->tensor (repeat (* batch-size n-input) 1.0))
-                             (tensor/in-place-reshape [batch-size num-input-channels input-dim input-dim]))
-         output (tensor/new-tensor (m/shape input))
-         input-gradient (tensor/new-tensor (m/shape input))
-         lrn-desc (tensor/lrn-descriptor :n lrn-n :k 1 :alpha 1 :beta 1)]
-     (tensor/lrn-forward! output input lrn-desc)
-     (tensor/lrn-backward! input-gradient output input output-gradient lrn-desc)
-     {:output (vec (tensor/to-double-array output))
-      :input-gradient (vec (tensor/to-double-array input-gradient))
-      :input-data (vec (tensor/to-double-array input))}))
+         input (-> (ct/->tensor (flatten (repeat batch-size (range n-input))))
+                   (ct/in-place-reshape [batch-size num-input-channels input-dim input-dim]))
+         output-gradient (-> (ct/->tensor (repeat (* batch-size n-input) 1.0))
+                             (ct/in-place-reshape [batch-size num-input-channels input-dim input-dim]))
+         output (ct/new-tensor (m/shape input))
+         input-gradient (ct/new-tensor (m/shape input))
+         lrn-desc (ct/lrn-descriptor :n lrn-n :k 1 :alpha 1 :beta 1)]
+     (ct/lrn-forward! output input lrn-desc)
+     (ct/lrn-backward! input-gradient output input output-gradient lrn-desc)
+     {:output (vec (ct/to-double-array output))
+      :input-gradient (vec (ct/to-double-array input-gradient))
+      :input-data (vec (ct/to-double-array input))}))
 
 
 (defn lrn-operator
@@ -1120,7 +1120,48 @@ for the cuda backend."
          ;;Indexing only guaranteed to work for integers
          index-tens (ct/->tensor [1 2 1 2 1 2] :datatype :int)
          sel-tens (ct/select mat-tens :all :all index-tens)]
-     (is (= [2 3 6]
-            (ct/shape sel-tens)))
-     (is (m/equals (flatten (repeat 2 [1 2 1 2 1 2 4 5 4 5 4 5 7 8 7 8 7 8]))
-                   (vec (ct/to-double-array sel-tens)))))))
+     (testing "Basic assigning and sanity"
+       (is (not (ct-dims/access-increasing? (:dimensions sel-tens))))
+       (is (= [2 3 6]
+              (ct/shape sel-tens)))
+       (is (m/equals (flatten (repeat 2 [1 2 1 2 1 2 4 5 4 5 4 5 7 8 7 8 7 8]))
+                     (vec (ct/to-double-array sel-tens)))))
+
+     ;;Setup a test for what we do in centerloss
+     (testing "Center loss use case"
+       (let [centers (ct/select mat-tens 0 (ct/->tensor [0 1 0 2 1] :datatype :int) :all)
+             batch-data (ct/new-tensor [5 3])]
+         (ct/assign! batch-data centers)
+         (is (m/equals [0 1 2 3 4 5 0 1 2 6 7 8 3 4 5]
+                       (vec (ct/to-double-array batch-data))))
+         ;;Because we are using indexing, we *have* to use the actual compare-and-set versions of things.
+         ;;This test should highlight that by producing inconsistent results if the backend doesn't realize
+         ;;this situation.
+         (ct/binary-op! centers 1.0 batch-data 1.0 centers :+)
+         (is (m/equals [0 3 6 9 12 15 0 3 6 12 14 16 9 12 15]
+                       (vec (ct/to-double-array centers))))))
+     (testing "Broadcasting, multiple indexes in one tensor"
+       (let [mat-tens (ct/->tensor (->> (range 9)
+                                        (partition 3)))
+             sel-tens (ct/select mat-tens
+                                 (ct/->tensor [0 1 1 2] :datatype :int)
+                                 (ct/->tensor [2 1 0] :datatype :int))
+             dest-tens (ct/new-tensor [8 6])]
+         (ct/assign! dest-tens sel-tens)
+         (is (m/equals (vec (flatten [[2.0 1.0 0.0]
+                                      [2.0 1.0 0.0]
+                                      [5.0 4.0 3.0]
+                                      [5.0 4.0 3.0]
+                                      [5.0 4.0 3.0]
+                                      [5.0 4.0 3.0]
+                                      [8.0 7.0 6.0]
+                                      [8.0 7.0 6.0]
+                                      [2.0 1.0 0.0]
+                                      [2.0 1.0 0.0]
+                                      [5.0 4.0 3.0]
+                                      [5.0 4.0 3.0]
+                                      [5.0 4.0 3.0]
+                                      [5.0 4.0 3.0]
+                                      [8.0 7.0 6.0]
+                                      [8.0 7.0 6.0]]))
+                       (vec (ct/to-double-array dest-tens)))))))))

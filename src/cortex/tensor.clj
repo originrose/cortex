@@ -593,7 +593,7 @@ and the rest of the dimensions being squashed into n-rows."
   [& args]
   (let [{:keys [max-shape dimensions]} (->> (map tensor->dimensions args)
                                             (apply dims/dimension-seq->max-shape))
-        shape-seq (map :shape dimensions)]
+        shape-seq (map dims/shape  dimensions)]
     (when-not-error (every? (fn [shp]
                               (every? #(= 0 (long %))
                                       (map #(rem (long %1) (long %2))
