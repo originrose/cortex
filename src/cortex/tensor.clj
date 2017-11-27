@@ -806,10 +806,9 @@ Datatypes must match."
 
 
 (defn ternary-op!
-  "Perform the elementwise operation
-  dest = op( alpha * x, beta * y, gamma * z )
-  dest tensor and must not alias any other arguments.  There is no accumulator version
-  of these operations at this time in order to keep kernel permutations low (3 backend permutations).
+  "Perform the elementwise operation dest = op( alpha * x, beta * y, gamma * z ) dest tensor and
+  must not alias any other arguments.  There is no accumulator version of these operations at
+  this time in order to keep kernel permutations low (3 backend permutations).
 
   x, y, z can be constants or tensors.
 
