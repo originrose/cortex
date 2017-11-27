@@ -23,19 +23,32 @@
 (set! *unchecked-math* :warn-on-boxed)
 
 
+(defn- ensure-index-buffer
+  [tensor]
+  (let [retval (->ptr (ct/tensor->buffer tensor))]
+    (when-not (instance? IntPointer retval)
+      (throw (ex-info "Index buffers must be integer tensors" {})))
+    retval))
+
+
 (defn- dimensions->cuda
   [{:keys [shape strides]}]
   (let [max-shape-count 5
-        rev-shape (->> (concat (reverse shape)
-                               (repeat 1))
-                       (take max-shape-count)
-                       vec)
+        rev-complex-shape (->> (concat (ct-dims/reversev shape)
+                                       (repeat 1))
+                               (take max-shape-count))
+        rev-shape (ct-dims/disambiguate-shape rev-complex-shape)
         rev-strides (->> (concat (reverse strides)
                                  (repeat (first strides)))
-                         (take max-shape-count)
-                         vec)]
-    (->> (concat rev-shape rev-strides)
-         (mapv int))))
+                         (take max-shape-count))
+        rev-int-ptrs (map #(if (number? %)
+                             (IntPointer.)
+                             (ensure-index-buffer %))
+                          rev-complex-shape)
+        retval (concat (->> (concat rev-shape rev-strides)
+                           (map int))
+                      rev-int-ptrs)]
+    retval))
 
 
 (defn- operation->cuda

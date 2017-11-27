@@ -24,9 +24,9 @@ Op may be: [:+ :* :/].
 
 In the non-indexed cases the element counts of y or x may differ but they need to be
   commensurate meaning that the smaller evenly divides the larger.  When writing to result it is
-  important that result is as large as the largest.  This is a relaxation of the numpy broadcasting
-  rules to allow more forms of broadcasting; the check is that the remainder is zero; not that
-  the smaller dimension is 1.
+  important that result is as large as the largest.  This is a relaxation of the numpy
+  broadcasting rules to allow more forms of broadcasting; the check is that the remainder is
+  zero; not that the smaller dimension is 1.
 
 
 In general we want as much error checking and analysis done in this file as opposed to at the

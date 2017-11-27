@@ -114,3 +114,7 @@
 
 (def-double-float-test lrn-operator
   (verify-tensor/lrn-operator (create-driver) *datatype*))
+
+
+(def-all-dtype-test indexed-tensor
+  (verify-tensor/indexed-tensor (create-driver) *datatype*))

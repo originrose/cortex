@@ -107,5 +107,5 @@
   (verify-tensor/rand-operator (driver) :float))
 
 
-(deftest indexed-tensor
+(def-all-dtype-test indexed-tensor
   (verify-tensor/indexed-tensor (driver) *datatype*))
