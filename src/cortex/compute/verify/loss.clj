@@ -8,18 +8,20 @@
             [cortex.nn.layers :as layers]
             [cortex.nn.network :as network]
             [cortex.loss.util :as util]
-            [cortex.loss.core :as cortex-loss]))
+            [cortex.loss.core :as cortex-loss]
+            [clojure.core.matrix :as m]))
 
 
 (defn center-loss
   [backend]
   (backend/with-backend backend
    (let [n-classes 5
-         n-features 10
+         n-features n-classes
          batch-size 6
          center-val 1.0
          feature-val 1.0
          alpha 0.5
+
          input-buffer-map {:labels [[1 0 0 0 0]
                                     [0 0 1 0 0]
                                     [1 0 0 0 0]
@@ -27,7 +29,7 @@
                                     [0 0 0 1 0]
                                     [1 0 0 0 0]]}
          centers (vec (repeat n-classes (vec (repeat n-features center-val))))
-         features (vec (repeatedly batch-size #(vec (repeat n-features feature-val))))
+         features (mapv #(m/mul % 20) (:labels input-buffer-map))
          gradients (mapv #(m/sub % 1) features)
          network (network/linear-network [(layers/input n-features 1 1)
                                           (layers/linear n-features :id :feature)])
@@ -66,12 +68,13 @@
                                                           :gradient (backend/new-array backend [n-features]
                                                                                        batch-size)}})
          loss-term (util/create-compute-loss-term backend {:compute-graph graph} loss-term batch-size)
-         nonzero-classes [1 0 1 1 0]
-         adjusted-centers (mapv #(if (zero? %)
-                                   (vec (repeat n-features 1.0))
-                                   (vec (repeat n-features (+ (* alpha center-val)
-                                                              (* (- 1.0 alpha) feature-val)))))
-                                nonzero-classes)]
+         adjusted-centers (->> [1 0 1 1 0]
+                               (map-indexed (fn [idx nonzero?]
+                                              (if (= 1 nonzero?)
+                                                (assoc (vec (repeat n-features 0.5))
+                                                       idx 10.5)
+                                                (vec (repeat n-features 1)))))
+                               vec)]
      (util/compute-loss-gradient loss-term argument-map)
      (let [output-gradients (->> (backend/to-double-array backend (get-in argument-map [:output :gradient]))
                                  (partition n-features)
@@ -81,4 +84,5 @@
        (is (m/equals adjusted-centers
                      (->> (backend/to-double-array backend (get-in argument-map [:centers :buffer]))
                           (partition n-features)
-                          (mapv vec))))))))
+                          (mapv vec))
+                     1e-5))))))

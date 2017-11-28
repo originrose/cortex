@@ -16,13 +16,13 @@
   util/PComputeLoss
   (compute-loss-gradient [this buffer-map]
     (ct/with-stream (backend/get-stream)
-      (let [->batch-ct (fn [item] (math/->batch-ct item))
-            ->ct (fn [item] (math/->vector-ct item))
+      (let [->batch-ct #(math/->batch-ct %)
+            ->ct #(math/->vector-ct %)
             output-buffer (->batch-ct (get-in buffer-map [:output :buffer]))
             output-gradient (->batch-ct (get-in buffer-map [:output :gradient]))
             labels (->batch-ct (get-in buffer-map [:labels :buffer]))
             label-indexes (->ct (get-in buffer-map [:label-indexes :buffer]))
-            label-inverse-counts (->ct buffer-map [:label-inverse-counts :buffer])
+            label-inverse-counts (->ct (get-in buffer-map [:label-inverse-counts :buffer]))
             centers (->batch-ct (get-in buffer-map [:centers :buffer]))
             alpha (double (get loss-term :alpha))
             beta (- 1.0 alpha)
@@ -79,8 +79,11 @@
         ;; This is really (beta*(x-c))
         (ct/binary-op! batch-centers beta output-buffer beta batch-centers :-)
 
-        ;; Multiply by n
-        (ct/binary-op! batch-centers 1.0 batch-centers 1.0 (ct/in-place-reshape label-inverse-counts [batch-size 1]))
+        ;; divide by n
+        (ct/binary-op! batch-centers
+                       1.0 batch-centers
+                       1.0 (ct/in-place-reshape label-inverse-counts [batch-size 1])
+                       :*)
 
         ;; update centers with new positions doing a reduction.  This is safe because we aren't
         ;; using a constant alpha on expanded-centers.
