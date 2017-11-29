@@ -7,7 +7,8 @@
             [cortex.nn.network :as network]
             [cortex.nn.execute :as execute]
             [cortex.experiment.train :as experiment-train]
-            [cortex.util :as util]))
+            [cortex.util :as util]
+            [cortex.experiment.train :as train]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -152,6 +153,21 @@
    "dataset-image" (partial get-dataset-image dataset-display-atom)
    "accuracy-data" (partial get-accuracy-data classification-accuracy-atom)})
 
+(defn train-test-loss
+  "return the train-test loss"
+  [{:keys [new-network test-ds train-ds batch-size
+           context]}]
+  (let [batch-size (long batch-size)
+        get-label (partial experiment-train/get-labels new-network batch-size context)
+        loss-on (partial experiment-train/network-loss new-network)
+        ;;predicted labels
+        [pred-train-labels pred-test-labels] (mapv get-label [train-ds test-ds])
+        test-loss (loss-on pred-test-labels test-ds )
+        train-loss (loss-on pred-train-labels train-ds)]
+    {:pred-train-labels pred-train-labels :pred-test-labels pred-test-labels
+     :test-loss test-loss :train-loss train-loss}
+    ))
+
 (defn- test-fn
   "The `experiment` training system supports passing in a `test-fn`
   that gets called every epoch allowing the user to compare the old
@@ -160,11 +176,15 @@
   use that both for reporting and comparing."
   [confusion-matrix-atom classification-accuracy-atom observation->img-fn
    class-mapping network-filename
-   {:keys [batch-size context]}
-   {:keys [new-network old-network test-ds]}]
+   {:keys [batch-size context] :as m2}
+   {:keys [new-network old-network test-ds] :as m3}]
   (let [labels (execute/run new-network test-ds :batch-size batch-size)
         vec->label (vec->label-fn class-mapping)
         old-classification-accuracy (:classification-accuracy old-network)
+
+        ttmap (train-test-loss (merge m2 m3))
+        [train-loss test-loss :as ttloss] (mapv (comp :loss-sum ttmap)
+                                                [:train-loss :test-loss])
         classification-accuracy (double
                                  (/ (->> (map (fn [label observation]
                                                 (= (vec->label (:labels label))
@@ -192,7 +212,8 @@
                             ;;stuck in a sub-optimal state.
                           (assoc old-network :epoch-count (get new-network :epoch-count)))]
     (swap! classification-accuracy-atom conj classification-accuracy)
-    (println "Classification accuracy:" classification-accuracy)
+    (println "Classification accuracy:" classification-accuracy
+             " train loss " train-loss " test loss " test-loss)
 
     {:best-network? best-network?
      :network updated-network}))
@@ -201,10 +222,11 @@
   "Train forever. This function never returns."
   [initial-description train-ds test-ds
    train-args]
-  (let [network (network/linear-network initial-description)]
+  (let [network (network/linear-network initial-description)
+        targs(-> train-args seq flatten)]
     (apply (partial experiment-train/train-n network
                     train-ds test-ds)
-           (-> train-args seq flatten))))
+           targs)))
 
 (defn- display-dataset-and-model
   "Starts the web server that gives real-time training updates."
@@ -260,42 +282,50 @@
             (eio/make-event (str "buffers/" (name k))
                             (:buffer v))) buf)))
 
+
+
 (defn tensorboard-log
   "Given the context, old network, the new network and a test dataset,
   return a map with the updated network.
   As a side-effect, stream the train/test loss as well as all buffers 
   as tensorboard events, appended to the file-path argument"
-  [file-path
-   {:keys [batch-size context]}
-   {:keys [new-network old-network test-ds train-ds]}] ;;change per epoch
-  (let [batch-size (long batch-size)
-        get-label (fn [dset] (execute/run new-network dset
-                                          :batch-size batch-size
-                                          :loss-outputs? true
-                                          :context context))
-        labels (get-label test-ds)
-        loss-on (fn [dset] (execute/execute-loss-fn new-network labels dset))
-        cv-loss (loss-on test-ds)
-        test-loss (apply + (map :value cv-loss))
-        train-loss (apply + (map :value (loss-on train-ds)))
+  [{:keys [file-path class-mapping metric-fn] :as m1}
+    {:keys [batch-size context] :as m2}
+   {:keys [new-network old-network test-ds train-ds] :as m3}] ;;change per epoch
+  (let [
+        vec->label (vec->label-fn class-mapping)
+        ttmap (train-test-loss (merge m2 m3))
+        [train-loss test-loss :as ttloss] (mapv (comp :loss-sum ttmap)
+                                                [:train-loss :test-loss])
+        ;;;predicted labels
+        pred-test-labels (:pred-test-labels ttmap)
         ;;log train and test loss
         evs (mapv eio/make-event
                   (mapv (partial str "metrics/")
                         ["train-loss" "test-loss"])
-                  [train-loss test-loss])
-        evs (into evs (log-weights new-network))
+                  ttloss)
+
+        ;;run all the metrics
+        met-events (if-not (nil? metric-fn)
+            (let [label-fn #(mapv (fn [i] (vec->label (:labels i))) %)
+                  [predicted actual] (mapv label-fn [pred-test-labels test-ds])]
+              (metric-fn actual predicted)))
+        
+        evs (into met-events (into evs (log-weights new-network)))
+        _ (println " train test loss " (clojure.string/join
+                                        " , " ttloss))
         _ (eio/append-events file-path evs)]
-    {:network (assoc new-network :cv-loss cv-loss)}))
+    {:network (assoc new-network :cv-loss test-loss)}))
 
 (defn create-tensorboard-listener
   "initializes any prerequisites for listening functions, and returns a listener
   function. Takes a file-path argument where the events are logged to. "
-  [{:keys [file-path]}]
+  [{:keys [file-path] :as m}]
   (fn [initial-description train-ds test-ds]
     (do
-      (println "create-tensorboard-listener ")
+      (println "create-tensorboard-listener, events piped to " file-path)
       (eio/create-event-stream file-path)
-      (partial tensorboard-log file-path))))
+      (partial tensorboard-log m))))
 
 (defn perform-experiment
   "Main entry point:
