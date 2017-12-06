@@ -19,6 +19,11 @@ namespace tensor { namespace operations {
       return (dtype) ((int) lhs & (int) rhs);
     }
 
+    template<typename dtype>
+    __device__ inline dtype op_bit_xor(dtype lhs, dtype rhs) {
+      return (dtype) ((int) lhs ^ (int) rhs);
+    }
+
     struct binary_operation_type
     {
       enum _enum
@@ -30,7 +35,12 @@ namespace tensor { namespace operations {
 	min,
 	max,
 	bit_and,
+        bit_xor,
 	eq,
+        greater_than,
+        greater_than_or_equal_to,
+        less_than,
+        less_than_or_equal_to,
       };
     };
 
@@ -58,8 +68,18 @@ namespace tensor { namespace operations {
 	  return op_min(lhs, rhs);
 	case binary_operation_type::bit_and:
 	  return op_bit_and(lhs,rhs);
+	case binary_operation_type::bit_xor:
+	  return op_bit_xor(lhs,rhs);
 	case binary_operation_type::eq:
 	  return (dtype) lhs == rhs ? 1 : 0;
+	case binary_operation_type::greater_than:
+	  return (dtype) lhs > rhs ? 1 : 0;
+	case binary_operation_type::greater_than_or_equal_to:
+	  return (dtype) lhs >= rhs ? 1 : 0;
+	case binary_operation_type::less_than:
+	  return (dtype) lhs < rhs ? 1 : 0;
+	case binary_operation_type::less_than_or_equal_to:
+	  return (dtype) lhs <= rhs ? 1 : 0;
 	};
 	return (dtype) 0;
       }

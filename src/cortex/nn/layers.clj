@@ -41,7 +41,7 @@ constructors are all variable args with the extra arguments expected to be
 ;;decides what to do from there.
 (defmethod graph/initialize-graph-parameter-buffer :auto-weight-initialization
   [graph node argument shape initialization]
-  (let [activation-set #{:tanh :relu :logistic :swish}
+  (let [activation-set #{:tanh :relu :logistic :swish :selu}
         next-activation (->> (graph/relative-dfs-seq graph (get node :id))
                              (map #(get (graph/get-node graph %) :type))
                              (filter activation-set)
@@ -217,6 +217,16 @@ constructors are all variable args with the extra arguments expected to be
   [& args]
   (default-layer-metadata))
 
+(defn selu
+  "https://arxiv.org/pdf/1706.02515.pdf
+  Self Normalizing Neural Networks"
+  [& args]
+  [(merge-args {:type :selu} args)])
+
+(defmethod graph/get-node-metadata :selu
+  [& args]
+  (default-layer-metadata))
+
 
 (defn prelu
   "https://arxiv.org/pdf/1502.01852.pdf
@@ -343,6 +353,10 @@ If the input contains no channels then you get a scale factor per input paramete
   (concat (apply linear num-output (seq-without-id args))
           (apply swish args)))
 
+(defn linear->selu
+  [num-output & args]
+  (concat (apply linear num-output (seq-without-id args))
+          (apply selu args)))
 
 (defn linear->tanh
   [num-output & args]
