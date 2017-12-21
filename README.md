@@ -77,7 +77,7 @@ Install coreutils and cuda:
 
     $ brew install coreutils
     $ brew tap caskroom/drivers
-    $ brew cask install cuda
+    $ brew cask install nvidia-cuda
 
 Add CUDA Tool kit to bash profile
 
