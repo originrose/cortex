@@ -17,21 +17,3 @@
 
 (def-double-float-test simple-stream
   (verify-driver/simple-stream (driver) test-utils/*datatype*))
-
-(def-double-float-test sum
-  (verify-driver/sum (driver) test-utils/*datatype*))
-
-(def-double-float-test subtract
-  (verify-driver/subtract (driver) test-utils/*datatype*))
-
-(def-double-float-test gemv
-  (verify-driver/gemv (driver) test-utils/*datatype*))
-
-(def-double-float-test mul-rows
-  (verify-driver/mul-rows (driver) test-utils/*datatype*))
-
-(def-double-float-test elem-mul
-  (verify-driver/elem-mul (driver) :float))
-
-(def-double-float-test l2-constraint-scale
-  (verify-driver/l2-constraint-scale (driver) test-utils/*datatype*))

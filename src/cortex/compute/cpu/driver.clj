@@ -8,7 +8,6 @@
             [think.resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
-            [cortex.compute.array-view-math :as avm]
             [think.parallel.core :as parallel])
   (:import [java.nio ByteBuffer IntBuffer ShortBuffer LongBuffer
             FloatBuffer DoubleBuffer Buffer]
@@ -313,29 +312,3 @@ Use with care; the synchonization primitives will just hang with this stream."
 (extend-type ArrayViewBase
   resource/PResource
   (release-resource [_]))
-
-
-(extend-type CPUStream
-  c-math/PMath
-  (sum-impl [stream alpha x beta y result]
-    (with-stream-dispatch stream
-      (avm/sum (dtype/->view x) alpha beta (dtype/->view y) (dtype/->view result))))
-
-  (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
-    (with-stream-dispatch stream
-      (avm/gemv (dtype/->view A) a-colstride trans-a? a-row-count a-col-count alpha
-                (dtype/->view x) inc-x beta (dtype/->view y) inc-y)))
-
-  (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride]
-    (with-stream-dispatch stream
-      (avm/mul-rows (dtype/->view A) a-colstride a-row-count a-col-count
-                    (dtype/->view x) inc-x (dtype/->view C) c-colstride)))
-
-  (elem-mul [stream alpha a inc-a b inc-b res inc-res]
-    (with-stream-dispatch stream
-      (avm/elem-mul (dtype/->view a) inc-a alpha (dtype/->view b) inc-b (dtype/->view res)
-                    inc-res)))
-
-  (l2-constraint-scale [stream a inc-a l2-max-constraint]
-    (with-stream-dispatch stream
-      (avm/l2-constraint-scale (dtype/->view a) inc-a l2-max-constraint))))

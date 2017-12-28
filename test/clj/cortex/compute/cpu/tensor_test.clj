@@ -113,3 +113,7 @@
 
 (def-double-float-test magnitude-and-mag-squared
   (verify-tensor/magnitude-and-mag-squared (driver) *datatype*))
+
+
+(def-double-float-test constrain-inside-hypersphere
+  (verify-tensor/constrain-inside-hypersphere (driver) *datatype*))

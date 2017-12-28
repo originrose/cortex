@@ -1205,7 +1205,7 @@ for the cuda backend."
    driver datatype
    (let [num-elems 10
          num-rows 10
-         src-data (partition num-rows (range (* num-rows num-elems)))
+         src-data (partition num-elems (range (* num-rows num-elems)))
          src-tensor (ct/->tensor src-data)
          dst-tensor (ct/new-tensor [num-rows 1])]
      (ct/unary-reduce! dst-tensor 1.0 src-tensor :magnitude-squared)
@@ -1226,3 +1226,23 @@ for the cuda backend."
                         vec)
                    (vec (ct/to-double-array dst-tensor))
                    1e-4)))))
+
+
+(defn constrain-inside-hypersphere
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [num-elems 10
+         num-rows 10
+         src-data (partition num-elems (range (* num-rows num-elems)))
+         radius 100
+         src-tensor (ct/->tensor src-data)
+         mul-tensor (ct/new-tensor [(first (ct/shape src-tensor)) 1])]
+     (ct/constrain-inside-hypersphere! src-tensor mul-tensor radius)
+     (let [magnitudes (mapv m/magnitude
+                            (partition num-rows
+                                       (ct/to-double-array src-tensor)))]
+       (is (every? #(<= (double %) (+ radius 1e4))
+                   (map m/magnitude
+                        (partition num-rows
+                                   (ct/to-double-array src-tensor)))))))))

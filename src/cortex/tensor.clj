@@ -1615,6 +1615,35 @@ a[i] = a[i] / ((k + alpha*(windowed-summation a[i-n/2]^2...a[i+n/2]^2))^beta)"
    input-gradient))
 
 
+(defn normalize!
+  "Ensure each vector of the last dimension of dest has length radius-length.
+Epsilon is used to avoid divide-by-zero conditions.  This operation can also
+be seen as a projection to the surface of a hypersphere of radius radius-length."
+  [dest mag-vec radius-length epsilon]
+  (unary-reduce! mag-vec 1.0 dest :magnitude)
+  ;;Ensure a zero doesn't cause a nan.
+  (binary-op! mag-vec 1.0 mag-vec 1.0 1e-6 :+)
+  (binary-op! dest 1.0 dest (/ 1.0 (double radius-length)) mag-vec :/))
+
+
+(defn constrain-inside-hypersphere!
+  "Like normalize, but only shorten vectors that are too long.  So instead of
+projecting to the surface of the hypersphere like normalize does, do a <= operation."
+  [dest mag-vec radius-length]
+  (unary-reduce! mag-vec 1.0 dest :magnitude)
+  ;;Subtract radius-length from the magnitude vector.  This means scales below the target are
+  ;;now less than 0
+  (binary-op! mag-vec 1.0 mag-vec 1.0 radius-length :-)
+  ;;Set scales less than 0 to 0 and do not change ones more than zero.
+  (ternary-op! mag-vec 1.0 mag-vec 0.0 0.0 1.0 mag-vec :select)
+  ;;Add radius-length back into the mix.  This means that items with scale <= radius-length are now
+  ;;radius-length and items with scale > radius-length are whatever their original lengths would be.
+  (binary-op! mag-vec 1.0 mag-vec 1.0 radius-length :+)
+  ;;Last step, multiple dest by radius-length/mag-len.  If mag-len is radius-length, then no change.
+  ;;and we know from the above operations that only items of mag-len or greater will be changed.
+  (binary-op! dest 1.0 dest (/ 1.0 (double radius-length)) mag-vec :/))
+
+
 (extend-type Tensor
   mp/PVectorView
   (as-vector [m]

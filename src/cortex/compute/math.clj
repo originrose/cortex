@@ -36,38 +36,6 @@
    :div ;;a*x / b*y
    ])
 
-
-(defprotocol PMath
-  "Base math abstraction.  Note the constants (alpha, beta) must be in the same
-  datatype as the buffers.  The buffers must be device buffers and the matrixes are
-  assumed to be row major.  Note that this interface expects raw device buffers and
-  *not* DeviceArrays (the multidimension abstraction presented below).
-  gemm: C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C
-  sum: y = a*x + b*y
-  gemv: y = alpha * A * x + y
-  mul-rows (diagonal gemm): given a matrix and vector, multiply each row by the
-    corresponding element in the vector.  Place result in C.
-  elem-mul: result = elementwise multiply alpha * a * b
-  l2-constraint-scale: create scale vector with either 1.0 or (constraint / row-len)
-  select: create a buffer with fixed constants for values >= 0 and values < 0."
-  (sum-impl [stream alpha x beta y result]
-    "result = a*x + b*y.  This function can be used as an accumulator assuming (ecount y) <
-(ecount x) and (rem (ecount x) (ecount y)) == 0.  It is used in fact when accumulating batch
-gradients and so x is several times the length of y.  Implementations need to use a threadsafe
-compare-and-set type implementation because result could be x or y.")
-  (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
-    "Generalized gemv implementation function.  A is a row-major matrix.")
-  (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride]
-    "given a matrix and vector, multiply each row by the corresponding element in the vector.
-Place result in C.  Used for scaling the rows of a matrix.")
-  (elem-mul [stream alpha a inc-a b inc-b res inc-res]
-    "res  = alpha* a * b.  This is an elementwise multiply where result is expected
-to be same length as a and b. The inc params are related to strides.")
-  (l2-constraint-scale [stream a inc-a l2-max-constraint]
-    "Given a vector that contains x^2,
-a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]"))
-
-
 (defmacro math-error
   [msg]
   `(throw (Exception. ~msg)))
@@ -352,46 +320,6 @@ versions of cortex (meaning only contains java base types)."
   "Copy an DeviceArray into a double array."
   [stream ^DeviceArray ary]
   (device-array->array stream :double ary))
-
-
-
-(defn gemv
-  "General matrix (row) vector multiply.  See blas-2 documentation."
-  ([stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
-   (let [[a-row-count a-col-count] (if trans-a?
-                                     [a-col-count a-row-count]
-                                     [a-row-count a-col-count])]
-     (gemv-impl stream trans-a? a-row-count a-col-count alpha A a-colstride
-                x inc-x beta y inc-y)))
-  ([stream trans-a? alpha A x beta y]
-   (let [[a-rows a-cols] (shape-2d A)
-         x-ecount (long (mp/element-count x))
-         y-ecount (long (mp/element-count y))]
-     (gemv stream trans-a? a-rows a-cols alpha A a-cols x 1 beta y 1))))
-
-
-(defn sum
-  "c = ax + by.  C may be either x or y.  Implementations must support y being smaller than X so
-  it can act as an accumulator for X."
-  ([stream alpha x beta y result]
-   (let [x-elems (long (ecount x))
-         y-elems (long (ecount y))
-         res-elems (long (ecount result))]
-     (if-not (zero? (rem (max x-elems y-elems) (min x-elems y-elems)))
-       (throw (Exception. (format "Sum: Lengths of x (%s) and y (%s) are not commensurate"
-                                  x-elems y-elems))))
-     (if-not (zero? (rem (max x-elems res-elems) (min x-elems res-elems)))
-       (throw (Exception. (format "Sum: Lengths of x (%s) and res (%s) are not commensurate"
-                                  x-elems res-elems))))
-     (sum-impl stream alpha (device-buffer x) beta (device-buffer y) (device-buffer result))))
-  ([stream alpha x beta y]
-   (sum stream alpha x beta y y)))
-
-
-(defn subtract
-  "result = alpha*x - beta*y."
-  ([stream alpha x beta y result]
-   (sum stream alpha x (* -1.0 (double beta)) y result)))
 
 
 (defn ensure-factor-of-2

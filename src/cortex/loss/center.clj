@@ -93,10 +93,7 @@
 
         ;; Perform normalization to the radius
         (let [mag-vec (ct/in-place-reshape batch-centers [(first (ct/shape centers)) 1])]
-          (ct/unary-reduce! mag-vec 1.0 centers :magnitude)
-          ;;Ensure a zero doesn't cause a nan.
-          (ct/binary-op! mag-vec 1.0 mag-vec 1.0 1e-6 :+)
-          (ct/binary-op! centers 1.0 centers (/ 1.0 radius) mag-vec :/))))))
+          (ct/normalize! centers mag-vec radius 1e-6))))))
 
 
 (defmethod util/create-compute-loss-term :center-loss

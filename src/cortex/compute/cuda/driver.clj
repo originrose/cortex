@@ -787,11 +787,7 @@ relies only on blockDim.x block.x and thread.x"
                                        :driver-fn (constantly driver))
                                 ((fn [retval]
                                    (reset! (get retval :device-functions)
-                                           {:memset (load-all-datatype-function "memset")
-                                            :elementwise-multiply (load-float-double-function
-                                                                   "elementwise_multiply")
-                                            :l2-constraint-scale (load-float-double-function
-                                                                  "l2_constraint_scale")})
+                                           {:memset (load-all-datatype-function "memset")})
                                    retval)))))]
     (reset! (get retval :resource-context) res-ctx)
     (resource/track retval)))
@@ -944,13 +940,6 @@ relies only on blockDim.x block.x and thread.x"
     (resource/track retval)))
 
 
-(defprotocol PCudaMath
-  (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream])
-  (cuda-mul-rows [A a-colstride x inc-x a-row-count a-col-count C c-colstride stream])
-  (cuda-elem-mul [x inc-x alpha y inc-y res inc-res elem-count stream])
-  (cuda-l2-constraint-scale [a inc-a a-elem-count l2-max-constraint stream]))
-
-
 (defn bool->blas-trans
   ^long [bool-val?]
   (if bool-val?
@@ -1017,94 +1006,6 @@ relies only on blockDim.x block.x and thread.x"
     (dev-fn-from-stream stream fn-name dtype)))
 
 
-(extend-type DoublePointer
-  PCudaMath
-  (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
-    (mu/col->row-gemv
-     (fn [trans-a? a-row-count a-col-count
-          alpha ^DoublePointer A a-rowstride
-          ^DoublePointer x inc-x
-          beta ^DoublePointer y inc-y]
-       (blas-with-stream
-        stream
-        (cublas-call (cublas/cublasDgemv_v2
-                      ^cublas$cublasContext cublas
-                      (bool->blas-trans trans-a?) (long a-row-count) (long a-col-count)
-                      (value->double-ptr alpha)
-                      A
-                      (int a-rowstride)
-                      x
-                      (long inc-x)
-                      (value->double-ptr beta)
-                      y
-                      (long inc-y)))))
-     trans-a? a-row-count a-col-count
-     alpha A a-colstride
-     x inc-x
-     beta y inc-y))
-  (cuda-mul-rows [^DoublePointer A a-colstride ^DoublePointer x inc-x a-row-count
-                  a-col-count ^DoublePointer C c-colstride stream]
-    (blas-with-stream
-     stream
-     (cublas-call (cublas/cublasDdgmm
-                   ^cublas$cublasContext cublas
-                   cublas/CUBLAS_SIDE_RIGHT (int a-col-count) (int a-row-count)
-                   A (int a-col-count) x (int inc-x) C (int c-colstride)))))
-  (cuda-elem-mul [^DoublePointer x inc-x alpha ^DoublePointer y inc-y
-                  ^DoublePointer res inc-res elem-count stream]
-    (launch-linear-kernel stream (dev-fn-from-stream stream :elementwise-multiply :double)
-                          (long elem-count) 0
-                          (double alpha) x (int inc-x)
-                          y (int inc-y) res inc-res (long elem-count)))
-  (cuda-l2-constraint-scale [a inc-a elem-count l2-max-constraint stream]
-    (launch-linear-kernel stream (dev-fn-from-stream stream :l2-constraint-scale :double)
-                          (long elem-count) 0
-                          a (int inc-a) (double l2-max-constraint) (int elem-count))))
-
-(extend-type FloatPointer
-  PCudaMath
-  (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
-    (mu/col->row-gemv
-     (fn [trans-a? a-row-count a-col-count
-          alpha ^FloatPointer A a-rowstride
-          ^FloatPointer x inc-x
-          beta ^FloatPointer y inc-y]
-       (blas-with-stream
-        stream
-        (cublas-call (cublas/cublasSgemv_v2
-                      ^cublas$cublasContext cublas
-                      (bool->blas-trans trans-a?) (long a-row-count) (long a-col-count)
-                      (value->float-ptr alpha)
-                      A
-                      (int a-rowstride)
-                      x
-                      (long inc-x)
-                      (value->float-ptr beta)
-                      y
-                      (long inc-y)))))
-     trans-a? a-row-count a-col-count
-     alpha A a-colstride
-     x inc-x
-     beta y inc-y))
-  (cuda-mul-rows [^FloatPointer A a-colstride ^FloatPointer x inc-x a-row-count
-                  a-col-count ^FloatPointer C c-colstride stream]
-    (blas-with-stream
-     stream
-     (cublas-call (cublas/cublasSdgmm
-                   ^cublas$cublasContext cublas
-                   cublas/CUBLAS_SIDE_RIGHT (int a-col-count) (int a-row-count)
-                   A (int a-col-count) x (int inc-x) C (int c-colstride)))))
-  (cuda-elem-mul [^FloatPointer x inc-x alpha ^FloatPointer y inc-y ^FloatPointer
-                  res inc-res elem-count stream]
-    (launch-linear-kernel stream (dev-fn-from-stream stream :elementwise-multiply :float)
-                          (long elem-count) 0
-                          (float alpha) x (int inc-x)
-                          y (int inc-y) res inc-res (long elem-count)))
-  (cuda-l2-constraint-scale [a inc-a elem-count l2-max-constraint stream]
-    (launch-linear-kernel stream (dev-fn-from-stream stream :l2-constraint-scale :float)
-                          (long elem-count) 0
-                          a (int inc-a) (float l2-max-constraint) (int elem-count))))
-
 (extend-type CudaStream
   drv/PStream
   (copy-host->device [stream host-buffer host-offset device-buffer device-offset elem-count]
@@ -1135,59 +1036,7 @@ relies only on blockDim.x block.x and thread.x"
       retval))
   ;;Ensure this stream cannot proceed until this event is triggered.
   (sync-event [stream ^cuda$CUevent_st event]
-    (cuda-call (cuda/cudaStreamWaitEvent (.stream stream) event (int 0))))
-
-  math/PMath
-  (sum-impl [stream alpha x beta y res]
-    (let [datatype (dtype/get-datatype x)
-          res-elem-count (long (m/ecount res))]
-      (when-not (and (= datatype (dtype/get-datatype y))
-                     (= datatype (dtype/get-datatype res)))
-        (throw (ex-info "Datatype mismatch in indirect-add"
-                        {:x-datatype (dtype/get-datatype x)
-                         :y-datatype (dtype/get-datatype y)
-                         :res-datatype (dtype/get-datatype res)})))
-
-      (if (or (alias? x res)
-              (alias? y res))
-        (let [src (if (alias? x res) y x)
-              src-elem-count (long (m/ecount src))
-              n-elems (long (max res-elem-count src-elem-count))]
-          (when (and (alias? x res)
-                     (alias? y res))
-            (throw (ex-info "Both x and y cannot alias res"
-                            {})))
-          (launch-linear-kernel stream (get-or-create-fn stream :sum datatype
-                                                         #(load-float-double-function "sum"))
-                                n-elems 0
-                                (dtype-cast alpha datatype) (->ptr x) (int src-elem-count)
-                                (dtype-cast beta datatype) (->ptr res) (int res-elem-count)))
-        (let [x-elem-count (long (m/ecount x))
-              y-elem-count (long (m/ecount y))
-              n-elems (max x-elem-count y-elem-count res-elem-count)]
-          (when (or (partially-alias? x res)
-                    (partially-alias? y res))
-            (throw (ex-info "Either x or y partially alias (overlap) result"
-                            {:x-partial-alias? (partially-alias? x res)
-                             :y-partial-alias? (partially-alias? y res)})))
-          (launch-linear-kernel stream (get-or-create-fn stream :add datatype
-                                                         #(load-float-double-function "add"))
-                                n-elems 0
-                                (dtype-cast alpha datatype) (->ptr x) (int x-elem-count)
-                                (dtype-cast beta datatype) (->ptr y) (int y-elem-count)
-                                (->ptr res) (int res-elem-count))))))
-  (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
-    (cuda-gemv (->ptr A) a-colstride (->ptr x) inc-x trans-a? a-row-count a-col-count alpha beta
-               (->ptr y) inc-y stream))
-  (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride]
-    (cuda-mul-rows (->ptr A) a-colstride (->ptr x) inc-x a-row-count a-col-count
-                   (->ptr C) c-colstride stream))
-  (elem-mul [stream alpha a inc-a b inc-b res inc-res]
-    (cuda-elem-mul (->ptr a) inc-a alpha (->ptr b) inc-b (->ptr res)
-                   inc-res (math/ecount a) stream))
-  (l2-constraint-scale [stream a inc-a l2-max-constraint]
-    (cuda-l2-constraint-scale (->ptr a) inc-a (quot (math/ecount a) (long inc-a))
-                              l2-max-constraint stream)))
+    (cuda-call (cuda/cudaStreamWaitEvent (.stream stream) event (int 0)))))
 
 
 (extend-type cuda$CUevent_st
