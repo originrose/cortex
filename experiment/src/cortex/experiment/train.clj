@@ -31,20 +31,32 @@
   (util/write-nippy-file network-filename network)
   network)
 
+(defn get-labels
+  "returns the predicted labels for the given network and dataset"
+  ([new-network  batch-size test-ds]
+   (execute/run new-network test-ds
+     :batch-size batch-size
+     :loss-outputs? true))
+  ([new-network  batch-size context test-ds]
+   (execute/run new-network test-ds
+     :batch-size batch-size :context context
+     :loss-outputs? true)))
 
+(defn network-loss
+  "calculate the loss on the given network and dataset. Returns a map with
+  the raw loss (per label)  and the sum of loss for all labels"
+  [new-network labels test-ds]
+  (let [loss-fn (execute/execute-loss-fn new-network labels test-ds)]
+    {:raw-loss loss-fn :loss-sum (apply + (map :value loss-fn))}))
 
 (defn default-network-loss-eval-fn
   "Evaluate the network using its current loss terms"
   [simple-loss-print? new-network test-ds batch-size]
-  (let [labels (execute/run new-network test-ds
-                 :batch-size batch-size
-                 :loss-outputs? true)
-        loss-fn (execute/execute-loss-fn new-network labels test-ds)]
+  (let [labels (get-labels new-network batch-size test-ds)
+        {:keys [raw-loss loss-sum]} (network-loss new-network labels test-ds)]
     (when-not simple-loss-print?
-      (println (loss/loss-fn->table-str loss-fn)))
-    (apply + (map :value loss-fn))))
-
-
+      (println (loss/loss-fn->table-str raw-loss)))
+    loss-sum))
 
 (defn default-network-test-fn
   "Test functions take two map arguments, one with global information and one

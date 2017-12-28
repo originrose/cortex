@@ -26,7 +26,6 @@
   [(layers/input input-w input-h 1 :id :data)
    (layers/convolutional 5 0 1 20)
    (layers/max-pooling 2 0 2)
-   (layers/dropout 0.9)
    (layers/relu)
    (layers/convolutional 5 0 1 50)
    (layers/max-pooling 2 0 2)

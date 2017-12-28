@@ -99,7 +99,8 @@ a datastructure that shares the backing store."
           :logistic (activations/logistic input output)
           :tanh (activations/tanh input output)
           :relu (activations/relu input output)
-          :swish (activations/swish input output)))))
+          :swish (activations/swish input output)
+          :selu (activations/selu input output)))))
 
   (backward [this parameter-buffers output-buffers input-buffers]
     (tensor/with-stream (nn-backend/get-stream)
@@ -111,7 +112,8 @@ a datastructure that shares the backing store."
           :logistic (activations/logistic-gradient input-gradient output-gradient output)
           :tanh (activations/tanh-gradient input-gradient output-gradient output)
           :relu (activations/relu-gradient input-gradient output-gradient output)
-          :swish (activations/swish-gradient input-gradient output-gradient output))))))
+          :swish (activations/swish-gradient input-gradient output-gradient output)
+          :selu (activations/selu-gradient input-gradient output-gradient output))))))
 
 
 (defmethod create :relu
@@ -121,6 +123,10 @@ a datastructure that shares the backing store."
 (defmethod create :swish
   [backend node batch-size]
   (->ActivationLayer :swish node))
+
+(defmethod create :selu
+  [backend node batch-size]
+  (->ActivationLayer :selu node))
 
 (defmethod create :logistic
   [backend node batch-size]

@@ -30,6 +30,9 @@
 (def-double-float-test swish
   (verify-layers/test-activation (create-context) :swish))
 
+(def-double-float-test selu
+  (verify-layers/test-activation (create-context) :selu))
+
 (def-double-float-test tanh
   (verify-layers/test-activation (create-context) :tanh))
 
@@ -38,6 +41,9 @@
 
 (def-double-float-test swish-batch
   (verify-layers/test-activation-batch (create-context) :swish))
+
+(def-double-float-test selu-batch
+  (verify-layers/test-activation-batch (create-context) :selu))
 
 (def-double-float-test tanh-batch
   (verify-layers/test-activation-batch (create-context) :tanh))

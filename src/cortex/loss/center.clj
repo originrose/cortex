@@ -26,6 +26,7 @@
             centers (->batch-ct (get-in buffer-map [:centers :buffer]))
             alpha (double (get loss-term :alpha))
             beta (- 1.0 alpha)
+            radius (double (or (get loss-term :radius) 1.0))
             batch-centers (->batch-ct batch-centers)
             [batch-size num-elems] (m/shape output-buffer)
             expanded-centers (ct/select centers label-indexes :all)]
@@ -62,6 +63,7 @@
         ;; c' = c + b * (avg(x) - c)
         ;; c' = c + b * avg(x - c)
         ;; c' = c + b * sum(x - c) * 1/n
+        ;; c' = normalize(c', radius)
         ;;
         ;; If (b*x-b*c) is an expansion and not a reduction we can guarantee b will only be multiplied
         ;; into c exactly once.
