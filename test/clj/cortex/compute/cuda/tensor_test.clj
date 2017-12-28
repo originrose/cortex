@@ -106,11 +106,18 @@
 (def-double-float-test pooling-operator
   (verify-tensor/pooling-operator (create-driver) *datatype*))
 
-
 ;;Note that this is not a float-double test.
 (deftest rand-operator
   (verify-tensor/rand-operator (create-driver) :float))
 
-
 (def-double-float-test lrn-operator
   (verify-tensor/lrn-operator (create-driver) *datatype*))
+
+(def-cas-dtype-test indexed-tensor
+  (verify-tensor/indexed-tensor (create-driver) *datatype*))
+
+(def-double-float-test magnitude-and-mag-squared
+  (verify-tensor/magnitude-and-mag-squared (create-driver) *datatype*))
+
+(def-double-float-test constrain-inside-hypersphere
+  (verify-tensor/constrain-inside-hypersphere (create-driver) *datatype*))

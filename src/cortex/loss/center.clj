@@ -7,57 +7,93 @@
             [cortex.loss.util :as util]
             [cortex.util :refer [max-index]]
             [cortex.graph :as graph]
-            [cortex.argument :as argument]))
+            [cortex.argument :as argument]
+            [cortex.tensor :as ct]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Compute implementation
-(defrecord CenterLoss [loss-term backend batch-centers monotonic-indexes temp-centers]
+(defrecord CenterLoss [loss-term backend batch-centers]
   util/PComputeLoss
   (compute-loss-gradient [this buffer-map]
-    (let [output-buffer (get-in buffer-map [:output :buffer])
-          [batch-size n-elems] (math/batch-shape output-buffer)
-          output-gradient (get-in buffer-map [:output :gradient])
-          labels (get-in buffer-map [:labels :buffer])
-          label-indexes (get-in buffer-map [:label-indexes :buffer])
-          label-inverse-counts (get-in buffer-map [:label-inverse-counts :buffer])
-          centers (get-in buffer-map [:centers :buffer])
-          stream (backend/get-stream)
-          alpha (double (get loss-term :alpha))
-          label-indexes (math/device-buffer label-indexes)
-          monotonic-indexes (math/device-buffer monotonic-indexes)
-          beta (- 1.0 alpha)]
-      ;;First distribute centers according to labels
-      (drv/indexed-copy stream
-                        (math/device-buffer centers)
-                        (math/device-buffer label-indexes)
-                        (math/device-buffer batch-centers)
-                        (math/device-buffer monotonic-indexes) n-elems)
-      ;;gradient = feature - center
-      (math/subtract stream 1.0 output-buffer 1.0 batch-centers output-gradient)
-      ;;copy features to batch-centers to start to calculate new centers
+    (ct/with-stream (backend/get-stream)
+      (let [->batch-ct #(math/->batch-ct %)
+            ->ct #(math/->vector-ct %)
+            output-buffer (->batch-ct (get-in buffer-map [:output :buffer]))
+            output-gradient (->batch-ct (get-in buffer-map [:output :gradient]))
+            labels (->batch-ct (get-in buffer-map [:labels :buffer]))
+            label-indexes (->ct (get-in buffer-map [:label-indexes :buffer]))
+            label-inverse-counts (->ct (get-in buffer-map [:label-inverse-counts :buffer]))
+            centers (->batch-ct (get-in buffer-map [:centers :buffer]))
+            alpha (double (get loss-term :alpha))
+            beta (- 1.0 alpha)
+            radius (double (or (get loss-term :radius) 1.0))
+            batch-centers (->batch-ct batch-centers)
+            [batch-size num-elems] (m/shape output-buffer)
+            expanded-centers (ct/select centers label-indexes :all)]
+        (when-not (= batch-size (ct/ecount label-indexes))
+          (throw (ex-info "Label index size is wrong" {:batch-size batch-size
+                                                       :label-index-count (ct/ecount label-indexes)})))
 
-      ;;c' = a*c + b*sum(x)/n
-      ;;c' = sum(a*c + b*x)/n
-      ;;c' = c - c + sum(a*c + b*x)/n
-      ;;c' = c + sum(a*c - c + b*x)/n
-      ;;c  = a*c + b*c
-      ;;c - b*c = a*c
-      ;;-b*c = a*c - c
-      ;;c' = c + sum(b*x - b*c)/n
-      ;;subtract centers from features
-      (math/subtract stream beta output-buffer beta batch-centers batch-centers)
+        (when-not (= [batch-size] (ct/shape label-inverse-counts))
+          (throw (ex-info "Label index size is wrong" {:batch-size batch-size
+                                                       :label-inverse-count (ct/shape label-inverse-counts)})))
+        ;; definitions (var :: def :: shape):
+        ;; c  :: current centers :: [num-classes]
+        ;; c' :: new centers :: [num-classes]
+        ;; a  :: alpha :: scalar
+        ;; b  :: 1.0 - alpha
+        ;; Note that a single 'center' may be represented multiple times in the batch
+        ;; n  :: per-center per-batch counts :: [batch-size]
+        ;; x  :: centers calculated this batch :: [batch-size]
+        ;;
+        ;; centers are running averages over time so new-center = old-center * alpha + batch-center * beta
+        ;; restricted per-batch to the set of centers that actually appear in this batch.  We rely on items being
+        ;; evenly distributed throughout an epoch to make this pathway work as at later epochs the centers
+        ;; should be more 'set' and meaningful.
+        ;;
+        ;; derived math
+        ;; a + b = 1.0
+        ;;
+        ;; Then if we multiply cb by b we can then add this to c' and the classes that are in this batch
+        ;; will get updated but the classes that are not in this batch will not get updated.
+        ;; c' = c + b*(x - c)
+        ;; c' = a*c + b * avg(x)
+        ;; c' = c - b * c + b * avg(x)
+        ;; We can move c into the average because it is a constant so the avg of c is always c.
+        ;; c' = c + b * (avg(x) - c)
+        ;; c' = c + b * avg(x - c)
+        ;; c' = c + b * sum(x - c) * 1/n
+        ;; c' = normalize(c', radius)
+        ;;
+        ;; If (b*x-b*c) is an expansion and not a reduction we can guarantee b will only be multiplied
+        ;; into c exactly once.
+        ;; We can then
+        ;; Then the reduction into c' has no constant on c
 
-      ;;scale subtracted quantities according to inverse counts
-      (math/mul-rows (backend/get-stream) batch-size n-elems
-                     (math/device-buffer batch-centers) n-elems
-                     (math/device-buffer label-inverse-counts) 1
-                     (math/device-buffer batch-centers) n-elems)
 
-      (math/indirect-add stream
-                         1.0 batch-centers monotonic-indexes
-                         1.0 centers label-indexes
-                         centers label-indexes
-                         n-elems))))
+        ;; First distribute centers according to labels
+        (ct/assign! batch-centers expanded-centers)
+
+        ;; gradient = feature - center
+        (ct/binary-op! output-gradient 1.0 output-buffer 1.0 batch-centers :-)
+
+        ;; copy features to batch-centers to start to calculate new centers
+        ;; This is really (beta*(x-c))
+        (ct/binary-op! batch-centers beta output-buffer beta batch-centers :-)
+
+        ;; divide by n
+        (ct/binary-op! batch-centers
+                       1.0 batch-centers
+                       1.0 (ct/in-place-reshape label-inverse-counts [batch-size 1])
+                       :*)
+
+        ;; update centers with new positions doing a reduction.  This is safe because we aren't
+        ;; using a constant alpha on expanded-centers.
+        (ct/binary-op! expanded-centers 1.0 expanded-centers 1.0 batch-centers :+)
+
+        ;; Perform normalization to the radius
+        (let [mag-vec (ct/in-place-reshape batch-centers [(first (ct/shape centers)) 1])]
+          (ct/normalize! centers mag-vec radius 1e-6))))))
 
 
 (defmethod util/create-compute-loss-term :center-loss
@@ -67,15 +103,8 @@
                                                (graph/get-node-argument loss-term :output))
         labels-shape (graph/get-argument-shape graph loss-term
                                                (graph/get-node-argument loss-term :labels))
-        batch-centers (backend/new-array backend output-shape batch-size)
-        monotonic-indexes (math/array (backend/get-stream)
-                                      :int
-                                      (range batch-size))
-        label-indexes (math/new-array (backend/get-stream)
-                                      :int
-                                      [batch-size])
-        temp-centers (backend/new-array backend [(apply * labels-shape) (apply * output-shape)])]
-    (->CenterLoss loss-term backend batch-centers monotonic-indexes temp-centers)))
+        batch-centers (backend/new-array backend output-shape batch-size)]
+    (->CenterLoss loss-term backend batch-centers)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Stream augmentation

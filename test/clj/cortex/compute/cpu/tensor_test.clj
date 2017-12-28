@@ -101,6 +101,19 @@
 (def-double-float-test pooling-operator
   (verify-tensor/pooling-operator (driver) *datatype*))
 
+
 ;;Note that this is not a float-double test.
 (deftest rand-operator
   (verify-tensor/rand-operator (driver) :float))
+
+
+(def-all-dtype-test indexed-tensor
+  (verify-tensor/indexed-tensor (driver) *datatype*))
+
+
+(def-double-float-test magnitude-and-mag-squared
+  (verify-tensor/magnitude-and-mag-squared (driver) *datatype*))
+
+
+(def-double-float-test constrain-inside-hypersphere
+  (verify-tensor/constrain-inside-hypersphere (driver) *datatype*))
