@@ -791,8 +791,7 @@ relies only on blockDim.x block.x and thread.x"
                                             :elementwise-multiply (load-float-double-function
                                                                    "elementwise_multiply")
                                             :l2-constraint-scale (load-float-double-function
-                                                                  "l2_constraint_scale")
-                                            :select (load-float-double-function "select")})
+                                                                  "l2_constraint_scale")})
                                    retval)))))]
     (reset! (get retval :resource-context) res-ctx)
     (resource/track retval)))
@@ -946,8 +945,6 @@ relies only on blockDim.x block.x and thread.x"
 
 
 (defprotocol PCudaMath
-  (cuda-gemm [A a-colstride trans-a? trans-b? a-row-count a-col-count b-col-count alpha
-              B b-colstride beta C c-colstride stream])
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream])
   (cuda-mul-rows [A a-colstride x inc-x a-row-count a-col-count C c-colstride stream])
   (cuda-elem-mul [x inc-x alpha y inc-y res inc-res elem-count stream])
@@ -1022,35 +1019,6 @@ relies only on blockDim.x block.x and thread.x"
 
 (extend-type DoublePointer
   PCudaMath
-  (cuda-gemm [A a-colstride
-              trans-a? trans-b? a-row-count a-col-count b-col-count alpha
-              B b-colstride
-              beta C c-colstride
-              ^CudaStream stream]
-    (mu/col->row-gemm
-     (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
-          alpha ^DoublePointer A a-rowstride
-          ^DoublePointer B b-rowstride
-          beta ^DoublePointer C c-rowstride]
-       (blas-with-stream
-        stream
-        (cublas-call (cublas/cublasDgemm_v2
-                      ^cublas$cublasContext cublas
-                      (bool->blas-trans trans-a?)
-                      (bool->blas-trans trans-b?)
-                      (long a-row-count) (long b-col-count) (long a-col-count)
-                      (value->double-ptr alpha)
-                      ^DoublePointer A
-                      (int a-rowstride)
-                      ^DoublePointer B
-                      (int b-rowstride)
-                      (value->double-ptr beta)
-                      ^DoublePointer C
-                      (int c-rowstride)))))
-     trans-a? trans-b? a-row-count a-col-count b-col-count
-     alpha A a-colstride
-     B b-colstride
-     beta C c-colstride))
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
     (mu/col->row-gemv
      (fn [trans-a? a-row-count a-col-count
@@ -1095,35 +1063,6 @@ relies only on blockDim.x block.x and thread.x"
 
 (extend-type FloatPointer
   PCudaMath
-  (cuda-gemm [A a-colstride
-              trans-a? trans-b? a-row-count a-col-count b-col-count alpha
-              B b-colstride
-              beta C c-colstride
-              ^CudaStream stream]
-    (mu/col->row-gemm
-     (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
-          alpha ^FloatPointer A a-rowstride
-          ^FloatPointer B b-rowstride
-          beta ^FloatPointer C c-rowstride]
-       (blas-with-stream
-        stream
-        (cublas-call (cublas/cublasSgemm_v2
-                      ^cublas$cublasContext cublas
-                      (bool->blas-trans trans-a?)
-                      (bool->blas-trans trans-b?)
-                      (long a-row-count) (long b-col-count) (long a-col-count)
-                      (value->float-ptr alpha)
-                      ^FloatPointer A
-                      (int a-rowstride)
-                      ^FloatPointer B
-                      (int b-rowstride)
-                      (value->float-ptr beta)
-                      ^FloatPointer C
-                      (int c-rowstride)))))
-     trans-a? trans-b? a-row-count a-col-count b-col-count
-     alpha A a-colstride
-     B b-colstride
-     beta C c-colstride))
   (cuda-gemv [A a-colstride x inc-x trans-a? a-row-count a-col-count alpha beta y inc-y stream]
     (mu/col->row-gemv
      (fn [trans-a? a-row-count a-col-count
@@ -1197,41 +1136,8 @@ relies only on blockDim.x block.x and thread.x"
   ;;Ensure this stream cannot proceed until this event is triggered.
   (sync-event [stream ^cuda$CUevent_st event]
     (cuda-call (cuda/cudaStreamWaitEvent (.stream stream) event (int 0))))
-  (indexed-copy-impl [stream src src-indexes src-stride
-                      dst dst-indexes dst-stride n-elems-per-index]
-    (let [n-indexes (m/ecount src-indexes)]
-      (when-not (= (dtype/get-datatype src)
-                   (dtype/get-datatype dst))
-        (throw (ex-info "Indexed copy operates only on same-datatype variables"
-                        {:src-datatype (dtype/get-datatype src)
-                         :dst-datatype (dtype/get-datatype dst)})))
-      (when-not (and (= :int (dtype/get-datatype src-indexes))
-                     (= :int (dtype/get-datatype dst-indexes)))
-        (throw (ex-info "Src and dst indexes must be integer buffers"
-                        {:src-index-datatype (dtype/get-datatype src-indexes)
-                         :dst-index-datatype (dtype/get-datatype dst-indexes)})))
-      ;;We cannot check that the indexes are valid on the device.
-      ;;So only the cpu layer can help with that type of debugging.
-      (let [elem-count (* (int n-elems-per-index) (int n-indexes))]
-        (launch-linear-kernel stream (get-or-create-fn stream :indexed-copy
-                                                       (dtype/get-datatype src)
-                                                       #(load-float-double-function
-                                                         "indexed_copy"))
-                              elem-count 0
-                              (->ptr src) (->ptr src-indexes) (int src-stride)
-                              (->ptr dst) (->ptr dst-indexes) (int dst-stride)
-                              (int n-elems-per-index) (int n-indexes)))))
+
   math/PMath
-  (gemm-impl [stream trans-a? trans-b?
-              a-row-count a-col-count b-col-count
-              alpha A a-colstride
-              B b-colstride
-              beta C c-colstride]
-    ;;Now specific dispatch on the buffer type
-    (cuda-gemm (->ptr A) a-colstride
-               trans-a? trans-b? a-row-count a-col-count b-col-count
-               alpha (->ptr B) b-colstride
-               beta (->ptr C) c-colstride stream))
   (sum-impl [stream alpha x beta y res]
     (let [datatype (dtype/get-datatype x)
           res-elem-count (long (m/ecount res))]
@@ -1281,84 +1187,7 @@ relies only on blockDim.x block.x and thread.x"
                    inc-res (math/ecount a) stream))
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     (cuda-l2-constraint-scale (->ptr a) inc-a (quot (math/ecount a) (long inc-a))
-                              l2-max-constraint stream))
-  (select [stream src-buf dest-buf lt-zero ge-zero]
-    (let [elem-count (long (m/ecount src-buf))
-          datatype (dtype/get-datatype src-buf)]
-      (when-not (= datatype (dtype/get-datatype dest-buf))
-        (throw (ex-info "Datatypes for src and dest must match"
-                        {:src-datatype (dtype/get-datatype src-buf)
-                         :dest-datatype (dtype/get-datatype dest-buf)})))
-      (when-not (= elem-count (long (m/ecount dest-buf)))
-        (throw (ex-info "Element counts for src and dest must match"
-                        {:src-ecount (m/ecount src-buf)
-                         :dest-ecount (m/ecount dest-buf)})))
-      (launch-linear-kernel stream (get-or-create-fn stream :select datatype
-                                                     #(load-float-double-function "select"))
-                            elem-count 0
-                            (->ptr src-buf) (->ptr dest-buf)
-                            (dtype-cast lt-zero datatype)
-                            (dtype-cast ge-zero datatype)
-                            elem-count)))
-  (indirect-add [stream
-                 alpha x x-indexes
-                 beta y y-indexes
-                 res res-indexes
-                 n-elems-per-index]
-    (let [datatype (dtype/get-datatype x)
-          n-indexes (m/ecount x-indexes)
-          n-elems (* (int n-indexes) (int n-elems-per-index))]
-      (when-not (and (= datatype (dtype/get-datatype y))
-                     (= datatype (dtype/get-datatype res)))
-        (throw (ex-info "Datatype mismatch in indirect-add"
-                        {:x-datatype (dtype/get-datatype x)
-                         :y-datatype (dtype/get-datatype y)
-                         :res-datatype (dtype/get-datatype res)})))
-      (when-not (and (= n-indexes (m/ecount y-indexes))
-                     (= n-indexes (m/ecount res-indexes)))
-        (throw (ex-info "Index count mismatch"
-                        {:x-index-count n-indexes
-                         :y-index-count (m/ecount y-indexes)
-                         :res-index-count (m/ecount res-indexes)})))
-      (when-not (and (= :int (dtype/get-datatype x-indexes))
-                     (= :int (dtype/get-datatype y-indexes))
-                     (= :int (dtype/get-datatype res-indexes)))
-        (throw (ex-info "Indexes must be of int type"
-                        {:x-idx-type (dtype/get-datatype x-indexes)
-                         :y-idx-type (dtype/get-datatype y-indexes)
-                         :res-idx-type (dtype/get-datatype res-indexes)})))
-      (if (or (alias? x res)
-              (alias? y res))
-        (let [[src src-indexes dst dst-indexes] (if (alias? x res)
-                                                  [y y-indexes x x-indexes]
-                                                  [x x-indexes y y-indexes])]
-          (when (and (alias? x res)
-                     (alias? y res))
-            (throw (ex-info "Both x and y cannot alias res"
-                            {})))
-          (when-not (alias? dst-indexes
-                            res-indexes)
-            (throw (ex-info "If x or y alias result, then their indexes must also alias res-indexes"
-                            {})))
-          (launch-linear-kernel stream (get-or-create-fn stream :indirect-sum datatype
-                                                         #(load-float-double-function "indirect_sum"))
-                                n-elems 0
-                                (dtype-cast alpha datatype) (->ptr x) (->ptr x-indexes)
-                                (dtype-cast beta datatype) (->ptr res) (->ptr res-indexes)
-                                (int n-elems-per-index) (int n-indexes)))
-        (do
-          (when (or (partially-alias? x res)
-                    (partially-alias? y res))
-            (throw (ex-info "Either x or y partially alias result"
-                            {:x-alias? (partially-alias? x res)
-                             :y-alias? (partially-alias? y res)})))
-          (launch-linear-kernel stream (get-or-create-fn stream :indirect-add datatype
-                                                         #(load-float-double-function "indirect_add"))
-                                n-elems 0
-                                (dtype-cast alpha datatype) (->ptr x) (->ptr x-indexes)
-                                (dtype-cast beta datatype) (->ptr y) (->ptr y-indexes)
-                                (->ptr res) (->ptr res-indexes)
-                                (int n-elems-per-index) (int n-indexes)))))))
+                              l2-max-constraint stream)))
 
 
 (extend-type cuda$CUevent_st

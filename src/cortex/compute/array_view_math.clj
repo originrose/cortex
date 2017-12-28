@@ -14,20 +14,13 @@
 
 
 (defprotocol PCPUMathImpl
-  (gemm [A a-colstride
-             trans-a? trans-b? a-row-count a-col-count b-col-count alpha
-             B b-colstride
-             beta C c-colstride])
   (sum [x alpha beta y result])
   (gemv [A a-colstride trans-a a-row-count a-col-count alpha x inc-x beta y inc-y])
   (mul-rows [A a-colstride a-row-count a-col-count X inc-x C c-colstride])
   (elem-mul [a inc-a alpha b inc-b res inc-res])
   ;;Create a scale vector with either 1.0 in the row if the row-len is < the
   ;;l2 constraint or (/ l2-max-constraint row-len) otherwise.
-  (l2-constraint-scale [a inc-a l2-max-constraint])
-  (select [a res lt-zero ge-zero])
-  (indirect-add [x alpha x-indexes beta y y-indexes
-                 result res-indexes n-elems-per-idx]))
+  (l2-constraint-scale [a inc-a l2-max-constraint]))
 
 
 (defmacro sum-impl
@@ -98,77 +91,8 @@
                 (v-aset a# a-offset# (/ l2-max-constraint# row-len#)))))))
 
 
-(defmacro select-impl
-  [a res lt-zero ge-zero cast-fn]
-  `(let [a# (ArrayView/toView ~a)
-         res# (ArrayView/toView ~res)
-         lt-zero# (~cast-fn ~lt-zero)
-         ge-zero# (~cast-fn ~ge-zero)
-         a-elem-count# (.length a#)]
-     (c-for [idx# 0 (< idx# a-elem-count#) (inc idx#)]
-            (v-aset res# idx#
-                    (~cast-fn
-                     (if (>= (v-aget a# idx#) 0)
-                       ge-zero#
-                       lt-zero#))))))
-
-
-(defmacro indirect-add-impl
-  [x alpha x-indexes beta y y-indexes result res-indexes n-elems-per-idx cast-fn]
-  `(let [x# (ArrayView/toView ~x)
-         alpha# (double ~alpha)
-         x-indexes# (ArrayView/toView ~x-indexes)
-         beta# (double ~beta)
-         y# (ArrayView/toView ~y)
-         y-indexes# (ArrayView/toView ~y-indexes)
-         result# (ArrayView/toView ~result)
-         res-indexes# (ArrayView/toView ~res-indexes)
-         n-elems-per-idx# (long ~n-elems-per-idx)
-         n-elems# (.length y-indexes#)]
-     (c-for
-      [idx# 0 (< idx# n-elems#) (inc idx#)]
-      (let [x-offset# (* n-elems-per-idx# (v-aget x-indexes# idx#))
-            y-offset# (* n-elems-per-idx# (v-aget y-indexes# idx#))
-            res-offset# (* n-elems-per-idx# (v-aget res-indexes# idx#))]
-        (c-for
-         [elem-idx# 0 (< elem-idx# n-elems-per-idx#) (inc elem-idx#)]
-         (v-aset result# (+ res-offset# elem-idx#)
-                 (~cast-fn (+ (* alpha# (v-aget x# (+ x-offset# elem-idx#)))
-                              (* beta# (v-aget y# (+ y-offset# elem-idx#)))))))))))
-
-
 (extend-protocol PCPUMathImpl
   DoubleArrayView
-  (gemm [^DoubleArrayView A a-colstride
-             trans-a? trans-b? a-row-count a-col-count b-col-count alpha
-             ^DoubleArrayView B b-colstride
-             beta ^DoubleArrayView C c-colstride]
-    (col->row-gemm (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
-                        alpha ^DoubleArrayView A a-rowstride
-                        ^DoubleArrayView B b-rowstride
-                        beta ^DoubleArrayView C c-rowstride]
-                     (let [trans-a? (bool->blas-trans trans-a?)
-                           trans-b? (bool->blas-trans trans-b?)
-                           M (long a-row-count)
-                           N (long b-col-count)
-                           K (long a-col-count)
-                           alpha (double alpha)
-                           beta (double beta)
-                           A-offset (.offset A)
-                           B-offset (.offset B)
-                           C-offset (.offset C)
-                           A (.data A)
-                           B (.data B)
-                           C (.data C)]
-                       (.dgemm (BLAS/getInstance) trans-a? trans-b?
-                               M N K
-                               alpha A A-offset a-rowstride
-                               B B-offset b-rowstride
-                               beta C C-offset c-rowstride)))
-                   trans-a? trans-b? a-row-count a-col-count b-col-count
-                   alpha A a-colstride
-                   B b-colstride
-                   beta C c-colstride))
   (sum [^DoubleArrayView x alpha beta
             ^DoubleArrayView y
             ^DoubleArrayView result]
@@ -210,48 +134,8 @@
     (elem-mul-impl a inc-a alpha b inc-b res inc-res double))
   (l2-constraint-scale [^DoubleArrayView a inc-a l2-max-constraint]
     (l2-constraint-scale-impl a inc-a l2-max-constraint double))
-  (select [^DoubleArrayView a ^DoubleArrayView res lt-zero ge-zero]
-    (select-impl a res lt-zero ge-zero double))
-  (indirect-add [^DoubleArrayView x alpha ^IntArrayView x-indexes
-                 beta ^DoubleArrayView y ^IntArrayView y-indexes
-                 ^DoubleArrayView result ^IntArrayView res-indexes
-                 n-elems-per-idx]
-    (indirect-add-impl x alpha x-indexes
-                       beta y y-indexes
-                       result res-indexes
-                       n-elems-per-idx double))
 
   FloatArrayView
-  (gemm [^FloatArrayView A a-colstride
-             trans-a? trans-b? a-row-count a-col-count b-col-count alpha
-             ^FloatArrayView B b-colstride
-             beta ^FloatArrayView C c-colstride]
-    (col->row-gemm (fn [trans-a? trans-b? a-row-count a-col-count b-col-count
-                        alpha ^FloatArrayView A a-rowstride
-                        ^FloatArrayView B b-rowstride
-                        beta ^FloatArrayView C c-rowstride]
-                     (let [trans-a? (bool->blas-trans trans-a?)
-                           trans-b? (bool->blas-trans trans-b?)
-                           M (long a-row-count)
-                           N (long b-col-count)
-                           K (long a-col-count)
-                           alpha (float alpha)
-                           beta (float beta)
-                           A-offset (.offset A)
-                           B-offset (.offset B)
-                           C-offset (.offset C)
-                           A (.data A)
-                           B (.data B)
-                           C (.data C)]
-                       (.sgemm (BLAS/getInstance) trans-a? trans-b?
-                               M N K
-                               alpha A A-offset a-rowstride
-                               B B-offset b-rowstride
-                               beta C C-offset c-rowstride)))
-                   trans-a? trans-b? a-row-count a-col-count b-col-count
-                   alpha A a-colstride
-                   B b-colstride
-                   beta C c-colstride))
   (sum [^FloatArrayView x alpha beta
             ^FloatArrayView y
             ^FloatArrayView result]
@@ -292,17 +176,7 @@
                  ^FloatArrayView res inc-res]
     (elem-mul-impl a inc-a alpha b inc-b res inc-res float))
   (l2-constraint-scale [^FloatArrayView a inc-a l2-max-constraint]
-    (l2-constraint-scale-impl a inc-a l2-max-constraint float))
-  (select [^FloatArrayView a ^FloatArrayView res lt-zero ge-zero]
-    (select-impl a res lt-zero ge-zero float))
-  (indirect-add [^FloatArrayView x alpha ^IntArrayView x-indexes
-                 beta ^FloatArrayView y ^IntArrayView y-indexes
-                 ^FloatArrayView result ^IntArrayView res-indexes
-                 n-elems-per-idx]
-    (indirect-add-impl x alpha x-indexes
-                       beta y y-indexes
-                       result res-indexes
-                       n-elems-per-idx float)))
+    (l2-constraint-scale-impl a inc-a l2-max-constraint float)))
 
 
 (extend-protocol resource/PResource

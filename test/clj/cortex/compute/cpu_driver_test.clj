@@ -18,12 +18,6 @@
 (def-double-float-test simple-stream
   (verify-driver/simple-stream (driver) test-utils/*datatype*))
 
-(def-double-float-test indexed-copy
-  (verify-driver/indexed-copy (driver) test-utils/*datatype*))
-
-(def-double-float-test gemm
-  (verify-driver/gemm (driver) test-utils/*datatype*))
-
 (def-double-float-test sum
   (verify-driver/sum (driver) test-utils/*datatype*))
 
@@ -41,12 +35,3 @@
 
 (def-double-float-test l2-constraint-scale
   (verify-driver/l2-constraint-scale (driver) test-utils/*datatype*))
-
-(def-double-float-test select
-  (verify-driver/select (driver) test-utils/*datatype*))
-
-(def-double-float-test indirect-add
-  (verify-driver/indirect-add (driver) test-utils/*datatype*))
-
-(def-double-float-test batched-offsetting
-  (verify-driver/batched-offsetting (driver) test-utils/*datatype*))

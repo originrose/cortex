@@ -50,13 +50,6 @@
   elem-mul: result = elementwise multiply alpha * a * b
   l2-constraint-scale: create scale vector with either 1.0 or (constraint / row-len)
   select: create a buffer with fixed constants for values >= 0 and values < 0."
-  (gemm-impl [stream trans-a? trans-b?
-              a-row-count a-col-count b-col-count
-              alpha A a-colstride
-              B b-colstride
-              beta C c-colstride]
-    "C = alpha * ((trans-a? A) * (trans-b? B)) + beta * C.
-All arguments come in as row major.")
   (sum-impl [stream alpha x beta y result]
     "result = a*x + b*y.  This function can be used as an accumulator assuming (ecount y) <
 (ecount x) and (rem (ecount x) (ecount y)) == 0.  It is used in fact when accumulating batch
@@ -72,16 +65,7 @@ Place result in C.  Used for scaling the rows of a matrix.")
 to be same length as a and b. The inc params are related to strides.")
   (l2-constraint-scale [stream a inc-a l2-max-constraint]
     "Given a vector that contains x^2,
-a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]")
-  (select [stream src-buf dest-buf less-zero-value equal-or-greater-val]
-    "Check buffer value against zero and set it to one value if it is less than zero
-and another value if it is greater or equal to zero:
-dest-buf[idx] = buf[idx] >= 0 ? equal-or-greater-val : less-zero-value;")
-  (indirect-add [stream alpha x x-indexes beta y y-indexes result res-indexes n-elems-per-idx]
-    "Indirect indexed add.  Unlike sum there is no index wrapping so the index vectors
-need to be setup correctly.  Like sum, however, res could be either x or y and thus you
-could use this to accumulate particular results in addition to adding into a separate vector.
-result[res-indexes[idx]] = alpha * x[x-indexes[idx]] + beta * y[y-indexes[idx]];"))
+a[idx] = a[idx] < constraint ? 1.0 : constraint / a[idx]"))
 
 
 (defmacro math-error
@@ -370,43 +354,6 @@ versions of cortex (meaning only contains java base types)."
   (device-array->array stream :double ary))
 
 
-(defn gemm
-  "general matrix multiply.  See blas-3 documentation."
-  ([stream trans-a? trans-b?
-    a-row-count a-col-count b-row-count b-col-count c-row-count c-col-count
-    alpha A a-colstride
-    B b-colstride
-    beta C c-colstride]
-   (let [a-colstride (long a-colstride)
-         b-colstride (long b-colstride)
-         c-colstride (long c-colstride)]
-     (when-not-error (>= a-colstride ^long a-col-count) "a-col-stride is less than a-col-count")
-     (when-not-error (>= b-colstride ^long b-col-count) "b-col-stride is less than b-col-count")
-     (when-not-error (>= c-colstride ^long c-col-count) "c-col-stride is less than c-col-count")
-     (let [[a-row-count a-col-count :as a-shape] (if trans-a?
-                                                   [a-col-count a-row-count]
-                                                   [a-row-count a-col-count])
-           [b-row-count b-col-count :as b-shape] (if trans-b?
-                                                   [b-col-count b-row-count]
-                                                   [b-row-count b-col-count])
-           c-shape [c-row-count c-col-count]]
-       (when-not-error (= a-col-count b-row-count)
-         (format "A %s col count doesn't match B %s row count" a-shape b-shape))
-       (when-not-error (= a-row-count c-row-count)
-         (format "C %s row count doesn't match A %s row count" c-shape a-shape))
-       (when-not-error (= b-col-count c-col-count)
-         (format "C %s col count doesn't match B %s col count" c-shape b-shape))
-       (gemm-impl stream trans-a? trans-b? a-row-count a-col-count b-col-count
-                  alpha A a-colstride
-                  B b-colstride
-                  beta C c-colstride))))
-  ([stream trans-a? trans-b? alpha A B beta C]
-   (let [[a-rows a-cols] (shape-2d A)
-         [b-rows b-cols] (shape-2d B)
-         [c-rows c-cols] (shape-2d C)]
-     (gemm stream trans-a? trans-b? a-rows a-cols b-rows b-cols c-rows c-cols
-           alpha (device-buffer A) a-cols (device-buffer B) b-cols
-           beta (device-buffer C) c-cols))))
 
 (defn gemv
   "General matrix (row) vector multiply.  See blas-2 documentation."
@@ -450,35 +397,6 @@ versions of cortex (meaning only contains java base types)."
 (defn ensure-factor-of-2
  ^long  [^long number]
   (+ number (rem number 2)))
-
-
-(defn split-array-into-batches
-  "Given a device array with some batch size return a vector
-of device arrays one for each element in the batch."
-  [^DeviceArray ary-data]
-  (let [^Tensor t (.tensor ary-data)
-        [batch-size batch-stride] (batch-shape ary-data)
-        batch-size (long batch-size)
-        batch-stride (long batch-stride)
-        sub-tensor (tensor 1 (.channel-count t)
-                           (.height t) (.width t))
-        dev-buf (device-buffer ary-data)]
-    (mapv (fn [^long batch-idx]
-            (->DeviceArray (drv/sub-buffer dev-buf (* batch-idx batch-stride)
-                                           batch-stride) sub-tensor))
-          (range batch-size))))
-
-
-(defn batched-data-to-per-input-data
-  "Given a sequence of DeviceArrays return a sequence of arrays with the device
-arrays split into one entry per batch.  So for example if I have a batch size of 5
-and I pass in [input output] then I get batch [[input-1 input-2 ...][output-1 output-2 ...]]"
-  [data-array-seq]
-  (->> data-array-seq
-       (map split-array-into-batches)
-       (apply interleave)
-       (partition (count data-array-seq))
-       vec))
 
 
 (defn array->cortex-tensor
