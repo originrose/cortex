@@ -36,7 +36,7 @@
                               :label-inverse-counts {:stream :label}
                               :labels {:stream :label}
                               :alpha 0.9
-                              :lambda 1e-4})
+                              :lambda 1e-2})
    (layers/linear 10)
    (layers/softmax :id :label)])
 

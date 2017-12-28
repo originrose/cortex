@@ -1,7 +1,6 @@
 CUFILES := $(shell find . -name "*.cu")
 FATBINS := $(CUFILES:.cu=.fatbin)
 CUDA_HOME:=/usr/local/cuda
-NVCC := nvcc
 
 all: $(FATBINS)
 

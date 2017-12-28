@@ -19,7 +19,8 @@
             [cortex.loss.core :as loss]
             [cortex.loss.util :as loss-util]
             [cortex.buffer-initialization :as buf-init]
-            [cortex.util :as util]))
+            [cortex.util :as util]
+            [cortex.tensor :as ct]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -64,10 +65,8 @@
 (defn- allocate-l2-temp-data
   [weights backend]
   (let [weight-shape (m/shape weights)]
-    {:weight-temp (backend/new-array backend weight-shape)
-     :weight-magnitude-temp (backend/new-array backend
-                                               [(first weight-shape)])
-     :ones-vec (backend/allocate-ones backend (second weight-shape))}))
+    {:weight-magnitude-temp (backend/new-array backend
+                                               [(first weight-shape)])}))
 
 (defn is-l2-max-constraint-valid?
   [parameter]
@@ -689,6 +688,16 @@ traversal with the inputs and outputs mapped to specific buffers."
     retval))
 
 
+(defn- sum-flat-buffers
+  [stream dest alpha arg1]
+  (let [dest-tens (math/->vector-ct dest)]
+    (ct/with-stream stream
+      (ct/binary-op! dest-tens
+                     1.0 dest-tens
+                     alpha (math/->vector-ct arg1)
+                     :+))))
+
+
 
 ;;for the backward pass we also need to generate losses.
 (defmethod perform-pass :backward
@@ -730,9 +739,9 @@ traversal with the inputs and outputs mapped to specific buffers."
     ;;have a cumulative summation step at the end.
     (->> output-arguments
          (map (fn [argument]
-                (math/sum stream
-                          (double (get argument :lambda)) (get argument :gradient)
-                          1.0 incoming-gradient)))
+                (sum-flat-buffers stream incoming-gradient
+                                  (double (get argument :lambda))
+                                  (get argument :gradient))))
          dorun)
     ;;Perform this node's backward pass.
     (let [network (perform-pass :default network pass-function entry)]
@@ -748,9 +757,8 @@ traversal with the inputs and outputs mapped to specific buffers."
                                       {:loss-term-param (get argument :argument)
                                        :loss-term-keys (keys argument)
                                        :node-parameters (vec (keys node-params))})))
-                    (math/sum stream
-                              (double (get argument :lambda)) (get argument :gradient)
-                              1.0 (get node-parameter :gradient)))))
+                    (sum-flat-buffers stream (get node-parameter :gradient)
+                                      (double (get argument :lambda)) (get argument :gradient)))))
            dorun)
       network)))
 
@@ -795,30 +803,16 @@ traversal with the inputs and outputs mapped to specific buffers."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Optimization
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (defn- apply-l2-max-constraint
-  [network {:keys [weight-temp weight-magnitude-temp ones-vec buffer l2-max-constraint]}]
+  [network {:keys [weight-magnitude-temp buffer l2-max-constraint]}]
   (when l2-max-constraint
-    (let [weight-ecount (long (math/ecount buffer))
-          [num-w-rows num-w-cols] (math/shape-2d buffer)
-          backend (backend network)
-          stream (stream network)]
-      (backend/assign! backend weight-temp buffer)
-      (math/elem-mul stream
-                     1.0 (math/device-buffer buffer) 1
-                     (math/device-buffer weight-temp) 1
-                     (math/device-buffer weight-temp) 1)
-      (math/gemv stream false num-w-rows num-w-cols
-                 1.0 (math/device-buffer weight-temp) num-w-cols
-                 (math/device-buffer ones-vec) 1
-                 0.0 (math/device-buffer weight-magnitude-temp) 1)
-      (math/l2-constraint-scale stream
-                                (math/device-buffer weight-magnitude-temp) 1
-                                l2-max-constraint)
-      (math/mul-rows stream num-w-rows num-w-cols
-                     (math/device-buffer buffer) num-w-cols
-                     (math/device-buffer weight-magnitude-temp) 1
-                     (math/device-buffer buffer) num-w-cols))))
+    (let [weight-tensor (-> (math/array->cortex-tensor buffer)
+                            (ct/as-2d-matrix))
+          [num-w-rows num-w-cols] (ct/shape weight-tensor)
+          weight-mag-tensor (-> (math/->vector-ct weight-magnitude-temp)
+                                (ct/in-place-reshape [num-w-rows 1]))]
+      (ct/with-stream (stream network)
+        (ct/constrain-inside-hypersphere! weight-tensor weight-mag-tensor l2-max-constraint)))))
 
 (defn optimize-network
   [network]

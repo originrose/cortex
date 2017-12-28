@@ -24,9 +24,9 @@ Op may be: [:+ :* :/].
 
 In the non-indexed cases the element counts of y or x may differ but they need to be
   commensurate meaning that the smaller evenly divides the larger.  When writing to result it is
-  important that result is as large as the largest.  This is a relaxation of the numpy broadcasting
-  rules to allow more forms of broadcasting; the check is that the remainder is zero; not that
-  the smaller dimension is 1.
+  important that result is as large as the largest.  This is a relaxation of the numpy
+  broadcasting rules to allow more forms of broadcasting; the check is that the remainder is
+  zero; not that the smaller dimension is 1.
 
 
 In general we want as much error checking and analysis done in this file as opposed to at the
@@ -593,7 +593,7 @@ and the rest of the dimensions being squashed into n-rows."
   [& args]
   (let [{:keys [max-shape dimensions]} (->> (map tensor->dimensions args)
                                             (apply dims/dimension-seq->max-shape))
-        shape-seq (map :shape dimensions)]
+        shape-seq (map dims/shape  dimensions)]
     (when-not-error (every? (fn [shp]
                               (every? #(= 0 (long %))
                                       (map #(rem (long %1) (long %2))
@@ -806,10 +806,9 @@ Datatypes must match."
 
 
 (defn ternary-op!
-  "Perform the elementwise operation
-  dest = op( alpha * x, beta * y, gamma * z )
-  dest tensor and must not alias any other arguments.  There is no accumulator version
-  of these operations at this time in order to keep kernel permutations low (3 backend permutations).
+  "Perform the elementwise operation dest = op( alpha * x, beta * y, gamma * z ) dest tensor and
+  must not alias any other arguments.  There is no accumulator version of these operations at
+  this time in order to keep kernel permutations low (3 backend permutations).
 
   x, y, z can be constants or tensors.
 
@@ -856,7 +855,7 @@ Datatypes must match."
 
 
 (def unary-reduction-operations
-  [:max :min :sum :mean])
+  [:max :min :sum :mean :magnitude-squared :magnitude])
 
 
 (defn unary-reduce!
@@ -1614,6 +1613,35 @@ a[i] = a[i] / ((k + alpha*(windowed-summation a[i-n/2]^2...a[i+n/2]^2))^beta)"
                      (tensor->buffer output-gradient) (tensor->dimensions output-gradient)
                      lrn-descriptor)
    input-gradient))
+
+
+(defn normalize!
+  "Ensure each vector of the last dimension of dest has length radius-length.
+Epsilon is used to avoid divide-by-zero conditions.  This operation can also
+be seen as a projection to the surface of a hypersphere of radius radius-length."
+  [dest mag-vec radius-length epsilon]
+  (unary-reduce! mag-vec 1.0 dest :magnitude)
+  ;;Ensure a zero doesn't cause a nan.
+  (binary-op! mag-vec 1.0 mag-vec 1.0 1e-6 :+)
+  (binary-op! dest 1.0 dest (/ 1.0 (double radius-length)) mag-vec :/))
+
+
+(defn constrain-inside-hypersphere!
+  "Like normalize, but only shorten vectors that are too long.  So instead of
+projecting to the surface of the hypersphere like normalize does, do a <= operation."
+  [dest mag-vec radius-length]
+  (unary-reduce! mag-vec 1.0 dest :magnitude)
+  ;;Subtract radius-length from the magnitude vector.  This means scales below the target are
+  ;;now less than 0
+  (binary-op! mag-vec 1.0 mag-vec 1.0 radius-length :-)
+  ;;Set scales less than 0 to 0 and do not change ones more than zero.
+  (ternary-op! mag-vec 1.0 mag-vec 0.0 0.0 1.0 mag-vec :select)
+  ;;Add radius-length back into the mix.  This means that items with scale <= radius-length are now
+  ;;radius-length and items with scale > radius-length are whatever their original lengths would be.
+  (binary-op! mag-vec 1.0 mag-vec 1.0 radius-length :+)
+  ;;Last step, multiple dest by radius-length/mag-len.  If mag-len is radius-length, then no change.
+  ;;and we know from the above operations that only items of mag-len or greater will be changed.
+  (binary-op! dest 1.0 dest (/ 1.0 (double radius-length)) mag-vec :/))
 
 
 (extend-type Tensor

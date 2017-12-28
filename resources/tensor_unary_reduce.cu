@@ -13,8 +13,26 @@ struct unary_reduction_operations
     max = 0,
     min,
     sum,
-    mean
+    mean,
+    magnitude,
+    magnitude_squared,
   };
+};
+
+template<typename dtype>
+struct sqrt_op
+{
+  __device__ dtype operator() (dtype src) {
+    return static_cast<dtype>( sqrt(static_cast<double>( src) ) );
+  }
+};
+
+template<>
+struct sqrt_op<float>
+{
+  __device__ float operator() (float src) {
+    return sqrt(src);
+  }
 };
 
 template<typename dtype>
@@ -52,6 +70,17 @@ void unary_reduce(dtype* output, const general_index_system& output_sys,
 	result += input_alpha * input[input_sys( offset, input_sys.rev_shape)];
       }
       result /= input_col_len;
+      break;
+    case unary_reduction_operations::magnitude_squared:
+    case unary_reduction_operations::magnitude:
+      result = result * result;
+      for ( int idx = 1; idx < input_col_len; ++idx ) {
+	int offset = idx + idx_offset;
+	dtype temp = input_alpha * input[input_sys( offset, input_sys.rev_shape)];
+	result += temp * temp;
+      }
+      if ( reduce_op == unary_reduction_operations::magnitude )
+	result = sqrt_op<dtype>()(result);
       break;
     }
     output[output_sys(elem_idx, output_sys.rev_shape)] = result;

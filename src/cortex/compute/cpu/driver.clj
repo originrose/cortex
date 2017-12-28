@@ -8,7 +8,6 @@
             [think.resource.core :as resource]
             [clojure.core.matrix.macros :refer [c-for]]
             [clojure.core.matrix :as m]
-            [cortex.compute.array-view-math :as avm]
             [think.parallel.core :as parallel])
   (:import [java.nio ByteBuffer IntBuffer ShortBuffer LongBuffer
             FloatBuffer DoubleBuffer Buffer]
@@ -313,59 +312,3 @@ Use with care; the synchonization primitives will just hang with this stream."
 (extend-type ArrayViewBase
   resource/PResource
   (release-resource [_]))
-
-
-(extend-type CPUStream
-  c-math/PMath
-  (gemm-impl [stream trans-a? trans-b? a-row-count a-col-count b-col-count alpha A a-colstride
-              B b-colstride
-              beta C c-colstride]
-    (with-stream-dispatch stream
-      (avm/gemm (dtype/->view A) a-colstride
-                trans-a? trans-b? a-row-count a-col-count b-col-count alpha
-                (dtype/->view B) b-colstride
-                beta (dtype/->view C) c-colstride)))
-
-  (sum-impl [stream alpha x beta y result]
-    (with-stream-dispatch stream
-      (avm/sum (dtype/->view x) alpha beta (dtype/->view y) (dtype/->view result))))
-
-  (gemv-impl [stream trans-a? a-row-count a-col-count alpha A a-colstride x inc-x beta y inc-y]
-    (with-stream-dispatch stream
-      (avm/gemv (dtype/->view A) a-colstride trans-a? a-row-count a-col-count alpha
-                (dtype/->view x) inc-x beta (dtype/->view y) inc-y)))
-
-  (mul-rows [stream a-row-count a-col-count A a-colstride x inc-x C c-colstride]
-    (with-stream-dispatch stream
-      (avm/mul-rows (dtype/->view A) a-colstride a-row-count a-col-count
-                    (dtype/->view x) inc-x (dtype/->view C) c-colstride)))
-
-  (elem-mul [stream alpha a inc-a b inc-b res inc-res]
-    (with-stream-dispatch stream
-      (avm/elem-mul (dtype/->view a) inc-a alpha (dtype/->view b) inc-b (dtype/->view res)
-                    inc-res)))
-
-  (l2-constraint-scale [stream a inc-a l2-max-constraint]
-    (with-stream-dispatch stream
-      (avm/l2-constraint-scale (dtype/->view a) inc-a l2-max-constraint)))
-
-
-  (select [stream src-buf buffer less-zero-value equal-or-greater-val]
-    (with-stream-dispatch stream
-      (avm/select (dtype/->view src-buf) (dtype/->view buffer)
-                  less-zero-value equal-or-greater-val)))
-
-  (indirect-add [stream alpha x x-indexes beta y y-indexes result res-indexes n-elems-per-idx]
-    (when-not (and (= (m/ecount x-indexes)
-                      (m/ecount y-indexes))
-                   (= (m/ecount x-indexes)
-                      (m/ecount res-indexes)))
-      (throw (ex-info "Index counts differ between x, y result"
-                      {:x-count (m/ecount x-indexes)
-                       :y-count (m/ecount y-indexes)
-                       :res-count (m/ecount res-indexes)})))
-    (with-stream-dispatch stream
-      (avm/indirect-add (dtype/->view x) alpha (dtype/->view x-indexes)
-                        beta (dtype/->view y) (dtype/->view y-indexes)
-                        (dtype/->view result) (dtype/->view res-indexes)
-                        n-elems-per-idx))))
