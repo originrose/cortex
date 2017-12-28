@@ -1,9 +1,11 @@
 (defproject mnist-classification "0.9.23-SNAPSHOT"
   :description "An example of using experiment/classification on mnist."
   :dependencies [[org.clojure/clojure "1.9.0-alpha17"]
-                 [thinktopic/experiment "0.9.22"]
+                 [thinktopic/experiment "0.9.23-SNAPSHOT"]
                  [org.clojure/tools.cli "0.3.5"]
                  [thinktopic/think.tsne "0.1.1"]
+                 [incanter/incanter-core "1.5.7"]
+                 [incanter/incanter-charts "1.5.7"]
                  ;;If you need cuda 8...
                  [org.bytedeco.javacpp-presets/cuda "8.0-1.2"]
                  ;;If you need cuda 7.5...

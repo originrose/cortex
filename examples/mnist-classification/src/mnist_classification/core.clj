@@ -13,7 +13,13 @@
             [cortex.nn.network :as network]
             [cortex.nn.execute :as execute]
             [cortex.util :as util]
-            [cortex.experiment.util :as experiment-util])
+            [cortex.experiment.util :as experiment-util]
+            [think.tsne.core :as tsne]
+            [incanter
+             [core :as inc-core]
+             [charts :as inc-charts]
+             [datasets :as datasets]]
+            [clojure.core.matrix.stats :as stats])
   (:import [java.io File]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -29,15 +35,19 @@
    (layers/relu)
    (layers/convolutional 5 0 1 50)
    (layers/max-pooling 2 0 2)
-   (layers/batch-normalization)
-   (layers/linear 1000)
-   (layers/relu :center-loss {:label-indexes {:stream :labels}
+   (layers/batch-normalization :mode :spatial)
+   (layers/linear 128)
+   (layers/relu)
+   (layers/linear 128)
+   (layers/relu :id :center-loss
+                :center-loss {:label-indexes {:stream :labels}
                               :label-inverse-counts {:stream :labels}
                               :labels {:stream :labels}
                               :alpha 0.9
-                              :lambda 1e-4})
-   (layers/dropout 0.5)
-   (layers/linear num-classes)
+                              :radius 10
+                              :lambda 1e-1})
+   #_(layers/relu :id :center-loss)
+   (layers/linear num-classes :id :last-linear)
    (layers/softmax :id :labels)])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -137,7 +147,7 @@
                              (-> test-folder
                                  (experiment-util/create-dataset-from-folder class-mapping)) ]
          listener (if-let [file-path (:tensorboard-output argmap)]
-                    (classification/create-tensorboard-listener 
+                    (classification/create-tensorboard-listener
                           {:file-path file-path})
                     (classification/create-listener mnist-observation->image
                                                     class-mapping
@@ -166,14 +176,97 @@
   []
   (ensure-images-on-disk!)
   (let [observation (-> (str dataset-folder "test")
-                         (experiment-util/create-dataset-from-folder class-mapping)
-                         (rand-nth))]
+                        (experiment-util/create-dataset-from-folder class-mapping)
+                        (rand-nth))]
     (i/show (mnist-observation->image (:data observation)))
     {:answer (-> observation :labels util/max-index)
      :guess (->> (execute/run (util/read-nippy-file network-filename) [observation])
                  (first)
                  (:labels)
                  (util/max-index))}))
+
+
+(defn- tsne-some-data
+  []
+  (let [network (-> (util/read-nippy-file network-filename)
+                    (network/dissoc-layers-from-network :last-linear))
+        dataset (->> (experiment-util/create-dataset-from-folder
+                      (str dataset-folder "test")
+                      class-mapping)
+                     shuffle
+                     (take 1000))
+        inference-data (execute/run network dataset :batch-size 10)
+        _ (println (keys (first inference-data)))
+        tsne-data (tsne/tsne (mapv :center-loss inference-data) 2)]
+    {:dataset dataset
+     :tsne tsne-data
+     :inference-data inference-data}))
+
+
+(defn- one-hot->name
+  [one-hot-vec]
+  (-> one-hot-vec
+      util/max-index
+      str))
+
+(defn- tsne-result->incanter-dataset
+  [{:keys [dataset tsne]}]
+  (inc-core/dataset [:x :y :label] (map (fn [tsne-row dataset-entry]
+                                          [(m/mget tsne-row 0)
+                                           (m/mget tsne-row 1)
+                                           (one-hot->name (:labels dataset-entry))])
+                                        (m/rows tsne)
+                                        dataset)))
+
+(defn- scatterplot-incanter-dataset
+  [ds]
+  (doto (inc-charts/scatter-plot :x :y :data ds)
+    inc-core/view))
+
+
+(defn- divine-centroid-groups
+  [{:keys [inference-data dataset]}]
+  (->> (map merge
+            inference-data
+            dataset)
+       (group-by :labels)
+       (map (fn [[label entries]]
+              (let [num-entries (count entries)
+                    center-loss-result (map :center-loss entries)
+                    centroid (m/div (reduce m/add center-loss-result)
+                                    num-entries)
+                    centroid-mse (/ (->> center-loss-result
+                                         (map #(m/magnitude-squared
+                                                (m/sub centroid %)))
+                                         (reduce +))
+                                    num-entries)]
+                [(one-hot->name label) {:num-entries num-entries
+                                        :centroid centroid
+                                        :centroid-magnitude (m/magnitude centroid)
+                                        :centroid-mse centroid-mse}])))
+       (into {})))
+
+
+(defn order-indep-combinations
+  [item-seq]
+  (concat (map vector
+               (repeat (first item-seq))
+               (rest item-seq))
+          (when (seq (rest item-seq))
+            (order-indep-combinations (rest item-seq)))))
+
+
+(defn- centroid-analysis-from-groups
+  [centroid-groups]
+  (let [centroids (map (comp :centroid second) centroid-groups)
+        distances (->> (order-indep-combinations centroids)
+                       (map #(apply m/distance %)))]
+    {:max (apply max distances)
+     :min (apply min distances)
+     :mean (clojure.core.matrix.stats/mean distances)}
+    ))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Advanced techniques
