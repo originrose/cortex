@@ -12,6 +12,17 @@
             [clojure.core.matrix :as m]))
 
 
+(defn- normalize
+  [radius vec-data]
+  (let [mag-data (Math/sqrt
+                  (double
+                   (->> vec-data
+                        (map #(* (double %)
+                                 (double %)))
+                        (reduce +))))]
+    (m/mul vec-data (/ radius mag-data))))
+
+
 (defn center-loss
   [backend]
   (backend/with-backend backend
@@ -21,6 +32,7 @@
          center-val 1.0
          feature-val 1.0
          alpha 0.5
+         radius 10.0
 
          input-buffer-map {:labels [[1 0 0 0 0]
                                     [0 0 1 0 0]
@@ -40,6 +52,7 @@
                                                                      :type :node-output}
                                                             :label-indexes {:stream :labels}
                                                             :label-inverse-counts {:stream :labels}
+                                                            :radius radius
                                                             :alpha alpha
                                                             :centers {:buffer centers}
                                                             :id :center-loss-1)
@@ -70,10 +83,11 @@
          loss-term (util/create-compute-loss-term backend {:compute-graph graph} loss-term batch-size)
          adjusted-centers (->> [1 0 1 1 0]
                                (map-indexed (fn [idx nonzero?]
-                                              (if (= 1 nonzero?)
-                                                (assoc (vec (repeat n-features 0.5))
-                                                       idx 10.5)
-                                                (vec (repeat n-features 1)))))
+                                              (->> (if (= 1 nonzero?)
+                                                     (assoc (vec (repeat n-features 0.5))
+                                                            idx 10.5)
+                                                     (vec (repeat n-features 1)))
+                                                   (normalize radius))))
                                vec)]
      (util/compute-loss-gradient loss-term argument-map)
      (let [output-gradients (->> (backend/to-double-array backend (get-in argument-map [:output :gradient]))
@@ -85,4 +99,4 @@
                      (->> (backend/to-double-array backend (get-in argument-map [:centers :buffer]))
                           (partition n-features)
                           (mapv vec))
-                     1e-5))))))
+                     1e-4))))))

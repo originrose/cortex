@@ -625,7 +625,9 @@
                             :max (int 0)
                             :min (int 1)
                             :sum (int 2)
-                            :mean (int 3)) input-col-len n-elems])
+                            :mean (int 3)
+                            :magnitude (int 4)
+                            :magnitude-squared (int 5)) input-col-len n-elems])
                  vec))))
 
   (gemm! [stream

@@ -118,3 +118,6 @@
 
 (def-cas-dtype-test indexed-tensor
   (verify-tensor/indexed-tensor (create-driver) *datatype*))
+
+(def-double-float-test magnitude-and-mag-squared
+  (verify-tensor/magnitude-and-mag-squared (create-driver) *datatype*))

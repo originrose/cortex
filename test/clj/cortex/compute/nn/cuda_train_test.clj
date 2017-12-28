@@ -15,7 +15,7 @@
 (def-double-float-test corn
   (verify-train/test-corn (create-context)))
 
-(def-double-float-test mnist-adam
+(deftest mnist-adam
   (verify-train/train-mnist-adam (create-context)))
 
 (def-double-float-test mnist-sgd

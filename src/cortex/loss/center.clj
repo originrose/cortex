@@ -89,7 +89,14 @@
 
         ;; update centers with new positions doing a reduction.  This is safe because we aren't
         ;; using a constant alpha on expanded-centers.
-        (ct/binary-op! expanded-centers 1.0 expanded-centers 1.0 batch-centers :+)))))
+        (ct/binary-op! expanded-centers 1.0 expanded-centers 1.0 batch-centers :+)
+
+        ;; Perform normalization to the radius
+        (let [mag-vec (ct/in-place-reshape batch-centers [(first (ct/shape centers)) 1])]
+          (ct/unary-reduce! mag-vec 1.0 centers :magnitude)
+          ;;Ensure a zero doesn't cause a nan.
+          (ct/binary-op! mag-vec 1.0 mag-vec 1.0 1e-6 :+)
+          (ct/binary-op! centers 1.0 centers (/ 1.0 radius) mag-vec :/))))))
 
 
 (defmethod util/create-compute-loss-term :center-loss

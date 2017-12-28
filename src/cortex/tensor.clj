@@ -855,7 +855,7 @@ Datatypes must match."
 
 
 (def unary-reduction-operations
-  [:max :min :sum :mean])
+  [:max :min :sum :mean :magnitude-squared :magnitude])
 
 
 (defn unary-reduce!

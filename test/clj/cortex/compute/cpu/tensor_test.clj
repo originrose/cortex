@@ -109,3 +109,7 @@
 
 (def-all-dtype-test indexed-tensor
   (verify-tensor/indexed-tensor (driver) *datatype*))
+
+
+(def-double-float-test magnitude-and-mag-squared
+  (verify-tensor/magnitude-and-mag-squared (driver) *datatype*))

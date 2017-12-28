@@ -1197,3 +1197,32 @@ for the cuda backend."
                                       [8.0 7.0 6.0]
                                       [8.0 7.0 6.0]]))
                        (vec (ct/to-double-array dest-tens)))))))))
+
+
+(defn magnitude-and-mag-squared
+  [driver datatype]
+  (tensor-context
+   driver datatype
+   (let [num-elems 10
+         num-rows 10
+         src-data (partition num-rows (range (* num-rows num-elems)))
+         src-tensor (ct/->tensor src-data)
+         dst-tensor (ct/new-tensor [num-rows 1])]
+     (ct/unary-reduce! dst-tensor 1.0 src-tensor :magnitude-squared)
+     (is (m/equals (->> (flatten src-data)
+                        (map #(* % %))
+                        (partition num-rows)
+                        (mapv #(reduce + %))
+                        vec)
+                   (vec (ct/to-double-array dst-tensor))
+                   1e-4))
+
+     (ct/unary-reduce! dst-tensor 1.0 src-tensor :magnitude)
+     (is (m/equals (->> (flatten src-data)
+                        (map #(* % %))
+                        (partition num-rows)
+                        (mapv (comp #(Math/sqrt (double %))
+                                    #(reduce + %)))
+                        vec)
+                   (vec (ct/to-double-array dst-tensor))
+                   1e-4)))))

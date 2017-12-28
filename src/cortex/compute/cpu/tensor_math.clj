@@ -579,6 +579,11 @@
 (def ^:private ternary-op-table
   (ternary-op-iter))
 
+(defmacro square-expr
+  [expr]
+  `(let [item# ~expr]
+     (* item# item#)))
+
 
 (defmacro do-unary-reduce-op
   [datatype op input addr in-alpha idx-start idx-stop]
@@ -608,7 +613,20 @@
               (recur (+ sum-val# (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#))))
                      (inc idx#))
               (/ sum-val#
-                 (- ~idx-stop ~idx-start))))))
+                 (- ~idx-stop ~idx-start))))
+    :magnitude `(loop [sum-val# (square-expr (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start))))
+                       idx# (+ ~idx-start 1)]
+                  (if (< idx# ~idx-stop)
+                    (recur (+ sum-val# (square-expr (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#)))))
+                           (inc idx#))
+                    (Math/sqrt sum-val#)))
+    :magnitude-squared `(loop [sum-val# (square-expr (* ~in-alpha (v-aget ~input (.idx_to_address ~addr ~idx-start))))
+                               idx# (+ ~idx-start 1)]
+                          (if (< idx# ~idx-stop)
+                            (recur (+ sum-val# (square-expr
+                                                (* ~in-alpha (v-aget ~input (.idx_to_address ~addr idx#)))))
+                                   (inc idx#))
+                            sum-val#))))
 
 
 (defmacro unary-reduce-impl
