@@ -188,9 +188,11 @@
              force-gpu?
              simple-loss-print?
              test-fn
-             context]
+             context
+             save-gradients?]
       :or {batch-size 128
            network-filestem default-network-filestem
+           save-gradients? false
            reset-score false}}]
   (let [context (or context (execute/compute-context))]
     (execute/with-compute-context context
@@ -216,7 +218,8 @@
             train-fn #(execute/train %1 %2
                                      :batch-size batch-size
                                      :optimizer %3
-                                     :context context)
+                                     :context context
+                                     :save-gradients? save-gradients?)
             training-context {:batch-size batch-size :context context}
             test-fn  (or test-fn
                          ;;Normally if the loss goes down then this is the best network
