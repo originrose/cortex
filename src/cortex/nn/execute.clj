@@ -436,10 +436,12 @@ from the size of their result and the traversal information updated to take this
 (defn train
   "Train.  Returns a tuple of network and optimizer where both the network and optimizer's
   parameters are updated."
-  [network dataset & {:keys [batch-size context optimizer datatype batch-transfer-parallelism]
+  [network dataset & {:keys [batch-size context optimizer datatype batch-transfer-parallelism
+                             save-gradients?]
                       :or {batch-size 10
                            datatype :float
-                           batch-transfer-parallelism 2}}]
+                           batch-transfer-parallelism 2
+                           save-gradients? false}}]
   (let [context (or context (compute-context :datatype datatype))]
     (with-compute-context context
       (let [optimizer (or optimizer (adam/adam))
@@ -465,7 +467,9 @@ from the size of their result and the traversal information updated to take this
           ;;Ensure the network is finished before we upload more things.
           (drv/sync-streams (compute-binding/stream network) batch-stream)
           (print-time-info :train-end))
-        (compute-binding/save-to-network context network {:save-optimizer-parameters? true})))))
+        (compute-binding/save-to-network context network
+                                         {:save-gradients? save-gradients?
+                                          :save-optimizer-parameters? true})))))
 
 
 (defn run

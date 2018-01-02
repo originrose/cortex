@@ -121,14 +121,20 @@
     ;;wait for the listener to finish reading epoch-count events
     (<!! event-writer-chan)))
 
+(defn get-ds
+  "returns a shuffled, dataset split ai 90:10 train-test ratio"
+  []
+  (let [ds (shuffle (default-dataset))
+        ds-count (count ds)
+        train-ds (take (int (* 0.9 ds-count)) ds)
+        test-ds (drop (int (* 0.9 ds-count)) ds)]
+    [train-ds test-ds]))
+
 (defn get-trainer
   "given a training function, returns a partial function that trains on
   a 90-10 split of the default dataset"
   [trainer-fn]
-  (let [ds (shuffle (default-dataset))
-        ds-count (count ds)
-        train-ds (take (int (* 0.9 ds-count)) ds)
-        test-ds (drop (int (* 0.9 ds-count)) ds)
+  (let [[train-ds test-ds] (get-ds)
         train-fn (partial trainer-fn train-ds test-ds)]
     train-fn))
 
@@ -153,6 +159,15 @@
     (classification/perform-experiment network-description train-ds test-ds
                                        listener
                                        {:epoch-count epoch-count})))
+
+(deftest test-gradient-display
+  (let [epoch-count 2
+        [train-ds test-ds] (get-ds)
+        res (train/train-n linear-with-batch-norm train-ds test-ds
+                                       :save-gradients? true
+                                       :epoch-count epoch-count)  
+        ]
+    (is (not (empty? (->> res :compute-graph :buffers  (mapv  (fn [[k v]]  (:gradient v))))))) ))
 
 (deftest test-perform-experiment
   (let [train-fn (get-trainer perform-experiment-eval)
