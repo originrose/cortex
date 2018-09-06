@@ -65,7 +65,7 @@ graph and a sequence of input,answer pairs returns a sequence of
 progressively better trained graphs.  This builds a traversal which
 calculates a forward traversal, backward traversal and io buffer list
 for the execution context.  A traversal is a sequence of
-```{:incoming :id: :outgoing}``` where incoming and outgoing are lists of buffer ids
+```{:incoming :id :outgoing}``` where incoming and outgoing are lists of buffer ids
 and id is the node for execution.  The training system is expected to
 respect the traversal but it could for instance use a completely
 separate neural network facility to accomplish the transformation from
