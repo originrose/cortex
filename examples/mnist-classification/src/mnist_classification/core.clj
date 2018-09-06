@@ -156,7 +156,7 @@
 ;; Once a net is trained (and the trained model is saved to a nippy file), it
 ;; is hopefully straight forward to use that saved model to make inferences on
 ;; additional observations. Note that nothing in this section depends on
-;; `experiment`, only `cortex` itself. This makes deploying traned models much
+;; `experiment`, only `cortex` itself. This makes deploying trained models much
 ;; simpler, since `cortex` has many fewer dependencies than `experiment.`
 (def network-filename
   (str train/default-network-filestem ".nippy"))

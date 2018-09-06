@@ -35,7 +35,7 @@ the image will be resized and converted to grayscale before the training.
 The picture set is composed of only cats and dogs, with the type of the animal being in the original file name.
 
 With a first half of the original picture set, we will constitute a training folder, 
-where the picture will be used tell the network to remember that this picture a cat, or a dog explicitely.
+where the picture will be used tell the network to remember that this picture a cat, or a dog explicitly.
 
 With the second half of the original picture set, we will create a testing folder. 
 Those pictures will be used to validate answers of the trained network with pictures. 
@@ -150,7 +150,7 @@ On each training iteration the network will be checked against images from the t
 
 The trained network is periodically saved to a file with a default name of trained-network.nippy.
 The nippy file is mostlly only a binary version of a big clojure map. 
-FIrst we load the network saved in a nippy  file:
+First we load the network saved in a nippy  file:
 
 ```
 (def nippy
@@ -169,12 +169,12 @@ Then the main client function in simple.clj, is the guess function. It takes a l
    index->class-name)))
 ```
 
-The steps are explained below below:
+The steps are explained below:
 
 1. convert the image to a compatible format (same size as network) and turn it into an observation, something that the network can act upon
-2. make a run of the network. the input is an array of obervations
+2. make a run of the network. the input is an array of observations
 3. the return object is also an array, one result for each element of the input array. (so take the first element)
-4. basically, each result is a score for each of the possible input, so util/max-index gets one of the possible categoies ("cat", "dog") and retrieve the one with the highest score
+4. basically, each result is a score for each of the possible input, so util/max-index gets one of the possible categories ("cat", "dog") and retrieves the one with the highest score
 
 ![resources/4-ways-cheer-up-depressed-cat.jpg](resources/4-ways-cheer-up-depressed-cat.jpg)
 

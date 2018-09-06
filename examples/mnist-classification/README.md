@@ -66,7 +66,7 @@ You will see output about compilation and building the image sets. The program a
 
 After each training epoch the new network's classification accuracy is evaluated against a test dataset. If the new network is found to be the best so far (on that metric), then the trained model is saved to the file: `trained-network.nippy`.
 
-When you think it has run long enough, go ahead a stop the process.
+When you think it has run long enough, go ahead and stop the process.
 
 Get a new REPL up in the core namespace and run the `label-one` function:
 

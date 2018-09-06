@@ -34,7 +34,7 @@ trained) network.
 * Generalized framework for building algorithms meant to run on both a cpu and gpu.
 * Implementation of cortex execution context on top of the compute framework enabling a unified
 cpu/cuda/opencl implementation.
-* Specialized layer implementations and protocol definitions for imlementations that cannot be efficiently
+* Specialized layer implementations and protocol definitions for implementations that cannot be efficiently
 implemented in a using generalized math operators available across compute framework implementations.
 
 ### gpu-compute
@@ -57,11 +57,11 @@ steps necessary to use this for neural networks.
 1.  Building an initial minimal description into a network.  This
 calculates layer sizes and creates initial parameter buffers.
 2.  Bind the graph nodes to inputs and outputs.  Every node has an id
-and data coming form outside is represented by a stream.
+and data coming from outside is represented by a stream.
 Inputs are maps of ```id->{:stream stream-name}```
 Outputs for training are ```id->{:stream stream-name :loss loss-fn}```.
 2.  Training.  Training can be thought of as a function that given a
-graph and a sequence if input,answer pairs returns a sequence of
+graph and a sequence of input,answer pairs returns a sequence of
 progressively better trained graphs.  This builds a traversal which
 calculates a forward traversal, backward traversal and io buffer list
 for the execution context.  A traversal is a sequence of
@@ -70,13 +70,13 @@ and id is the node for execution.  The training system is expected to
 respect the traversal but it could for instance use a completely
 separate neural network facility to accomplish the transformation from
 network->network.
-3.  Inference: Inference is a function that given an network and a
+3.  Inference: Inference is a function that given a network and a
 sequence of data produces a sequence of outputs.  In this case the
 outputs are node-id->output-data maps.
 
 
 Over time the intention is to aggregate algorithms into cortex out of the execution contexts
-so that it because easier to test and verify as much of cortex as possible without requiring actual
+so that it is easier to test and verify as much of cortex as possible without requiring actual
 execution of the training or inference algorithms.
 
 ## Rational->Design Justification
