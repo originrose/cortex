@@ -39,7 +39,7 @@
         train-fn (partial preprocess-image training-dir target-image-size)
         test-fn (partial preprocess-image  testing-dir target-image-size)]
   (dorun (pmap train-fn training-observation-label-seq))
-  (dorun (pmap test-fn training-observation-label-seq))))
+  (dorun (pmap test-fn testing-observation-label-seq))))
 
 (comment
   (build-image-data
