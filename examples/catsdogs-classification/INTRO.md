@@ -42,7 +42,7 @@ Those pictures will be used to validate answers of the trained network with pict
 
 The main function is the preprocess-image function, that turn one of the original picture to a smaller size version in grayscale:
 
-![resources/cat_training.png](resources/cat_training.png)
+![resources/cat_training.png](TODO: Add working link to picture)
 
 -  [idx [file label] ], unique index of the picture, source file, and a cat or dog label
 -  output-dir, the top target folder
@@ -142,7 +142,7 @@ While the experiment is running, a small web application is started to confirm t
 
 [http://localhost:8091](http://localhost:8091)
 
-![resources/web.png](resources/web.png)
+![resources/web.png](TODO: Add working link to picture)
 
 On each training iteration the network will be checked against images from the testing folder, and will be given a score. If that score is higher than the previous iteration, then the updated network will be saved in the nippy file.
 
@@ -176,7 +176,7 @@ The steps are explained below:
 3. the return object is also an array, one result for each element of the input array. (so take the first element)
 4. basically, each result is a score for each of the possible input, so util/max-index gets one of the possible categories ("cat", "dog") and retrieves the one with the highest score
 
-![resources/4-ways-cheer-up-depressed-cat.jpg](resources/4-ways-cheer-up-depressed-cat.jpg)
+![resources/4-ways-cheer-up-depressed-cat.jpg](TODO: Add working link to picture)
 
 ```
 catsdogs.simple=> (guess nippy "resources/4-ways-cheer-up-depressed-cat.jpg")
