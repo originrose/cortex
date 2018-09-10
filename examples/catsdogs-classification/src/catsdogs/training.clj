@@ -21,8 +21,8 @@
 (require '[mikera.image.core :as imagez])
 (def first-test-pic 
   (first (filter #(.isFile %) (file-seq (io/file training-folder)))))
-(imagez/load-image first-test-pic)
-(def image-size 
+
+(def image-size
   (.getWidth (imagez/load-image first-test-pic)))
 
 ;;;

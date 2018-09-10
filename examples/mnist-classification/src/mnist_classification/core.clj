@@ -135,7 +135,7 @@
                                                                              :image-aug-fn (:image-aug-fn argmap))
                                  (experiment-util/infinite-class-balanced-dataset))
                              (-> test-folder
-                                 (experiment-util/create-dataset-from-folder class-mapping)) ]
+                                 (experiment-util/create-dataset-from-folder class-mapping))]
          listener (if-let [file-path (:tensorboard-output argmap)]
                     (classification/create-tensorboard-listener 
                           {:file-path file-path})

@@ -161,12 +161,12 @@ Then the main client function in simple.clj, is the guess function. It takes a l
 
 ```
 (defn guess [nippy image-path]
-  (let[obs (image-file->observation image-path) ]
-  (-> (execute/run nippy [obs])
-   first
-   :labels
-   util/max-index
-   index->class-name)))
+  (let [obs (image-file->observation image-path)]
+    (-> (execute/run nippy [obs])
+        first
+        :labels
+        util/max-index
+        index->class-name)))
 ```
 
 The steps are explained below:

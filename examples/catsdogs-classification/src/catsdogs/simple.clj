@@ -25,12 +25,12 @@
   (nth ["cat" "dog"] n))
 
 (defn guess [nippy image-path]
-  (let[obs (image-file->observation image-path) ]
-  (-> (execute/run nippy [obs])
-   first
-   :labels
-   util/max-index
-   index->class-name)))
+  (let [obs (image-file->observation image-path)]
+    (-> (execute/run nippy [obs])
+        first
+        :labels
+        util/max-index
+        index->class-name)))
 
 (defn guesses [nippy image-paths]
   (let[obs (map #(image-file->observation %) image-paths) ]
