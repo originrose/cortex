@@ -185,8 +185,8 @@
         mnist-network (util/read-nippy-file network-filename)
         initial-description (:initial-description mnist-network)
         ;; To figure out at which point you'd like to split the network,
-        ;; you can use (get-in mnist-net [:compute-graph :edges]) or
-        ;; (get-in mnist-net [:compute-graph :id->node-map])
+        ;; you can use (get-in mnist-network [:compute-graph :edges]) or
+        ;; (get-in mnist-network [:compute-graph :id->node-map])
         ;; to guide your decision.
         ;;
         ;; Removing the fully connected layers and beyond.
