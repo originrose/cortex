@@ -13,8 +13,7 @@
             [cortex.nn.network :as network]
             [cortex.nn.execute :as execute]
             [cortex.util :as util]
-            [cortex.experiment.util :as experiment-util])
-  (:import [java.io File]))
+            [cortex.experiment.util :as experiment-util]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Convolutional neural net description
