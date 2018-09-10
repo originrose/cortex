@@ -1,5 +1,7 @@
 (ns catsdogs.training
-  (:require [clojure.java.io :as io]))
+  (:require [clojure.java.io :as io]
+            [cortex.experiment.util :as experiment-util]
+            [mikera.image.core :as imagez]))
 
 ;;;
 ; SETUP: PARAMETERS
